@@ -1,0 +1,52 @@
+@if (gameController.currentQuestion(); as question) {
+  <div class="min-h-screen bg-slate-100 flex items-center justify-center px-4 py-8">
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 sm:p-8">
+      <div class="flex items-center justify-between mb-6 text-sm sm:text-base">
+        <span class="font-semibold text-slate-600">
+          Question {{ gameController.currentIndex() + 1 }} / {{ gameController.totalQuestions() }}
+        </span>
+        <span class="font-semibold text-indigo-600">Score: {{ gameController.score() }}</span>
+        <span
+          class="font-bold rounded-full w-10 h-10 flex items-center justify-center text-white"
+          [class.bg-red-500]="timeLeft() <= 5"
+          [class.bg-indigo-600]="timeLeft() > 5"
+        >
+          {{ timeLeft() }}
+        </span>
+      </div>
+
+      <div class="w-full h-2 bg-slate-200 rounded-full mb-6 overflow-hidden">
+        <div
+          class="h-full bg-indigo-600 transition-all duration-1000 ease-linear"
+          [class.bg-red-500]="timeLeft() <= 5"
+          [style.width.%]="(timeLeft() / 15) * 100"
+        ></div>
+      </div>
+
+      <div class="flex items-center gap-2 mb-4">
+        <span class="text-xs font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700 rounded-full px-3 py-1">
+          {{ question.category }}
+        </span>
+        <span class="text-xs font-semibold uppercase tracking-wide bg-slate-100 text-slate-600 rounded-full px-3 py-1">
+          {{ question.difficulty }}
+        </span>
+      </div>
+
+      <h2 class="text-xl sm:text-2xl font-bold text-slate-800 mb-6">{{ question.question }}</h2>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        @for (answer of question.all_answers; track answer) {
+          <button
+            type="button"
+            (click)="selectAnswer(answer)"
+            [disabled]="isAnswered()"
+            class="text-left rounded-xl border-2 px-4 py-3 font-medium transition-colors disabled:cursor-not-allowed"
+            [class]="answerClass(answer)"
+          >
+            {{ answer }}
+          </button>
+        }
+      </div>
+    </div>
+  </div>
+}
