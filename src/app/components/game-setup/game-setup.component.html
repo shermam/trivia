@@ -1,0 +1,108 @@
+<div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 via-indigo-700 to-purple-800 px-4 py-10">
+  <div class="w-full max-w-md bg-white rounded-2xl shadow-xl p-8">
+    <h1 class="text-3xl font-extrabold text-center text-indigo-700 mb-1">Trivia Time</h1>
+    <p class="text-center text-slate-500 mb-6">Configure your quiz and test your knowledge</p>
+
+    @if (categoriesError()) {
+      <p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+        {{ categoriesError() }}
+      </p>
+    }
+
+    @if (gameController.loadError()) {
+      <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4">
+        {{ gameController.loadError() }}
+      </p>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-5">
+      <div>
+        <label for="amount" class="block text-sm font-medium text-slate-700 mb-1">Number of Questions</label>
+        <select
+          id="amount"
+          formControlName="amount"
+          class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option [value]="5">5</option>
+          <option [value]="10">10</option>
+          <option [value]="15">15</option>
+          <option [value]="20">20</option>
+          <option [value]="25">25</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="category" class="block text-sm font-medium text-slate-700 mb-1">Category</label>
+        <select
+          id="category"
+          formControlName="category"
+          class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="">Any Category</option>
+          @for (category of categories(); track category.id) {
+            <option [value]="category.name">{{ category.name }}</option>
+          }
+        </select>
+      </div>
+
+      <div>
+        <label for="difficulty" class="block text-sm font-medium text-slate-700 mb-1">Difficulty</label>
+        <select
+          id="difficulty"
+          formControlName="difficulty"
+          class="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="">Any Difficulty</option>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+
+      <div>
+        <span class="block text-sm font-medium text-slate-700 mb-2">Question Source</span>
+        <div class="grid grid-cols-3 gap-2">
+          <label
+            class="flex items-center justify-center rounded-lg border px-2 py-2 text-sm cursor-pointer transition-colors"
+            [class.border-indigo-600]="form.value.source === 'open_trivia'"
+            [class.bg-indigo-50]="form.value.source === 'open_trivia'"
+            [class.border-slate-300]="form.value.source !== 'open_trivia'"
+          >
+            <input type="radio" formControlName="source" value="open_trivia" class="sr-only" />
+            Open Trivia
+          </label>
+          <label
+            class="flex items-center justify-center rounded-lg border px-2 py-2 text-sm cursor-pointer transition-colors"
+            [class.border-indigo-600]="form.value.source === 'custom'"
+            [class.bg-indigo-50]="form.value.source === 'custom'"
+            [class.border-slate-300]="form.value.source !== 'custom'"
+          >
+            <input type="radio" formControlName="source" value="custom" class="sr-only" />
+            Custom
+          </label>
+          <label
+            class="flex items-center justify-center rounded-lg border px-2 py-2 text-sm cursor-pointer transition-colors"
+            [class.border-indigo-600]="form.value.source === 'mixed'"
+            [class.bg-indigo-50]="form.value.source === 'mixed'"
+            [class.border-slate-300]="form.value.source !== 'mixed'"
+          >
+            <input type="radio" formControlName="source" value="mixed" class="sr-only" />
+            Mixed
+          </label>
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        [disabled]="gameController.isLoading()"
+        class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 transition-colors"
+      >
+        @if (gameController.isLoading()) {
+          Loading Questions&hellip;
+        } @else {
+          Start Game
+        }
+      </button>
+    </form>
+  </div>
+</div>
