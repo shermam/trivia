@@ -1,23 +1,13 @@
-import { Injectable } from '@angular/core';
-import type { FirebaseOptions } from 'firebase/app';
+import { Injectable, inject } from '@angular/core';
 import type { Firestore } from 'firebase/firestore';
 import { Observable, defer, map } from 'rxjs';
 import { CustomQuestionDoc, LeaderboardEntry } from '../models/question.model';
 import { withTimeout } from '../utils/with-timeout.util';
+import { FirebaseAppService } from './firebase-app.service';
 
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
 const LEADERBOARD_COLLECTION = 'leaderboard';
 const FIRESTORE_TIMEOUT_MS = 10_000;
-
-/**
- * Reserved Firebase Hosting endpoint that returns the web app config for
- * whichever project is serving the current origin. In production this is
- * generated automatically by Hosting; in dev it's proxied to the live
- * Hosting site (see src/proxy.conf.json). This means no Firebase config —
- * not even the "safe to expose" apiKey — ever needs to live in a committed
- * environment file.
- */
-const RUNTIME_CONFIG_URL = '/__/firebase/init.json';
 
 /**
  * Thin wrapper around the Firebase modular SDK. Kept framework-agnostic
@@ -28,33 +18,22 @@ type FirestoreModule = typeof import('firebase/firestore');
 
 @Injectable({ providedIn: 'root' })
 export class FirebaseService {
-  private firestorePromise: Promise<{ firestore: Firestore; firestoreModule: FirestoreModule }> | null =
-    null;
+  private readonly firebaseAppService = inject(FirebaseAppService);
 
-  private async loadRuntimeConfig(): Promise<FirebaseOptions> {
-    const response = await fetch(RUNTIME_CONFIG_URL);
-    if (!response.ok) {
-      throw new Error(`Failed to load Firebase config from ${RUNTIME_CONFIG_URL}`);
-    }
-    return response.json();
-  }
+  private firestorePromise: Promise<{
+    firestore: Firestore;
+    firestoreModule: FirestoreModule;
+  }> | null = null;
 
-  /**
-   * Lazily loads the Firebase SDK, fetches the runtime config, and initializes
-   * Firebase exactly once. The SDK is dynamically imported (instead of a
-   * top-level import) so it isn't bundled into the initial route chunk —
-   * most users never touch custom questions or the leaderboard.
-   */
   private getFirestore() {
     if (!this.firestorePromise) {
       this.firestorePromise = Promise.all([
-        import('firebase/app'),
         import('firebase/firestore'),
-        this.loadRuntimeConfig(),
-      ]).then(([{ initializeApp }, firestoreModule, config]) => {
-        const app = initializeApp(config);
-        return { firestore: firestoreModule.getFirestore(app), firestoreModule };
-      });
+        this.firebaseAppService.getApp(),
+      ]).then(([firestoreModule, app]) => ({
+        firestore: firestoreModule.getFirestore(app),
+        firestoreModule,
+      }));
     }
     return this.firestorePromise;
   }
@@ -79,10 +58,20 @@ export class FirebaseService {
     );
   }
 
+  /**
+   * Leaderboard entries are keyed by uid (one entry per user, best score
+   * wins) — the write is a `setDoc` on `leaderboard/{uid}`, not an
+   * auto-id `addDoc`. Firestore rules reject the write outright if
+   * `entry.score` isn't higher than the user's existing best, so a
+   * rejection here doesn't necessarily mean an error, just "not a new PB".
+   */
   async saveHighScore(entry: LeaderboardEntry): Promise<void> {
     const { firestore, firestoreModule } = await this.getFirestore();
     await withTimeout(
-      firestoreModule.addDoc(firestoreModule.collection(firestore, LEADERBOARD_COLLECTION), entry),
+      firestoreModule.setDoc(
+        firestoreModule.doc(firestore, LEADERBOARD_COLLECTION, entry.uid),
+        entry,
+      ),
       FIRESTORE_TIMEOUT_MS,
     );
   }

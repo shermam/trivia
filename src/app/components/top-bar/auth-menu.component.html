@@ -1,0 +1,185 @@
+<div class="w-80 max-w-[90vw] rounded-xl border border-slate-200 bg-white shadow-xl p-4 text-left">
+  @if (!authService.authReady()) {
+    <p class="text-sm text-slate-500">Loading&hellip;</p>
+  } @else if (authService.isAnonymous()) {
+    <!-- Signed-out / anonymous: sign-in & sign-up -->
+    <h2 class="text-base font-bold text-slate-800 mb-3">
+      {{ emailFormMode() === 'signup' ? 'Create an account' : 'Sign in' }}
+    </h2>
+
+    <button
+      type="button"
+      (click)="continueWithProvider('google.com')"
+      [disabled]="isSubmitting()"
+      class="w-full flex items-center justify-center gap-2 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-60 text-slate-700 font-medium py-2 mb-3 transition-colors"
+    >
+      <app-provider-icon providerId="google.com" />
+      Continue with Google
+    </button>
+
+    <div class="flex items-center gap-2 mb-3">
+      <div class="h-px flex-1 bg-slate-200"></div>
+      <span class="text-xs text-slate-400">or</span>
+      <div class="h-px flex-1 bg-slate-200"></div>
+    </div>
+
+    <form (ngSubmit)="submitEmailForm()" class="space-y-2">
+      <input
+        type="email"
+        name="email"
+        [(ngModel)]="email"
+        placeholder="Email"
+        required
+        autocomplete="email"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      />
+      <input
+        type="password"
+        name="password"
+        [(ngModel)]="password"
+        placeholder="Password"
+        required
+        minlength="6"
+        [autocomplete]="emailFormMode() === 'signup' ? 'new-password' : 'current-password'"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      />
+      <button
+        type="submit"
+        [disabled]="isSubmitting()"
+        class="w-full rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold py-2 text-sm transition-colors"
+      >
+        @if (isSubmitting()) {
+          Please wait&hellip;
+        } @else {
+          {{ emailFormMode() === 'signup' ? 'Sign up' : 'Sign in' }}
+        }
+      </button>
+    </form>
+
+    <button
+      type="button"
+      (click)="toggleEmailFormMode()"
+      class="w-full text-center text-xs text-indigo-600 hover:text-indigo-800 mt-2"
+    >
+      {{
+        emailFormMode() === 'signup'
+          ? 'Already have an account? Sign in'
+          : "Don't have an account? Sign up"
+      }}
+    </button>
+
+    <button
+      type="button"
+      (click)="toggleMoreProviders()"
+      class="w-full text-center text-xs text-slate-500 hover:text-slate-700 mt-3 pt-3 border-t border-slate-100"
+    >
+      {{ showMoreProviders() ? 'Hide other sign-in options' : 'More sign-in options' }}
+    </button>
+
+    @if (showMoreProviders()) {
+      <div class="grid grid-cols-2 gap-2 mt-2">
+        @for (providerId of secondaryProviders; track providerId) {
+          <button
+            type="button"
+            (click)="continueWithProvider(providerId)"
+            [disabled]="isSubmitting()"
+            class="flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-60 text-slate-700 text-xs font-medium py-2 transition-colors"
+          >
+            <app-provider-icon [providerId]="providerId" />
+            {{ providerLabels[providerId] }}
+          </button>
+        }
+      </div>
+    }
+
+    @if (errorMessage()) {
+      <p class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">
+        {{ errorMessage() }}
+      </p>
+    }
+    @if (infoMessage()) {
+      <p
+        class="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-3"
+      >
+        {{ infoMessage() }}
+      </p>
+    }
+  } @else if (!authService.isFullyAuthenticated()) {
+    <!-- Signed in with email/password, awaiting verification -->
+    <h2 class="text-base font-bold text-slate-800 mb-2">Verify your email</h2>
+    <p class="text-sm text-slate-500 mb-3">
+      We sent a verification link to <span class="font-medium">{{ authService.user()?.email }}</span
+      >. Verify it to finish signing in and save scores to the leaderboard.
+    </p>
+    <button
+      type="button"
+      (click)="resendVerification()"
+      class="w-full rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium py-2 mb-2 transition-colors"
+    >
+      Resend verification email
+    </button>
+    <button
+      type="button"
+      (click)="signOut()"
+      class="w-full text-center text-xs text-slate-500 hover:text-slate-700"
+    >
+      Sign out
+    </button>
+    @if (errorMessage()) {
+      <p class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">
+        {{ errorMessage() }}
+      </p>
+    }
+    @if (infoMessage()) {
+      <p
+        class="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-3"
+      >
+        {{ infoMessage() }}
+      </p>
+    }
+  } @else {
+    <!-- Fully authenticated: profile management -->
+    <h2 class="text-base font-bold text-slate-800 mb-3">Your profile</h2>
+
+    <label for="displayName" class="block text-xs font-medium text-slate-700 mb-1"
+      >Display name</label
+    >
+    <div class="flex gap-2 mb-3">
+      <input
+        id="displayName"
+        type="text"
+        [(ngModel)]="nameDraft"
+        maxlength="30"
+        class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      />
+      <button
+        type="button"
+        (click)="saveDisplayName()"
+        class="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3 transition-colors"
+      >
+        Save
+      </button>
+    </div>
+
+    <p class="text-xs text-slate-500 mb-4">
+      {{ authService.user()?.email }}
+      @if (authService.isEmailPasswordAccount()) {
+        <span class="ml-1 text-green-700">&check; Verified</span>
+      }
+    </p>
+
+    <button
+      type="button"
+      (click)="signOut()"
+      class="w-full rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium py-2 transition-colors"
+    >
+      Sign out
+    </button>
+
+    @if (errorMessage()) {
+      <p class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">
+        {{ errorMessage() }}
+      </p>
+    }
+  }
+</div>

@@ -1,1 +1,21 @@
 @import 'tailwindcss';
+
+/* Tailwind's preflight resets button cursors to the browser default
+   (`default`, i.e. the arrow) — restore the hand cursor app-wide. Placed in
+   the base layer so any explicit disabled:cursor-* utility on a component
+   still wins via Tailwind's cascade layers. */
+@layer base {
+  button:not(:disabled),
+  [type='button']:not(:disabled),
+  [type='submit']:not(:disabled),
+  [type='reset']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [type='button']:disabled,
+  [type='submit']:disabled,
+  [type='reset']:disabled {
+    cursor: not-allowed;
+  }
+}
