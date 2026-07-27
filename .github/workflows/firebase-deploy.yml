@@ -39,3 +39,14 @@ jobs:
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}'
           projectId: intellectura-3b26a
           channelId: live
+
+      - name: Deploy Firestore rules and indexes
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project intellectura-3b26a
+
+      - name: Clean up service account credentials
+        if: always()
+        run: rm -f "${{ runner.temp }}/firebase-service-account.json"
