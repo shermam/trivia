@@ -79,12 +79,17 @@ describe('anonymous game flow (custom source)', () => {
     cy.contains('button', 'Start Game').click();
 
     cy.location('pathname').should('eq', '/play');
-    // The very first Firestore read on a freshly loaded page pays for the
-    // SDK's initial connection handshake, which can comfortably exceed the
-    // suite's default command timeout — give this one specific assertion
-    // more headroom rather than inflating it for every test.
-    cy.contains('button', 'Earth', { timeout: 20000 }).click();
-    cy.answerQuestion('True');
+    // fetchCustomQuestions() shuffles question order, so don't assume which
+    // of the two seeded questions renders first. Both correct answers are
+    // distinct, so matching either via one regex — using Cypress's own
+    // retry-and-click instead of manually reading the question text first —
+    // always hits whichever question is currently showing.
+    const correctAnswerPattern = new RegExp(
+      customQuestions.map((q) => q.correct_answer).join('|'),
+    );
+    customQuestions.forEach(() => {
+      cy.contains('button', correctAnswerPattern, { timeout: 20000 }).click();
+    });
     cy.location('pathname').should('eq', '/game-over');
     cy.contains('2 / 2');
   });
