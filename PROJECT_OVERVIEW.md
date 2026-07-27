@@ -99,6 +99,8 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 
 - **Angular CLI 22** (`@angular/cli`, `@angular/build`) — build, dev-server, scaffolding.
 - **Vitest 4** — the project's unit test runner (Angular CLI's new default test builder, `@angular/build:unit-test`), using **jsdom** as the DOM environment. Run via `npm test` (`ng test`).
+- **Cypress 15** — end-to-end tests (`npm run e2e` / `npm run e2e:open`), driven against a real local Firebase Emulator Suite instance rather than mocks; see §4.3.
+- **firebase-admin** (devDependency) — used only from Cypress's Node-side tasks to seed/reset emulator Auth users and Firestore docs, bypassing `firestore.rules`; never shipped in the app bundle.
 - **Prettier 3** — code formatting; configured for 100-char print width, single quotes, and the Angular HTML parser for `.html` templates (`.prettierrc`).
 - **PostCSS** — pipes Tailwind through `@tailwindcss/postcss` (`.postcssrc.json`).
 - **EditorConfig** — enforces 2-space indentation, UTF-8, single quotes in TS across editors.
@@ -151,7 +153,7 @@ No composite indexes are currently defined (`firestore.indexes.json` is empty); 
 ### 4.1 Hosting configuration (`firebase.json`)
 - Hosting serves the compiled Angular app from `dist/trivia-app/browser`.
 - SPA rewrite: all paths (`**`) fall back to `/index.html` (client-side routing).
-- Local emulator ports: Firestore `8080`, Hosting `5000`, plus the Emulator UI.
+- Local emulator ports: Firestore `8080`, Auth `9099`, Hosting `5000`, plus the Emulator UI. `singleProjectMode` is enabled. The Auth emulator exists solely for the e2e suite (§4.3) — the app never talks to it outside that configuration.
 
 ### 4.2 GitHub Actions workflow (`.github/workflows/firebase-deploy.yml`)
 **Trigger**: fires only when a pull request targeting `main` is **closed and merged** (not just closed).
@@ -169,21 +171,32 @@ Job permissions are scoped to `contents: read`, `checks: write`, `pull-requests:
 
 This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys hosting + Firestore rules/indexes to the single production project (`intellectura-3b26a`); there's no separate staging environment or preview-channel deploy step configured.
 
-### 4.3 Local npm scripts (`package.json`)
+### 4.3 E2E testing (Cypress + Firebase Emulator Suite)
+- Suite lives under `cypress/e2e/unauthenticated/` (anonymous game flow across all three question sources, route guards, embed mode) and `cypress/e2e/authenticated/` (email sign-up + verification, sign-in, saving a score, profile management), run via `npm run e2e` (headless) or `npm run e2e:open` (interactive).
+- Both commands wrap `firebase emulators:exec --project demo-trivia-app-e2e --only auth,firestore`, which starts a throwaway local Firestore + Auth emulator pair, runs the wrapped command, and always tears the emulators down afterward — no real project is ever touched.
+- The app itself only connects to the emulators when built with the dedicated `e2e` Angular configuration (`ng serve --configuration=e2e`, see §4.5): `FirebaseAppService` skips the `/__/firebase/init.json` fetch and uses a hardcoded `demo-trivia-app-e2e` config instead, and `AuthService`/`FirebaseService` call `connectAuthEmulator`/`connectFirestoreEmulator`.
+- `cypress/tasks/firebase-emulator-tasks.ts` uses `firebase-admin` (talking to the emulators only) to reset all Auth users/Firestore docs before every test, seed `custom_questions`/`leaderboard` documents bypassing `firestore.rules`, create already-verified users, and fetch pending email-verification links from the Auth emulator's testing REST endpoint — the same mechanism the real "resend verification email" UI flow is exercised against.
+- Two real bugs were found and fixed by this suite: a race in `AuthService.ensureSignedIn()` where a returning user's persisted session could be clobbered by a fresh anonymous sign-in (fixed with `auth.authStateReady()`), and a stale-UI bug where linking an anonymous session to a real credential mutates the Firebase `User` object in place without firing `onAuthStateChanged`, so `isAnonymous`/`isFullyAuthenticated` never updated until fixed by explicitly re-pushing the user into the auth signal after linking.
+- CI: `.github/workflows/e2e.yml` runs the full suite on every PR targeting `main` (and on push to `main`), separately from the merge-to-deploy pipeline in §4.2.
+
+### 4.4 Local npm scripts (`package.json`)
 ```
 npm start              # ng serve (dev server, proxies /__/firebase/** to live Hosting)
 npm run build          # ng build (dev config)
 npm run build:prod     # ng build --configuration production
 npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom)
+npm run e2e            # Cypress e2e suite (headless) against the Firebase Emulator Suite
+npm run e2e:open       # same, but with the interactive Cypress runner
 npm run firebase:emulate  # build:prod, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore
 ```
 Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 
-### 4.4 Environments
+### 4.5 Environments
 - `.firebaserc` pins the default (and only) Firebase project to `intellectura-3b26a`.
-- `src/environments/environment.ts` / `environment.development.ts` currently only carry a `production` boolean flag — no secrets or API keys live here, consistent with the runtime-config-fetch approach described in §2.3.
+- `src/environments/environment.ts` / `environment.development.ts` carry `production` and `useEmulators` flags — no secrets or API keys live here, consistent with the runtime-config-fetch approach described in §2.3.
+- `src/environments/environment.e2e.ts` sets `useEmulators: true` and is swapped in only by the `e2e` build/serve configuration (`angular.json`, `fileReplacements`) used by the Cypress suite (§4.3) — never by `start`/`build`/`build:prod`.
 - Production build budgets (`angular.json`): 500 KB warning / 1 MB error (initial bundle), 4 KB warning / 8 KB error (per component style); output hashing enabled for cache-busting.
 
 ---
@@ -203,5 +216,5 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 - Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`), which needs the Blaze plan and a `functions/` CI deploy step; scoped out for now. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
 - Play Games and Game Center sign-in are listed in the Firebase console but not offered in the app — no Web SDK equivalent exists for either (native Android/Apple only).
 - No admin UI for writing to `custom_questions` (console-only for now, per the rules comments).
-- No end-to-end test suite (`ng e2e` is not configured — README explicitly notes Angular CLI doesn't bundle one).
 - No staging/preview deploy channel — CI only deploys straight to production on merge to `main`.
+- The e2e suite (§4.3) covers the core unauthenticated/authenticated flows but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator) or the "mixed" question source end-to-end (unit-level coverage only).

@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import type { Firestore } from 'firebase/firestore';
 import { Observable, defer, map } from 'rxjs';
+import { environment } from '../../environments/environment';
 import { CustomQuestionDoc, LeaderboardEntry } from '../models/question.model';
 import { withTimeout } from '../utils/with-timeout.util';
 import { FirebaseAppService } from './firebase-app.service';
@@ -8,6 +9,8 @@ import { FirebaseAppService } from './firebase-app.service';
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
 const LEADERBOARD_COLLECTION = 'leaderboard';
 const FIRESTORE_TIMEOUT_MS = 10_000;
+const FIRESTORE_EMULATOR_HOST = '127.0.0.1';
+const FIRESTORE_EMULATOR_PORT = 8080;
 
 /**
  * Thin wrapper around the Firebase modular SDK. Kept framework-agnostic
@@ -30,10 +33,17 @@ export class FirebaseService {
       this.firestorePromise = Promise.all([
         import('firebase/firestore'),
         this.firebaseAppService.getApp(),
-      ]).then(([firestoreModule, app]) => ({
-        firestore: firestoreModule.getFirestore(app),
-        firestoreModule,
-      }));
+      ]).then(([firestoreModule, app]) => {
+        const firestore = firestoreModule.getFirestore(app);
+        if (environment.useEmulators) {
+          firestoreModule.connectFirestoreEmulator(
+            firestore,
+            FIRESTORE_EMULATOR_HOST,
+            FIRESTORE_EMULATOR_PORT,
+          );
+        }
+        return { firestore, firestoreModule };
+      });
     }
     return this.firestorePromise;
   }

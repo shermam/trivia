@@ -1,10 +1,12 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type { Auth, User } from 'firebase/auth';
+import { environment } from '../../environments/environment';
 import { isAliasEmail } from '../utils/email-alias.util';
 import { withTimeout } from '../utils/with-timeout.util';
 import { FirebaseAppService } from './firebase-app.service';
 
 const ANONYMOUS_SIGN_IN_TIMEOUT_MS = 10_000;
+const AUTH_EMULATOR_URL = 'http://127.0.0.1:9099';
 
 /** OAuth providers with a working Firebase Web SDK implementation. */
 export type OAuthProviderId =
@@ -123,6 +125,9 @@ export class AuthService {
         this.firebaseAppService.getApp(),
       ]).then(([authModule, app]) => {
         const auth = authModule.getAuth(app);
+        if (environment.useEmulators) {
+          authModule.connectAuthEmulator(auth, AUTH_EMULATOR_URL, { disableWarnings: true });
+        }
         authModule.onAuthStateChanged(auth, (user) => {
           this.userSignal.set(user);
           this.authReadySignal.set(true);
@@ -142,6 +147,12 @@ export class AuthService {
   async ensureSignedIn(): Promise<void> {
     try {
       const { auth, authModule } = await this.getAuth();
+      // `auth.currentUser` can still read `null` right after `getAuth()`
+      // even for a returning, already-signed-in user — persistence restores
+      // it asynchronously. Without this, a slow IndexedDB read loses the
+      // race and this method mints a throwaway anonymous session on top of
+      // (or instead of) the one being restored.
+      await auth.authStateReady();
       if (auth.currentUser) {
         return;
       }
@@ -164,7 +175,12 @@ export class AuthService {
     try {
       if (auth.currentUser?.isAnonymous) {
         const credential = authModule.EmailAuthProvider.credential(email, password);
+        // Linking mutates the existing (same-uid) user in place rather than
+        // firing `onAuthStateChanged` — without this, `isAnonymous` etc. would
+        // stay stale in the UI until some unrelated auth event happened to
+        // refire the listener.
         await authModule.linkWithCredential(auth.currentUser, credential);
+        this.userSignal.set(auth.currentUser);
       } else {
         await authModule.createUserWithEmailAndPassword(auth, email, password);
       }
@@ -205,7 +221,9 @@ export class AuthService {
 
     try {
       if (auth.currentUser?.isAnonymous) {
+        // Same in-place mutation caveat as the email/password link path above.
         await authModule.linkWithPopup(auth.currentUser, provider);
+        this.userSignal.set(auth.currentUser);
       } else {
         await authModule.signInWithPopup(auth, provider);
       }
