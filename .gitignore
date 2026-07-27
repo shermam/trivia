@@ -51,6 +51,11 @@ ui-debug.log
 *-debug.log
 .runtimeconfig.json
 
+# Cypress
+/cypress/videos
+/cypress/screenshots
+/cypress/downloads
+
 # Never commit downloaded service account / admin credentials
 serviceAccountKey*.json
 *-service-account*.json

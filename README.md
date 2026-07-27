@@ -46,13 +46,18 @@ ng test
 
 ## Running end-to-end tests
 
-For end-to-end (e2e) testing, run:
+E2E tests use [Cypress](https://www.cypress.io/) driven against a real, local [Firebase Emulator Suite](https://firebase.google.com/docs/emulator-suite) instance (Auth + Firestore) — never the live `intellectura-3b26a` project. The suite covers both unauthenticated flows (anonymous play, route guards, embed mode) and authenticated flows (sign-up/verification, sign-in, saving a score, profile management), under `cypress/e2e/unauthenticated/` and `cypress/e2e/authenticated/`.
+
+Requires a JRE on your `PATH` (the Firestore emulator runs on the JVM) and the [Firebase CLI](https://firebase.google.com/docs/cli) tooling, which is fetched on demand via `npx`.
 
 ```bash
-ng e2e
+npm run e2e        # headless: builds + serves the app, starts the emulators, runs Cypress, tears everything down
+npm run e2e:open   # same, but opens the interactive Cypress runner instead of running headlessly
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+Both commands wrap `firebase emulators:exec`, so the emulators start fresh and shut down automatically when Cypress finishes (or is closed). The app itself only talks to the emulators when built with the `e2e` configuration (`ng serve --configuration=e2e`) — see `src/environments/environment.e2e.ts` and `useEmulators` in `FirebaseAppService`/`AuthService`/`FirebaseService`.
+
+CI runs the same suite on every pull request targeting `main` (`.github/workflows/e2e.yml`).
 
 ## Additional Resources
 

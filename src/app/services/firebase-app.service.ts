@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import type { FirebaseApp, FirebaseOptions } from 'firebase/app';
+import { environment } from '../../environments/environment';
 
 /**
  * Reserved Firebase Hosting endpoint that returns the web app config for
@@ -12,6 +13,21 @@ import type { FirebaseApp, FirebaseOptions } from 'firebase/app';
 const RUNTIME_CONFIG_URL = '/__/firebase/init.json';
 
 /**
+ * The Auth/Firestore emulators don't validate project credentials at all, so
+ * under `environment.useEmulators` (see the `e2e` build config + Cypress)
+ * this fake config is used instead of fetching runtime config — that fetch
+ * would otherwise 404 (no Hosting emulator serving `ng serve`) or, worse,
+ * proxy to the live production project. The "demo-" prefix is a Firebase
+ * convention that keeps the emulators fully offline even if something here
+ * were ever misconfigured.
+ */
+const EMULATOR_CONFIG: FirebaseOptions = {
+  apiKey: 'demo-api-key',
+  authDomain: 'demo-trivia-app-e2e.firebaseapp.com',
+  projectId: 'demo-trivia-app-e2e',
+};
+
+/**
  * Single shared entry point for initializing the Firebase app. Firestore and
  * Auth both depend on this so `initializeApp` is only ever called once —
  * calling it twice with the same config throws.
@@ -21,6 +37,9 @@ export class FirebaseAppService {
   private appPromise: Promise<FirebaseApp> | null = null;
 
   private async loadRuntimeConfig(): Promise<FirebaseOptions> {
+    if (environment.useEmulators) {
+      return EMULATOR_CONFIG;
+    }
     const response = await fetch(RUNTIME_CONFIG_URL);
     if (!response.ok) {
       throw new Error(`Failed to load Firebase config from ${RUNTIME_CONFIG_URL}`);
