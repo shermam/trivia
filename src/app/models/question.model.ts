@@ -23,6 +23,8 @@ export interface GameConfig {
 
 export interface LeaderboardEntry {
   id?: string;
+  /** Firebase Auth uid — also the Firestore document ID (one entry per user, best score kept). */
+  uid: string;
   name: string;
   score: number;
   totalQuestions: number;

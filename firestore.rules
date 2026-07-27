@@ -3,6 +3,34 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Signed in, not anonymous, and (for password accounts) email-verified —
+    // so spinning up throwaway/alias accounts can't be used to flood the
+    // leaderboard.
+    function isRealAuthedUser() {
+      return request.auth != null
+             && request.auth.token.firebase.sign_in_provider != 'anonymous'
+             && (request.auth.token.firebase.sign_in_provider != 'password'
+                 || request.auth.token.email_verified == true);
+    }
+
+    function isValidLeaderboardEntry(uid) {
+      return request.resource.data.keys().hasOnly(
+                ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt']
+              )
+            && request.resource.data.uid == uid
+            && request.resource.data.name is string
+            && request.resource.data.name.size() > 0
+            && request.resource.data.name.size() <= 30
+            && request.resource.data.score is int
+            && request.resource.data.score >= 0
+            && request.resource.data.totalQuestions is int
+            && request.resource.data.totalQuestions >= request.resource.data.score
+            && request.resource.data.percentage is number
+            && request.resource.data.percentage >= 0
+            && request.resource.data.percentage <= 100
+            && request.resource.data.createdAt is int;
+    }
+
     // Question bank: readable by anyone playing the game, writable only
     // via the console or an authenticated admin tool (none exists yet).
     match /custom_questions/{questionId} {
@@ -10,25 +38,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Leaderboard: anyone can read and submit a score, but scores are
-    // append-only (no edits or deletes) and must match the app's shape.
-    match /leaderboard/{entryId} {
+    // Leaderboard: readable by anyone; one document per user (doc ID == uid),
+    // append-only in the sense that a write only succeeds if it beats that
+    // user's existing best score.
+    match /leaderboard/{uid} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(
-                        ['name', 'score', 'totalQuestions', 'percentage', 'createdAt']
-                      )
-                    && request.resource.data.name is string
-                    && request.resource.data.name.size() > 0
-                    && request.resource.data.name.size() <= 30
-                    && request.resource.data.score is int
-                    && request.resource.data.score >= 0
-                    && request.resource.data.totalQuestions is int
-                    && request.resource.data.totalQuestions >= request.resource.data.score
-                    && request.resource.data.percentage is number
-                    && request.resource.data.percentage >= 0
-                    && request.resource.data.percentage <= 100
-                    && request.resource.data.createdAt is int;
-      allow update: if false;
+      allow create: if isRealAuthedUser()
+                    && request.auth.uid == uid
+                    && isValidLeaderboardEntry(uid);
+      allow update: if isRealAuthedUser()
+                    && request.auth.uid == uid
+                    && isValidLeaderboardEntry(uid)
+                    && request.resource.data.score > resource.data.score;
       allow delete: if false;
     }
   }

@@ -42,7 +42,7 @@ Any unmatched route redirects back to `/`.
 **Game over (`/game-over`)**
 - Redirects to `/` if there's no completed game in memory.
 - Shows final score (`X / N`) and accuracy percentage.
-- Lets the player enter a name (≤30 chars) and submit their score once to the Firestore `leaderboard` collection (submission is disabled after the first successful save for that session).
+- If fully authenticated (see §1.5), lets the player enter a name (≤30 chars, prefilled from their profile) and submit their score to the Firestore `leaderboard` collection — one entry per account, keeping their best score. Anonymous or unverified players see a sign-in/verify prompt instead of the form.
 - Displays the **top 10 leaderboard**, sorted by score descending, loaded from Firestore and refreshed after a successful save.
 - "Play Again" resets all in-memory game state and returns to `/`.
 
@@ -66,6 +66,18 @@ Shared normalization for every question:
 
 Firestore collection `custom_questions` acts as a first-party question bank alongside Open Trivia DB. There is currently **no in-app admin UI** to write to it — per the Firestore rules, it's read-only from the client and intended to be populated manually via the Firebase console or a future admin tool.
 
+### 1.5 Authentication & the leaderboard
+
+Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`AuthService.ensureSignedIn()`, called once from the root `App` component) — there's no sign-in wall before playing. Signing in with a real provider is optional and only needed to save a score to the leaderboard.
+
+- **Top bar** (`TopBarComponent`, rendered as a sibling of `<router-outlet>` in `app.html`) shows a sign-in trigger top-right on every screen. It's a self-contained, removable component — dropping it (or gating it behind `EmbedModeService`, see below) leaves just the game panel.
+- **Sign-in options**: Google and email/password are the prominent choices; a "more sign-in options" disclosure reveals Facebook, GitHub, Microsoft, Apple, Twitter/X, and Yahoo (`AuthService.signInWithOAuth`). Play Games and Game Center are Firebase console options with no Web SDK equivalent (native Android/Apple only) and are intentionally not offered here.
+- **Anonymous-to-real upgrade**: signing in from an anonymous session links the new credential to the existing uid (`linkWithCredential`/`linkWithPopup`) instead of minting a new one, so anything already saved carries forward. If that credential already belongs to another account, it falls back to a normal sign-in (switching uid).
+- **Email alias blocking**: sign-up rejects `name+tag@domain.com`-style addresses client-side (`isAliasEmail`, `utils/email-alias.util.ts`) — this stops the UI from creating alias accounts but not a direct Auth API call; see the anti-cheat note below.
+- **Email verification**: an email/password account is not treated as "fully authenticated" (`AuthService.isFullyAuthenticated`) until its email is verified. Anonymous and unverified-password users can play and view the leaderboard but the "Save Score" action is replaced with a sign-in/verify prompt.
+- **Anti-cheat enforcement is server-side, in `firestore.rules`**, not just the client: a leaderboard write is only accepted if `request.auth.token.firebase.sign_in_provider` isn't `anonymous`, and — for password accounts — `email_verified` is `true`. This is what actually stops someone from bypassing the UI to flood the board with throwaway accounts; the client-side gating above is just so the UI reflects the same rule.
+- **`EmbedModeService`** reads `?embed=1` from the URL to hide the top bar entirely for iframe/widget use — anonymous-only play, no leaderboard saves, no code changes needed on the embedder's side.
+
 ---
 
 ## 2. Frameworks, Tools & Libraries
@@ -77,7 +89,7 @@ Firestore collection `custom_questions` acts as a first-party question bank alon
 | Framework | **Angular 22** (standalone components, signals, `@if`/`@for` control-flow syntax, `OnPush` change detection throughout) |
 | Language | **TypeScript ~6.0** |
 | Styling | **Tailwind CSS 4** (via `@tailwindcss/postcss`), utility classes only — no component CSS frameworks |
-| Backend-as-a-service | **Firebase** — Firestore (data) + Hosting (static deploy). No Firebase Auth is used. |
+| Backend-as-a-service | **Firebase** — Firestore (data), Auth (anonymous + Google/email/Facebook/GitHub/Microsoft/Apple/Twitter-X/Yahoo), Hosting (static deploy). |
 | Reactive/async plumbing | **RxJS 7.8** (`Observable`s in the Firebase/Trivia services, `firstValueFrom` to bridge to async/await) |
 | HTTP | Angular's `HttpClient` (`provideHttpClient()`), used for Open Trivia DB calls |
 | Forms | Angular `ReactiveFormsModule` (game setup) and `FormsModule` + `ngModel` (game-over name input) |
@@ -94,9 +106,9 @@ Firestore collection `custom_questions` acts as a first-party question bank alon
 
 ### 2.3 Firebase client integration details
 
-`FirebaseService` wraps the Firebase modular SDK (`firebase/app`, `firebase/firestore`) directly — **no AngularFire** — by design, so it can later be reused unmodified in non-Angular shells (e.g. Capacitor/Tauri) per an in-code comment.
+`FirebaseService` and `AuthService` wrap the Firebase modular SDK (`firebase/app`, `firebase/firestore`, `firebase/auth`) directly — **no AngularFire** — by design, so they can later be reused unmodified in non-Angular shells (e.g. Capacitor/Tauri) per an in-code comment.
 
-Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. Firestore is then lazily initialized exactly once from that config.
+Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. `FirebaseAppService.getApp()` fetches that config and calls `initializeApp` exactly once, shared by both Firestore and Auth.
 
 All Firestore calls (`getCustomQuestions`, `saveHighScore`, `getTopScores`) are wrapped in a `withTimeout()` helper (10s) — the Firestore SDK's promises never reject on their own if the backend is unreachable (e.g. placeholder/misconfigured credentials), which would otherwise leave the UI stuck in a permanent loading state.
 
@@ -118,6 +130,7 @@ incorrect_answers: string[]
 
 ### `leaderboard` — high scores
 ```
+uid: string            (doc ID; must equal request.auth.uid)
 name: string          (1–30 chars)
 score: int             (>= 0)
 totalQuestions: int    (>= score)
@@ -125,8 +138,9 @@ percentage: number     (0–100)
 createdAt: int         (epoch ms)
 ```
 - **Read**: public.
-- **Create**: public, but strictly schema-validated in `firestore.rules` (exact key set, types, and bounds enforced server-side).
-- **Update / Delete**: disallowed — the leaderboard is append-only.
+- **Create / Update**: requires a non-anonymous, (if password-based) email-verified caller writing to their own uid's doc — schema is strictly validated in `firestore.rules` (exact key set, types, bounds) and an update is only accepted if `score` improves on the existing value.
+- **Delete**: disallowed.
+- One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes; a rejected write means "not a new personal best", not necessarily an error.
 
 No composite indexes are currently defined (`firestore.indexes.json` is empty); the leaderboard's `orderBy('score', 'desc').limit(10)` query only needs the automatic single-field index.
 
@@ -186,7 +200,8 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 
 ## 6. Known Gaps / Not Yet Implemented
 
-- No authentication — the leaderboard and question bank are fully anonymous/public, protected only by Firestore security rules.
+- Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`), which needs the Blaze plan and a `functions/` CI deploy step; scoped out for now. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
+- Play Games and Game Center sign-in are listed in the Firebase console but not offered in the app — no Web SDK equivalent exists for either (native Android/Apple only).
 - No admin UI for writing to `custom_questions` (console-only for now, per the rules comments).
 - No end-to-end test suite (`ng e2e` is not configured — README explicitly notes Angular CLI doesn't bundle one).
 - No staging/preview deploy channel — CI only deploys straight to production on merge to `main`.

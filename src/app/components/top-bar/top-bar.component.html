@@ -1,0 +1,43 @@
+<header class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
+  <div class="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between">
+    <span class="font-extrabold text-indigo-700 text-lg tracking-tight">Trivia Time</span>
+
+    <div class="relative">
+      <button
+        type="button"
+        (click)="toggleMenu()"
+        class="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-slate-100 transition-colors"
+      >
+        @if (!authService.authReady()) {
+          <span class="text-sm text-slate-400">Loading&hellip;</span>
+        } @else if (authService.isAnonymous()) {
+          <span
+            class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-500 text-sm"
+            >&#128100;</span
+          >
+          <span class="text-sm font-medium text-slate-700">Sign in</span>
+        } @else {
+          <span
+            class="relative flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white text-sm font-bold"
+          >
+            {{ initials() }}
+            @if (needsVerification()) {
+              <span
+                class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white"
+              ></span>
+            }
+          </span>
+          <span class="text-sm font-medium text-slate-700 max-w-[10rem] truncate">
+            {{ authService.user()?.displayName || authService.user()?.email }}
+          </span>
+        }
+      </button>
+
+      @if (isMenuOpen()) {
+        <div class="absolute right-0 mt-2">
+          <app-auth-menu (closeRequested)="closeMenu()" />
+        </div>
+      }
+    </div>
+  </div>
+</header>
