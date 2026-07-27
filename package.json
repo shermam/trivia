@@ -5,8 +5,11 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "build:prod": "ng build --configuration production",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "firebase:emulate": "npm run build:prod && firebase emulators:start",
+    "firebase:deploy": "npm run build:prod && firebase deploy --only hosting,firestore"
   },
   "private": true,
   "packageManager": "npm@11.12.1",

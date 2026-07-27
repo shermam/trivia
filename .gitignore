@@ -42,3 +42,17 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*-debug.log
+.runtimeconfig.json
+
+# Never commit downloaded service account / admin credentials
+serviceAccountKey*.json
+*-service-account*.json
+.env
+.env.*
