@@ -13,6 +13,13 @@ declare global {
       stubOpenTrivia(): Chainable<null>;
       /** Visits `/`, waits for the stubbed categories to load, selects `amount`, and starts the game. */
       startGame(amount?: 5 | 10 | 15 | 20 | 25): Chainable<null>;
+      /**
+       * Starts another game without revisiting the page — for replaying via
+       * "Play Again" within the same test/session, where the app is already
+       * loaded and on `/`. Categories are already cached in `TriviaService`
+       * from the first `startGame()`, so no new `@categories` request fires.
+       */
+      startNewGame(amount?: 5 | 10 | 15 | 20 | 25): Chainable<null>;
       /** Clicks the answer button matching this exact text on the active quiz question. */
       answerQuestion(answerText: string): Chainable<null>;
       /** Opens the top-bar auth menu (only valid while it's closed). */
@@ -52,6 +59,13 @@ Cypress.Commands.add('startGame', (amount = 5) => {
   cy.stubOpenTrivia();
   cy.visit('/');
   cy.wait('@categories');
+  cy.get('#amount').select(String(amount));
+  cy.contains('button', 'Start Game').click();
+  cy.wait('@questions');
+});
+
+Cypress.Commands.add('startNewGame', (amount = 5) => {
+  cy.location('pathname').should('eq', '/');
   cy.get('#amount').select(String(amount));
   cy.contains('button', 'Start Game').click();
   cy.wait('@questions');
