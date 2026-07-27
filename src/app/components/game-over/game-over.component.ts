@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { LeaderboardEntry } from '../../models/question.model';
 import { FirebaseService } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
@@ -68,7 +69,7 @@ export class GameOverComponent implements OnInit {
     this.isLoadingLeaderboard.set(true);
     this.leaderboardError.set(null);
     try {
-      const topScores = await this.firebaseService.getTopScores(10);
+      const topScores = await firstValueFrom(this.firebaseService.getTopScores(10));
       this.leaderboard.set(topScores);
     } catch {
       this.leaderboard.set([]);

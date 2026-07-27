@@ -1,0 +1,8 @@
+{
+  "/__/firebase/**": {
+    "target": "https://intellectura-3b26a.web.app",
+    "secure": true,
+    "changeOrigin": true,
+    "logLevel": "warn"
+  }
+}

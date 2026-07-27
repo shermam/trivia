@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Question bank: readable by anyone playing the game, writable only
+    // via the console or an authenticated admin tool (none exists yet).
+    match /custom_questions/{questionId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Leaderboard: anyone can read and submit a score, but scores are
+    // append-only (no edits or deletes) and must match the app's shape.
+    match /leaderboard/{entryId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(
+                        ['name', 'score', 'totalQuestions', 'percentage', 'createdAt']
+                      )
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 30
+                    && request.resource.data.score is int
+                    && request.resource.data.score >= 0
+                    && request.resource.data.totalQuestions is int
+                    && request.resource.data.totalQuestions >= request.resource.data.score
+                    && request.resource.data.percentage is number
+                    && request.resource.data.percentage >= 0
+                    && request.resource.data.percentage <= 100
+                    && request.resource.data.createdAt is int;
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

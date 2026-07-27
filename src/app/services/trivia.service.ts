@@ -105,7 +105,7 @@ export class TriviaService {
       return [];
     }
 
-    const docs = await this.firebaseService.getCustomQuestions();
+    const docs = await firstValueFrom(this.firebaseService.getCustomQuestions());
 
     const filtered = docs.filter((doc) => {
       const matchesCategory = !category || doc.category === category;
