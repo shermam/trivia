@@ -1,41 +1,24 @@
 // Temporary diagnostic, not part of the permanent suite — see the PR
-// discussion. The intercept-based check below reported "no request ever
-// occurred" for both /__/firebase/init.json and identitytoolkit — this
-// patches window.fetch itself (before any app code runs) to see whether
-// fetch() is even being *called*, independent of Cypress's own network
-// proxy layer. Reports via a forced test failure, since that's the one
-// channel we've proven reliably surfaces in the CI log (unlike an earlier,
-// silently-broken attempt at console/task-based logging).
+// discussion. Confirmed so far: fetch('/__/firebase/init.json') IS called
+// (window.fetch patch caught it), but Cypress's own network-intercept layer
+// never sees a matching request — meaning the fetch itself is failing or
+// hanging before it ever reaches the wire. This calls it directly from the
+// page context and reports the actual resolve/reject outcome (or a genuine
+// hang, via Cypress's own command timeout) via a forced test failure — the
+// one channel proven to reliably show up in the CI log.
 describe('preview network diagnostic', () => {
-  it('records every fetch() call the app makes in the first 6s', () => {
-    cy.on('window:before:load', (win) => {
-      const calls: string[] = [];
-      (win as unknown as { __fetchLog: string[] }).__fetchLog = calls;
-      const originalFetch = win.fetch.bind(win);
-      win.fetch = ((...args: Parameters<typeof fetch>) => {
-        calls.push(String(args[0]));
-        return originalFetch(...args);
-      }) as typeof fetch;
+  it('directly fetches /__/firebase/init.json and reports the outcome', () => {
+    cy.visit('/');
+    cy.window().then((win) => {
+      const startedAt = Date.now();
+      return win.fetch('/__/firebase/init.json').then(
+        (res) => {
+          throw new Error(`RESOLVED after ${Date.now() - startedAt}ms: status=${res.status}`);
+        },
+        (err: unknown) => {
+          throw new Error(`REJECTED after ${Date.now() - startedAt}ms: ${String(err)}`);
+        },
+      );
     });
-
-    cy.visit('/');
-    cy.wait(6000);
-    cy.window()
-      .its('__fetchLog')
-      .then((calls: string[]) => {
-        throw new Error(`fetch() calls observed: ${JSON.stringify(calls)}`);
-      });
-  });
-
-  it('reaches identitytoolkit.googleapis.com and gets a response', () => {
-    cy.intercept('POST', '**/identitytoolkit.googleapis.com/**').as('authCall');
-    cy.visit('/');
-    cy.wait('@authCall', { timeout: 15000 }).its('response.statusCode').should('eq', 200);
-  });
-
-  it('reaches /__/firebase/init.json and gets a response', () => {
-    cy.intercept('GET', '**/__/firebase/init.json').as('configCall');
-    cy.visit('/');
-    cy.wait('@configCall', { timeout: 15000 }).its('response.statusCode').should('eq', 200);
   });
 });
