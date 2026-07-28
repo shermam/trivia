@@ -15,6 +15,7 @@
     "e2e:runner:open": "start-server-and-test e2e:serve http://localhost:4200 cypress:open",
     "e2e": "npx firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only auth,firestore \"npm run e2e:runner\"",
     "e2e:open": "npx firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only auth,firestore \"npm run e2e:runner:open\"",
+    "e2e:preview": "ELECTRON_RUN_AS_NODE= cypress run --config-file cypress.preview.config.ts",
     "cypress:open": "ELECTRON_RUN_AS_NODE= cypress open",
     "cypress:run": "ELECTRON_RUN_AS_NODE= cypress run",
     "build:lighthouse": "ng build --configuration=lighthouse",

@@ -48,9 +48,11 @@ describe('anonymous game flow (open_trivia source)', () => {
 });
 
 describe('anonymous game flow (custom source)', () => {
+  // Unique per run so concurrent CI runs never race on the same doc IDs.
+  const runId = Date.now();
   const customQuestions = [
     {
-      id: 'q1',
+      id: `q1-${runId}`,
       category: 'Science',
       type: 'multiple' as const,
       difficulty: 'easy' as const,
@@ -59,7 +61,7 @@ describe('anonymous game flow (custom source)', () => {
       incorrect_answers: ['Mars', 'Venus', 'Jupiter'],
     },
     {
-      id: 'q2',
+      id: `q2-${runId}`,
       category: 'Science',
       type: 'boolean' as const,
       difficulty: 'easy' as const,
@@ -84,9 +86,7 @@ describe('anonymous game flow (custom source)', () => {
     // distinct, so matching either via one regex — using Cypress's own
     // retry-and-click instead of manually reading the question text first —
     // always hits whichever question is currently showing.
-    const correctAnswerPattern = new RegExp(
-      customQuestions.map((q) => q.correct_answer).join('|'),
-    );
+    const correctAnswerPattern = new RegExp(customQuestions.map((q) => q.correct_answer).join('|'));
     customQuestions.forEach(() => {
       cy.contains('button', correctAnswerPattern).click();
     });

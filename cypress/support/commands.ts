@@ -1,8 +1,4 @@
-import type {
-  CustomQuestionSeed,
-  LeaderboardSeed,
-  VerifiedUserSeed,
-} from '../tasks/firebase-emulator-tasks';
+import type { CustomQuestionSeed, LeaderboardSeed, VerifiedUserSeed } from '../tasks/types';
 
 declare global {
   namespace Cypress {
@@ -101,7 +97,9 @@ Cypress.Commands.add('signUpViaUi', (email: string, password: string) => {
 
 Cypress.Commands.add('signInViaUi', (email: string, password: string) => {
   cy.openAuthMenu();
-  cy.get('app-auth-menu').contains('button[type=button]', 'Already have an account? Sign in').click();
+  cy.get('app-auth-menu')
+    .contains('button[type=button]', 'Already have an account? Sign in')
+    .click();
   fillEmailForm(email, password);
   cy.get('app-auth-menu form button[type=submit]').click();
   // A successful sign-in closes the menu — wait for that instead of racing
@@ -111,7 +109,9 @@ Cypress.Commands.add('signInViaUi', (email: string, password: string) => {
 
 Cypress.Commands.add('signInFromGameOver', (email: string, password: string) => {
   cy.get('[data-cy=open-sign-in]').click();
-  cy.get('app-auth-menu').contains('button[type=button]', 'Already have an account? Sign in').click();
+  cy.get('app-auth-menu')
+    .contains('button[type=button]', 'Already have an account? Sign in')
+    .click();
   fillEmailForm(email, password);
   cy.get('app-auth-menu form button[type=submit]').click();
   cy.get('app-auth-menu').should('not.exist');

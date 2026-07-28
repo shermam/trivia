@@ -5,6 +5,9 @@ const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 describe('verified user saves a score to the leaderboard', () => {
   const email = `player-${Date.now()}@example.com`;
   const password = 'correct horse battery staple';
+  // Unique per run so concurrent CI runs (e.g. two preview deploys against
+  // the same real project) never race on the same doc.
+  const existingLeaderUid = `existing-leader-${Date.now()}`;
 
   beforeEach(() => {
     cy.createVerifiedUser({ email, password });
@@ -12,7 +15,7 @@ describe('verified user saves a score to the leaderboard', () => {
 
   it('shows the save-score form once fully authenticated and records the entry', () => {
     cy.seedLeaderboardEntry({
-      uid: 'existing-leader',
+      uid: existingLeaderUid,
       name: 'Reigning Champ',
       score: 5,
       totalQuestions: 5,

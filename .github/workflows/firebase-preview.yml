@@ -1,0 +1,114 @@
+name: Deploy Preview Channel
+
+# Every PR targeting main gets its own ephemeral Firebase Hosting preview
+# channel (pr-<number>), so changes can be reviewed on a live URL — and
+# smoke-tested end-to-end against the real project — before merge, instead
+# of only finding out after they've already gone to production (see
+# firebase-deploy.yml, which is merge-to-deploy only).
+#
+# The `E2E (preview)` job is meant to be a required status check on `main`
+# (branch protection), so a PR can't be merged — and therefore can't trigger
+# firebase-deploy.yml — unless the real preview build actually passed e2e.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+concurrency:
+  group: firebase-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    name: Deploy preview channel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    outputs:
+      preview_url: ${{ steps.preview_url.outputs.url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production app
+        run: npm run build:prod
+
+      - name: Deploy preview channel
+        id: deploy
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}'
+          projectId: intellectura-3b26a
+          channelId: 'pr-${{ github.event.pull_request.number }}'
+          expires: 7d
+
+      - name: Extract preview URL
+        id: preview_url
+        run: |
+          url=$(echo '${{ steps.deploy.outputs.urls }}' | jq -r '.[0]')
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "Could not extract a preview URL from the deploy action's 'urls' output: '${{ steps.deploy.outputs.urls }}'" >&2
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+  e2e-preview:
+    name: E2E (preview)
+    needs: deploy-preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-binary-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Only the seed/cleanup Node-side tasks (cypress/tasks/firebase-preview-tasks.ts)
+      # use this — the app itself under test still fetches its Firebase
+      # config from the deployed preview channel's own /__/firebase/init.json,
+      # same as a real visitor.
+      - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
+        env:
+          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npm run e2e:preview
+
+      - name: Clean up service account credentials
+        if: always()
+        run: rm -f "${{ runner.temp }}/firebase-service-account.json"
+
+      - name: Upload Cypress screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-preview-screenshots
+          path: cypress/screenshots
+          if-no-files-found: ignore

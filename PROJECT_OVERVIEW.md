@@ -172,7 +172,18 @@ Steps:
 
 Job permissions are scoped to `contents: read`, `checks: write`, `pull-requests: write` — the minimum needed for the hosting-deploy action to post a check/PR comment (this was tightened in a dedicated fix after the action initially hit a 403).
 
-This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys hosting + Firestore rules/indexes to the single production project (`intellectura-3b26a`); there's no separate staging environment or preview-channel deploy step configured.
+This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys hosting + Firestore rules/indexes to the single production project (`intellectura-3b26a`). It deliberately doesn't re-run e2e itself — see §4.2a for why that's still safe.
+
+### 4.2a Preview channel deploy + real-preview e2e (`.github/workflows/firebase-preview.yml`)
+**Trigger**: every PR targeting `main`, on open/sync/reopen (not close — that's what §4.2 handles on merge). A `concurrency` group keyed on the PR number cancels a stale in-flight run if the PR gets pushed again before it finishes.
+
+Two sequential jobs:
+1. **`deploy-preview`** — checkout → Node 22 → `npm ci` → `npm run build:prod` → `FirebaseExtended/action-hosting-deploy@v0` deploying to an ephemeral channel named `pr-<number>` (7-day expiry) instead of `channelId: live`. The action posts/updates a PR comment with the preview URL on every push. The step's `urls` JSON output is parsed (`jq`) into a job output consumed by the next job.
+2. **`e2e-preview`** (job name `E2E (preview)`) — runs a scoped slice of the Cypress suite (§4.3) against the just-deployed preview URL, hitting the **real** `intellectura-3b26a` project instead of an emulator.
+
+Preview channels are a **Hosting-only** feature — there's still a single Firestore database for the project, so a preview build (and its e2e run) reads/writes the same production `custom_questions`/`leaderboard` data as `main` and live. Firestore rules/indexes are also not redeployed per-preview (they're project-wide, not channel-scoped); only §4.2's merge pipeline touches them. There is no isolated staging *database* — just an isolated hosting URL, backed by production data, that's now also exercised end-to-end before merge.
+
+`E2E (preview)` is configured as a **required status check** on `main` branch protection, so a PR can't be merged (and therefore can't trigger §4.2's deploy) unless the real deployed preview actually passed e2e — see the note at the top of `firebase-deploy.yml`.
 
 ### 4.3 E2E testing (Cypress + Firebase Emulator Suite)
 - Suite lives under `cypress/e2e/unauthenticated/` (anonymous game flow across all three question sources, route guards, embed mode) and `cypress/e2e/authenticated/` (email sign-up + verification, sign-in, saving a score, profile management), run via `npm run e2e` (headless) or `npm run e2e:open` (interactive).
@@ -181,6 +192,13 @@ This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys
 - `cypress/tasks/firebase-emulator-tasks.ts` uses `firebase-admin` (talking to the emulators only) to reset all Auth users/Firestore docs before every test, seed `custom_questions`/`leaderboard` documents bypassing `firestore.rules`, create already-verified users, and fetch pending email-verification links from the Auth emulator's testing REST endpoint — the same mechanism the real "resend verification email" UI flow is exercised against.
 - Two real bugs were found and fixed by this suite: a race in `AuthService.ensureSignedIn()` where a returning user's persisted session could be clobbered by a fresh anonymous sign-in (fixed with `auth.authStateReady()`), and a stale-UI bug where linking an anonymous session to a real credential mutates the Firebase `User` object in place without firing `onAuthStateChanged`, so `isAnonymous`/`isFullyAuthenticated` never updated until fixed by explicitly re-pushing the user into the auth signal after linking.
 - CI: `.github/workflows/e2e.yml` runs the full suite on every PR targeting `main` (and on push to `main`), separately from the merge-to-deploy pipeline in §4.2.
+
+**Running the same suite against a real preview instead of the emulator** (`cypress.preview.config.ts`, driven by the `e2e-preview` job in §4.2a): a deliberately narrower slice, because this hits the real, persistent, public `intellectura-3b26a` project — there's no throwaway emulator to reset:
+- `specPattern` includes all of `cypress/e2e/unauthenticated/` plus only `sign-in-save-score.cy.ts` and `profile.cy.ts` from `cypress/e2e/authenticated/`. `sign-up-verify.cy.ts` is excluded permanently: it depends on the Auth emulator's testing-only `oobCodes` REST endpoint to read a verification link, which has no real-Auth equivalent without a live mailbox.
+- `cypress/tasks/firebase-preview-tasks.ts` is the real-project counterpart to `firebase-emulator-tasks.ts` — same task names/shapes (sharing types from `cypress/tasks/types.ts`) but **no blanket `resetBackend`**. Instead, every uid/doc a test creates (explicitly via a seed task, or implicitly — every `cy.visit()` triggers the app's own anonymous sign-in) is tracked in-process and swept up by a `finalCleanup` task, called from an `after()` hook in `cypress/support/e2e.preview.ts`. `cypress/support/preview-commands.ts` adds `trackCurrentSessionUid()`, called in an `afterEach`, which reads the Firebase-persisted uid straight out of the app's own `localStorage` (`browserLocalPersistence`, see §1.5) so even the ambient anonymous user from a plain page visit gets cleaned up, not just uids created via an explicit task call.
+- The two authenticated specs' previously-hardcoded fixture IDs (`existing-leader`, `q1`/`q2`) were made unique per run (timestamp-suffixed) so two preview deploys running concurrently against the same real project never race on the same document.
+- Credentials: the same `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` secret used elsewhere in CI, written to a temp file and picked up via `GOOGLE_APPLICATION_CREDENTIALS` (Admin SDK default credential lookup) — never the `FIRESTORE_EMULATOR_HOST`/`FIREBASE_AUTH_EMULATOR_HOST` env vars the emulator tasks rely on.
+- Run locally with `npm run e2e:preview` (needs `PREVIEW_URL` and `GOOGLE_APPLICATION_CREDENTIALS` set).
 
 ### 4.4 Lighthouse CI (performance / accessibility / best-practices / SEO)
 - `lighthouserc.json` drives both local (`npm run lighthouse`) and CI (`.github/workflows/lighthouse.yml`) runs identically: builds with the dedicated `lighthouse` Angular configuration (same optimizations/budgets as `production`, but with `fileReplacements` swapping in `environment.e2e.ts` like the `e2e` config does — see §4.5), starts the Firebase Emulator Suite (`hosting`, `auth`, `firestore`) via `firebase emulators:exec --project demo-trivia-app-e2e`, and runs Lighthouse 3× against `http://127.0.0.1:5000/` (the Hosting emulator, serving the real build), asserting each category's median score.
@@ -198,6 +216,7 @@ npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom)
 npm run e2e            # Cypress e2e suite (headless) against the Firebase Emulator Suite
 npm run e2e:open       # same, but with the interactive Cypress runner
+npm run e2e:preview    # scoped Cypress suite against a real deployed preview (needs PREVIEW_URL + GOOGLE_APPLICATION_CREDENTIALS)
 npm run lighthouse     # build:prod, then Lighthouse CI against a local static server
 npm run firebase:emulate  # build:prod, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore
@@ -227,5 +246,5 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 - Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`), which needs the Blaze plan and a `functions/` CI deploy step; scoped out for now. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
 - Play Games and Game Center sign-in are listed in the Firebase console but not offered in the app — no Web SDK equivalent exists for either (native Android/Apple only).
 - No admin UI for writing to `custom_questions` (console-only for now, per the rules comments).
-- No staging/preview deploy channel — CI only deploys straight to production on merge to `main`.
 - The e2e suite (§4.3) covers the core unauthenticated/authenticated flows but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator) or the "mixed" question source end-to-end (unit-level coverage only).
+- The `E2E (preview)` job (§4.2a) needs to actually be turned on as a required status check in GitHub branch protection settings for `main` — it's not enforced yet. GitHub Actions jobs can't gate a merge on their own; that has to come from branch protection, and setting it up needs repo-admin access that CI/automation credentials don't have.
