@@ -3,13 +3,21 @@ import questionsFixture from '../../fixtures/open-trivia-questions.json';
 const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 
 describe('verified user saves a score to the leaderboard', () => {
-  const email = `player-${Date.now()}@example.com`;
+  // Computed fresh in `beforeEach` (not once at describe-scope) — this file
+  // has two `it`s sharing this hook, and against the real preview backend
+  // (cypress.preview.config.ts) there's no reset between them: a second
+  // `createVerifiedUser` call with the same, already-created email would
+  // deterministically fail with "email address already in use". Against the
+  // emulator this never mattered since `resetBackend()` wipes every user
+  // before each test anyway.
+  let email: string;
   const password = 'correct horse battery staple';
   // Unique per run so concurrent CI runs (e.g. two preview deploys against
   // the same real project) never race on the same doc.
   const existingLeaderUid = `existing-leader-${Date.now()}`;
 
   beforeEach(() => {
+    email = `player-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     cy.createVerifiedUser({ email, password });
   });
 
