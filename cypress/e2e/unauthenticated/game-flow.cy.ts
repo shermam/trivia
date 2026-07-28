@@ -88,7 +88,7 @@ describe('anonymous game flow (custom source)', () => {
       customQuestions.map((q) => q.correct_answer).join('|'),
     );
     customQuestions.forEach(() => {
-      cy.contains('button', correctAnswerPattern, { timeout: 20000 }).click();
+      cy.contains('button', correctAnswerPattern).click();
     });
     cy.location('pathname').should('eq', '/game-over');
     cy.contains('2 / 2');
