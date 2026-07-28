@@ -124,7 +124,19 @@ export class AuthService {
         import('firebase/auth'),
         this.firebaseAppService.getApp(),
       ]).then(([authModule, app]) => {
-        const auth = authModule.getAuth(app);
+        // Deliberately `initializeAuth` (not the `getAuth` convenience
+        // wrapper) with no `popupRedirectResolver`: `getAuth` wires one in
+        // unconditionally, which eagerly loads a third-party iframe on
+        // `firebaseapp.com` (plus Google's gapi.js) for every visitor to
+        // check for a pending redirect result — even the vast majority who
+        // only ever play anonymously and never touch OAuth. That iframe is
+        // exactly what Lighthouse's "third-party cookies" best-practices
+        // audit flags in browsers that don't block third-party cookies.
+        // `signInWithOAuth` below passes the resolver explicitly instead, so
+        // it's only ever loaded for someone actually using it.
+        const auth = authModule.initializeAuth(app, {
+          persistence: authModule.browserLocalPersistence,
+        });
         if (environment.useEmulators) {
           authModule.connectAuthEmulator(auth, AUTH_EMULATOR_URL, { disableWarnings: true });
         }
@@ -222,10 +234,14 @@ export class AuthService {
     try {
       if (auth.currentUser?.isAnonymous) {
         // Same in-place mutation caveat as the email/password link path above.
-        await authModule.linkWithPopup(auth.currentUser, provider);
+        await authModule.linkWithPopup(
+          auth.currentUser,
+          provider,
+          authModule.browserPopupRedirectResolver,
+        );
         this.userSignal.set(auth.currentUser);
       } else {
-        await authModule.signInWithPopup(auth, provider);
+        await authModule.signInWithPopup(auth, provider, authModule.browserPopupRedirectResolver);
       }
     } catch (error) {
       if (isUserCancelledPopup(error)) {
@@ -233,7 +249,7 @@ export class AuthService {
       }
       if ((error as { code?: string }).code === 'auth/credential-already-in-use') {
         try {
-          await authModule.signInWithPopup(auth, provider);
+          await authModule.signInWithPopup(auth, provider, authModule.browserPopupRedirectResolver);
           return;
         } catch (retryError) {
           if (isUserCancelledPopup(retryError)) {
