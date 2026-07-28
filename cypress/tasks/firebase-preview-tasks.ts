@@ -80,6 +80,13 @@ export function registerFirebasePreviewTasks(on: Cypress.PluginEvents): void {
       return null;
     },
 
+    /** Prints straight to the CI job's own stdout — visible in plain workflow logs, unlike the Cypress command log. */
+    log(message: string) {
+      // eslint-disable-next-line no-console
+      console.log(message);
+      return null;
+    },
+
     async finalCleanup() {
       const leaderboardUids = new Set([...trackedLeaderboardUids, ...trackedAuthUids]);
 

@@ -28,8 +28,14 @@ export default defineConfig({
     // localhost + emulator, so give a bit more headroom than the emulator
     // config's already-generous timeout/retry settings.
     defaultCommandTimeout: 20000,
+    // No retries here, unlike cypress.config.ts: a retry re-runs the whole
+    // test including `beforeEach`, but there's no `resetBackend()` wiping
+    // the real project between attempts — a retried `createVerifiedUser`
+    // call collides on the same email/uid the first attempt already
+    // created, turning "flaky test" into a guaranteed second failure
+    // ("email address already in use"). Fix flakiness at the source instead.
     retries: {
-      runMode: 1,
+      runMode: 0,
       openMode: 0,
     },
     setupNodeEvents(on) {
