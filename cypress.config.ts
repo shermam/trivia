@@ -18,11 +18,17 @@ export default defineConfig({
     specPattern: 'cypress/e2e/**/*.cy.ts',
     fixturesFolder: 'cypress/fixtures',
     video: false,
-    defaultCommandTimeout: 12000,
-    // The Firestore/Auth emulators (and the underlying JVM) occasionally add
-    // a few seconds of latency under load — one automatic retry in `cypress
-    // run` (CI/headless) absorbs that without hiding a real failure, since a
-    // genuine bug fails again on the retry. Interactive `cypress open` never
+    // Deliberately above the app's own 15s per-question countdown
+    // (QUESTION_DURATION_SECONDS in quiz-loop.component.ts): on a
+    // CPU-constrained CI runner (Firestore's JVM emulator + the Angular dev
+    // server + headless Chrome all sharing a couple of shared vCPUs),
+    // Cypress's own command execution can occasionally get starved for
+    // several seconds. The answer button stays clickable for the full 15s
+    // regardless, so a timeout below that just means Cypress giving up
+    // early on a button that was never actually gone.
+    defaultCommandTimeout: 20000,
+    // Retries as a secondary safety net for the rarer case that CI slowness
+    // eats into the full 15s countdown itself. `cypress open` never
     // retries, so nothing is hidden while actively developing a test.
     retries: {
       runMode: 1,
