@@ -155,6 +155,7 @@ No composite indexes are currently defined (`firestore.indexes.json` is empty); 
 ### 4.1 Hosting configuration (`firebase.json`)
 - Hosting serves the compiled Angular app from `dist/trivia-app/browser`.
 - SPA rewrite: all paths (`**`) fall back to `/index.html` (client-side routing).
+- **Header rule ordering matters here**: the catch-all `**` headers rule (no-cache + `Cross-Origin-Opener-Policy: same-origin-allow-popups`, needed so Firebase Auth's popup-sign-in polling can read `popup.closed` without the browser blocking it — see §1.5) is listed *first*, with the more specific hashed-asset rules (`**/*.@(js|css)`, images/fonts) listed *after* — Hosting applies the last-declared matching rule per header key, so the specific rules' `immutable` `Cache-Control` correctly overrides the broad one for those paths. An earlier version of this scoped the no-cache/COOP headers to the literal `source: "/index.html"`, which silently never matched any real request — every route (`/`, `/play`, `/game-over`, ...) is served via the `**` rewrite above, never a literal request for `/index.html` itself.
 - Local emulator ports: Firestore `8080`, Auth `9099`, Hosting `5000`, plus the Emulator UI. `singleProjectMode` is enabled. The Auth emulator exists solely for the e2e suite (§4.3) — the app never talks to it outside that configuration.
 
 ### 4.2 GitHub Actions workflow (`.github/workflows/firebase-deploy.yml`)
