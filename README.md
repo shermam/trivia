@@ -59,6 +59,18 @@ Both commands wrap `firebase emulators:exec`, so the emulators start fresh and s
 
 CI runs the same suite on every pull request targeting `main` (`.github/workflows/e2e.yml`).
 
+## Running Lighthouse
+
+[Lighthouse CI](https://github.com/GoogleChrome/lighthouse-ci) audits the production build's performance, accessibility, best-practices, and SEO scores, with thresholds and collection settings in `lighthouserc.json`:
+
+```bash
+npm run lighthouse
+```
+
+This builds the app (`build:prod`) and runs Lighthouse 3 times against a local static server, asserting each category's median score against `lighthouserc.json`'s thresholds. Requires Google Chrome on your `PATH` (or set `CHROME_PATH`) — already present on GitHub-hosted runners, so no extra setup is needed there.
+
+CI runs the same audit on every pull request targeting `main` (`.github/workflows/lighthouse.yml`), uploading the HTML/JSON reports as a build artifact either way.
+
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.

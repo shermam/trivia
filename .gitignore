@@ -56,6 +56,10 @@ ui-debug.log
 /cypress/screenshots
 /cypress/downloads
 
+# Lighthouse CI
+/.lighthouseci
+/lighthouse-reports
+
 # Never commit downloaded service account / admin credentials
 serviceAccountKey*.json
 *-service-account*.json
