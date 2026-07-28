@@ -67,7 +67,9 @@ CI runs the same suite on every pull request targeting `main` (`.github/workflow
 npm run lighthouse
 ```
 
-This builds the app (`build:prod`) and runs Lighthouse 3 times against a local static server, asserting each category's median score against `lighthouserc.json`'s thresholds. Requires Google Chrome on your `PATH` (or set `CHROME_PATH`) — already present on GitHub-hosted runners, so no extra setup is needed there.
+This builds the app with the `lighthouse` configuration (same optimizations as `build:prod`, but pointed at the Firebase Emulator Suite instead of the live project — see `useEmulators` in `src/environments/environment.e2e.ts`), serves it from the real Firebase Hosting emulator, and runs Lighthouse 3 times, asserting each category's median score against `lighthouserc.json`'s thresholds. Requires a JRE (Firestore emulator) and Google Chrome on your `PATH` (or set `CHROME_PATH`) — both already present on GitHub-hosted runners, so no extra setup is needed there.
+
+Serving from the real Hosting emulator (not a bare static server) matters: it's what makes `/__/firebase/init.json` resolve, so Auth/Firestore actually initialize and run for real instead of every audit eating a guaranteed console error that would otherwise mask genuine best-practices regressions.
 
 CI runs the same audit on every pull request targeting `main` (`.github/workflows/lighthouse.yml`), uploading the HTML/JSON reports as a build artifact either way.
 

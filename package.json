@@ -17,7 +17,9 @@
     "e2e:open": "npx firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only auth,firestore \"npm run e2e:runner:open\"",
     "cypress:open": "ELECTRON_RUN_AS_NODE= cypress open",
     "cypress:run": "ELECTRON_RUN_AS_NODE= cypress run",
-    "lighthouse": "npm run build:prod && lhci autorun --config=./lighthouserc.json"
+    "build:lighthouse": "ng build --configuration=lighthouse",
+    "lighthouse:runner": "lhci autorun --config=./lighthouserc.json",
+    "lighthouse": "npm run build:lighthouse && npx firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only hosting,auth,firestore \"npm run lighthouse:runner\""
   },
   "private": true,
   "packageManager": "npm@11.12.1",
