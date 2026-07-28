@@ -59,6 +59,20 @@ Both commands wrap `firebase emulators:exec`, so the emulators start fresh and s
 
 CI runs the same suite on every pull request targeting `main` (`.github/workflows/e2e.yml`).
 
+## Running Lighthouse
+
+[Lighthouse CI](https://github.com/GoogleChrome/lighthouse-ci) audits the production build's performance, accessibility, best-practices, and SEO scores, with thresholds and collection settings in `lighthouserc.json`:
+
+```bash
+npm run lighthouse
+```
+
+This builds the app with the `lighthouse` configuration (same optimizations as `build:prod`, but pointed at the Firebase Emulator Suite instead of the live project — see `useEmulators` in `src/environments/environment.e2e.ts`), serves it from the real Firebase Hosting emulator, and runs Lighthouse 3 times, asserting each category's median score against `lighthouserc.json`'s thresholds. Requires a JRE (Firestore emulator) and Google Chrome on your `PATH` (or set `CHROME_PATH`) — both already present on GitHub-hosted runners, so no extra setup is needed there.
+
+Serving from the real Hosting emulator (not a bare static server) matters: it's what makes `/__/firebase/init.json` resolve, so Auth/Firestore actually initialize and run for real instead of every audit eating a guaranteed console error that would otherwise mask genuine best-practices regressions.
+
+CI runs the same audit on every pull request targeting `main` (`.github/workflows/lighthouse.yml`), uploading the HTML/JSON reports as a build artifact either way.
+
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.

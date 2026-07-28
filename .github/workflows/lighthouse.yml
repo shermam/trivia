@@ -1,0 +1,58 @@
+name: Lighthouse
+
+# Audits the production-optimized build's performance, accessibility,
+# best-practices, and SEO scores on every PR targeting main, plus main
+# itself as a safety net — thresholds and collection settings live in
+# lighthouserc.json (also runnable locally via `npm run lighthouse`).
+#
+# Served from the real Firebase Hosting emulator (not a bare static server)
+# with the app's Auth/Firestore calls pointed at the local emulators (the
+# `lighthouse` build configuration, mirroring the `e2e` one) — so Firebase
+# actually initializes and runs for real, instead of every run eating one
+# guaranteed console error from the reserved /__/firebase/init.json endpoint
+# never resolving. That gap previously hid real best-practices regressions
+# that only show up once Auth/Firestore genuinely execute.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java (required by the Firestore emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Firebase Emulator binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and run Lighthouse CI against the Firebase Emulator Suite
+        run: npm run lighthouse
+
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: lighthouse-reports
+          if-no-files-found: ignore

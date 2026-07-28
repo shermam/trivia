@@ -101,6 +101,7 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 - **Vitest 4** — the project's unit test runner (Angular CLI's new default test builder, `@angular/build:unit-test`), using **jsdom** as the DOM environment. Run via `npm test` (`ng test`).
 - **Cypress 15** — end-to-end tests (`npm run e2e` / `npm run e2e:open`), driven against a real local Firebase Emulator Suite instance rather than mocks; see §4.3.
 - **firebase-admin** (devDependency) — used only from Cypress's Node-side tasks to seed/reset emulator Auth users and Firestore docs, bypassing `firestore.rules`; never shipped in the app bundle.
+- **@lhci/cli (Lighthouse CI) 0.15** — audits the production build's performance/accessibility/best-practices/SEO scores (`npm run lighthouse`); see §4.4.
 - **Prettier 3** — code formatting; configured for 100-char print width, single quotes, and the Angular HTML parser for `.html` templates (`.prettierrc`).
 - **PostCSS** — pipes Tailwind through `@tailwindcss/postcss` (`.postcssrc.json`).
 - **EditorConfig** — enforces 2-space indentation, UTF-8, single quotes in TS across editors.
@@ -179,7 +180,14 @@ This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys
 - Two real bugs were found and fixed by this suite: a race in `AuthService.ensureSignedIn()` where a returning user's persisted session could be clobbered by a fresh anonymous sign-in (fixed with `auth.authStateReady()`), and a stale-UI bug where linking an anonymous session to a real credential mutates the Firebase `User` object in place without firing `onAuthStateChanged`, so `isAnonymous`/`isFullyAuthenticated` never updated until fixed by explicitly re-pushing the user into the auth signal after linking.
 - CI: `.github/workflows/e2e.yml` runs the full suite on every PR targeting `main` (and on push to `main`), separately from the merge-to-deploy pipeline in §4.2.
 
-### 4.4 Local npm scripts (`package.json`)
+### 4.4 Lighthouse CI (performance / accessibility / best-practices / SEO)
+- `lighthouserc.json` drives both local (`npm run lighthouse`) and CI (`.github/workflows/lighthouse.yml`) runs identically: builds with the dedicated `lighthouse` Angular configuration (same optimizations/budgets as `production`, but with `fileReplacements` swapping in `environment.e2e.ts` like the `e2e` config does — see §4.5), starts the Firebase Emulator Suite (`hosting`, `auth`, `firestore`) via `firebase emulators:exec --project demo-trivia-app-e2e`, and runs Lighthouse 3× against `http://127.0.0.1:5000/` (the Hosting emulator, serving the real build), asserting each category's median score.
+- **This intentionally serves from the Hosting emulator, not a bare static server**: only Hosting (real or emulated) resolves the reserved `/__/firebase/init.json` endpoint, so this is what lets `FirebaseAppService` actually initialize and `AuthService`/`FirebaseService` actually run anonymous sign-in and Firestore reads against the local emulators — exercising the real runtime code paths instead of everything failing silently. An earlier version of this check served a bare static build instead; that setup measured a *better* best-practices score (Firebase never initialized at all, so nothing could log a runtime error) which would have masked exactly the class of regression this check exists to catch — first caught when a real Chrome DevTools run against the live production URL showed something not reflected by CI at all (turned out to be an unrelated noisy manual run — see below — but the gap in methodology was real).
+- Thresholds: performance ≥ 0.75 (measured 0.77–0.89 across local + emulator-backed runs, and 0.89 on a clean headless run against the live production URL — kept lower than that for CI-runner performance variance, since timing metrics like FCP/TBT are inherently less stable across machines); accessibility/best-practices/SEO ≥ 0.95 (all measured a clean 1.0 once Firebase genuinely initializes).
+- A clean, extension-free, headless CLI run (`npx lighthouse <url> --chrome-flags="--headless=new"`) against the real deployed site is the trustworthy way to spot-check a production regression — a manual Chrome DevTools run can be skewed by browser extensions, a non-Incognito profile, or leftover site data, none of which reflect a real visitor's or CI's measurement.
+- Reports (HTML + JSON) are uploaded as a `lighthouse-reports` build artifact on every CI run, pass or fail.
+
+### 4.5 Local npm scripts (`package.json`)
 ```
 npm start              # ng serve (dev server, proxies /__/firebase/** to live Hosting)
 npm run build          # ng build (dev config)
@@ -188,12 +196,13 @@ npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom)
 npm run e2e            # Cypress e2e suite (headless) against the Firebase Emulator Suite
 npm run e2e:open       # same, but with the interactive Cypress runner
+npm run lighthouse     # build:prod, then Lighthouse CI against a local static server
 npm run firebase:emulate  # build:prod, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore
 ```
 Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 
-### 4.5 Environments
+### 4.6 Environments
 - `.firebaserc` pins the default (and only) Firebase project to `intellectura-3b26a`.
 - `src/environments/environment.ts` / `environment.development.ts` carry `production` and `useEmulators` flags — no secrets or API keys live here, consistent with the runtime-config-fetch approach described in §2.3.
 - `src/environments/environment.e2e.ts` sets `useEmulators: true` and is swapped in only by the `e2e` build/serve configuration (`angular.json`, `fileReplacements`) used by the Cypress suite (§4.3) — never by `start`/`build`/`build:prod`.
