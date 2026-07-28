@@ -18,6 +18,8 @@ export default defineConfig({
     baseUrl: process.env['PREVIEW_URL'],
     supportFile: 'cypress/support/e2e.preview.ts',
     specPattern: [
+      // TEMPORARY diagnostic spec — see cypress/e2e-preview-diagnostic/network.cy.ts.
+      'cypress/e2e-preview-diagnostic/**/*.cy.ts',
       'cypress/e2e/unauthenticated/**/*.cy.ts',
       'cypress/e2e/authenticated/sign-in-save-score.cy.ts',
       'cypress/e2e/authenticated/profile.cy.ts',
