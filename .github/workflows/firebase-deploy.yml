@@ -1,6 +1,12 @@
 name: Deploy to Firebase Hosting
 
 # Fires only when a PR targeting main is closed AND merged (not just closed/declined).
+#
+# This intentionally does not re-run e2e itself: gating is structural via
+# GitHub branch protection on main, which requires the `E2E (preview)` job
+# from firebase-preview.yml to pass before a PR can be merged at all — so by
+# the time this workflow fires, that check has already passed against a real
+# deployed preview build of this exact code.
 on:
   pull_request:
     types: [closed]

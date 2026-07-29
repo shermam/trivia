@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import type { FirebaseApp, FirebaseOptions } from 'firebase/app';
 import { environment } from '../../environments/environment';
+import { withTimeout } from '../utils/with-timeout.util';
 
 /**
  * Reserved Firebase Hosting endpoint that returns the web app config for
@@ -11,6 +12,16 @@ import { environment } from '../../environments/environment';
  * environment file.
  */
 const RUNTIME_CONFIG_URL = '/__/firebase/init.json';
+
+/**
+ * Every other network call in the app (Firestore reads, anonymous sign-in)
+ * is wrapped in `withTimeout` for exactly this reason, but this fetch — the
+ * one thing everything else depends on via the shared `appPromise` below —
+ * originally wasn't: a stalled connection here (no HTTP error, just a
+ * request that never settles) silently hung the entire app forever, with no
+ * timeout anywhere in the chain to ever surface it as a real error state.
+ */
+const RUNTIME_CONFIG_TIMEOUT_MS = 10_000;
 
 /**
  * The Auth/Firestore emulators don't validate project credentials at all, so
@@ -40,7 +51,7 @@ export class FirebaseAppService {
     if (environment.useEmulators) {
       return EMULATOR_CONFIG;
     }
-    const response = await fetch(RUNTIME_CONFIG_URL);
+    const response = await withTimeout(fetch(RUNTIME_CONFIG_URL), RUNTIME_CONFIG_TIMEOUT_MS);
     if (!response.ok) {
       throw new Error(`Failed to load Firebase config from ${RUNTIME_CONFIG_URL}`);
     }

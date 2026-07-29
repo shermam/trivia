@@ -1,8 +1,13 @@
 describe('authenticated profile management', () => {
-  const email = `profile-${Date.now()}@example.com`;
+  // Computed fresh in `beforeEach` (not once at describe-scope) — see the
+  // identical comment in sign-in-save-score.cy.ts: this file's two `it`s
+  // share this hook, and there's no reset between them against the real
+  // preview backend.
+  let email: string;
   const password = 'correct horse battery staple';
 
   beforeEach(() => {
+    email = `profile-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     cy.createVerifiedUser({ email, password });
     cy.visit('/');
     cy.signInViaUi(email, password);
