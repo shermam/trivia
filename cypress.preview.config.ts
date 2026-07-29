@@ -46,17 +46,18 @@ export default defineConfig({
 
       // Diagnostic finding: fetch() to Google-operated hosts (Firebase
       // Hosting, identitytoolkit.googleapis.com) hangs forever inside
-      // Cypress's Electron browser in CI, while a plain curl from the same
-      // runner succeeds in <0.5s and an unrelated third-party host
-      // (opentdb.com) fetches fine from the same browser. That signature
-      // matches Chromium preferring QUIC (HTTP/3, over UDP) for Google
-      // properties, in a container where UDP egress is silently dropped —
-      // TCP-only tools like curl are unaffected, but Chromium's QUIC
-      // attempt never falls back to TCP, it just hangs. Disabling QUIC
-      // forces plain HTTP/2 over TCP for everything.
+      // Cypress's Electron browser in this CI runner, while a plain curl
+      // from the same runner succeeds in <0.5s and an unrelated third-party
+      // host (opentdb.com) fetches fine from the same browser. Disabling
+      // QUIC alone didn't fix it. DNS resolution confirmed the actual
+      // pattern: the hanging hosts are dual-stack (both A and AAAA/IPv6
+      // records), while opentdb.com is IPv4-only — this runner's IPv6 route
+      // silently black-holes instead of failing fast, defeating Chromium's
+      // own Happy-Eyeballs fallback to IPv4. Forcing IPv4-only avoids the
+      // black hole entirely.
       on('before:browser:launch', (browser, launchOptions) => {
         if (browser.family === 'chromium') {
-          launchOptions.args.push('--disable-quic');
+          launchOptions.args.push('--disable-ipv6', '--disable-quic');
         }
         return launchOptions;
       });
