@@ -69,6 +69,23 @@ export class FirebaseService {
   }
 
   /**
+   * Adds a player-submitted question to the shared bank via an auto-id
+   * `addDoc` (unlike the leaderboard, there's no per-user document to
+   * upsert). Rejected outright by `firestore.rules` for anonymous/unverified
+   * callers or a malformed payload — see `isValidCustomQuestion` there.
+   */
+  async addCustomQuestion(question: CustomQuestionDoc): Promise<void> {
+    const { firestore, firestoreModule } = await this.getFirestore();
+    await withTimeout(
+      firestoreModule.addDoc(
+        firestoreModule.collection(firestore, CUSTOM_QUESTIONS_COLLECTION),
+        question,
+      ),
+      FIRESTORE_TIMEOUT_MS,
+    );
+  }
+
+  /**
    * Leaderboard entries are keyed by uid (one entry per user, best score
    * wins) — the write is a `setDoc` on `leaderboard/{uid}`, not an
    * auto-id `addDoc`. Firestore rules reject the write outright if

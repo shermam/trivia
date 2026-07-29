@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { GameConfig } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
@@ -7,7 +8,7 @@ import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 @Component({
   selector: 'app-game-setup',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, RouterLink],
   templateUrl: './game-setup.component.html',
   styleUrl: './game-setup.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
