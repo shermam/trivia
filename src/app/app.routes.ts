@@ -16,5 +16,12 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./components/game-over/game-over.component').then((m) => m.GameOverComponent),
   },
+  {
+    path: 'add-question',
+    loadComponent: () =>
+      import('./components/add-question/add-question.component').then(
+        (m) => m.AddQuestionComponent,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

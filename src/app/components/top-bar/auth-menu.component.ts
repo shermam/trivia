@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import {
   AuthService,
   OAUTH_PROVIDER_LABELS,
@@ -22,7 +23,7 @@ type EmailFormMode = 'signup' | 'signin';
 @Component({
   selector: 'app-auth-menu',
   standalone: true,
-  imports: [FormsModule, ProviderIconComponent],
+  imports: [FormsModule, ProviderIconComponent, RouterLink],
   templateUrl: './auth-menu.component.html',
   styleUrl: './auth-menu.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

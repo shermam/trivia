@@ -31,11 +31,29 @@ service cloud.firestore {
             && request.resource.data.createdAt is int;
     }
 
-    // Question bank: readable by anyone playing the game, writable only
-    // via the console or an authenticated admin tool (none exists yet).
+    function isValidCustomQuestion() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+                ['category', 'type', 'difficulty', 'question', 'correct_answer', 'incorrect_answers']
+              )
+            && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+            && data.type in ['multiple', 'boolean']
+            && data.difficulty in ['easy', 'medium', 'hard']
+            && data.question is string && data.question.size() > 0 && data.question.size() <= 500
+            && data.correct_answer is string
+            && data.correct_answer.size() > 0 && data.correct_answer.size() <= 200
+            && data.incorrect_answers is list
+            && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 5;
+    }
+
+    // Question bank: readable by anyone playing the game. Creating a new
+    // question is open to any real (non-anonymous, verified-if-password)
+    // account — same anti-flood gate as the leaderboard — subject to schema
+    // validation above; editing/removing an existing one is console-only.
     match /custom_questions/{questionId} {
       allow read: if true;
-      allow write: if false;
+      allow create: if isRealAuthedUser() && isValidCustomQuestion();
+      allow update, delete: if false;
     }
 
     // Leaderboard: readable by anyone; one document per user (doc ID == uid),

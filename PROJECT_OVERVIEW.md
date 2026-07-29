@@ -10,13 +10,14 @@ Live project: Firebase project `intellectura-3b26a` · Repo: `shermam/trivia`
 
 ### 1.1 Game flow
 
-The app is a three-screen flow, implemented as three lazily-loaded standalone Angular routes:
+The app is a four-screen flow, implemented as four lazily-loaded standalone Angular routes:
 
-| Route        | Component            | Purpose                                              |
-| ------------ | -------------------- | ---------------------------------------------------- |
-| `/`          | `GameSetupComponent` | Configure and start a new game                       |
-| `/play`      | `QuizLoopComponent`  | Answer questions one at a time, against a timer      |
-| `/game-over` | `GameOverComponent`  | Show final score, submit to leaderboard, view top 10 |
+| Route           | Component              | Purpose                                              |
+| --------------- | ----------------------- | ---------------------------------------------------- |
+| `/`             | `GameSetupComponent`   | Configure and start a new game                       |
+| `/play`         | `QuizLoopComponent`    | Answer questions one at a time, against a timer      |
+| `/game-over`    | `GameOverComponent`    | Show final score, submit to leaderboard, view top 10 |
+| `/add-question` | `AddQuestionComponent` | Submit a new question to the custom question bank    |
 
 Any unmatched route redirects back to `/`.
 
@@ -49,6 +50,12 @@ Any unmatched route redirects back to `/`.
 - Displays the **top 10 leaderboard**, sorted by score descending, loaded from Firestore and refreshed after a successful save.
 - "Play Again" resets all in-memory game state and returns to `/`.
 
+**Add a question (`/add-question`)**
+
+- Lets a **fully authenticated** player (same gate as the leaderboard save, §1.5) submit a new question to the shared `custom_questions` bank. Anonymous or unverified players see the same sign-in/verify prompts as game-over instead of the form.
+- Reactive form: free-text category (with `<datalist>` suggestions from the same cached Open Trivia category list used by game setup, so a submitted category can actually be filtered on later), difficulty, question type (multiple-choice vs. true/false), the question text, and answers — a correct-answer text field plus 3 incorrect-answer fields for multiple-choice, or a True/False picker for boolean (incorrect answer is derived as the opposite value).
+- On submit, `FirebaseService.addCustomQuestion()` does an auto-id `addDoc` into `custom_questions`; a success state offers "Add another" (resets the form) or "Back to game". Reachable from a link on the game-setup screen and from the profile section of the top-bar auth menu.
+
 ### 1.2 Question sourcing
 
 `TriviaService` is the single entry point for fetching quiz questions (`getQuestions(config)`), and normalizes both sources into one shared `TriviaQuestion` shape:
@@ -68,7 +75,7 @@ Shared normalization for every question:
 
 ### 1.4 Custom question bank
 
-Firestore collection `custom_questions` acts as a first-party question bank alongside Open Trivia DB. There is currently **no in-app admin UI** to write to it — per the Firestore rules, it's read-only from the client and intended to be populated manually via the Firebase console or a future admin tool.
+Firestore collection `custom_questions` acts as a first-party question bank alongside Open Trivia DB. It's populated both manually via the Firebase console and by players themselves through the in-app **Add a question** screen (`/add-question`, §1.1) — gated to fully authenticated accounts (same anti-flood rule as the leaderboard) and validated server-side by `firestore.rules` (§3). There's no in-app way to edit or delete an existing question yet — `custom_questions` writes are `create`-only from the client; that's still console-only.
 
 ### 1.5 Authentication & the leaderboard
 
@@ -136,7 +143,8 @@ incorrect_answers: string[]
 ```
 
 - **Read**: public (`allow read: if true`)
-- **Write**: none from the client (`allow write: if false`) — console/admin-tool only.
+- **Create**: requires a "real" account — same `isRealAuthedUser()` gate as the leaderboard (non-anonymous, and email-verified if it's a password account) — plus schema validation (`isValidCustomQuestion()`: exact key set, `type` in `['multiple','boolean']`, `difficulty` in `['easy','medium','hard']`, string length bounds, `incorrect_answers` a list of 1–5 entries). Written from the client via the `/add-question` screen (§1.1, §1.4).
+- **Update / Delete**: none from the client (`allow update, delete: if false`) — console-only for now.
 
 ### `leaderboard` — high scores
 
@@ -265,6 +273,6 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 
 - Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`), which needs the Blaze plan and a `functions/` CI deploy step; scoped out for now. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
 - Play Games and Game Center sign-in are listed in the Firebase console but not offered in the app — no Web SDK equivalent exists for either (native Android/Apple only).
-- No admin UI for writing to `custom_questions` (console-only for now, per the rules comments).
-- The e2e suite (§4.3) covers the core unauthenticated/authenticated flows but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator) or the "mixed" question source end-to-end (unit-level coverage only).
+- The `/add-question` screen only supports *creating* a question — no in-app way to edit or delete an existing `custom_questions` doc yet (console-only for now, per the rules comments). There's also no moderation/review step: any fully authenticated account can add directly to the shared, public bank.
+- The e2e suite (§4.3) covers the core unauthenticated/authenticated flows but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator), the "mixed" question source end-to-end (unit-level coverage only), or the `/add-question` screen (no spec yet).
 - The `E2E (preview)` job (§4.2a) needs to actually be turned on as a required status check in GitHub branch protection settings for `main` — it's not enforced yet. GitHub Actions jobs can't gate a merge on their own; that has to come from branch protection, and setting it up needs repo-admin access that CI/automation credentials don't have.

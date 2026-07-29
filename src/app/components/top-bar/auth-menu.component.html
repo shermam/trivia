@@ -168,6 +168,14 @@
       }
     </p>
 
+    <a
+      routerLink="/add-question"
+      (click)="closeRequested.emit()"
+      class="block w-full text-center rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium py-2 mb-2 transition-colors"
+    >
+      Add a question
+    </a>
+
     <button
       type="button"
       (click)="signOut()"
