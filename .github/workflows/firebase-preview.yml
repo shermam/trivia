@@ -110,13 +110,22 @@ jobs:
       # use this — the app itself under test still fetches its Firebase
       # config from the deployed preview channel's own /__/firebase/init.json,
       # same as a real visitor.
+      #
+      # TEMPORARY: --browser chrome, not Cypress's bundled Electron. Neither
+      # --disable-quic, --disable-ipv6, nor pinning Chromium directly to the
+      # exact IPv4 addresses curl already proved reachable changed anything —
+      # fetch() to Firebase/Google hosts specifically hangs forever inside
+      # Electron regardless, while a third-party host and the runner's own
+      # curl are both unaffected. Trying the ubuntu-latest runner's
+      # pre-installed real Chrome instead, in case it's specific to
+      # Cypress's bundled Electron/Chromium build rather than the network.
       - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npm run e2e:preview
+          npm run e2e:preview -- --browser chrome
 
       - name: Clean up service account credentials
         if: always()
