@@ -1,4 +1,3 @@
-import { promises as dns } from 'node:dns';
 import { defineConfig } from 'cypress';
 import { registerFirebasePreviewTasks } from './cypress/tasks/firebase-preview-tasks';
 
@@ -19,8 +18,6 @@ export default defineConfig({
     baseUrl: process.env['PREVIEW_URL'],
     supportFile: 'cypress/support/e2e.preview.ts',
     specPattern: [
-      // TEMPORARY diagnostic spec — see cypress/e2e-preview-diagnostic/network.cy.ts.
-      'cypress/e2e-preview-diagnostic/**/*.cy.ts',
       'cypress/e2e/unauthenticated/**/*.cy.ts',
       'cypress/e2e/authenticated/sign-in-save-score.cy.ts',
       'cypress/e2e/authenticated/profile.cy.ts',
@@ -44,61 +41,6 @@ export default defineConfig({
     },
     setupNodeEvents(on) {
       registerFirebasePreviewTasks(on);
-
-      // Diagnostic finding: fetch() to Google-operated hosts (Firebase
-      // Hosting, identitytoolkit.googleapis.com) hangs forever inside
-      // Cypress's Electron browser in this CI runner, while a plain curl
-      // from the same runner succeeds in <0.5s and an unrelated third-party
-      // host (opentdb.com) fetches fine from the same browser. Neither
-      // --disable-quic nor --disable-ipv6 changed the behavior at all
-      // (byte-for-byte identical hang timing both times), which is itself
-      // suspicious — logging here to confirm this hook and its args are
-      // even taking effect. This resolves the exact IPv4 addresses curl
-      // already proved reachable (via Node's own resolver, unaffected by
-      // whatever the browser is doing) and pins Chromium to them directly
-      // via --host-resolver-rules, sidestepping its own DNS/IPv6 path
-      // entirely instead of just asking it nicely to prefer IPv4.
-      on('before:browser:launch', async (browser, launchOptions) => {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[cypress-preview] before:browser:launch fired: family=${browser.family} name=${browser.name}`,
-        );
-        if (browser.family !== 'chromium') {
-          return launchOptions;
-        }
-
-        const previewHost = process.env['PREVIEW_URL']
-          ? new URL(process.env['PREVIEW_URL']).hostname
-          : null;
-        const hostsToPin = [
-          'identitytoolkit.googleapis.com',
-          'firestore.googleapis.com',
-          'www.googleapis.com',
-          ...(previewHost ? [previewHost] : []),
-        ];
-
-        const rules: string[] = [];
-        for (const host of hostsToPin) {
-          try {
-            const [address] = await dns.resolve4(host);
-            if (address) {
-              rules.push(`MAP ${host} ${address}`);
-            }
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.log(`[cypress-preview] resolve4(${host}) failed: ${String(err)}`);
-          }
-        }
-
-        if (rules.length > 0) {
-          launchOptions.args.push(`--host-resolver-rules=${rules.join(', ')}`);
-        }
-        launchOptions.args.push('--disable-ipv6', '--disable-quic');
-
-        // eslint-disable-next-line no-console
-        console.log(`[cypress-preview] launch args: ${JSON.stringify(launchOptions.args)}`);
-        return launchOptions;
-      });
     },
   },
 });

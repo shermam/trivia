@@ -89,43 +89,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # TEMPORARY diagnostic: the app's own fetch('/__/firebase/init.json')
-      # never resolves or rejects inside Cypress's browser in this job
-      # (confirmed via cypress/e2e-preview-diagnostic/network.cy.ts) even
-      # though a plain curl from an unrelated network succeeds in <0.5s.
-      # This checks whether the runner's own network path to Firebase
-      # Hosting is the problem, independent of the browser entirely.
-      - name: Diagnostic - curl the preview URL and the main site from the runner
-        env:
-          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-        run: |
-          echo "--- preview channel init.json ---"
-          time curl -sS -o /dev/null -w "HTTP %{http_code}  connect:%{time_connect}s ttfb:%{time_starttransfer}s total:%{time_total}s\n" --max-time 20 "$PREVIEW_URL/__/firebase/init.json" || echo "curl failed: exit $?"
-          echo "--- main production site init.json ---"
-          time curl -sS -o /dev/null -w "HTTP %{http_code}  connect:%{time_connect}s ttfb:%{time_starttransfer}s total:%{time_total}s\n" --max-time 20 "https://intellectura-3b26a.web.app/__/firebase/init.json" || echo "curl failed: exit $?"
-          echo "--- identitytoolkit anonymous sign-in ---"
-          time curl -sS -o /dev/null -w "HTTP %{http_code}  connect:%{time_connect}s ttfb:%{time_starttransfer}s total:%{time_total}s\n" --max-time 20 -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyAMeIj6puWPraoGYRs-svBYnT2rkJdsRdk" -H "Content-Type: application/json" -d '{"returnSecureToken":true}' || echo "curl failed: exit $?"
-
       # Only the seed/cleanup Node-side tasks (cypress/tasks/firebase-preview-tasks.ts)
       # use this — the app itself under test still fetches its Firebase
-      # config from the deployed preview channel's own /__/firebase/init.json,
-      # same as a real visitor.
-      #
-      # TEMPORARY: --browser chrome, not Cypress's bundled Electron. Neither
-      # --disable-quic, --disable-ipv6, nor pinning Chromium directly to the
-      # exact IPv4 addresses curl already proved reachable changed anything —
-      # fetch() to Firebase/Google hosts specifically hangs forever inside
-      # Electron regardless, while a third-party host and the runner's own
-      # curl are both unaffected. Trying the ubuntu-latest runner's
-      # pre-installed real Chrome instead, in case it's specific to
-      # Cypress's bundled Electron/Chromium build rather than the network.
+      # config from the deployed preview channel's own /__/firebase/init.json
+      # (patched around at the browser level, see cypress/support/e2e.preview.ts
+      # — Cypress's own reserved-path handling collides with Firebase Hosting's
+      # `/__/` namespace), same as a real visitor otherwise.
       - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npm run e2e:preview -- --browser chrome
+          npm run e2e:preview
 
       - name: Clean up service account credentials
         if: always()

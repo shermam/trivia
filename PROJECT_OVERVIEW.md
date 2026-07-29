@@ -12,15 +12,16 @@ Live project: Firebase project `intellectura-3b26a` · Repo: `shermam/trivia`
 
 The app is a three-screen flow, implemented as three lazily-loaded standalone Angular routes:
 
-| Route | Component | Purpose |
-|---|---|---|
-| `/` | `GameSetupComponent` | Configure and start a new game |
-| `/play` | `QuizLoopComponent` | Answer questions one at a time, against a timer |
-| `/game-over` | `GameOverComponent` | Show final score, submit to leaderboard, view top 10 |
+| Route        | Component            | Purpose                                              |
+| ------------ | -------------------- | ---------------------------------------------------- |
+| `/`          | `GameSetupComponent` | Configure and start a new game                       |
+| `/play`      | `QuizLoopComponent`  | Answer questions one at a time, against a timer      |
+| `/game-over` | `GameOverComponent`  | Show final score, submit to leaderboard, view top 10 |
 
 Any unmatched route redirects back to `/`.
 
 **Game setup (`/`)**
+
 - Reactive form to configure a game:
   - **Number of questions**: 5 / 10 / 15 / 20 / 25
   - **Category**: "Any Category" or one of the categories fetched live from Open Trivia DB
@@ -30,6 +31,7 @@ Any unmatched route redirects back to `/`.
 - On submit, `GameControllerService.startGame()` fetches questions for the chosen config and navigates to `/play`. Loading and error states (e.g. no questions found for the given filters, network failure) are surfaced inline on the form.
 
 **Quiz loop (`/play`)**
+
 - Guards against direct navigation: if there's no active question in memory, it redirects back to `/`.
 - Each question has a **15-second countdown timer** (visual ring + shrinking progress bar that turns red in the last 5 seconds).
 - Selecting an answer (or the timer hitting 0, which auto-submits a "no answer") locks the question:
@@ -40,6 +42,7 @@ Any unmatched route redirects back to `/`.
 - Displays running question index, live score, category, and difficulty badges.
 
 **Game over (`/game-over`)**
+
 - Redirects to `/` if there's no completed game in memory.
 - Shows final score (`X / N`) and accuracy percentage.
 - If fully authenticated (see §1.5), lets the player enter a name (≤30 chars, prefilled from their profile) and submit their score to the Firestore `leaderboard` collection — one entry per account, keeping their best score. Anonymous or unverified players see a sign-in/verify prompt instead of the form.
@@ -55,6 +58,7 @@ Any unmatched route redirects back to `/`.
 - **Mixed** (`source: 'mixed'`): splits the requested amount roughly in half between the two sources (Open Trivia questions are best-effort — a failure there is swallowed so a slow/broken third-party API doesn't sink a mixed game), merges, shuffles, and trims to the exact requested count.
 
 Shared normalization for every question:
+
 - HTML entities in question/category/answer text (as returned by Open Trivia DB, e.g. `&quot;`, `&#039;`) are decoded safely via an inert `DOMParser` document (chosen specifically to avoid the classic innerHTML-based decoding XSS footgun).
 - Answers (`correct_answer` + `incorrect_answers`) are merged into a single `all_answers` array and shuffled with a Fisher–Yates shuffle, so the correct answer's position varies per question/render.
 
@@ -73,7 +77,7 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 - **Top bar** (`TopBarComponent`, rendered as a sibling of `<router-outlet>` in `app.html`) shows a sign-in trigger top-right on every screen. It's a self-contained, removable component — dropping it (or gating it behind `EmbedModeService`, see below) leaves just the game panel.
 - **Sign-in options**: Google and email/password are the prominent choices; a "more sign-in options" disclosure reveals Facebook, GitHub, Microsoft, Apple, Twitter/X, and Yahoo (`AuthService.signInWithOAuth`). Play Games and Game Center are Firebase console options with no Web SDK equivalent (native Android/Apple only) and are intentionally not offered here.
 - **Anonymous-to-real upgrade**: signing in from an anonymous session links the new credential to the existing uid (`linkWithCredential`/`linkWithPopup`) instead of minting a new one, so anything already saved carries forward. If that credential already belongs to another account, it falls back to a normal sign-in (switching uid).
-- **Lazy OAuth popup resolver**: `AuthService` calls `initializeAuth(app, { persistence: browserLocalPersistence })` — deliberately *not* the `getAuth()` convenience wrapper, which wires in `browserPopupRedirectResolver` unconditionally and, as a side effect, eagerly loads a third-party iframe on the Firebase `authDomain` (plus Google's gapi.js) on every page load to check for a pending redirect result, whether or not that visitor ever uses OAuth. Since most visitors only ever play anonymously, `signInWithOAuth` instead passes `browserPopupRedirectResolver` explicitly at call time, so that iframe/script only loads for someone actually clicking a provider button. Confirmed via a Lighthouse best-practices "third-party cookies" audit failure on a real (non-Incognito) browser profile that reproduced only when that iframe loaded — a network trace before/after this change showed the `firebaseapp.com/__/auth/iframe` and `apis.google.com` requests disappearing entirely from the anonymous-only page-load path.
+- **Lazy OAuth popup resolver**: `AuthService` calls `initializeAuth(app, { persistence: browserLocalPersistence })` — deliberately _not_ the `getAuth()` convenience wrapper, which wires in `browserPopupRedirectResolver` unconditionally and, as a side effect, eagerly loads a third-party iframe on the Firebase `authDomain` (plus Google's gapi.js) on every page load to check for a pending redirect result, whether or not that visitor ever uses OAuth. Since most visitors only ever play anonymously, `signInWithOAuth` instead passes `browserPopupRedirectResolver` explicitly at call time, so that iframe/script only loads for someone actually clicking a provider button. Confirmed via a Lighthouse best-practices "third-party cookies" audit failure on a real (non-Incognito) browser profile that reproduced only when that iframe loaded — a network trace before/after this change showed the `firebaseapp.com/__/auth/iframe` and `apis.google.com` requests disappearing entirely from the anonymous-only page-load path.
 - **Email alias blocking**: sign-up rejects `name+tag@domain.com`-style addresses client-side (`isAliasEmail`, `utils/email-alias.util.ts`) — this stops the UI from creating alias accounts but not a direct Auth API call; see the anti-cheat note below.
 - **Email verification**: an email/password account is not treated as "fully authenticated" (`AuthService.isFullyAuthenticated`) until its email is verified. Anonymous and unverified-password users can play and view the leaderboard but the "Save Score" action is replaced with a sign-in/verify prompt.
 - **Anti-cheat enforcement is server-side, in `firestore.rules`**, not just the client: a leaderboard write is only accepted if `request.auth.token.firebase.sign_in_provider` isn't `anonymous`, and — for password accounts — `email_verified` is `true`. This is what actually stops someone from bypassing the UI to flood the board with throwaway accounts; the client-side gating above is just so the UI reflects the same rule.
@@ -85,16 +89,16 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 
 ### 2.1 Core stack
 
-| Layer | Technology |
-|---|---|
-| Framework | **Angular 22** (standalone components, signals, `@if`/`@for` control-flow syntax, `OnPush` change detection throughout) |
-| Language | **TypeScript ~6.0** |
-| Styling | **Tailwind CSS 4** (via `@tailwindcss/postcss`), utility classes only — no component CSS frameworks |
-| Backend-as-a-service | **Firebase** — Firestore (data), Auth (anonymous + Google/email/Facebook/GitHub/Microsoft/Apple/Twitter-X/Yahoo), Hosting (static deploy). |
-| Reactive/async plumbing | **RxJS 7.8** (`Observable`s in the Firebase/Trivia services, `firstValueFrom` to bridge to async/await) |
-| HTTP | Angular's `HttpClient` (`provideHttpClient()`), used for Open Trivia DB calls |
-| Forms | Angular `ReactiveFormsModule` (game setup) and `FormsModule` + `ngModel` (game-over name input) |
-| Routing | Angular Router with lazy-loaded (`loadComponent`) standalone routes |
+| Layer                   | Technology                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Framework               | **Angular 22** (standalone components, signals, `@if`/`@for` control-flow syntax, `OnPush` change detection throughout)                    |
+| Language                | **TypeScript ~6.0**                                                                                                                        |
+| Styling                 | **Tailwind CSS 4** (via `@tailwindcss/postcss`), utility classes only — no component CSS frameworks                                        |
+| Backend-as-a-service    | **Firebase** — Firestore (data), Auth (anonymous + Google/email/Facebook/GitHub/Microsoft/Apple/Twitter-X/Yahoo), Hosting (static deploy). |
+| Reactive/async plumbing | **RxJS 7.8** (`Observable`s in the Firebase/Trivia services, `firstValueFrom` to bridge to async/await)                                    |
+| HTTP                    | Angular's `HttpClient` (`provideHttpClient()`), used for Open Trivia DB calls                                                              |
+| Forms                   | Angular `ReactiveFormsModule` (game setup) and `FormsModule` + `ngModel` (game-over name input)                                            |
+| Routing                 | Angular Router with lazy-loaded (`loadComponent`) standalone routes                                                                        |
 
 ### 2.2 Tooling
 
@@ -121,6 +125,7 @@ All Firestore calls (`getCustomQuestions`, `saveHighScore`, `getTopScores`) are 
 ## 3. Data Model (Firestore)
 
 ### `custom_questions` — first-party question bank
+
 ```
 category: string
 type: 'multiple' | 'boolean'
@@ -129,10 +134,12 @@ question: string
 correct_answer: string
 incorrect_answers: string[]
 ```
+
 - **Read**: public (`allow read: if true`)
 - **Write**: none from the client (`allow write: if false`) — console/admin-tool only.
 
 ### `leaderboard` — high scores
+
 ```
 uid: string            (doc ID; must equal request.auth.uid)
 name: string          (1–30 chars)
@@ -141,6 +148,7 @@ totalQuestions: int    (>= score)
 percentage: number     (0–100)
 createdAt: int         (epoch ms)
 ```
+
 - **Read**: public.
 - **Create / Update**: requires a non-anonymous, (if password-based) email-verified caller writing to their own uid's doc — schema is strictly validated in `firestore.rules` (exact key set, types, bounds) and an update is only accepted if `score` improves on the existing value.
 - **Delete**: disallowed.
@@ -153,15 +161,18 @@ No composite indexes are currently defined (`firestore.indexes.json` is empty); 
 ## 4. Deployment & CI/CD
 
 ### 4.1 Hosting configuration (`firebase.json`)
+
 - Hosting serves the compiled Angular app from `dist/trivia-app/browser`.
 - SPA rewrite: all paths (`**`) fall back to `/index.html` (client-side routing).
-- **Header rule ordering matters here**: the catch-all `**` headers rule (no-cache + `Cross-Origin-Opener-Policy: same-origin-allow-popups`, needed so Firebase Auth's popup-sign-in polling can read `popup.closed` without the browser blocking it — see §1.5) is listed *first*, with the more specific hashed-asset rules (`**/*.@(js|css)`, images/fonts) listed *after* — Hosting applies the last-declared matching rule per header key, so the specific rules' `immutable` `Cache-Control` correctly overrides the broad one for those paths. An earlier version of this scoped the no-cache/COOP headers to the literal `source: "/index.html"`, which silently never matched any real request — every route (`/`, `/play`, `/game-over`, ...) is served via the `**` rewrite above, never a literal request for `/index.html` itself.
+- **Header rule ordering matters here**: the catch-all `**` headers rule (no-cache + `Cross-Origin-Opener-Policy: same-origin-allow-popups`, needed so Firebase Auth's popup-sign-in polling can read `popup.closed` without the browser blocking it — see §1.5) is listed _first_, with the more specific hashed-asset rules (`**/*.@(js|css)`, images/fonts) listed _after_ — Hosting applies the last-declared matching rule per header key, so the specific rules' `immutable` `Cache-Control` correctly overrides the broad one for those paths. An earlier version of this scoped the no-cache/COOP headers to the literal `source: "/index.html"`, which silently never matched any real request — every route (`/`, `/play`, `/game-over`, ...) is served via the `**` rewrite above, never a literal request for `/index.html` itself.
 - Local emulator ports: Firestore `8080`, Auth `9099`, Hosting `5000`, plus the Emulator UI. `singleProjectMode` is enabled. The Auth emulator exists solely for the e2e suite (§4.3) — the app never talks to it outside that configuration.
 
 ### 4.2 GitHub Actions workflow (`.github/workflows/firebase-deploy.yml`)
+
 **Trigger**: fires only when a pull request targeting `main` is **closed and merged** (not just closed).
 
 Steps:
+
 1. Checkout `main`.
 2. Set up Node 22 (with npm cache).
 3. `npm ci`.
@@ -175,17 +186,20 @@ Job permissions are scoped to `contents: read`, `checks: write`, `pull-requests:
 This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys hosting + Firestore rules/indexes to the single production project (`intellectura-3b26a`). It deliberately doesn't re-run e2e itself — see §4.2a for why that's still safe.
 
 ### 4.2a Preview channel deploy + real-preview e2e (`.github/workflows/firebase-preview.yml`)
+
 **Trigger**: every PR targeting `main`, on open/sync/reopen (not close — that's what §4.2 handles on merge). A `concurrency` group keyed on the PR number cancels a stale in-flight run if the PR gets pushed again before it finishes.
 
 Two sequential jobs:
+
 1. **`deploy-preview`** — checkout → Node 22 → `npm ci` → `npm run build:prod` → `FirebaseExtended/action-hosting-deploy@v0` deploying to an ephemeral channel named `pr-<number>` (7-day expiry) instead of `channelId: live`. The action posts/updates a PR comment with the preview URL on every push. The step's `urls` JSON output is parsed (`jq`) into a job output consumed by the next job.
 2. **`e2e-preview`** (job name `E2E (preview)`) — runs a scoped slice of the Cypress suite (§4.3) against the just-deployed preview URL, hitting the **real** `intellectura-3b26a` project instead of an emulator.
 
-Preview channels are a **Hosting-only** feature — there's still a single Firestore database for the project, so a preview build (and its e2e run) reads/writes the same production `custom_questions`/`leaderboard` data as `main` and live. Firestore rules/indexes are also not redeployed per-preview (they're project-wide, not channel-scoped); only §4.2's merge pipeline touches them. There is no isolated staging *database* — just an isolated hosting URL, backed by production data, that's now also exercised end-to-end before merge.
+Preview channels are a **Hosting-only** feature — there's still a single Firestore database for the project, so a preview build (and its e2e run) reads/writes the same production `custom_questions`/`leaderboard` data as `main` and live. Firestore rules/indexes are also not redeployed per-preview (they're project-wide, not channel-scoped); only §4.2's merge pipeline touches them. There is no isolated staging _database_ — just an isolated hosting URL, backed by production data, that's now also exercised end-to-end before merge.
 
 `E2E (preview)` is configured as a **required status check** on `main` branch protection, so a PR can't be merged (and therefore can't trigger §4.2's deploy) unless the real deployed preview actually passed e2e — see the note at the top of `firebase-deploy.yml`.
 
 ### 4.3 E2E testing (Cypress + Firebase Emulator Suite)
+
 - Suite lives under `cypress/e2e/unauthenticated/` (anonymous game flow across all three question sources, route guards, embed mode) and `cypress/e2e/authenticated/` (email sign-up + verification, sign-in, saving a score, profile management), run via `npm run e2e` (headless) or `npm run e2e:open` (interactive).
 - Both commands wrap `firebase emulators:exec --project demo-trivia-app-e2e --only auth,firestore`, which starts a throwaway local Firestore + Auth emulator pair, runs the wrapped command, and always tears the emulators down afterward — no real project is ever touched.
 - The app itself only connects to the emulators when built with the dedicated `e2e` Angular configuration (`ng serve --configuration=e2e`, see §4.5): `FirebaseAppService` skips the `/__/firebase/init.json` fetch and uses a hardcoded `demo-trivia-app-e2e` config instead, and `AuthService`/`FirebaseService` call `connectAuthEmulator`/`connectFirestoreEmulator`.
@@ -194,20 +208,24 @@ Preview channels are a **Hosting-only** feature — there's still a single Fires
 - CI: `.github/workflows/e2e.yml` runs the full suite on every PR targeting `main` (and on push to `main`), separately from the merge-to-deploy pipeline in §4.2.
 
 **Running the same suite against a real preview instead of the emulator** (`cypress.preview.config.ts`, driven by the `e2e-preview` job in §4.2a): a deliberately narrower slice, because this hits the real, persistent, public `intellectura-3b26a` project — there's no throwaway emulator to reset:
+
 - `specPattern` includes all of `cypress/e2e/unauthenticated/` plus only `sign-in-save-score.cy.ts` and `profile.cy.ts` from `cypress/e2e/authenticated/`. `sign-up-verify.cy.ts` is excluded permanently: it depends on the Auth emulator's testing-only `oobCodes` REST endpoint to read a verification link, which has no real-Auth equivalent without a live mailbox.
 - `cypress/tasks/firebase-preview-tasks.ts` is the real-project counterpart to `firebase-emulator-tasks.ts` — same task names/shapes (sharing types from `cypress/tasks/types.ts`) but **no blanket `resetBackend`**. Instead, every uid/doc a test creates (explicitly via a seed task, or implicitly — every `cy.visit()` triggers the app's own anonymous sign-in) is tracked in-process and swept up by a `finalCleanup` task, called from an `after()` hook in `cypress/support/e2e.preview.ts`. `cypress/support/preview-commands.ts` adds `trackCurrentSessionUid()`, called in an `afterEach`, which reads the Firebase-persisted uid straight out of the app's own `localStorage` (`browserLocalPersistence`, see §1.5) so even the ambient anonymous user from a plain page visit gets cleaned up, not just uids created via an explicit task call.
 - The two authenticated specs' previously-hardcoded fixture IDs (`existing-leader`, `q1`/`q2`) were made unique per run (timestamp-suffixed) so two preview deploys running concurrently against the same real project never race on the same document.
 - Credentials: the same `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` secret used elsewhere in CI, written to a temp file and picked up via `GOOGLE_APPLICATION_CREDENTIALS` (Admin SDK default credential lookup) — never the `FIRESTORE_EMULATOR_HOST`/`FIREBASE_AUTH_EMULATOR_HOST` env vars the emulator tasks rely on.
-- Run locally with `npm run e2e:preview` (needs `PREVIEW_URL` and `GOOGLE_APPLICATION_CREDENTIALS` set).
+- Run locally with `npm run e2e:preview` (needs `PREVIEW_URL` and `GOOGLE_APPLICATION_CREDENTIALS` set — the latter only matters for specs that seed/create via `firebase-preview-tasks.ts`; unauthenticated specs run fine without it).
+- **`cypress/support/e2e.preview.ts` patches `window.fetch` for `/__/firebase/init.json` specifically**, before any app code runs, serving a real response fetched separately via `cy.request()`. Root cause: Cypress reserves paths starting with `/__` for its own runner/iframe machinery, which collides with Firebase Hosting's own `/__/` reserved namespace — _any_ request to a `/__/`-prefixed path (real endpoint or not) simply hangs forever when made as a real browser request inside a Cypress-controlled tab, confirmed across Electron and real Chrome, regardless of network/DNS/IPv6/QUIC (all ruled out first). `cy.intercept()` stubbing the same URL didn't help either, since it's routed through the same proxy layer that mishandles the path — only a direct `window.fetch` override, bypassing Cypress's browser-facing network layer entirely, actually works. `cy.request()` (Cypress's own Node-side HTTP client, never going through the browser) is unaffected and used to fetch the real config for the patch to serve.
 
 ### 4.4 Lighthouse CI (performance / accessibility / best-practices / SEO)
+
 - `lighthouserc.json` drives both local (`npm run lighthouse`) and CI (`.github/workflows/lighthouse.yml`) runs identically: builds with the dedicated `lighthouse` Angular configuration (same optimizations/budgets as `production`, but with `fileReplacements` swapping in `environment.e2e.ts` like the `e2e` config does — see §4.5), starts the Firebase Emulator Suite (`hosting`, `auth`, `firestore`) via `firebase emulators:exec --project demo-trivia-app-e2e`, and runs Lighthouse 3× against `http://127.0.0.1:5000/` (the Hosting emulator, serving the real build), asserting each category's median score.
-- **This intentionally serves from the Hosting emulator, not a bare static server**: only Hosting (real or emulated) resolves the reserved `/__/firebase/init.json` endpoint, so this is what lets `FirebaseAppService` actually initialize and `AuthService`/`FirebaseService` actually run anonymous sign-in and Firestore reads against the local emulators — exercising the real runtime code paths instead of everything failing silently. An earlier version of this check served a bare static build instead; that setup measured a *better* best-practices score (Firebase never initialized at all, so nothing could log a runtime error) which would have masked exactly the class of regression this check exists to catch — first caught when a real Chrome DevTools run against the live production URL showed something not reflected by CI at all (turned out to be an unrelated noisy manual run — see below — but the gap in methodology was real).
+- **This intentionally serves from the Hosting emulator, not a bare static server**: only Hosting (real or emulated) resolves the reserved `/__/firebase/init.json` endpoint, so this is what lets `FirebaseAppService` actually initialize and `AuthService`/`FirebaseService` actually run anonymous sign-in and Firestore reads against the local emulators — exercising the real runtime code paths instead of everything failing silently. An earlier version of this check served a bare static build instead; that setup measured a _better_ best-practices score (Firebase never initialized at all, so nothing could log a runtime error) which would have masked exactly the class of regression this check exists to catch — first caught when a real Chrome DevTools run against the live production URL showed something not reflected by CI at all (turned out to be an unrelated noisy manual run — see below — but the gap in methodology was real).
 - Thresholds: performance ≥ 0.75 (measured 0.77–0.89 across local + emulator-backed runs, and 0.89 on a clean headless run against the live production URL — kept lower than that for CI-runner performance variance, since timing metrics like FCP/TBT are inherently less stable across machines); accessibility/best-practices/SEO ≥ 0.95 (all measured a clean 1.0 once Firebase genuinely initializes).
 - A clean, extension-free, headless CLI run (`npx lighthouse <url> --chrome-flags="--headless=new"`) against the real deployed site is the trustworthy way to spot-check a production regression — a manual Chrome DevTools run can be skewed by browser extensions, a non-Incognito profile, or leftover site data, none of which reflect a real visitor's or CI's measurement.
 - Reports (HTML + JSON) are uploaded as a `lighthouse-reports` build artifact on every CI run, pass or fail.
 
 ### 4.5 Local npm scripts (`package.json`)
+
 ```
 npm start              # ng serve (dev server, proxies /__/firebase/** to live Hosting)
 npm run build          # ng build (dev config)
@@ -221,9 +239,11 @@ npm run lighthouse     # build:prod, then Lighthouse CI against a local static s
 npm run firebase:emulate  # build:prod, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore
 ```
+
 Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 
 ### 4.6 Environments
+
 - `.firebaserc` pins the default (and only) Firebase project to `intellectura-3b26a`.
 - `src/environments/environment.ts` / `environment.development.ts` carry `production` and `useEmulators` flags — no secrets or API keys live here, consistent with the runtime-config-fetch approach described in §2.3.
 - `src/environments/environment.e2e.ts` sets `useEmulators: true` and is swapped in only by the `e2e` build/serve configuration (`angular.json`, `fileReplacements`) used by the Cypress suite (§4.3) — never by `start`/`build`/`build:prod`.
