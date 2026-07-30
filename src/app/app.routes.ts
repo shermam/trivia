@@ -23,5 +23,10 @@ export const routes: Routes = [
         (m) => m.AddQuestionComponent,
       ),
   },
+  {
+    path: 'pricing',
+    loadComponent: () =>
+      import('./components/pricing/pricing.component').then((m) => m.PricingComponent),
+  },
   { path: '**', redirectTo: '' },
 ];

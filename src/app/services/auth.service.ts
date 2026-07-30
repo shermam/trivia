@@ -96,9 +96,17 @@ export class AuthService {
   // updates like a changed displayName.
   private readonly userSignal = signal<User | null>(null, { equal: () => false });
   private readonly authReadySignal = signal(false);
+  // Populated from the `stripeRole` custom claim the "Run Subscriptions with
+  // Stripe" Firebase Extension sets on the ID token once a Pro subscription
+  // is active. Custom claims don't change on their own once cached by the
+  // SDK — see `refreshIdToken()`, called by SubscriptionService whenever its
+  // real-time Firestore listener sees the subscription doc flip to active,
+  // so this doesn't have to wait for the token's natural ~1hr refresh.
+  private readonly stripeRoleSignal = signal<string | null>(null);
 
   readonly user = this.userSignal.asReadonly();
   readonly authReady = this.authReadySignal.asReadonly();
+  readonly isProUser = computed(() => this.stripeRoleSignal() === 'pro');
 
   readonly isAnonymous = computed(() => this.user()?.isAnonymous ?? false);
 
@@ -143,6 +151,7 @@ export class AuthService {
         authModule.onAuthStateChanged(auth, (user) => {
           this.userSignal.set(user);
           this.authReadySignal.set(true);
+          this.loadStripeRoleClaim(authModule, user);
         });
         return { auth, authModule };
       });
@@ -275,6 +284,41 @@ export class AuthService {
     const { auth, authModule } = await this.getAuth();
     await authModule.signOut(auth);
     await this.ensureSignedIn();
+  }
+
+  private async loadStripeRoleClaim(authModule: AuthModule, user: User | null): Promise<void> {
+    if (!user) {
+      this.stripeRoleSignal.set(null);
+      return;
+    }
+    try {
+      const result = await authModule.getIdTokenResult(user);
+      this.stripeRoleSignal.set((result.claims['stripeRole'] as string | undefined) ?? null);
+    } catch {
+      this.stripeRoleSignal.set(null);
+    }
+  }
+
+  /**
+   * Forces the cached ID token to be re-minted so a just-granted `stripeRole`
+   * custom claim (set server-side by the Stripe extension after a successful
+   * checkout) is picked up without waiting for the SDK's natural ~1hr
+   * refresh. Called by SubscriptionService the moment its real-time listener
+   * sees the user's subscription doc become active — not on a timer, so it
+   * only ever fires right when there's actually something new to pick up.
+   */
+  async refreshIdToken(): Promise<void> {
+    const { auth, authModule } = await this.getAuth();
+    if (!auth.currentUser) {
+      return;
+    }
+    try {
+      const result = await authModule.getIdTokenResult(auth.currentUser, /* forceRefresh */ true);
+      this.stripeRoleSignal.set((result.claims['stripeRole'] as string | undefined) ?? null);
+    } catch {
+      // Leave the previous claim value in place — a transient refresh
+      // failure shouldn't demote a user who was already known to be Pro.
+    }
   }
 
   private createProvider(authModule: AuthModule, providerId: OAuthProviderId) {

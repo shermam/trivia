@@ -2,7 +2,12 @@ import { App, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { CollectionReference, getFirestore } from 'firebase-admin/firestore';
 import { E2E_PROJECT_ID } from '../../cypress.config';
-import { CustomQuestionSeed, LeaderboardSeed, VerifiedUserSeed } from './types';
+import {
+  CustomQuestionSeed,
+  LeaderboardSeed,
+  ProSubscriptionSeed,
+  VerifiedUserSeed,
+} from './types';
 
 const AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 const FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
@@ -70,6 +75,11 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         users.length ? auth.deleteUsers(users.map((u) => u.uid)) : Promise.resolve(),
         deleteCollection(firestore.collection('leaderboard')),
         deleteCollection(firestore.collection('custom_questions')),
+        // `recursiveDelete` (not the plain `deleteCollection` helper above)
+        // because each `customers/{uid}` doc owns subcollections
+        // (`subscriptions`, `checkout_sessions`, `payments`) that a
+        // top-level doc delete would otherwise orphan.
+        firestore.recursiveDelete(firestore.collection('customers')),
       ]);
       return null;
     },
@@ -107,6 +117,29 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
 
     getVerificationLink(email: string) {
       return fetchVerificationLink(email);
+    },
+
+    /**
+     * Simulates what the "Run Subscriptions with Stripe" extension does
+     * after a real checkout completes — sets the `stripeRole: 'pro'` custom
+     * claim (what firestore.rules actually checks) and seeds a matching
+     * `customers/{uid}/subscriptions` doc (what drives the app's real-time
+     * `isProUser` UI signal) — entirely via the Admin SDK, so tests never
+     * have to talk to Stripe or run the extension's own functions locally.
+     */
+    async setProSubscription({ uid }: ProSubscriptionSeed) {
+      await auth.setCustomUserClaims(uid, { stripeRole: 'pro' });
+      await firestore
+        .collection('customers')
+        .doc(uid)
+        .collection('subscriptions')
+        .doc('seed-sub')
+        .set({
+          status: 'active',
+          role: 'pro',
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+      return null;
     },
   });
 }

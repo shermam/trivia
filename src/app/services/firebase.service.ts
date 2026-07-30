@@ -28,7 +28,13 @@ export class FirebaseService {
     firestoreModule: FirestoreModule;
   }> | null = null;
 
-  private getFirestore() {
+  /**
+   * Public so other services (e.g. SubscriptionService) can share the same
+   * lazily-initialized Firestore instance instead of each opening their own
+   * — `getFirestore(app)` is idempotent per app, but there's no reason to
+   * duplicate the dynamic import + emulator-connect logic below.
+   */
+  getFirestore() {
     if (!this.firestorePromise) {
       this.firestorePromise = Promise.all([
         import('firebase/firestore'),

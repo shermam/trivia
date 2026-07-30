@@ -25,6 +25,22 @@
           Resend verification email
         </button>
       </div>
+    } @else if (!subscriptionService.isProUser()) {
+      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-lg px-4 py-6">
+        <p class="text-4xl mb-2">&#10022;</p>
+        <h2 class="text-lg font-bold text-slate-800 mb-1">This one's for Pro members</h2>
+        <p class="text-slate-600 mb-4">
+          Upgrade to Pro ($0.99/month) to create and add your own questions to the shared question
+          bank.
+        </p>
+        <button
+          type="button"
+          (click)="goToPricing()"
+          class="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2 transition-colors"
+        >
+          Upgrade to Pro
+        </button>
+      </div>
     } @else if (hasSubmitted()) {
       <div class="text-center bg-green-50 border border-green-200 rounded-lg px-4 py-4">
         <p class="text-green-700 font-medium mb-4">Thanks! Your question was added to the bank.</p>

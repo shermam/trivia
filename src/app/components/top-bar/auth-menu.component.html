@@ -171,10 +171,30 @@
     <a
       routerLink="/add-question"
       (click)="closeRequested.emit()"
-      class="block w-full text-center rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium py-2 mb-2 transition-colors"
+      class="flex items-center justify-center gap-1.5 w-full text-center rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium py-2 mb-2 transition-colors"
     >
       Add a question
+      @if (subscriptionService.isProUser()) {
+        <span
+          class="rounded-full bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none"
+          >PRO</span
+        >
+      } @else {
+        <span
+          class="rounded-full bg-slate-200 text-slate-500 text-[10px] font-bold px-1.5 py-0.5 leading-none"
+          >PRO</span
+        >
+      }
     </a>
+    @if (!subscriptionService.isProUser()) {
+      <a
+        routerLink="/pricing"
+        (click)="closeRequested.emit()"
+        class="block w-full text-center text-xs text-indigo-600 hover:text-indigo-800 mb-3"
+      >
+        Upgrade to Pro to add questions
+      </a>
+    }
 
     <button
       type="button"

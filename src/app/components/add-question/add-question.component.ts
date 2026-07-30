@@ -5,6 +5,7 @@ import { CustomQuestionDoc, Difficulty, QuestionType } from '../../models/questi
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { FirebaseService } from '../../services/firebase.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 
 @Component({
@@ -22,6 +23,7 @@ export class AddQuestionComponent implements OnInit {
   private readonly router = inject(Router);
   protected readonly authService = inject(AuthService);
   protected readonly authMenuState = inject(AuthMenuStateService);
+  protected readonly subscriptionService = inject(SubscriptionService);
 
   protected readonly categories = signal<TriviaCategory[]>([]);
   protected readonly isSubmitting = signal(false);
@@ -68,7 +70,11 @@ export class AddQuestionComponent implements OnInit {
   }
 
   protected async onSubmit(): Promise<void> {
-    if (this.isSubmitting() || !this.authService.isFullyAuthenticated()) {
+    if (
+      this.isSubmitting() ||
+      !this.authService.isFullyAuthenticated() ||
+      !this.subscriptionService.isProUser()
+    ) {
       return;
     }
 
@@ -103,6 +109,13 @@ export class AddQuestionComponent implements OnInit {
     this.isSubmitting.set(true);
     this.submitError.set(null);
     try {
+      // Guarantees the write carries an up-to-date `stripeRole` claim even
+      // if this user's Pro status just changed (e.g. in another tab, or
+      // moments ago via SubscriptionService's own background refresh that
+      // may not have landed yet) — firestore.rules checks the claim on the
+      // token attached to this exact request, not the client's cached
+      // `isProUser` signal.
+      await this.authService.refreshIdToken();
       await this.firebaseService.addCustomQuestion(question);
       this.hasSubmitted.set(true);
     } catch {
@@ -120,5 +133,9 @@ export class AddQuestionComponent implements OnInit {
 
   protected backToGame(): void {
     this.router.navigateByUrl('/');
+  }
+
+  protected goToPricing(): void {
+    this.router.navigateByUrl('/pricing');
   }
 }

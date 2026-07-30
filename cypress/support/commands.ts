@@ -1,4 +1,9 @@
-import type { CustomQuestionSeed, LeaderboardSeed, VerifiedUserSeed } from '../tasks/types';
+import type {
+  CustomQuestionSeed,
+  LeaderboardSeed,
+  ProSubscriptionSeed,
+  VerifiedUserSeed,
+} from '../tasks/types';
 
 declare global {
   namespace Cypress {
@@ -34,6 +39,12 @@ declare global {
       seedLeaderboardEntry(entry: LeaderboardSeed): Chainable<null>;
       /** Retrieves the emulator's pending OOB (out-of-band) email-verification link for this address. */
       getVerificationLink(email: string): Chainable<string>;
+      /**
+       * Simulates a completed Stripe subscription for this uid — sets the
+       * `stripeRole: 'pro'` custom claim and seeds a matching
+       * `customers/{uid}/subscriptions` doc — without touching Stripe.
+       */
+      setProSubscription(seed: ProSubscriptionSeed): Chainable<null>;
     }
   }
 }
@@ -131,4 +142,8 @@ Cypress.Commands.add('seedLeaderboardEntry', (entry: LeaderboardSeed) => {
 
 Cypress.Commands.add('getVerificationLink', (email: string) => {
   cy.task<string>('getVerificationLink', email);
+});
+
+Cypress.Commands.add('setProSubscription', (seed: ProSubscriptionSeed) => {
+  cy.task('setProSubscription', seed);
 });
