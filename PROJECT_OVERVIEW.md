@@ -1,6 +1,6 @@
 # Trivia App — Project Overview
 
-A single-page trivia quiz game built with Angular, styled with Tailwind CSS, and backed by Firebase (Firestore for data, Hosting for deployment). It pulls questions from the public Open Trivia DB API and/or a custom Firestore-backed question bank, runs a timed multiple-choice quiz, and tracks a global high-score leaderboard.
+A single-page trivia quiz game built with Angular, styled with Tailwind CSS, and backed by Firebase (Firestore for data, Cloud Functions for backend logic, Hosting for deployment). It pulls questions from the public Open Trivia DB API and/or a custom Firestore-backed question bank, runs a timed multiple-choice quiz, and tracks a global high-score leaderboard. A paid **Pro tier** ($0.99/month, via Stripe) unlocks the ability to contribute questions to the shared bank.
 
 Live project: Firebase project `intellectura-3b26a` · Repo: `shermam/trivia`
 
@@ -10,14 +10,15 @@ Live project: Firebase project `intellectura-3b26a` · Repo: `shermam/trivia`
 
 ### 1.1 Game flow
 
-The app is a four-screen flow, implemented as four lazily-loaded standalone Angular routes:
+The app is a five-screen flow, implemented as five lazily-loaded standalone Angular routes:
 
-| Route           | Component              | Purpose                                              |
-| --------------- | ----------------------- | ---------------------------------------------------- |
-| `/`             | `GameSetupComponent`   | Configure and start a new game                       |
-| `/play`         | `QuizLoopComponent`    | Answer questions one at a time, against a timer      |
-| `/game-over`    | `GameOverComponent`    | Show final score, submit to leaderboard, view top 10 |
-| `/add-question` | `AddQuestionComponent` | Submit a new question to the custom question bank    |
+| Route           | Component              | Purpose                                                                    |
+| --------------- | ---------------------- | -------------------------------------------------------------------------- |
+| `/`             | `GameSetupComponent`   | Configure and start a new game                                             |
+| `/play`         | `QuizLoopComponent`    | Answer questions one at a time, against a timer                            |
+| `/game-over`    | `GameOverComponent`    | Show final score, submit to leaderboard, view top 10                       |
+| `/add-question` | `AddQuestionComponent` | Submit a new question to the custom question bank (**Pro only**, see §1.6) |
+| `/pricing`      | `PricingComponent`     | Compare Starter vs. Pro and subscribe via Stripe Checkout (§1.6)           |
 
 Any unmatched route redirects back to `/`.
 
@@ -52,9 +53,13 @@ Any unmatched route redirects back to `/`.
 
 **Add a question (`/add-question`)**
 
-- Lets a **fully authenticated** player (same gate as the leaderboard save, §1.5) submit a new question to the shared `custom_questions` bank. Anonymous or unverified players see the same sign-in/verify prompts as game-over instead of the form.
+- Lets a **fully authenticated Pro subscriber** (leaderboard's anti-flood gate, §1.5, _plus_ an active Pro subscription, §1.6) submit a new question to the shared `custom_questions` bank. Anonymous or unverified players see the same sign-in/verify prompts as game-over; a fully authenticated but non-Pro account sees a friendly "Upgrade to Pro" empty state with a CTA to `/pricing` instead of the form.
 - Reactive form: free-text category (with `<datalist>` suggestions from the same cached Open Trivia category list used by game setup, so a submitted category can actually be filtered on later), difficulty, question type (multiple-choice vs. true/false), the question text, and answers — a correct-answer text field plus 3 incorrect-answer fields for multiple-choice, or a True/False picker for boolean (incorrect answer is derived as the opposite value).
-- On submit, `FirebaseService.addCustomQuestion()` does an auto-id `addDoc` into `custom_questions`; a success state offers "Add another" (resets the form) or "Back to game". Reachable from a link on the game-setup screen and from the profile section of the top-bar auth menu.
+- On submit, the ID token is force-refreshed (`AuthService.refreshIdToken()`) immediately before the write, so a just-granted `stripeRole` claim is never stale at the exact moment `firestore.rules` checks it — then `FirebaseService.addCustomQuestion()` does an auto-id `addDoc` into `custom_questions`; a success state offers "Add another" (resets the form) or "Back to game". Reachable (with a PRO badge) from a link on the game-setup screen and from the profile section of the top-bar auth menu.
+
+**Pricing (`/pricing`)**
+
+- Compares **Starter** (free: unlimited games, leaderboard) against **Pro** ($0.99/month: everything in Starter, plus creating custom questions). See §1.6 for the full subscription flow this page drives.
 
 ### 1.2 Question sourcing
 
@@ -75,7 +80,7 @@ Shared normalization for every question:
 
 ### 1.4 Custom question bank
 
-Firestore collection `custom_questions` acts as a first-party question bank alongside Open Trivia DB. It's populated both manually via the Firebase console and by players themselves through the in-app **Add a question** screen (`/add-question`, §1.1) — gated to fully authenticated accounts (same anti-flood rule as the leaderboard) and validated server-side by `firestore.rules` (§3). There's no in-app way to edit or delete an existing question yet — `custom_questions` writes are `create`-only from the client; that's still console-only.
+Firestore collection `custom_questions` acts as a first-party question bank alongside Open Trivia DB. It's populated both manually via the Firebase console and by players themselves through the in-app **Add a question** screen (`/add-question`, §1.1) — gated to fully authenticated accounts _with an active Pro subscription_ (§1.6) and validated server-side by `firestore.rules` (§3). There's no in-app way to edit or delete an existing question yet — `custom_questions` writes are `create`-only from the client; that's still console-only.
 
 ### 1.5 Authentication & the leaderboard
 
@@ -90,22 +95,32 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 - **Anti-cheat enforcement is server-side, in `firestore.rules`**, not just the client: a leaderboard write is only accepted if `request.auth.token.firebase.sign_in_provider` isn't `anonymous`, and — for password accounts — `email_verified` is `true`. This is what actually stops someone from bypassing the UI to flood the board with throwaway accounts; the client-side gating above is just so the UI reflects the same rule.
 - **`EmbedModeService`** reads `?embed=1` from the URL to hide the top bar entirely for iframe/widget use — anonymous-only play, no leaderboard saves, no code changes needed on the embedder's side.
 
+### 1.6 Pro subscription & billing (Stripe)
+
+A single paid tier, "Pro" ($0.99 USD/month), gates the ability to add custom questions (§1.1, §1.4). The whole flow is serverless, backed by a `functions/` Cloud Functions package this repo owns outright (§2.4) rather than a third-party SDK or a marketplace extension — the original implementation used the official "Run Subscriptions with Stripe" Firebase Extension, but that entire product line [announced it's shutting down in March 2027](https://firebase.google.com/docs/extensions/faq-and-troubleshooting) (new installs already blocked at the time this was migrated), so it was replaced with equivalent functions using the _same_ Firestore schema and custom-claim contract — the frontend below didn't need to change shape, only where the data comes from.
+
+- **`SubscriptionService`** is the client-side entry point: a real-time `isProUser` signal derived from the `customers/{uid}/subscriptions` Firestore subcollection (`stripeWebhook` keeps this synced from Stripe, §2.4) filtered to `active`/`trialing` status, `startProCheckout()` (creates a `customers/{uid}/checkout_sessions` doc and waits for `createCheckoutSession` to write back a hosted Stripe Checkout URL, then redirects), and a dynamic Pro-price lookup from the public `products`/`prices` collections (§3) — no Stripe price ID is ever hardcoded client-side, so changing the price in the Stripe Dashboard needs no frontend deploy.
+- **The actual security gate is a custom claim, not the Firestore listener above**: `stripeWebhook` sets `stripeRole: 'pro'` on the user's Auth ID token once an active/trialing subscription's price carries `firebaseRole: 'pro'` metadata (set once in the Stripe Dashboard, §4 setup notes), and `firestore.rules` checks that claim directly (`AuthService.isProUser`, §3). `SubscriptionService`'s real-time signal is read-your-own-writes UX only — the moment its Firestore listener sees a subscription go active, it proactively calls `AuthService.refreshIdToken()` so the claim doesn't have to wait on the SDK's ~1hr natural token refresh; `AddQuestionComponent` also force-refreshes immediately before its own write as a last-mile safety net against a stale cached token.
+- **Checkout redirect UX**: on success, Stripe returns the browser to `/pricing?checkout=success`; on cancel, `/pricing?checkout=cancelled`. `PricingComponent`'s Subscribe button is gated on `AuthService.authReady()` (not just `isAnonymous`/`isFullyAuthenticated`, which both default to `false` before the very first auth state resolves) so a click landing in that brief window can't misfire the "verify your email first" branch.
+- **Nav surfacing**: the top-bar auth-menu and game-setup's "Create custom question" link both show a PRO badge (grey when locked, indigo once subscribed) next to the "Add a question" link.
+
 ---
 
 ## 2. Frameworks, Tools & Libraries
 
 ### 2.1 Core stack
 
-| Layer                   | Technology                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Framework               | **Angular 22** (standalone components, signals, `@if`/`@for` control-flow syntax, `OnPush` change detection throughout)                    |
-| Language                | **TypeScript ~6.0**                                                                                                                        |
-| Styling                 | **Tailwind CSS 4** (via `@tailwindcss/postcss`), utility classes only — no component CSS frameworks                                        |
-| Backend-as-a-service    | **Firebase** — Firestore (data), Auth (anonymous + Google/email/Facebook/GitHub/Microsoft/Apple/Twitter-X/Yahoo), Hosting (static deploy). |
-| Reactive/async plumbing | **RxJS 7.8** (`Observable`s in the Firebase/Trivia services, `firstValueFrom` to bridge to async/await)                                    |
-| HTTP                    | Angular's `HttpClient` (`provideHttpClient()`), used for Open Trivia DB calls                                                              |
-| Forms                   | Angular `ReactiveFormsModule` (game setup) and `FormsModule` + `ngModel` (game-over name input)                                            |
-| Routing                 | Angular Router with lazy-loaded (`loadComponent`) standalone routes                                                                        |
+| Layer                   | Technology                                                                                                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework               | **Angular 22** (standalone components, signals, `@if`/`@for` control-flow syntax, `OnPush` change detection throughout)                                                                      |
+| Language                | **TypeScript ~6.0**                                                                                                                                                                          |
+| Styling                 | **Tailwind CSS 4** (via `@tailwindcss/postcss`), utility classes only — no component CSS frameworks                                                                                          |
+| Backend-as-a-service    | **Firebase** — Firestore (data), Auth (anonymous + Google/email/Facebook/GitHub/Microsoft/Apple/Twitter-X/Yahoo), Cloud Functions (Pro subscription backend, §2.4), Hosting (static deploy). |
+| Payments                | **Stripe** — Checkout (hosted payment page) + webhooks, driven entirely from `functions/` (§2.4); no Stripe code ships in the Angular bundle.                                                |
+| Reactive/async plumbing | **RxJS 7.8** (`Observable`s in the Firebase/Trivia services, `firstValueFrom` to bridge to async/await)                                                                                      |
+| HTTP                    | Angular's `HttpClient` (`provideHttpClient()`), used for Open Trivia DB calls                                                                                                                |
+| Forms                   | Angular `ReactiveFormsModule` (game setup) and `FormsModule` + `ngModel` (game-over name input)                                                                                              |
+| Routing                 | Angular Router with lazy-loaded (`loadComponent`) standalone routes                                                                                                                          |
 
 ### 2.2 Tooling
 
@@ -117,7 +132,8 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 - **Prettier 3** — code formatting; configured for 100-char print width, single quotes, and the Angular HTML parser for `.html` templates (`.prettierrc`).
 - **PostCSS** — pipes Tailwind through `@tailwindcss/postcss` (`.postcssrc.json`).
 - **EditorConfig** — enforces 2-space indentation, UTF-8, single quotes in TS across editors.
-- **Firebase CLI** (`firebase-tools`) — local emulation and deployment; invoked both from local npm scripts and CI.
+- **Firebase CLI** (`firebase-tools`) — local emulation and deployment; invoked both from local npm scripts and CI. Pinned to **`@13`** for the Auth/Firestore-only scripts (unchanged, long-stable), but **`@14`** for anything touching `functions/` (`e2e`, `e2e:open`, the Cloud Functions deploy step) — `@13`'s bundled Functions tooling unconditionally probes for `functions.config()`, an API `firebase-functions` v7 removed outright, crashing every invocation; `@14` detects v7+ and skips that legacy path. Confirmed by running the emulator directly with `--debug` and comparing the two.
+- **firebase-functions 7** / **stripe (Node SDK) 22** — the `functions/` package's only two runtime dependencies beyond `firebase-admin`; see §2.4.
 
 ### 2.3 Firebase client integration details
 
@@ -126,6 +142,17 @@ Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`
 Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. `FirebaseAppService.getApp()` fetches that config and calls `initializeApp` exactly once, shared by both Firestore and Auth.
 
 All Firestore calls (`getCustomQuestions`, `saveHighScore`, `getTopScores`) are wrapped in a `withTimeout()` helper (10s) — the Firestore SDK's promises never reject on their own if the backend is unreachable (e.g. placeholder/misconfigured credentials), which would otherwise leave the UI stuck in a permanent loading state.
+
+### 2.4 Cloud Functions backend (`functions/`)
+
+A separate npm package (own `package.json`/lockfile/`tsconfig.json`, TypeScript compiled to `lib/` — never committed) holding the entire Pro-subscription backend, deployed alongside Hosting/Firestore rules but as its own `firebase deploy --only functions` target:
+
+- **`createCheckoutSession`** (`onDocumentCreated` on `customers/{uid}/checkout_sessions/{sessionId}`): lazily creates the Stripe customer on first use (`customers.ts`, storing `stripeId` on `customers/{uid}`), creates the Stripe Checkout Session, and writes `{sessionId, url}` (or `{error}`) back onto the triggering doc — the other half of the handshake `SubscriptionService.startProCheckout()` (§1.6) is waiting on.
+- **`stripeWebhook`** (`onRequest`, HTTPS): verifies the Stripe signature (`stripeWebhookSecret`), then dispatches `customer.subscription.created/updated/deleted` to `subscriptions.ts` (upserts `customers/{uid}/subscriptions/{id}`, keyed by a `firebaseUID` carried in the Subscription's own metadata since checkout time — no Firestore reverse-lookup needed — then recomputes the `stripeRole` custom claim from _all_ of that user's subscription docs, so an unrelated subscription canceling can't clobber a still-active one) and `product.*`/`price.*` to `products.ts` (mirrors the public `products`/`prices` catalog, §3).
+- **`role.ts`** is a small pure function (`deriveClaimRole(status, priceRole)`) isolating the one security-relevant decision (does this status grant this role) so it's unit-tested directly (`node --test`, via `npm run functions:test`) without mocking Stripe or Firestore.
+- **Secrets**: `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` are bound via `firebase-functions/params`' `defineSecret` (Secret Manager–backed, set once per project with `firebase functions:secrets:set`) — never committed, never touch `process.env` directly in source.
+- **`STRIPE_MOCK_CHECKOUT`**: a plain (non-secret) flag, true only for the `demo-trivia-app-e2e` project via a committed `functions/.env.demo-trivia-app-e2e` (Firebase Functions v2 auto-loads `.env.<project-id>` files). When set, `createCheckoutSession` skips the real Stripe API call entirely and writes back a deterministic, **same-origin, hash-only** mock URL instead of an external one — deliberately, since `Location.assign`/`href` are non-configurable/read-only in real Chromium/Electron and can't be stubbed in Cypress, so letting the real (harmless, in-page) navigation happen was the only way to exercise the redirect for real. This is what lets the e2e suite (§4.3) drive the _actual_ `createCheckoutSession` function against the Functions emulator, not just a Firestore-seeded simulation of its outcome.
+- **`functions/.secret.local`** (committed, placeholder values only — see the comment in the file) lets the emulator start without real Secret Manager access, which neither a fresh contributor checkout nor CI has by default; the emulator's own startup warning suggests exactly this mechanism.
 
 ---
 
@@ -143,8 +170,52 @@ incorrect_answers: string[]
 ```
 
 - **Read**: public (`allow read: if true`)
-- **Create**: requires a "real" account — same `isRealAuthedUser()` gate as the leaderboard (non-anonymous, and email-verified if it's a password account) — plus schema validation (`isValidCustomQuestion()`: exact key set, `type` in `['multiple','boolean']`, `difficulty` in `['easy','medium','hard']`, string length bounds, `incorrect_answers` a list of 1–5 entries). Written from the client via the `/add-question` screen (§1.1, §1.4).
+- **Create**: requires a "real" account — same `isRealAuthedUser()` gate as the leaderboard (non-anonymous, and email-verified if it's a password account) — **plus an active Pro subscription** (`isProUser()`: `request.auth.token.stripeRole == 'pro'`, §1.6) — plus schema validation (`isValidCustomQuestion()`: exact key set, `type` in `['multiple','boolean']`, `difficulty` in `['easy','medium','hard']`, string length bounds, `incorrect_answers` a list of 1–5 entries). Written from the client via the `/add-question` screen (§1.1, §1.4).
 - **Update / Delete**: none from the client (`allow update, delete: if false`) — console-only for now.
+
+### `customers` — Stripe subscription state (managed by `functions/`, §2.4)
+
+```
+customers/{uid}
+  stripeId: string                          (Stripe customer ID)
+
+customers/{uid}/checkout_sessions/{id}
+  price, mode, success_url, cancel_url: string  (written by the client)
+  sessionId, url: string                        (written back by createCheckoutSession)
+  error?: { message: string }
+
+customers/{uid}/subscriptions/{id}
+  status: string      (Stripe subscription status, e.g. 'active' | 'trialing' | 'canceled' | ...)
+  role: string | null (from the price's `firebaseRole` metadata)
+  price, product: string | null
+  cancel_at_period_end: boolean
+```
+
+- **Read** (all three): only the owning uid (`isRealAuthedUser() && request.auth.uid == uid`).
+- **Create**: `checkout_sessions` only, by the owning uid — kicks off `createCheckoutSession` (§2.4). Never updated/deleted from the client.
+- `customers/{uid}` and `subscriptions/{id}` are never written by the client at all — only by `functions/` via the Admin SDK, which bypasses these rules entirely.
+
+### `products` — Stripe product/price catalog (managed by `functions/`, §2.4)
+
+```
+products/{id}
+  active: boolean
+  name: string
+  description: string | null
+  role: string | null       (from the product's `firebaseRole` metadata)
+  images: string[]
+
+products/{id}/prices/{id}
+  active: boolean
+  currency: string
+  unit_amount: number | null   (smallest currency unit, e.g. cents)
+  type: 'one_time' | 'recurring'
+  interval: 'day' | 'week' | 'month' | 'year' | null
+  interval_count: number | null
+```
+
+- **Read**: public on both levels — lets `/pricing` and `SubscriptionService.getProPriceId()` (§1.6) resolve the current Pro price with no secrets involved.
+- **Write**: client-side none at all; kept in sync from Stripe Dashboard `product.*`/`price.*` events by `stripeWebhook` (§2.4) via the Admin SDK.
 
 ### `leaderboard` — high scores
 
@@ -168,12 +239,13 @@ No composite indexes are currently defined (`firestore.indexes.json` is empty); 
 
 ## 4. Deployment & CI/CD
 
-### 4.1 Hosting configuration (`firebase.json`)
+### 4.1 Hosting & Functions configuration (`firebase.json`)
 
 - Hosting serves the compiled Angular app from `dist/trivia-app/browser`.
 - SPA rewrite: all paths (`**`) fall back to `/index.html` (client-side routing).
 - **Header rule ordering matters here**: the catch-all `**` headers rule (no-cache + `Cross-Origin-Opener-Policy: same-origin-allow-popups`, needed so Firebase Auth's popup-sign-in polling can read `popup.closed` without the browser blocking it — see §1.5) is listed _first_, with the more specific hashed-asset rules (`**/*.@(js|css)`, images/fonts) listed _after_ — Hosting applies the last-declared matching rule per header key, so the specific rules' `immutable` `Cache-Control` correctly overrides the broad one for those paths. An earlier version of this scoped the no-cache/COOP headers to the literal `source: "/index.html"`, which silently never matched any real request — every route (`/`, `/play`, `/game-over`, ...) is served via the `**` rewrite above, never a literal request for `/index.html` itself.
-- Local emulator ports: Firestore `8080`, Auth `9099`, Hosting `5000`, plus the Emulator UI. `singleProjectMode` is enabled. The Auth emulator exists solely for the e2e suite (§4.3) — the app never talks to it outside that configuration.
+- `functions` config points at the `functions/` package (§2.4), with a `predeploy` hook (`npm --prefix functions run build`) so `firebase deploy --only functions` always deploys freshly-compiled code.
+- Local emulator ports: Firestore `8080`, Auth `9099`, Functions `5001`, Hosting `5000`, plus the Emulator UI. `singleProjectMode` is enabled. The Auth and Functions emulators exist solely for the e2e suite (§4.3) — the app never talks to either outside that configuration.
 
 ### 4.2 GitHub Actions workflow (`.github/workflows/firebase-deploy.yml`)
 
@@ -182,16 +254,19 @@ No composite indexes are currently defined (`firestore.indexes.json` is empty); 
 Steps:
 
 1. Checkout `main`.
-2. Set up Node 22 (with npm cache).
+2. Set up Node 22 (with npm cache, keyed off both `package-lock.json` and `functions/package-lock.json`).
 3. `npm ci`.
 4. `npm run build:prod` (production Angular build).
 5. Deploy the built app to **Firebase Hosting** via `FirebaseExtended/action-hosting-deploy@v0` (channel: `live`), authenticated with the `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` repo secret.
 6. Deploy **Firestore rules + indexes** separately via `npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes`, using the same service account written to a temp `GOOGLE_APPLICATION_CREDENTIALS` file.
-7. Always clean up the temp service-account credentials file, even on failure.
+7. `npm ci --prefix functions`, then deploy **Cloud Functions** (§2.4) via `npx firebase-tools@14 deploy --only functions` (`@14`, not `@13` — see §2.2) — a separate step from #6 on purpose, and marked `continue-on-error: true` for now, so this failing (until the one-time Stripe/Secret-Manager/IAM setup below is done) doesn't also block the already-working Hosting/Firestore-rules deploys.
+8. Always clean up the temp service-account credentials file, even on failure.
 
 Job permissions are scoped to `contents: read`, `checks: write`, `pull-requests: write` — the minimum needed for the hosting-deploy action to post a check/PR comment (this was tightened in a dedicated fix after the action initially hit a 403).
 
-This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys hosting + Firestore rules/indexes to the single production project (`intellectura-3b26a`). It deliberately doesn't re-run e2e itself — see §4.2a for why that's still safe.
+This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys hosting + Firestore rules/indexes + Cloud Functions to the single production project (`intellectura-3b26a`). It deliberately doesn't re-run e2e itself — see §4.2a for why that's still safe.
+
+**One-time setup this pipeline depends on** (not automatable from CI, done once by someone with Stripe/GCP console access): a Stripe Product/Price with `firebaseRole: pro` metadata and a webhook endpoint pointed at the deployed `stripeWebhook` URL (§2.4); `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` set via `firebase functions:secrets:set`; and the deploying service account granted Cloud Functions Admin / Service Account User / Secret Manager Secret Accessor IAM roles. Until that's done, step 7 above fails harmlessly on every merge.
 
 ### 4.2a Preview channel deploy + real-preview e2e (`.github/workflows/firebase-preview.yml`)
 
@@ -208,16 +283,18 @@ Preview channels are a **Hosting-only** feature — there's still a single Fires
 
 ### 4.3 E2E testing (Cypress + Firebase Emulator Suite)
 
-- Suite lives under `cypress/e2e/unauthenticated/` (anonymous game flow across all three question sources, route guards, embed mode) and `cypress/e2e/authenticated/` (email sign-up + verification, sign-in, saving a score, profile management), run via `npm run e2e` (headless) or `npm run e2e:open` (interactive).
-- Both commands wrap `firebase emulators:exec --project demo-trivia-app-e2e --only auth,firestore`, which starts a throwaway local Firestore + Auth emulator pair, runs the wrapped command, and always tears the emulators down afterward — no real project is ever touched.
+- Suite lives under `cypress/e2e/unauthenticated/` (anonymous game flow across all three question sources, route guards, embed mode) and `cypress/e2e/authenticated/` (email sign-up + verification, sign-in, saving a score, profile management, Pro-gated `/add-question` access, and Stripe checkout), run via `npm run e2e` (headless) or `npm run e2e:open` (interactive).
+- Both commands first `npm run functions:build`, then wrap `firebase emulators:exec --project demo-trivia-app-e2e --only auth,firestore,functions` (**functions** included since this PR — see §2.4), which starts a throwaway local Firestore + Auth + Functions emulator trio, runs the wrapped command, and always tears the emulators down afterward — no real project is ever touched.
 - The app itself only connects to the emulators when built with the dedicated `e2e` Angular configuration (`ng serve --configuration=e2e`, see §4.5): `FirebaseAppService` skips the `/__/firebase/init.json` fetch and uses a hardcoded `demo-trivia-app-e2e` config instead, and `AuthService`/`FirebaseService` call `connectAuthEmulator`/`connectFirestoreEmulator`.
-- `cypress/tasks/firebase-emulator-tasks.ts` uses `firebase-admin` (talking to the emulators only) to reset all Auth users/Firestore docs before every test, seed `custom_questions`/`leaderboard` documents bypassing `firestore.rules`, create already-verified users, and fetch pending email-verification links from the Auth emulator's testing REST endpoint — the same mechanism the real "resend verification email" UI flow is exercised against.
-- Two real bugs were found and fixed by this suite: a race in `AuthService.ensureSignedIn()` where a returning user's persisted session could be clobbered by a fresh anonymous sign-in (fixed with `auth.authStateReady()`), and a stale-UI bug where linking an anonymous session to a real credential mutates the Firebase `User` object in place without firing `onAuthStateChanged`, so `isAnonymous`/`isFullyAuthenticated` never updated until fixed by explicitly re-pushing the user into the auth signal after linking.
-- CI: `.github/workflows/e2e.yml` runs the full suite on every PR targeting `main` (and on push to `main`), separately from the merge-to-deploy pipeline in §4.2.
+- `cypress/tasks/firebase-emulator-tasks.ts` uses `firebase-admin` (talking to the emulators only) to reset all Auth users/Firestore docs before every test, seed `custom_questions`/`leaderboard` documents bypassing `firestore.rules`, create already-verified users, fetch pending email-verification links from the Auth emulator's testing REST endpoint, and (new) `setProSubscription`/`seedProProduct` to drive a user into a "Pro" state (custom claim + subscription doc) or seed a fake Pro price without ever calling Stripe.
+- **`pricing.cy.ts`** covers the Subscribe flow against the _real_ `createCheckoutSession` function (in `STRIPE_MOCK_CHECKOUT` mode, §2.4) end-to-end — click → Firestore write → Functions-emulator trigger → write-back → client listener → same-origin redirect — plus the anonymous sign-in prompt and the already-subscribed state (via `setProSubscription`). **`add-question-pro-gating.cy.ts`** covers the free-tier upgrade prompt and, for a freshly-`setProSubscription`'d account, that the real-time subscription listener + forced token refresh actually let the `custom_questions` write through under the updated `firestore.rules`.
+- Real bugs found and fixed by this suite (beyond the two below, pre-dating the Pro tier): `PricingComponent` briefly misfiring "verify your email" for a click landing before the first auth state resolves (§1.6); and a pre-existing `sign-up-verify.cy.ts` race — `signInViaUi`'s `openAuthMenu()` racing the still-open dropdown from a prior "Sign out" click, which only closes after its async re-anonymous-sign-in resolves — surfaced (not caused) by the added Functions emulator's extra CPU contention, fixed with an explicit wait for the dropdown to close first.
+- Two earlier real bugs were found and fixed by this suite: a race in `AuthService.ensureSignedIn()` where a returning user's persisted session could be clobbered by a fresh anonymous sign-in (fixed with `auth.authStateReady()`), and a stale-UI bug where linking an anonymous session to a real credential mutates the Firebase `User` object in place without firing `onAuthStateChanged`, so `isAnonymous`/`isFullyAuthenticated` never updated until fixed by explicitly re-pushing the user into the auth signal after linking.
+- CI: `.github/workflows/e2e.yml` runs the full suite on every PR targeting `main` (and on push to `main`), separately from the merge-to-deploy pipeline in §4.2 — including installing/building `functions/` first.
 
 **Running the same suite against a real preview instead of the emulator** (`cypress.preview.config.ts`, driven by the `e2e-preview` job in §4.2a): a deliberately narrower slice, because this hits the real, persistent, public `intellectura-3b26a` project — there's no throwaway emulator to reset:
 
-- `specPattern` includes all of `cypress/e2e/unauthenticated/` plus only `sign-in-save-score.cy.ts` and `profile.cy.ts` from `cypress/e2e/authenticated/`. `sign-up-verify.cy.ts` is excluded permanently: it depends on the Auth emulator's testing-only `oobCodes` REST endpoint to read a verification link, which has no real-Auth equivalent without a live mailbox.
+- `specPattern` includes all of `cypress/e2e/unauthenticated/` plus only `sign-in-save-score.cy.ts` and `profile.cy.ts` from `cypress/e2e/authenticated/`. `sign-up-verify.cy.ts` is excluded permanently: it depends on the Auth emulator's testing-only `oobCodes` REST endpoint to read a verification link, which has no real-Auth equivalent without a live mailbox. `pricing.cy.ts` and `add-question-pro-gating.cy.ts` are excluded too, on purpose: Cloud Functions aren't channel-scoped (§4.2a below), so a preview build shares the _real_, already-deployed `createCheckoutSession`/`stripeWebhook` — running the mock-mode checkout spec here would either hit real Stripe or silently no-op depending on that deployed project's own `STRIPE_MOCK_CHECKOUT` state, neither of which this suite should depend on.
 - `cypress/tasks/firebase-preview-tasks.ts` is the real-project counterpart to `firebase-emulator-tasks.ts` — same task names/shapes (sharing types from `cypress/tasks/types.ts`) but **no blanket `resetBackend`**. Instead, every uid/doc a test creates (explicitly via a seed task, or implicitly — every `cy.visit()` triggers the app's own anonymous sign-in) is tracked in-process and swept up by a `finalCleanup` task, called from an `after()` hook in `cypress/support/e2e.preview.ts`. `cypress/support/preview-commands.ts` adds `trackCurrentSessionUid()`, called in an `afterEach`, which reads the Firebase-persisted uid straight out of the app's own `localStorage` (`browserLocalPersistence`, see §1.5) so even the ambient anonymous user from a plain page visit gets cleaned up, not just uids created via an explicit task call.
 - The two authenticated specs' previously-hardcoded fixture IDs (`existing-leader`, `q1`/`q2`) were made unique per run (timestamp-suffixed) so two preview deploys running concurrently against the same real project never race on the same document.
 - Credentials: the same `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` secret used elsewhere in CI, written to a temp file and picked up via `GOOGLE_APPLICATION_CREDENTIALS` (Admin SDK default credential lookup) — never the `FIRESTORE_EMULATOR_HOST`/`FIREBASE_AUTH_EMULATOR_HOST` env vars the emulator tasks rely on.
@@ -240,15 +317,18 @@ npm run build          # ng build (dev config)
 npm run build:prod     # ng build --configuration production
 npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom)
-npm run e2e            # Cypress e2e suite (headless) against the Firebase Emulator Suite
+npm run functions:install # npm install inside functions/
+npm run functions:build   # tsc-build functions/ (src/ -> lib/)
+npm run functions:test    # build, then node --test against functions/lib
+npm run e2e            # functions:build, then Cypress e2e suite (headless) against the Firebase Emulator Suite (incl. Functions)
 npm run e2e:open       # same, but with the interactive Cypress runner
 npm run e2e:preview    # scoped Cypress suite against a real deployed preview (needs PREVIEW_URL + GOOGLE_APPLICATION_CREDENTIALS)
 npm run lighthouse     # build:prod, then Lighthouse CI against a local static server
-npm run firebase:emulate  # build:prod, then firebase emulators:start
-npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore
+npm run firebase:emulate  # build:prod, functions:build, then firebase emulators:start
+npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore,functions
 ```
 
-Package manager is pinned via `"packageManager": "npm@11.12.1"`.
+Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is a separate npm package with its own `package.json`/lockfile (standard Firebase CLI convention) — its dependencies are _not_ installed by the root `npm ci`.
 
 ### 4.6 Environments
 
@@ -256,6 +336,7 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 - `src/environments/environment.ts` / `environment.development.ts` carry `production` and `useEmulators` flags — no secrets or API keys live here, consistent with the runtime-config-fetch approach described in §2.3.
 - `src/environments/environment.e2e.ts` sets `useEmulators: true` and is swapped in only by the `e2e` build/serve configuration (`angular.json`, `fileReplacements`) used by the Cypress suite (§4.3) — never by `start`/`build`/`build:prod`.
 - Production build budgets (`angular.json`): 500 KB warning / 1 MB error (initial bundle), 4 KB warning / 8 KB error (per component style); output hashing enabled for cache-busting.
+- `functions/` has its own env layer (§2.4): `.env.demo-trivia-app-e2e` (committed, non-secret — sets `STRIPE_MOCK_CHECKOUT=true`) and `.secret.local` (committed, placeholder-only fallback for `defineSecret`-bound values when Secret Manager isn't reachable). Everything else under `functions/.env*`/`.secret.local` is gitignored — see the comments in `functions/.gitignore` for exactly which two files are the deliberate exceptions and why.
 
 ---
 
@@ -266,13 +347,18 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`.
 3. **CI fix** — granted `checks`/`pull-requests` write permissions to resolve a 403 from the Hosting deploy GitHub Action.
 4. **CI enhancement** — added automatic Firestore rules/indexes deployment on merge (previously only Hosting deployed).
 5. **Tooling** — added an Angular CLI analytics ID to `angular.json`.
+6. **Custom question submission** — added the `/add-question` screen and its Firestore-backed question bank (§1.1, §1.4).
+7. **Pro subscription tier (Stripe)** — added the `/pricing` screen, gated `/add-question` behind a Pro subscription, and stood up the backend twice: first via the "Run Subscriptions with Stripe" Firebase Extension, then — once that product line announced its March 2027 shutdown, before this even shipped — migrated to an owned `functions/` Cloud Functions package with the same Firestore schema/custom-claim contract (§1.6, §2.4).
 
 ---
 
 ## 6. Known Gaps / Not Yet Implemented
 
-- Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`), which needs the Blaze plan and a `functions/` CI deploy step; scoped out for now. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
+- Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`) — the `functions/` package and its CI deploy step (§2.4, §4.2) now exist for the Pro subscription backend, so the infrastructure blocker is gone, but the blocking function itself still isn't written. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
 - Play Games and Game Center sign-in are listed in the Firebase console but not offered in the app — no Web SDK equivalent exists for either (native Android/Apple only).
-- The `/add-question` screen only supports *creating* a question — no in-app way to edit or delete an existing `custom_questions` doc yet (console-only for now, per the rules comments). There's also no moderation/review step: any fully authenticated account can add directly to the shared, public bank.
-- The e2e suite (§4.3) covers the core unauthenticated/authenticated flows but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator), the "mixed" question source end-to-end (unit-level coverage only), or the `/add-question` screen (no spec yet).
+- The `/add-question` screen only supports _creating_ a question — no in-app way to edit or delete an existing `custom_questions` doc yet (console-only for now, per the rules comments). There's also no moderation/review step: any fully authenticated Pro subscriber can add directly to the shared, public bank.
+- The e2e suite (§4.3) covers the core unauthenticated/authenticated flows plus Pro-gated `/add-question` access and the checkout-session creation function, but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator) or the "mixed" question source end-to-end (unit-level coverage only).
 - The `E2E (preview)` job (§4.2a) needs to actually be turned on as a required status check in GitHub branch protection settings for `main` — it's not enforced yet. GitHub Actions jobs can't gate a merge on their own; that has to come from branch protection, and setting it up needs repo-admin access that CI/automation credentials don't have.
+- **No self-service subscription management**: there's no in-app "cancel"/"update payment method" flow (no Stripe Billing Portal integration) — a subscriber currently has to manage/cancel directly from Stripe, or (for the developer) the Stripe Dashboard.
+- **The one-time Stripe/Secret-Manager/IAM setup (§4.2) hasn't been completed against the real `intellectura-3b26a` project yet** — until it is, the "Deploy Cloud Functions" CI step fails on every merge (harmlessly, `continue-on-error: true`) and Pro subscriptions can't actually be purchased in production, even though the code path is fully built and tested against the emulator.
+- `stripeWebhook`'s signature verification and end-to-end Stripe event handling have **not** been exercised against a real Stripe webhook delivery (test or live mode) — only the Firestore/claim _outcome_ of a successful webhook is simulated in tests (`setProSubscription`, §4.3). This should be manually verified with a real test-mode checkout once the setup above is done.
