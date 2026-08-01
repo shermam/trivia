@@ -21,8 +21,8 @@ describe('add-question Pro gating', () => {
     cy.createVerifiedUser({ email, password }).then(({ uid }) => {
       cy.visit('/');
       cy.signInViaUi(email, password);
-      // Simulates what the Stripe extension does after a real checkout —
-      // no page reload here on purpose: this exercises the app's own
+      // Simulates what our Stripe webhook handler does after a real
+      // checkout — no page reload here on purpose: this exercises the app's own
       // real-time subscription listener + token refresh (SubscriptionService
       // / AuthService.refreshIdToken), the same path a real subscriber hits
       // right after returning from Stripe Checkout.

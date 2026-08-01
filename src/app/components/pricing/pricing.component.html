@@ -94,10 +94,12 @@
           <button
             type="button"
             (click)="subscribe()"
-            [disabled]="isSubscribing()"
+            [disabled]="isSubscribing() || !authReady()"
             class="mt-6 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 transition-colors"
           >
-            @if (isSubscribing()) {
+            @if (!authReady()) {
+              Loading&hellip;
+            } @else if (isSubscribing()) {
               Redirecting&hellip;
             } @else if (needsSignIn()) {
               Sign in to subscribe

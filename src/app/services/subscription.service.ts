@@ -7,16 +7,19 @@ const CUSTOMERS_COLLECTION = 'customers';
 const PRODUCTS_COLLECTION = 'products';
 const CHECKOUT_TIMEOUT_MS = 20_000;
 
-/** Subscription statuses the Stripe extension considers "currently paying". */
+/** Subscription statuses our Cloud Functions backend considers "currently paying". */
 const ACTIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
 
 /**
- * Bridges the client to the official "Run Subscriptions with Stripe"
- * Firebase Extension purely through the Firestore collections it manages
- * (`customers/{uid}/checkout_sessions`, `customers/{uid}/subscriptions`,
- * `products/{id}/prices`) — no Cloud Functions of our own; the extension's
- * own functions (installed via the Firebase console/CLI, not this repo)
- * are the entire backend.
+ * Bridges the client to our own Cloud Functions backend (`functions/`,
+ * `createCheckoutSession` + `stripeWebhook`) purely through the Firestore
+ * collections that backend manages (`customers/{uid}/checkout_sessions`,
+ * `customers/{uid}/subscriptions`, `products/{id}/prices`). This used to be
+ * the officially maintained "Run Subscriptions with Stripe" Firebase
+ * Extension, but that entire product line is shutting down in March 2027 —
+ * we now own equivalent functions directly instead, using the same
+ * Firestore schema so this service (and firestore.rules) didn't need to
+ * change shape, only where the data comes from.
  *
  * `isProUser` here is a *real-time, optimistic* signal — the subscription
  * doc this listens to appears within moments of a successful checkout,
@@ -87,10 +90,10 @@ export class SubscriptionService {
 
   /**
    * Resolves the Stripe Price ID for the single active monthly "Pro"
-   * product by reading the `products`/`prices` collections the extension
-   * keeps synced from the Stripe Dashboard, so the price never has to be
-   * hardcoded here — changing the price in Stripe doesn't require a
-   * frontend deploy.
+   * product by reading the `products`/`prices` collections the webhook
+   * handler (`functions/src/products.ts`) keeps synced from the Stripe
+   * Dashboard, so the price never has to be hardcoded here — changing the
+   * price in Stripe doesn't require a frontend deploy.
    */
   private getProPriceId(): Promise<string> {
     if (!this.proPricePromise) {
@@ -136,8 +139,9 @@ export class SubscriptionService {
   }
 
   /**
-   * Creates a Stripe Checkout session doc, waits for the extension to write
-   * back a hosted checkout URL, and redirects the browser to it. Requires a
+   * Creates a Stripe Checkout session doc, waits for `createCheckoutSession`
+   * (functions/src/checkout-sessions.ts) to write back a hosted checkout
+   * URL, and redirects the browser to it. Requires a
    * fully signed-in (non-anonymous) caller — also enforced by
    * firestore.rules, but checked here first so an anonymous caller never
    * even creates a doc that would just be rejected.

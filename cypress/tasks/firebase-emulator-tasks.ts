@@ -120,12 +120,16 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
     },
 
     /**
-     * Simulates what the "Run Subscriptions with Stripe" extension does
-     * after a real checkout completes — sets the `stripeRole: 'pro'` custom
-     * claim (what firestore.rules actually checks) and seeds a matching
-     * `customers/{uid}/subscriptions` doc (what drives the app's real-time
-     * `isProUser` UI signal) — entirely via the Admin SDK, so tests never
-     * have to talk to Stripe or run the extension's own functions locally.
+     * Simulates what our Stripe webhook handler
+     * (functions/src/subscriptions.ts) does after a real checkout completes
+     * — sets the `stripeRole: 'pro'` custom claim (what firestore.rules
+     * actually checks) and seeds a matching `customers/{uid}/subscriptions`
+     * doc (what drives the app's real-time `isProUser` UI signal) — entirely
+     * via the Admin SDK, so this particular test path never needs a real
+     * Stripe webhook delivery. (Contrast with the *checkout-session
+     * creation* half of the flow, which runs for real against the emulated
+     * `createCheckoutSession` function — see add-question-pro-gating.cy.ts
+     * and pricing.cy.ts.)
      */
     async setProSubscription({ uid }: ProSubscriptionSeed) {
       await auth.setCustomUserClaims(uid, { stripeRole: 'pro' });
@@ -138,6 +142,34 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
           status: 'active',
           role: 'pro',
           current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+      return null;
+    },
+
+    /**
+     * Seeds the `products`/`prices` catalog `SubscriptionService.getProPriceId()`
+     * reads to resolve the current Pro price — normally kept in sync by
+     * `stripeWebhook` (functions/src/products.ts) from real Stripe
+     * `product.*`/`price.*` events, which obviously never fire against the
+     * emulator. Idempotent — safe to call once per spec.
+     */
+    async seedProProduct() {
+      await firestore.collection('products').doc('prod_test_pro').set({
+        active: true,
+        name: 'Pro',
+        role: 'pro',
+      });
+      await firestore
+        .collection('products')
+        .doc('prod_test_pro')
+        .collection('prices')
+        .doc('price_test_pro')
+        .set({
+          active: true,
+          currency: 'usd',
+          unit_amount: 99,
+          type: 'recurring',
+          interval: 'month',
         });
       return null;
     },

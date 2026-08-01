@@ -31,6 +31,12 @@ export class PricingComponent {
     (this.route.snapshot.queryParamMap.get('checkout') as CheckoutQueryStatus) ?? null,
   );
 
+  // `AuthService.isAnonymous`/`isFullyAuthenticated` both default to `false`
+  // before the very first auth state resolves (`user()` is still `null`),
+  // which would otherwise make `needsVerification` read `true` for a split
+  // second on every load — mirrors the same guard TopBarComponent already
+  // uses ("Loading…") for exactly this reason.
+  protected readonly authReady = this.authService.authReady;
   protected readonly needsSignIn = computed(() => this.authService.isAnonymous());
   protected readonly needsVerification = computed(
     () => !this.authService.isAnonymous() && !this.authService.isFullyAuthenticated(),
@@ -42,7 +48,7 @@ export class PricingComponent {
   }
 
   protected async subscribe(): Promise<void> {
-    if (this.isSubscribing()) {
+    if (this.isSubscribing() || !this.authReady()) {
       return;
     }
     this.errorMessage.set(null);

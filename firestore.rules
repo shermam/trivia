@@ -13,12 +13,12 @@ service cloud.firestore {
                  || request.auth.token.email_verified == true);
     }
 
-    // Set by the "Run Subscriptions with Stripe" Firebase Extension as a
-    // custom claim on the user's ID token once a subscription with a price
-    // tagged `firebaseRole: 'pro'` (see the Stripe Dashboard setup) reaches
-    // `active`/`trialing`. This is what actually gates the write below —
-    // the client's real-time `SubscriptionService.isProUser` signal is
-    // read-your-own-writes UX only and carries no authority here.
+    // Set by our Stripe webhook handler (functions/src/subscriptions.ts) as
+    // a custom claim on the user's ID token once a subscription with a
+    // price tagged `firebaseRole: 'pro'` (see the Stripe Dashboard setup)
+    // reaches `active`/`trialing`. This is what actually gates the write
+    // below — the client's real-time `SubscriptionService.isProUser` signal
+    // is read-your-own-writes UX only and carries no authority here.
     function isProUser() {
       return request.auth != null && request.auth.token.stripeRole == 'pro';
     }
@@ -68,45 +68,38 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Stripe extension-managed collections ("Run Subscriptions with Stripe").
-    // The extension's backend functions use the Admin SDK, which bypasses
-    // these rules entirely — the rules below only constrain direct client
-    // access.
+    // Collections managed by our own Cloud Functions backend (`functions/`)
+    // — this used to be the "Run Subscriptions with Stripe" Firebase
+    // Extension, migrated off ahead of that product line's March 2027
+    // shutdown. Those functions use the Admin SDK, which bypasses these
+    // rules entirely — the rules below only constrain direct client access.
     match /customers/{uid} {
-      // A user may read their own customer doc (Stripe customer ID/link)
-      // but never write it directly — only the extension does, via Admin
-      // SDK, after a successful checkout.
+      // A user may read their own customer doc (Stripe customer ID) but
+      // never write it directly — only `createCheckoutSession` does, via
+      // Admin SDK, on first checkout.
       allow read: if isRealAuthedUser() && request.auth.uid == uid;
 
       match /checkout_sessions/{id} {
         // The client creates a session doc to kick off Checkout and reads
-        // it back to learn the hosted checkout URL the extension writes in
-        // response; it never updates/deletes one directly.
+        // it back to learn the hosted checkout URL `createCheckoutSession`
+        // writes in response; it never updates/deletes one directly.
         allow read, create: if isRealAuthedUser() && request.auth.uid == uid;
       }
 
       match /subscriptions/{id} {
-        // Synced read-only from Stripe by the extension; drives the
+        // Synced read-only from Stripe by `stripeWebhook`; drives the
         // real-time `isProUser` UI signal.
-        allow read: if isRealAuthedUser() && request.auth.uid == uid;
-      }
-
-      match /payments/{id} {
         allow read: if isRealAuthedUser() && request.auth.uid == uid;
       }
     }
 
-    // Product/price catalog the extension mirrors from the Stripe
+    // Product/price catalog `stripeWebhook` mirrors from the Stripe
     // Dashboard — public so the pricing page and checkout-session creation
     // can read the current Pro price without any secrets.
     match /products/{id} {
       allow read: if true;
 
       match /prices/{id} {
-        allow read: if true;
-      }
-
-      match /tax_rates/{id} {
         allow read: if true;
       }
     }

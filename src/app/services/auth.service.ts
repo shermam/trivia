@@ -96,12 +96,13 @@ export class AuthService {
   // updates like a changed displayName.
   private readonly userSignal = signal<User | null>(null, { equal: () => false });
   private readonly authReadySignal = signal(false);
-  // Populated from the `stripeRole` custom claim the "Run Subscriptions with
-  // Stripe" Firebase Extension sets on the ID token once a Pro subscription
-  // is active. Custom claims don't change on their own once cached by the
-  // SDK — see `refreshIdToken()`, called by SubscriptionService whenever its
-  // real-time Firestore listener sees the subscription doc flip to active,
-  // so this doesn't have to wait for the token's natural ~1hr refresh.
+  // Populated from the `stripeRole` custom claim our Cloud Functions backend
+  // (functions/src/subscriptions.ts) sets on the ID token once a Pro
+  // subscription is active. Custom claims don't change on their own once
+  // cached by the SDK — see `refreshIdToken()`, called by SubscriptionService
+  // whenever its real-time Firestore listener sees the subscription doc flip
+  // to active, so this doesn't have to wait for the token's natural ~1hr
+  // refresh.
   private readonly stripeRoleSignal = signal<string | null>(null);
 
   readonly user = this.userSignal.asReadonly();
@@ -301,8 +302,8 @@ export class AuthService {
 
   /**
    * Forces the cached ID token to be re-minted so a just-granted `stripeRole`
-   * custom claim (set server-side by the Stripe extension after a successful
-   * checkout) is picked up without waiting for the SDK's natural ~1hr
+   * custom claim (set server-side by our Stripe webhook handler after a
+   * successful checkout) is picked up without waiting for the SDK's natural ~1hr
    * refresh. Called by SubscriptionService the moment its real-time listener
    * sees the user's subscription doc become active — not on a timer, so it
    * only ever fires right when there's actually something new to pick up.

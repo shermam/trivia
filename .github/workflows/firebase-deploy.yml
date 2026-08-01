@@ -31,6 +31,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -52,6 +55,33 @@ jobs:
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
           npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project intellectura-3b26a
+
+      - name: Install Cloud Functions dependencies
+        run: npm ci --prefix functions
+
+      # Kept as its own step (not batched with the Firestore rules/indexes
+      # deploy above): this fails until the one-time setup in the PR
+      # description is done (STRIPE_SECRET_KEY/STRIPE_WEBHOOK_SECRET in
+      # Secret Manager + Cloud Functions IAM roles on the deploying service
+      # account) — a separate step means that setup lag doesn't also block
+      # the already-working Hosting/Firestore rules deploys above.
+      # `continue-on-error` here on purpose, temporarily: until the one-time
+      # Stripe/IAM setup above is done this step fails on every merge, and a
+      # failing-but-non-blocking step is far less disruptive than turning
+      # the whole workflow red for something unrelated to the code being
+      # merged. Remove this line once that setup is confirmed working.
+      - name: Deploy Cloud Functions
+        continue-on-error: true
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          # @14, not @13 like the Firestore rules/indexes step above: @13's
+          # bundled Functions support predates firebase-functions v7's
+          # removal of `functions.config()` and unconditionally probes for
+          # it, crashing — confirmed locally against the emulator; @14
+          # detects v7+ and skips that legacy path.
+          npx firebase-tools@14 deploy --only functions --project intellectura-3b26a
 
       - name: Clean up service account credentials
         if: always()

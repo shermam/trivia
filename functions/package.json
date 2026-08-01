@@ -1,0 +1,24 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions backing the Pro subscription — Stripe Checkout session creation + webhook sync. Replaces the (now end-of-life) \"Run Subscriptions with Stripe\" Firebase Extension with functions we own outright.",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "npm run build && node --test lib/**/*.test.js",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2",
+    "stripe": "^22.4.0"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  }
+}

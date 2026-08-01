@@ -45,6 +45,8 @@ declare global {
        * `customers/{uid}/subscriptions` doc — without touching Stripe.
        */
       setProSubscription(seed: ProSubscriptionSeed): Chainable<null>;
+      /** Seeds a fake Pro product/price so `getProPriceId()` resolves without a real Stripe sync. */
+      seedProProduct(): Chainable<null>;
     }
   }
 }
@@ -146,4 +148,8 @@ Cypress.Commands.add('getVerificationLink', (email: string) => {
 
 Cypress.Commands.add('setProSubscription', (seed: ProSubscriptionSeed) => {
   cy.task('setProSubscription', seed);
+});
+
+Cypress.Commands.add('seedProProduct', () => {
+  cy.task('seedProProduct');
 });

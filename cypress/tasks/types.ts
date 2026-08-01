@@ -24,9 +24,9 @@ export interface VerifiedUserSeed {
 }
 
 /**
- * Drives the app into a "Pro" state the same way the Stripe extension would
- * — a `stripeRole: 'pro'` custom claim plus a synced `subscriptions` doc —
- * without ever calling Stripe. See `firebase-emulator-tasks.ts`.
+ * Drives the app into a "Pro" state the same way our Stripe webhook handler
+ * would — a `stripeRole: 'pro'` custom claim plus a synced `subscriptions`
+ * doc — without ever calling Stripe. See `firebase-emulator-tasks.ts`.
  */
 export interface ProSubscriptionSeed {
   uid: string;

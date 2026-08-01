@@ -1,0 +1,22 @@
+# Compiled output
+/lib
+
+# Dependencies
+/node_modules
+
+# Local-only Firebase Functions v2 config — these can hold secret values for
+# a developer's own local `firebase emulators:start` and must never be
+# committed (unlike the project-scoped `.env.<project-id>` files below).
+.env
+.env.local
+.secret.local
+
+# `.env.demo-trivia-app-e2e` IS committed on purpose: it only sets
+# STRIPE_MOCK_CHECKOUT=true for the throwaway e2e project so Cypress/CI never
+# need real Stripe credentials — see src/stripe-client.ts. The root
+# .gitignore's blanket `.env.*` rule would otherwise catch this file too.
+!.env.demo-trivia-app-e2e
+
+# `.secret.local` IS also committed on purpose, despite the name — see the
+# comment inside that file for why it holds no real secret.
+!.secret.local
