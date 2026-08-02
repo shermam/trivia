@@ -234,8 +234,10 @@ export class AuthService {
    * Tries to upgrade the current anonymous session in place with
    * `linkWithPopup` so the uid (and anything saved under it) is preserved.
    * If that provider credential already belongs to an existing account,
-   * falls back to a fresh `signInWithPopup` — accepting one extra popup in
-   * that edge case to keep this provider-agnostic across all 7 providers.
+   * Firebase's error carries the exact credential the user just produced in
+   * the popup (`error.customData`), so we sign in with that directly via
+   * `signInWithCredential` instead of making the user pick their account a
+   * second time in a fresh popup.
    */
   async signInWithOAuth(providerId: OAuthProviderId): Promise<void> {
     const { auth, authModule } = await this.getAuth();
@@ -258,8 +260,20 @@ export class AuthService {
         return;
       }
       if ((error as { code?: string }).code === 'auth/credential-already-in-use') {
+        const credential = this.credentialFromError(authModule, providerId, error);
         try {
-          await authModule.signInWithPopup(auth, provider, authModule.browserPopupRedirectResolver);
+          if (credential) {
+            await authModule.signInWithCredential(auth, credential);
+          } else {
+            // Fallback for the rare case the SDK didn't attach a credential
+            // to the error — only path left is asking the user to pick
+            // their account again in a fresh popup.
+            await authModule.signInWithPopup(
+              auth,
+              provider,
+              authModule.browserPopupRedirectResolver,
+            );
+          }
           return;
         } catch (retryError) {
           if (isUserCancelledPopup(retryError)) {
@@ -334,6 +348,25 @@ export class AuthService {
         return new authModule.TwitterAuthProvider();
       default:
         return new authModule.OAuthProvider(providerId);
+    }
+  }
+
+  /** Mirrors `createProvider`'s mapping — each provider class's static
+   * `credentialFromError` knows how to read its own shape out of
+   * `error.customData`. */
+  private credentialFromError(authModule: AuthModule, providerId: OAuthProviderId, error: unknown) {
+    const firebaseError = error as import('firebase/auth').AuthError;
+    switch (providerId) {
+      case 'google.com':
+        return authModule.GoogleAuthProvider.credentialFromError(firebaseError);
+      case 'facebook.com':
+        return authModule.FacebookAuthProvider.credentialFromError(firebaseError);
+      case 'github.com':
+        return authModule.GithubAuthProvider.credentialFromError(firebaseError);
+      case 'twitter.com':
+        return authModule.TwitterAuthProvider.credentialFromError(firebaseError);
+      default:
+        return authModule.OAuthProvider.credentialFromError(firebaseError);
     }
   }
 }
