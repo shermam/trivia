@@ -105,6 +105,14 @@ export class AuthService {
   // refresh.
   private readonly stripeRoleSignal = signal<string | null>(null);
 
+  // `signOut()` immediately re-anonymizes (see below), but Firebase always
+  // fires `onAuthStateChanged(null)` for the sign-out itself before the
+  // follow-up anonymous sign-in's callback lands. Without suppressing that
+  // one known-transient `null`, every `user()`-derived signal (isAnonymous,
+  // isFullyAuthenticated) briefly reads as "signed in, unverified", which
+  // flashed a "Verify your email" prompt on logout.
+  private suppressNextNullState = false;
+
   readonly user = this.userSignal.asReadonly();
   readonly authReady = this.authReadySignal.asReadonly();
   readonly isProUser = computed(() => this.stripeRoleSignal() === 'pro');
@@ -150,6 +158,10 @@ export class AuthService {
           authModule.connectAuthEmulator(auth, AUTH_EMULATOR_URL, { disableWarnings: true });
         }
         authModule.onAuthStateChanged(auth, (user) => {
+          if (user === null && this.suppressNextNullState) {
+            return;
+          }
+          this.suppressNextNullState = false;
           this.userSignal.set(user);
           this.authReadySignal.set(true);
           this.loadStripeRoleClaim(authModule, user);
@@ -297,8 +309,22 @@ export class AuthService {
 
   async signOut(): Promise<void> {
     const { auth, authModule } = await this.getAuth();
-    await authModule.signOut(auth);
-    await this.ensureSignedIn();
+    this.suppressNextNullState = true;
+    try {
+      await authModule.signOut(auth);
+      await this.ensureSignedIn();
+    } finally {
+      this.suppressNextNullState = false;
+    }
+    // If re-anonymizing above didn't land (e.g. offline), the suppressed
+    // `null` from signOut() was never applied — push it through now so the
+    // UI reflects the real signed-out state instead of staying stuck on the
+    // just-signed-out account.
+    if (!auth.currentUser) {
+      this.userSignal.set(null);
+      this.authReadySignal.set(true);
+      this.loadStripeRoleClaim(authModule, null);
+    }
   }
 
   private async loadStripeRoleClaim(authModule: AuthModule, user: User | null): Promise<void> {
