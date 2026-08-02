@@ -1,4 +1,4 @@
-import { logger } from 'firebase-functions/v2';
+import * as logger from 'firebase-functions/logger';
 import { onRequest } from 'firebase-functions/v2/https';
 import type Stripe from 'stripe';
 import {

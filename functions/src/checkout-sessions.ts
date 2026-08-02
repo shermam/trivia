@@ -1,5 +1,5 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
-import { logger } from 'firebase-functions/v2';
+import * as logger from 'firebase-functions/logger';
 import { getOrCreateStripeCustomerId } from './customers';
 import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 

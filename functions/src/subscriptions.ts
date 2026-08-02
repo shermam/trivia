@@ -1,6 +1,6 @@
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { logger } from 'firebase-functions/v2';
+import * as logger from 'firebase-functions/logger';
 import type Stripe from 'stripe';
 import { deriveClaimRole } from './role';
 
