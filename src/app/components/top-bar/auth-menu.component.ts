@@ -16,6 +16,7 @@ import {
   PROMINENT_OAUTH_PROVIDERS,
   SECONDARY_OAUTH_PROVIDERS,
 } from '../../services/auth.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { ProviderIconComponent } from './provider-icon.component';
 
 type EmailFormMode = 'signup' | 'signin';
@@ -30,6 +31,7 @@ type EmailFormMode = 'signup' | 'signin';
 })
 export class AuthMenuComponent {
   protected readonly authService = inject(AuthService);
+  protected readonly subscriptionService = inject(SubscriptionService);
 
   @Output() closeRequested = new EventEmitter<void>();
 

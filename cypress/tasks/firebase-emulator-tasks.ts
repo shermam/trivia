@@ -2,7 +2,12 @@ import { App, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { CollectionReference, getFirestore } from 'firebase-admin/firestore';
 import { E2E_PROJECT_ID } from '../../cypress.config';
-import { CustomQuestionSeed, LeaderboardSeed, VerifiedUserSeed } from './types';
+import {
+  CustomQuestionSeed,
+  LeaderboardSeed,
+  ProSubscriptionSeed,
+  VerifiedUserSeed,
+} from './types';
 
 const AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 const FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
@@ -70,6 +75,11 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         users.length ? auth.deleteUsers(users.map((u) => u.uid)) : Promise.resolve(),
         deleteCollection(firestore.collection('leaderboard')),
         deleteCollection(firestore.collection('custom_questions')),
+        // `recursiveDelete` (not the plain `deleteCollection` helper above)
+        // because each `customers/{uid}` doc owns subcollections
+        // (`subscriptions`, `checkout_sessions`, `payments`) that a
+        // top-level doc delete would otherwise orphan.
+        firestore.recursiveDelete(firestore.collection('customers')),
       ]);
       return null;
     },
@@ -107,6 +117,61 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
 
     getVerificationLink(email: string) {
       return fetchVerificationLink(email);
+    },
+
+    /**
+     * Simulates what our Stripe webhook handler
+     * (functions/src/subscriptions.ts) does after a real checkout completes
+     * — sets the `stripeRole: 'pro'` custom claim (what firestore.rules
+     * actually checks) and seeds a matching `customers/{uid}/subscriptions`
+     * doc (what drives the app's real-time `isProUser` UI signal) — entirely
+     * via the Admin SDK, so this particular test path never needs a real
+     * Stripe webhook delivery. (Contrast with the *checkout-session
+     * creation* half of the flow, which runs for real against the emulated
+     * `createCheckoutSession` function — see add-question-pro-gating.cy.ts
+     * and pricing.cy.ts.)
+     */
+    async setProSubscription({ uid }: ProSubscriptionSeed) {
+      await auth.setCustomUserClaims(uid, { stripeRole: 'pro' });
+      await firestore
+        .collection('customers')
+        .doc(uid)
+        .collection('subscriptions')
+        .doc('seed-sub')
+        .set({
+          status: 'active',
+          role: 'pro',
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+      return null;
+    },
+
+    /**
+     * Seeds the `products`/`prices` catalog `SubscriptionService.getProPriceId()`
+     * reads to resolve the current Pro price — normally kept in sync by
+     * `stripeWebhook` (functions/src/products.ts) from real Stripe
+     * `product.*`/`price.*` events, which obviously never fire against the
+     * emulator. Idempotent — safe to call once per spec.
+     */
+    async seedProProduct() {
+      await firestore.collection('products').doc('prod_test_pro').set({
+        active: true,
+        name: 'Pro',
+        role: 'pro',
+      });
+      await firestore
+        .collection('products')
+        .doc('prod_test_pro')
+        .collection('prices')
+        .doc('price_test_pro')
+        .set({
+          active: true,
+          currency: 'usd',
+          unit_amount: 99,
+          type: 'recurring',
+          interval: 'month',
+        });
+      return null;
     },
   });
 }

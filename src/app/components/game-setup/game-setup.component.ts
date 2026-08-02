@@ -3,6 +3,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { GameConfig } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 
 @Component({
@@ -17,6 +18,7 @@ export class GameSetupComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly triviaService = inject(TriviaService);
   protected readonly gameController = inject(GameControllerService);
+  protected readonly subscriptionService = inject(SubscriptionService);
 
   protected readonly categories = signal<TriviaCategory[]>([]);
   protected readonly categoriesError = signal<string | null>(null);

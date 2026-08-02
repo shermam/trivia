@@ -13,6 +13,16 @@ service cloud.firestore {
                  || request.auth.token.email_verified == true);
     }
 
+    // Set by our Stripe webhook handler (functions/src/subscriptions.ts) as
+    // a custom claim on the user's ID token once a subscription with a
+    // price tagged `firebaseRole: 'pro'` (see the Stripe Dashboard setup)
+    // reaches `active`/`trialing`. This is what actually gates the write
+    // below — the client's real-time `SubscriptionService.isProUser` signal
+    // is read-your-own-writes UX only and carries no authority here.
+    function isProUser() {
+      return request.auth != null && request.auth.token.stripeRole == 'pro';
+    }
+
     function isValidLeaderboardEntry(uid) {
       return request.resource.data.keys().hasOnly(
                 ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt']
@@ -47,13 +57,51 @@ service cloud.firestore {
     }
 
     // Question bank: readable by anyone playing the game. Creating a new
-    // question is open to any real (non-anonymous, verified-if-password)
-    // account — same anti-flood gate as the leaderboard — subject to schema
-    // validation above; editing/removing an existing one is console-only.
+    // question requires both the anti-flood gate (real, non-anonymous,
+    // verified-if-password account) and an active Pro subscription — this
+    // is a paid-tier feature, see PricingComponent/AddQuestionComponent —
+    // subject to schema validation above; editing/removing an existing one
+    // is console-only.
     match /custom_questions/{questionId} {
       allow read: if true;
-      allow create: if isRealAuthedUser() && isValidCustomQuestion();
+      allow create: if isRealAuthedUser() && isProUser() && isValidCustomQuestion();
       allow update, delete: if false;
+    }
+
+    // Collections managed by our own Cloud Functions backend (`functions/`)
+    // — this used to be the "Run Subscriptions with Stripe" Firebase
+    // Extension, migrated off ahead of that product line's March 2027
+    // shutdown. Those functions use the Admin SDK, which bypasses these
+    // rules entirely — the rules below only constrain direct client access.
+    match /customers/{uid} {
+      // A user may read their own customer doc (Stripe customer ID) but
+      // never write it directly — only `createCheckoutSession` does, via
+      // Admin SDK, on first checkout.
+      allow read: if isRealAuthedUser() && request.auth.uid == uid;
+
+      match /checkout_sessions/{id} {
+        // The client creates a session doc to kick off Checkout and reads
+        // it back to learn the hosted checkout URL `createCheckoutSession`
+        // writes in response; it never updates/deletes one directly.
+        allow read, create: if isRealAuthedUser() && request.auth.uid == uid;
+      }
+
+      match /subscriptions/{id} {
+        // Synced read-only from Stripe by `stripeWebhook`; drives the
+        // real-time `isProUser` UI signal.
+        allow read: if isRealAuthedUser() && request.auth.uid == uid;
+      }
+    }
+
+    // Product/price catalog `stripeWebhook` mirrors from the Stripe
+    // Dashboard — public so the pricing page and checkout-session creation
+    // can read the current Pro price without any secrets.
+    match /products/{id} {
+      allow read: if true;
+
+      match /prices/{id} {
+        allow read: if true;
+      }
     }
 
     // Leaderboard: readable by anyone; one document per user (doc ID == uid),
