@@ -60,18 +60,9 @@ jobs:
         run: npm ci --prefix functions
 
       # Kept as its own step (not batched with the Firestore rules/indexes
-      # deploy above): this fails until the one-time setup in the PR
-      # description is done (STRIPE_SECRET_KEY/STRIPE_WEBHOOK_SECRET in
-      # Secret Manager + Cloud Functions IAM roles on the deploying service
-      # account) — a separate step means that setup lag doesn't also block
-      # the already-working Hosting/Firestore rules deploys above.
-      # `continue-on-error` here on purpose, temporarily: until the one-time
-      # Stripe/IAM setup above is done this step fails on every merge, and a
-      # failing-but-non-blocking step is far less disruptive than turning
-      # the whole workflow red for something unrelated to the code being
-      # merged. Remove this line once that setup is confirmed working.
+      # deploy above) so a functions-only failure is easy to spot separately
+      # from the Hosting/Firestore rules deploys above.
       - name: Deploy Cloud Functions
-        continue-on-error: true
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
