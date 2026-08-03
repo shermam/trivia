@@ -68,14 +68,14 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected answerClass(answer: string): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
-      return 'bg-white hover:bg-slate-50 hover:border-indigo-600 hover:shadow-[0_0_0_3px_rgba(79,70,229,0.08)] border-slate-900/15 text-slate-900';
+      return 'bg-white hover:bg-slate-50 hover:border-emerald-600 hover:shadow-[0_0_0_3px_rgba(5,150,105,0.08)] border-slate-900/15 text-slate-900';
     }
 
     const isCorrectAnswer = answer === question.correct_answer;
     const isSelected = answer === this.selectedAnswer();
 
     if (isCorrectAnswer) {
-      return 'bg-green-50 border-green-700 text-green-900';
+      return 'bg-emerald-50 border-emerald-700 text-emerald-900';
     }
     if (isSelected) {
       return 'bg-red-50 border-red-700 text-red-900';
@@ -93,7 +93,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     const isSelected = answer === this.selectedAnswer();
 
     if (isCorrectAnswer) {
-      return 'bg-green-700 text-white';
+      return 'bg-emerald-700 text-white';
     }
     if (isSelected) {
       return 'bg-red-700 text-white';

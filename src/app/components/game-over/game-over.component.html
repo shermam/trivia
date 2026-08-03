@@ -12,7 +12,7 @@
       <div class="grid grid-cols-2 gap-4">
         <div class="rounded-2xl border border-slate-900/7 bg-slate-50 px-4 py-5">
           <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Score</p>
-          <p class="text-4xl font-extrabold text-indigo-600 tracking-tight">
+          <p class="text-4xl font-extrabold text-emerald-600 tracking-tight">
             {{ gameController.score() }}
             <span class="text-xl font-medium text-slate-400"
               >/ {{ gameController.totalQuestions() }}</span
@@ -42,45 +42,45 @@
         </div>
       } @else {
         <div
-          class="flex items-start gap-2.5 text-green-700 bg-green-50 border border-green-200 rounded-2xl px-5 py-4"
+          class="flex items-start gap-2.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4"
         >
           <app-icon name="circle-check-big" [size]="18" class="shrink-0 mt-0.5" />
           <div>
             <p class="font-semibold">Score saved to the leaderboard!</p>
             @if (playerRank(); as rank) {
-              <p class="text-sm text-green-800/80">You're ranked #{{ rank }} on the leaderboard.</p>
+              <p class="text-sm text-emerald-800/80">You're ranked #{{ rank }} on the leaderboard.</p>
             }
           </div>
         </div>
       }
     } @else if (authService.isAnonymous()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-5">
+      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-5">
         <p class="text-slate-700 mb-3">Sign in to save this score to the leaderboard.</p>
         @if (!embedMode.isEmbedded()) {
           <button
             type="button"
             data-cy="open-sign-in"
             (click)="openSignIn()"
-            class="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 transition-colors"
+            class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
           >
             Sign in
           </button>
         }
       </div>
     } @else if (!authService.isFullyAuthenticated()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-5">
+      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-5">
         <p class="text-slate-700 mb-3">Verify your email to save this score to the leaderboard.</p>
         <button
           type="button"
           (click)="resendVerification()"
-          class="rounded-xl border border-indigo-300 hover:bg-indigo-100 text-indigo-700 font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl border border-emerald-300 hover:bg-emerald-100 text-emerald-700 font-semibold px-5 py-2.5 transition-colors"
         >
           Resend verification email
         </button>
       </div>
     } @else {
-      <div class="bg-indigo-100 rounded-2xl px-5 py-5 border border-indigo-600/15">
-        <p class="flex items-center gap-1.5 text-sm font-bold text-indigo-900 mb-3">
+      <div class="bg-emerald-100 rounded-2xl px-5 py-5 border border-emerald-600/15">
+        <p class="flex items-center gap-1.5 text-sm font-bold text-emerald-900 mb-3">
           <app-icon name="save" [size]="15" />
           Save your score to the leaderboard
         </p>
@@ -92,12 +92,12 @@
             placeholder="Enter your name"
             maxlength="30"
             required
-            class="flex-1 rounded-xl border border-indigo-600/25 bg-white px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+            class="flex-1 rounded-xl border border-emerald-600/25 bg-white px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
           />
           <button
             type="submit"
             [disabled]="isSaving() || !playerName.trim()"
-            class="rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
+            class="rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
           >
             @if (isSaving()) {
               Saving&hellip;
@@ -136,9 +136,9 @@
           @for (entry of leaderboard(); track entry.id; let i = $index) {
             <li
               class="flex items-center gap-3.5 px-6 py-2.5"
-              [class.bg-indigo-50]="entry.uid === authService.user()?.uid"
+              [class.bg-emerald-50]="entry.uid === authService.user()?.uid"
               [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
-              [class.border-indigo-600]="entry.uid === authService.user()?.uid"
+              [class.border-emerald-600]="entry.uid === authService.user()?.uid"
             >
               <span
                 class="w-7 text-center shrink-0"
@@ -160,8 +160,8 @@
 
               <span
                 class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white"
-                [class.from-indigo-600]="entry.uid === authService.user()?.uid"
-                [class.to-violet-600]="entry.uid === authService.user()?.uid"
+                [class.from-emerald-600]="entry.uid === authService.user()?.uid"
+                [class.to-amber-600]="entry.uid === authService.user()?.uid"
                 [class.from-slate-300]="entry.uid !== authService.user()?.uid"
                 [class.to-slate-400]="entry.uid !== authService.user()?.uid"
               >
@@ -172,13 +172,13 @@
                 <span
                   class="font-medium text-slate-900 truncate"
                   [class.font-bold]="entry.uid === authService.user()?.uid"
-                  [class.text-indigo-600]="entry.uid === authService.user()?.uid"
+                  [class.text-emerald-600]="entry.uid === authService.user()?.uid"
                 >
                   {{ entry.name }}
                 </span>
                 @if (entry.uid === authService.user()?.uid) {
                   <span
-                    class="ml-1.5 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                    class="ml-1.5 rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
                     >YOU</span
                   >
                 }
@@ -186,7 +186,7 @@
 
               <span
                 class="text-sm font-bold text-slate-900"
-                [class.text-indigo-600]="entry.uid === authService.user()?.uid"
+                [class.text-emerald-600]="entry.uid === authService.user()?.uid"
               >
                 {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
               </span>

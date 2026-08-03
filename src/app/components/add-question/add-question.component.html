@@ -2,40 +2,40 @@
   <div class="w-full max-w-xl bg-white rounded-3xl shadow-card-lg p-6 sm:p-8">
     <div class="text-center mb-6">
       <div
-        class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-cta"
+        class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-amber-600 shadow-cta"
       >
         <app-icon name="plus-circle" [size]="24" class="text-white" />
       </div>
-      <h1 class="text-3xl font-extrabold text-indigo-600 tracking-tight mb-1">Add a Question</h1>
+      <h1 class="text-3xl font-extrabold text-emerald-600 tracking-tight mb-1">Add a Question</h1>
       <p class="text-slate-500">Contribute a question to the shared custom bank</p>
     </div>
 
     @if (authService.isAnonymous()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-5">
+      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-5">
         <p class="text-slate-700 mb-3">Sign in to submit a question to the shared bank.</p>
         <button
           type="button"
           (click)="openSignIn()"
-          class="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
         >
           Sign in
         </button>
       </div>
     } @else if (!authService.isFullyAuthenticated()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-5">
+      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-5">
         <p class="text-slate-700 mb-3">Verify your email to submit a question.</p>
         <button
           type="button"
           (click)="resendVerification()"
-          class="rounded-xl border border-indigo-300 hover:bg-indigo-100 text-indigo-700 font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl border border-emerald-300 hover:bg-emerald-100 text-emerald-700 font-semibold px-5 py-2.5 transition-colors"
         >
           Resend verification email
         </button>
       </div>
     } @else if (!subscriptionService.isProUser()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-8">
+      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-8">
         <div
-          class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600"
+          class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-amber-600"
         >
           <app-icon name="sparkles" [size]="20" class="text-white" />
         </div>
@@ -47,20 +47,20 @@
         <button
           type="button"
           (click)="goToPricing()"
-          class="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
         >
           Upgrade to Pro
         </button>
       </div>
     } @else if (hasSubmitted()) {
-      <div class="text-center bg-green-50 border border-green-200 rounded-2xl px-4 py-6">
-        <app-icon name="circle-check-big" [size]="28" class="mx-auto mb-2 text-green-700" />
-        <p class="text-green-700 font-medium mb-4">Thanks! Your question was added to the bank.</p>
+      <div class="text-center bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-6">
+        <app-icon name="circle-check-big" [size]="28" class="mx-auto mb-2 text-emerald-700" />
+        <p class="text-emerald-700 font-medium mb-4">Thanks! Your question was added to the bank.</p>
         <div class="flex justify-center gap-3">
           <button
             type="button"
             (click)="addAnother()"
-            class="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 transition-colors"
+            class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
           >
             Add another
           </button>
@@ -85,7 +85,7 @@
             formControlName="category"
             list="category-suggestions"
             placeholder="e.g. Science"
-            class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           />
           <datalist id="category-suggestions">
             @for (category of categories(); track category.id) {
@@ -102,7 +102,7 @@
             <select
               id="difficulty"
               formControlName="difficulty"
-              class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
             >
               <option value="easy">Easy</option>
               <option value="medium">Medium</option>
@@ -121,8 +121,8 @@
           <div class="flex gap-0.5 rounded-xl bg-slate-100 p-1">
             <label
               class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-              [class.bg-indigo-100]="form.value.type === 'multiple'"
-              [class.text-indigo-600]="form.value.type === 'multiple'"
+              [class.bg-emerald-100]="form.value.type === 'multiple'"
+              [class.text-emerald-700]="form.value.type === 'multiple'"
               [class.text-slate-600]="form.value.type !== 'multiple'"
             >
               <input type="radio" formControlName="type" value="multiple" class="sr-only" />
@@ -130,8 +130,8 @@
             </label>
             <label
               class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-              [class.bg-indigo-100]="form.value.type === 'boolean'"
-              [class.text-indigo-600]="form.value.type === 'boolean'"
+              [class.bg-emerald-100]="form.value.type === 'boolean'"
+              [class.text-emerald-700]="form.value.type === 'boolean'"
               [class.text-slate-600]="form.value.type !== 'boolean'"
             >
               <input type="radio" formControlName="type" value="boolean" class="sr-only" />
@@ -149,7 +149,7 @@
             formControlName="question"
             rows="3"
             placeholder="What is the question?"
-            class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           ></textarea>
         </div>
 
@@ -159,8 +159,8 @@
             <div class="flex gap-0.5 rounded-xl bg-slate-100 p-1">
               <label
                 class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-                [class.bg-indigo-100]="form.value.correctAnswer === 'True'"
-                [class.text-indigo-600]="form.value.correctAnswer === 'True'"
+                [class.bg-emerald-100]="form.value.correctAnswer === 'True'"
+                [class.text-emerald-700]="form.value.correctAnswer === 'True'"
                 [class.text-slate-600]="form.value.correctAnswer !== 'True'"
               >
                 <input type="radio" formControlName="correctAnswer" value="True" class="sr-only" />
@@ -168,8 +168,8 @@
               </label>
               <label
                 class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-                [class.bg-indigo-100]="form.value.correctAnswer === 'False'"
-                [class.text-indigo-600]="form.value.correctAnswer === 'False'"
+                [class.bg-emerald-100]="form.value.correctAnswer === 'False'"
+                [class.text-emerald-700]="form.value.correctAnswer === 'False'"
                 [class.text-slate-600]="form.value.correctAnswer !== 'False'"
               >
                 <input type="radio" formControlName="correctAnswer" value="False" class="sr-only" />
@@ -186,7 +186,7 @@
               id="correctAnswer"
               type="text"
               formControlName="correctAnswer"
-              class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
             />
           </div>
 
@@ -198,7 +198,7 @@
                   type="text"
                   [formControlName]="$index"
                   [placeholder]="'Incorrect answer ' + ($index + 1)"
-                  class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  class="w-full rounded-xl border border-slate-900/15 px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
                 />
               }
             </div>
@@ -225,7 +225,7 @@
           <button
             type="submit"
             [disabled]="isSubmitting()"
-            class="flex-1 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
+            class="flex-1 rounded-xl bg-gradient-to-br from-emerald-600 to-amber-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (isSubmitting()) {
               Saving&hellip;
