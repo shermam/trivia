@@ -9,6 +9,7 @@ import {
 import { RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { AuthMenuComponent } from './auth-menu.component';
 
 /**
@@ -27,6 +28,7 @@ import { AuthMenuComponent } from './auth-menu.component';
 })
 export class TopBarComponent {
   protected readonly authService = inject(AuthService);
+  protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly authMenuState = inject(AuthMenuStateService);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
 
