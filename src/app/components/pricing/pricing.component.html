@@ -1,16 +1,29 @@
-<div class="min-h-screen bg-slate-100 px-4 py-10">
+<div class="min-h-screen bg-slate-50 px-4 sm:px-6 py-10 sm:py-14">
   <div class="max-w-3xl mx-auto">
-    <div class="text-center mb-8">
-      <h1 class="text-3xl sm:text-4xl font-extrabold text-indigo-700 mb-2">Pricing</h1>
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-indigo-600 transition-colors mb-8"
+    >
+      <app-icon name="arrow-left" [size]="15" />
+      Back to game
+    </a>
+
+    <div class="text-center mb-10">
+      <h1 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mb-2">
+        Pricing
+      </h1>
       <p class="text-slate-500">Play free forever, or go Pro to contribute your own questions.</p>
     </div>
 
     @if (checkoutStatus() === 'success') {
       <div
-        class="mb-6 flex items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
+        class="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"
       >
-        <span>Subscription started! It may take a few seconds to finish activating.</span>
-        <div class="flex items-center gap-3">
+        <span class="flex items-center gap-2">
+          <app-icon name="circle-check-big" [size]="16" class="shrink-0" />
+          Subscription started! It may take a few seconds to finish activating.
+        </span>
+        <div class="flex items-center gap-3 shrink-0">
           <a routerLink="/" class="font-semibold hover:underline">Start playing</a>
           <button
             type="button"
@@ -24,38 +37,65 @@
     }
     @if (checkoutStatus() === 'cancelled') {
       <div
-        class="mb-6 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
+        class="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
       >
-        <span>Checkout was cancelled — no charge was made.</span>
+        <span class="flex items-center gap-2">
+          <app-icon name="triangle-alert" [size]="16" class="shrink-0" />
+          Checkout was cancelled — no charge was made.
+        </span>
         <button
           type="button"
           (click)="dismissCheckoutStatus()"
-          class="font-semibold hover:underline"
+          class="font-semibold hover:underline shrink-0"
         >
           Dismiss
         </button>
       </div>
     }
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
       <!-- Starter (Free) -->
-      <div class="bg-white rounded-2xl shadow-xl p-6 sm:p-8 flex flex-col">
-        <h2 class="text-xl font-bold text-slate-800 mb-1">Starter</h2>
-        <p class="text-3xl font-extrabold text-slate-800 mb-4">Free</p>
-        <ul class="space-y-3 text-slate-600 flex-1">
-          <li class="flex items-start gap-2">
-            <span class="text-green-600 mt-0.5">&check;</span>
-            Play unlimited games
+      <div
+        class="bg-white rounded-3xl border border-slate-900/8 shadow-card p-8 flex flex-col"
+      >
+        <div
+          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 mb-5"
+        >
+          <app-icon name="zap" [size]="22" class="text-slate-500" />
+        </div>
+        <h2 class="text-xl font-extrabold text-slate-900 mb-1">Starter</h2>
+        <p class="text-sm text-slate-500 mb-5">Everything you need to play and compete.</p>
+        <p class="flex items-baseline gap-1 mb-6">
+          <span class="text-4xl font-extrabold text-slate-900 tracking-tight">$0</span>
+          <span class="text-sm font-medium text-slate-400">/month</span>
+        </p>
+
+        <div class="h-px bg-slate-900/6 mb-6"></div>
+
+        <ul class="space-y-1 text-slate-700 flex-1 mb-8">
+          <li class="flex items-start gap-2.5 py-1.5">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-50 mt-0.5"
+            >
+              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-green-700" />
+            </span>
+            <span class="text-sm">Play unlimited games</span>
           </li>
-          <li class="flex items-start gap-2">
-            <span class="text-green-600 mt-0.5">&check;</span>
-            Submit scores to the global leaderboard
+          <li class="flex items-start gap-2.5 py-1.5">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-50 mt-0.5"
+            >
+              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-green-700" />
+            </span>
+            <span class="text-sm">Submit scores to the global leaderboard</span>
           </li>
         </ul>
+
         @if (!isProUser()) {
           <div
-            class="mt-6 rounded-lg border border-slate-300 text-slate-500 text-center font-semibold py-2.5"
+            class="flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-slate-900/20 text-slate-900 text-center font-bold py-3"
           >
+            <app-icon name="check" [size]="16" [strokeWidth]="2.5" />
             Your current plan
           </div>
         }
@@ -63,44 +103,69 @@
 
       <!-- Pro -->
       <div
-        class="bg-white rounded-2xl shadow-xl p-6 sm:p-8 flex flex-col border-2 border-indigo-600 relative"
+        class="relative overflow-hidden bg-white rounded-3xl border-2 border-indigo-600 shadow-pro-card p-8 flex flex-col"
       >
+        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-600 to-violet-600"></div>
         <span
-          class="absolute -top-3 right-6 rounded-full bg-indigo-600 text-white text-xs font-bold px-3 py-1"
+          class="absolute top-5 right-5 rounded-full bg-indigo-600 text-white text-[11px] font-extrabold px-2.5 py-1 tracking-wide"
         >
-          Pro
+          PRO
         </span>
-        <h2 class="text-xl font-bold text-slate-800 mb-1">Pro</h2>
-        <p class="text-3xl font-extrabold text-slate-800 mb-4">
-          $0.99<span class="text-base font-medium text-slate-500">/month</span>
+
+        <div
+          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-cta mb-5"
+        >
+          <app-icon name="sparkles" [size]="22" class="text-white" />
+        </div>
+        <h2 class="text-xl font-extrabold text-slate-900 mb-1">Pro</h2>
+        <p class="text-sm text-slate-500 mb-5">Contribute questions and shape the game.</p>
+        <p class="flex items-baseline gap-1 mb-6">
+          <span class="text-4xl font-extrabold text-indigo-600 tracking-tight">$0.99</span>
+          <span class="text-sm font-medium text-slate-400">/month</span>
         </p>
-        <ul class="space-y-3 text-slate-600 flex-1">
-          <li class="flex items-start gap-2">
-            <span class="text-green-600 mt-0.5">&check;</span>
-            Everything in Starter
+
+        <div class="h-px bg-indigo-600/10 mb-6"></div>
+
+        <ul class="space-y-1 text-slate-700 flex-1 mb-8">
+          <li class="flex items-start gap-2.5 py-1.5">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-50 mt-0.5"
+            >
+              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-green-700" />
+            </span>
+            <span class="text-sm">Everything in Starter</span>
           </li>
-          <li class="flex items-start gap-2">
-            <span class="text-green-600 mt-0.5">&check;</span>
-            Create and add custom questions to the global question bank
+          <li class="flex items-start gap-2.5 py-1.5">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-50 mt-0.5"
+            >
+              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-green-700" />
+            </span>
+            <span class="text-sm">Create and add custom questions to the global question bank</span>
           </li>
-          <li class="flex items-start gap-2 text-slate-400">
-            <span class="mt-0.5">&#10022;</span>
-            More features coming soon
+          <li class="flex items-start gap-2.5 py-1.5 text-slate-400">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 mt-0.5"
+            >
+              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-slate-400" />
+            </span>
+            <span class="text-sm">More features coming soon</span>
           </li>
         </ul>
 
         @if (isProUser()) {
           <div
-            class="mt-6 rounded-lg bg-green-50 border border-green-200 text-green-700 text-center font-semibold py-2.5"
+            class="flex items-center justify-center gap-2 rounded-xl bg-green-50 border border-green-200 text-green-700 text-center font-bold py-3"
           >
-            &check; You're subscribed
+            <app-icon name="check" [size]="16" [strokeWidth]="2.5" />
+            You're subscribed
           </div>
         } @else {
           <button
             type="button"
             (click)="subscribe()"
             [disabled]="isSubscribing() || !authReady()"
-            class="mt-6 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold py-2.5 transition-colors"
+            class="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (!authReady()) {
               Loading&hellip;
@@ -109,17 +174,23 @@
             } @else if (needsSignIn()) {
               Sign in to subscribe
             } @else {
-              Subscribe
+              <app-icon name="sparkles" [size]="16" />
+              Subscribe — $0.99/mo
             }
           </button>
         }
 
         @if (errorMessage()) {
-          <p class="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <p
+            class="flex items-start gap-2 mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2"
+          >
+            <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
             {{ errorMessage() }}
           </p>
         }
       </div>
     </div>
+
+    <p class="text-center text-xs text-slate-400 mt-10">Cancel anytime. No hidden fees.</p>
   </div>
 </div>

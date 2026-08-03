@@ -3,13 +3,14 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { SubscriptionService } from '../../services/subscription.service';
+import { IconComponent } from '../icon/icon.component';
 
 type CheckoutQueryStatus = 'success' | 'cancelled' | null;
 
 @Component({
   selector: 'app-pricing',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, IconComponent],
   templateUrl: './pricing.component.html',
   styleUrl: './pricing.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

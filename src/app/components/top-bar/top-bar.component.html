@@ -1,51 +1,78 @@
-<header class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
-  <div class="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between">
-    <a routerLink="/" class="font-extrabold text-indigo-700 text-lg tracking-tight">Trivimind</a>
-
-    <div class="relative">
-      <button
-        type="button"
-        (click)="toggleMenu()"
-        class="flex items-center gap-2 rounded-full pl-1 pr-3 py-1 hover:bg-slate-100 transition-colors"
+<header
+  class="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-slate-900/8"
+>
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+    <a routerLink="/" class="flex items-center gap-2">
+      <span
+        class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-white"
       >
-        @if (!authService.authReady()) {
-          <span class="text-sm text-slate-400">Loading&hellip;</span>
-        } @else if (authService.isAnonymous()) {
-          <span
-            class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-500 text-sm"
-            >&#128100;</span
-          >
-          <span class="text-sm font-medium text-slate-700">Sign in</span>
-        } @else {
-          <span
-            class="relative flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white text-sm font-bold"
-          >
-            {{ initials() }}
-            @if (needsVerification()) {
-              <span
-                class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white"
-              ></span>
-            }
-          </span>
-          <span class="flex items-center gap-1.5 min-w-0">
-            <span class="text-sm font-medium text-slate-700 max-w-[10rem] truncate">
-              {{ authService.user()?.displayName || authService.user()?.email }}
-            </span>
-            @if (subscriptionService.isProUser()) {
-              <span
-                class="shrink-0 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none"
-                >PRO</span
-              >
-            }
-          </span>
-        }
-      </button>
+        <app-icon name="sparkles" [size]="16" />
+      </span>
+      <span class="font-extrabold text-indigo-600 text-lg tracking-tight">Trivimind</span>
+    </a>
 
-      @if (isMenuOpen()) {
-        <div class="absolute right-0 mt-2">
-          <app-auth-menu (closeRequested)="closeMenu()" />
-        </div>
-      }
+    <div class="flex items-center gap-6">
+      <a
+        routerLink="/pricing"
+        class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
+      >
+        Pricing
+      </a>
+
+      <div class="relative">
+        <button
+          type="button"
+          (click)="toggleMenu()"
+          class="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 border border-slate-900/10 transition-colors"
+          [class.bg-slate-50]="isMenuOpen()"
+          [class.bg-white]="!isMenuOpen()"
+          [class.shadow-[0_0_0_3px_rgba(79,70,229,0.12)]]="isMenuOpen()"
+        >
+          @if (!authService.authReady()) {
+            <span class="text-sm text-slate-400 px-1">Loading&hellip;</span>
+          } @else if (authService.isAnonymous()) {
+            <span
+              class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-500 text-sm"
+              >&#128100;</span
+            >
+            <span class="text-sm font-medium text-slate-700">Sign in</span>
+          } @else {
+            <span
+              class="relative flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-white text-xs font-bold"
+            >
+              {{ initials() }}
+              @if (needsVerification()) {
+                <span
+                  class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white"
+                ></span>
+              }
+            </span>
+            <span class="flex items-center gap-1.5 min-w-0">
+              <span class="text-sm font-medium text-slate-900 max-w-[10rem] truncate">
+                {{ authService.user()?.displayName || authService.user()?.email }}
+              </span>
+              @if (subscriptionService.isProUser()) {
+                <span
+                  class="shrink-0 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                  >PRO</span
+                >
+              }
+            </span>
+          }
+          <app-icon
+            name="chevron-down"
+            [size]="14"
+            class="text-slate-500 transition-transform"
+            [class.rotate-180]="isMenuOpen()"
+          />
+        </button>
+
+        @if (isMenuOpen()) {
+          <div class="absolute right-0 mt-2">
+            <app-auth-menu (closeRequested)="closeMenu()" />
+          </div>
+        }
+      </div>
     </div>
   </div>
 </header>

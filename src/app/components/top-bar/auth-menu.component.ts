@@ -17,6 +17,7 @@ import {
   SECONDARY_OAUTH_PROVIDERS,
 } from '../../services/auth.service';
 import { SubscriptionService } from '../../services/subscription.service';
+import { IconComponent } from '../icon/icon.component';
 import { ProviderIconComponent } from './provider-icon.component';
 
 type EmailFormMode = 'signup' | 'signin';
@@ -24,7 +25,7 @@ type EmailFormMode = 'signup' | 'signin';
 @Component({
   selector: 'app-auth-menu',
   standalone: true,
-  imports: [FormsModule, ProviderIconComponent, RouterLink],
+  imports: [FormsModule, ProviderIconComponent, RouterLink, IconComponent],
   templateUrl: './auth-menu.component.html',
   styleUrl: './auth-menu.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,6 +46,7 @@ export class AuthMenuComponent {
   protected readonly isOpeningPortal = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly infoMessage = signal<string | null>(null);
+  protected readonly nameSaved = signal(false);
 
   protected email = '';
   protected password = '';
@@ -127,6 +129,8 @@ export class AuthMenuComponent {
     }
     try {
       await this.authService.updateDisplayName(name);
+      this.nameSaved.set(true);
+      setTimeout(() => this.nameSaved.set(false), 2000);
     } catch {
       this.errorMessage.set('Could not update your name. Please try again.');
     }

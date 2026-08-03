@@ -1,5 +1,48 @@
 @import 'tailwindcss';
 
+/* Brand typography (see BRAND_DESIGN_SYSTEM.md §2) — Inter everywhere,
+   loaded via Google Fonts <link> in index.html (preconnected, display=swap)
+   rather than a self-hosted/npm font package, matching this app's existing
+   minimal-dependency approach for third-party assets. */
+@theme {
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji';
+}
+
+/* Brand elevation tokens (see BRAND_DESIGN_SYSTEM.md §2.1) — named utilities
+   so every card/dropdown/CTA across the app pulls from the same shadow
+   scale instead of ad hoc arbitrary values. */
+@utility shadow-card {
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+}
+@utility shadow-card-lg {
+  box-shadow:
+    0 8px 32px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.04);
+}
+@utility shadow-hero-card {
+  box-shadow:
+    0 32px 64px rgba(15, 23, 42, 0.22),
+    0 8px 16px rgba(15, 23, 42, 0.1);
+}
+@utility shadow-dropdown {
+  box-shadow:
+    0 20px 40px rgba(15, 23, 42, 0.12),
+    0 4px 8px rgba(15, 23, 42, 0.06);
+}
+@utility shadow-cta {
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.35);
+}
+@utility shadow-cta-hover {
+  box-shadow: 0 6px 24px rgba(79, 70, 229, 0.5);
+}
+@utility shadow-pro-card {
+  box-shadow:
+    0 8px 40px rgba(79, 70, 229, 0.18),
+    0 4px 16px rgba(79, 70, 229, 0.1);
+}
+
 /* Tailwind's preflight resets button cursors to the browser default
    (`default`, i.e. the arrow) — restore the hand cursor app-wide. Placed in
    the base layer so any explicit disabled:cursor-* utility on a component

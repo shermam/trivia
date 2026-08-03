@@ -1,121 +1,207 @@
-<div class="min-h-screen bg-slate-100 flex items-center justify-center px-4 py-8">
-  <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 sm:p-8">
-    <h1 class="text-3xl font-extrabold text-center text-indigo-700 mb-2">Game Over!</h1>
-    <p class="text-center text-slate-500 mb-6">Here's how you did</p>
-
-    <div class="flex justify-center gap-8 mb-8">
-      <div class="text-center">
-        <p class="text-4xl font-extrabold text-indigo-600">
-          {{ gameController.score() }} / {{ gameController.totalQuestions() }}
-        </p>
-        <p class="text-sm text-slate-500 mt-1">Score</p>
+<div class="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10">
+  <div class="w-full max-w-xl flex flex-col gap-4">
+    <div class="bg-white rounded-3xl shadow-card-lg px-6 sm:px-8 py-8 text-center">
+      <div
+        class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-amber-400 shadow-[0_8px_24px_rgba(245,158,11,0.3)]"
+      >
+        <app-icon name="trophy" [size]="28" class="text-white" />
       </div>
-      <div class="text-center">
-        <p class="text-4xl font-extrabold text-indigo-600">{{ gameController.percentage() }}%</p>
-        <p class="text-sm text-slate-500 mt-1">Accuracy</p>
+      <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight mb-1">Game Over!</h1>
+      <p class="text-slate-500 mb-6">Here's how you did</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-2xl border border-slate-900/7 bg-slate-50 px-4 py-5">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Score</p>
+          <p class="text-4xl font-extrabold text-indigo-600 tracking-tight">
+            {{ gameController.score() }}
+            <span class="text-xl font-medium text-slate-400"
+              >/ {{ gameController.totalQuestions() }}</span
+            >
+          </p>
+          <p class="text-xs text-slate-500 mt-1">correct answers</p>
+        </div>
+        <div class="rounded-2xl border border-slate-900/7 bg-slate-50 px-4 py-5">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Accuracy</p>
+          <p class="text-4xl font-extrabold tracking-tight" [class]="performanceColorClass()">
+            {{ gameController.percentage() }}%
+          </p>
+          <p class="text-xs font-semibold mt-1" [class]="performanceColorClass()">
+            {{ performanceLabel() }}
+          </p>
+        </div>
       </div>
     </div>
 
     @if (hasSaved()) {
       @if (saveError()) {
-        <p
-          class="text-center text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-8"
+        <div
+          class="flex items-start gap-2.5 text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4"
         >
-          {{ saveError() }}
-        </p>
+          <app-icon name="triangle-alert" [size]="18" class="shrink-0 mt-0.5" />
+          <p>{{ saveError() }}</p>
+        </div>
       } @else {
-        <p
-          class="text-center text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-8"
+        <div
+          class="flex items-start gap-2.5 text-green-700 bg-green-50 border border-green-200 rounded-2xl px-5 py-4"
         >
-          Score saved to the leaderboard!
-        </p>
+          <app-icon name="circle-check-big" [size]="18" class="shrink-0 mt-0.5" />
+          <div>
+            <p class="font-semibold">Score saved to the leaderboard!</p>
+            @if (playerRank(); as rank) {
+              <p class="text-sm text-green-800/80">You're ranked #{{ rank }} on the leaderboard.</p>
+            }
+          </div>
+        </div>
       }
     } @else if (authService.isAnonymous()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-lg px-4 py-4 mb-8">
+      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-5">
         <p class="text-slate-700 mb-3">Sign in to save this score to the leaderboard.</p>
         @if (!embedMode.isEmbedded()) {
           <button
             type="button"
             data-cy="open-sign-in"
             (click)="openSignIn()"
-            class="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2 transition-colors"
+            class="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 transition-colors"
           >
             Sign in
           </button>
         }
       </div>
     } @else if (!authService.isFullyAuthenticated()) {
-      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-lg px-4 py-4 mb-8">
+      <div class="text-center bg-indigo-50 border border-indigo-100 rounded-2xl px-4 py-5">
         <p class="text-slate-700 mb-3">Verify your email to save this score to the leaderboard.</p>
         <button
           type="button"
           (click)="resendVerification()"
-          class="rounded-lg border border-indigo-300 hover:bg-indigo-100 text-indigo-700 font-semibold px-5 py-2 transition-colors"
+          class="rounded-xl border border-indigo-300 hover:bg-indigo-100 text-indigo-700 font-semibold px-5 py-2.5 transition-colors"
         >
           Resend verification email
         </button>
       </div>
     } @else {
-      <form (ngSubmit)="saveScore()" class="flex flex-col sm:flex-row gap-3 mb-8">
-        <input
-          type="text"
-          name="playerName"
-          [(ngModel)]="playerName"
-          placeholder="Enter your name"
-          maxlength="30"
-          required
-          class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        <button
-          type="submit"
-          [disabled]="isSaving() || !playerName.trim()"
-          class="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold px-5 py-2.5 transition-colors"
-        >
-          @if (isSaving()) {
-            Saving&hellip;
-          } @else {
-            Save Score
-          }
-        </button>
-      </form>
+      <div class="bg-indigo-100 rounded-2xl px-5 py-5 border border-indigo-600/15">
+        <p class="flex items-center gap-1.5 text-sm font-bold text-indigo-900 mb-3">
+          <app-icon name="save" [size]="15" />
+          Save your score to the leaderboard
+        </p>
+        <form (ngSubmit)="saveScore()" class="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            name="playerName"
+            [(ngModel)]="playerName"
+            placeholder="Enter your name"
+            maxlength="30"
+            required
+            class="flex-1 rounded-xl border border-indigo-600/25 bg-white px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+          />
+          <button
+            type="submit"
+            [disabled]="isSaving() || !playerName.trim()"
+            class="rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
+          >
+            @if (isSaving()) {
+              Saving&hellip;
+            } @else {
+              Save Score
+            }
+          </button>
+        </form>
+      </div>
     }
     @if (saveError() && !hasSaved()) {
-      <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-6">
+      <p
+        class="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-2xl px-4 py-3"
+      >
+        <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
         {{ saveError() }}
       </p>
     }
 
-    <h2 class="text-lg font-bold text-slate-800 mb-3">Top 10 Leaderboard</h2>
+    <div class="bg-white rounded-3xl shadow-card-lg overflow-hidden">
+      <div class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6">
+        <app-icon name="medal" [size]="18" class="text-amber-500" />
+        <h2 class="text-base font-bold text-slate-900">Top 10 Leaderboard</h2>
+      </div>
 
-    @if (isLoadingLeaderboard()) {
-      <p class="text-slate-500 text-sm">Loading leaderboard&hellip;</p>
-    } @else if (leaderboardError()) {
-      <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-        {{ leaderboardError() }}
-      </p>
-    } @else if (leaderboard().length === 0) {
-      <p class="text-slate-500 text-sm">No scores yet. Be the first!</p>
-    } @else {
-      <ol class="divide-y divide-slate-200 rounded-lg border border-slate-200 overflow-hidden">
-        @for (entry of leaderboard(); track entry.id; let i = $index) {
-          <li class="flex items-center justify-between px-4 py-2.5 bg-white">
-            <span class="flex items-center gap-3">
-              <span class="w-6 text-center font-bold text-slate-400">{{ i + 1 }}</span>
-              <span class="font-medium text-slate-800">{{ entry.name }}</span>
-            </span>
-            <span class="text-sm text-slate-600">
-              {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
-            </span>
-          </li>
-        }
-      </ol>
-    }
+      @if (isLoadingLeaderboard()) {
+        <p class="text-slate-500 text-sm px-6 py-4">Loading leaderboard&hellip;</p>
+      } @else if (leaderboardError()) {
+        <p class="text-sm text-red-700 px-6 py-4">
+          {{ leaderboardError() }}
+        </p>
+      } @else if (leaderboard().length === 0) {
+        <p class="text-slate-500 text-sm px-6 py-4">No scores yet. Be the first!</p>
+      } @else {
+        <ol class="py-2">
+          @for (entry of leaderboard(); track entry.id; let i = $index) {
+            <li
+              class="flex items-center gap-3.5 px-6 py-2.5"
+              [class.bg-indigo-50]="entry.uid === authService.user()?.uid"
+              [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
+              [class.border-indigo-600]="entry.uid === authService.user()?.uid"
+            >
+              <span
+                class="w-7 text-center shrink-0"
+                [class.text-lg]="i < 3"
+                [class.text-sm]="i >= 3"
+                [class.font-bold]="i >= 3"
+                [class.text-slate-400]="i >= 3"
+              >
+                @if (i === 0) {
+                  &#129351;
+                } @else if (i === 1) {
+                  &#129352;
+                } @else if (i === 2) {
+                  &#129353;
+                } @else {
+                  #{{ i + 1 }}
+                }
+              </span>
+
+              <span
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white"
+                [class.from-indigo-600]="entry.uid === authService.user()?.uid"
+                [class.to-violet-600]="entry.uid === authService.user()?.uid"
+                [class.from-slate-300]="entry.uid !== authService.user()?.uid"
+                [class.to-slate-400]="entry.uid !== authService.user()?.uid"
+              >
+                {{ initialsFor(entry.name) }}
+              </span>
+
+              <span class="flex-1 min-w-0">
+                <span
+                  class="font-medium text-slate-900 truncate"
+                  [class.font-bold]="entry.uid === authService.user()?.uid"
+                  [class.text-indigo-600]="entry.uid === authService.user()?.uid"
+                >
+                  {{ entry.name }}
+                </span>
+                @if (entry.uid === authService.user()?.uid) {
+                  <span
+                    class="ml-1.5 rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                    >YOU</span
+                  >
+                }
+              </span>
+
+              <span
+                class="text-sm font-bold text-slate-900"
+                [class.text-indigo-600]="entry.uid === authService.user()?.uid"
+              >
+                {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
+              </span>
+            </li>
+          }
+        </ol>
+      }
+    </div>
 
     <button
       type="button"
       (click)="playAgain()"
-      class="w-full mt-8 rounded-lg bg-slate-800 hover:bg-slate-900 text-white font-semibold py-2.5 transition-colors"
+      class="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 shadow-[0_4px_16px_rgba(15,23,42,0.2)] transition-colors"
     >
+      <app-icon name="rotate-ccw" [size]="18" />
       Play Again
     </button>
   </div>

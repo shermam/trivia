@@ -1,9 +1,20 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnDestroy,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { Router } from '@angular/router';
 import { GameControllerService } from '../../services/game-controller.service';
 
 const QUESTION_DURATION_SECONDS = 15;
 const ANSWER_DELAY_MS = 2000;
+const ANSWER_LABELS = ['A', 'B', 'C', 'D'];
+const TIMER_RING_RADIUS = 18;
+const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 
 @Component({
   selector: 'app-quiz-loop',
@@ -17,9 +28,19 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly gameController = inject(GameControllerService);
   private readonly router = inject(Router);
 
+  protected readonly answerLabels = ANSWER_LABELS;
+  protected readonly timerRingRadius = TIMER_RING_RADIUS;
+  protected readonly timerRingCircumference = TIMER_RING_CIRCUMFERENCE;
+
   protected readonly timeLeft = signal(QUESTION_DURATION_SECONDS);
   protected readonly selectedAnswer = signal<string | null>(null);
   protected readonly isAnswered = signal(false);
+
+  protected readonly timerRingOffset = computed(
+    () =>
+      TIMER_RING_CIRCUMFERENCE -
+      (this.timeLeft() / QUESTION_DURATION_SECONDS) * TIMER_RING_CIRCUMFERENCE,
+  );
 
   private timerHandle: ReturnType<typeof setInterval> | null = null;
   private advanceTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -47,19 +68,37 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected answerClass(answer: string): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
-      return 'bg-white hover:bg-indigo-50 border-slate-300 text-slate-800';
+      return 'bg-white hover:bg-slate-50 hover:border-indigo-600 hover:shadow-[0_0_0_3px_rgba(79,70,229,0.08)] border-slate-900/15 text-slate-900';
     }
 
     const isCorrectAnswer = answer === question.correct_answer;
     const isSelected = answer === this.selectedAnswer();
 
     if (isCorrectAnswer) {
-      return 'bg-green-100 border-green-500 text-green-800';
+      return 'bg-green-50 border-green-700 text-green-900';
     }
     if (isSelected) {
-      return 'bg-red-100 border-red-500 text-red-800';
+      return 'bg-red-50 border-red-700 text-red-900';
     }
-    return 'bg-white border-slate-300 text-slate-400 opacity-60';
+    return 'bg-white border-slate-900/8 text-slate-400 opacity-60';
+  }
+
+  protected answerBadgeClass(answer: string): string {
+    const question = this.gameController.currentQuestion();
+    if (!this.isAnswered() || !question) {
+      return 'bg-slate-100 text-slate-600';
+    }
+
+    const isCorrectAnswer = answer === question.correct_answer;
+    const isSelected = answer === this.selectedAnswer();
+
+    if (isCorrectAnswer) {
+      return 'bg-green-700 text-white';
+    }
+    if (isSelected) {
+      return 'bg-red-700 text-white';
+    }
+    return 'bg-slate-100 text-slate-600';
   }
 
   private startTimer(): void {

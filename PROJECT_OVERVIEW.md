@@ -46,9 +46,9 @@ Any unmatched route redirects back to `/`.
 **Game over (`/game-over`)**
 
 - Redirects to `/` if there's no completed game in memory.
-- Shows final score (`X / N`) and accuracy percentage.
+- Shows final score (`X / N`) and accuracy percentage, plus a derived performance label ("Outstanding!" / "Great job!" / "Good effort!" / "Keep practicing!" based on accuracy).
 - If fully authenticated (see §1.5), lets the player enter a name (≤30 chars, prefilled from their profile) and submit their score to the Firestore `leaderboard` collection — one entry per account, keeping their best score. Anonymous or unverified players see a sign-in/verify prompt instead of the form.
-- Displays the **top 10 leaderboard**, sorted by score descending, loaded from Firestore and refreshed after a successful save.
+- Displays the **top 10 leaderboard**, sorted by score descending, loaded from Firestore and refreshed after a successful save. After a successful save, if the player's own entry is present in that fetched top 10, their row is highlighted and their rank ("You're ranked #N on the leaderboard") is shown — derived entirely from the already-fetched top-10 list (matched by `uid`), not a dedicated rank query, so a saved score outside the top 10 shows no rank claim rather than an invented one.
 - "Play Again" resets all in-memory game state and returns to `/`.
 
 **Add a question (`/add-question`)**
@@ -86,7 +86,7 @@ Firestore collection `custom_questions` acts as a first-party question bank alon
 
 Every visitor gets a **Firebase Anonymous Auth** uid the moment the app loads (`AuthService.ensureSignedIn()`, called once from the root `App` component) — there's no sign-in wall before playing. Signing in with a real provider is optional and only needed to save a score to the leaderboard.
 
-- **Top bar** (`TopBarComponent`, rendered as a sibling of `<router-outlet>` in `app.html`) shows a sign-in trigger top-right on every screen. It's a self-contained, removable component — dropping it (or gating it behind `EmbedModeService`, see below) leaves just the game panel.
+- **Top bar** (`TopBarComponent`, rendered as a sibling of `<router-outlet>` in `app.html`) shows a persistent `/pricing` nav link plus a sign-in trigger top-right on every screen. It's a self-contained, removable component — dropping it (or gating it behind `EmbedModeService`, see below) leaves just the game panel.
 - **Sign-in options**: Google and email/password are the prominent choices; a "more sign-in options" disclosure reveals Facebook, GitHub, Microsoft, Apple, Twitter/X, and Yahoo (`AuthService.signInWithOAuth`). Play Games and Game Center are Firebase console options with no Web SDK equivalent (native Android/Apple only) and are intentionally not offered here.
 - **Anonymous-to-real upgrade**: signing in from an anonymous session links the new credential to the existing uid (`linkWithCredential`/`linkWithPopup`) instead of minting a new one, so anything already saved carries forward. If that credential already belongs to another account, it falls back to a normal sign-in (switching uid).
 - **Lazy OAuth popup resolver**: `AuthService` calls `initializeAuth(app, { persistence: browserLocalPersistence })` — deliberately _not_ the `getAuth()` convenience wrapper, which wires in `browserPopupRedirectResolver` unconditionally and, as a side effect, eagerly loads a third-party iframe on the Firebase `authDomain` (plus Google's gapi.js) on every page load to check for a pending redirect result, whether or not that visitor ever uses OAuth. Since most visitors only ever play anonymously, `signInWithOAuth` instead passes `browserPopupRedirectResolver` explicitly at call time, so that iframe/script only loads for someone actually clicking a provider button. Confirmed via a Lighthouse best-practices "third-party cookies" audit failure on a real (non-Incognito) browser profile that reproduced only when that iframe loaded — a network trace before/after this change showed the `firebaseapp.com/__/auth/iframe` and `apis.google.com` requests disappearing entirely from the anonymous-only page-load path.
@@ -122,6 +122,8 @@ A single paid tier, "Pro" ($0.99 USD/month), gates the ability to add custom que
 | HTTP                    | Angular's `HttpClient` (`provideHttpClient()`), used for Open Trivia DB calls                                                                                                                |
 | Forms                   | Angular `ReactiveFormsModule` (game setup) and `FormsModule` + `ngModel` (game-over name input)                                                                                              |
 | Routing                 | Angular Router with lazy-loaded (`loadComponent`) standalone routes                                                                                                                          |
+
+The visual design system (colors, typography, shadows, radii, component styling directives) is documented in **`BRAND_DESIGN_SYSTEM.md`**; a Figma-exported reference implementation lives under `figma/` (read-only reference material, not part of the shipped app). Icons are inline SVG (lucide-static path data, ISC license) rendered via a single shared `IconComponent` (`src/app/components/icon/icon.component.ts`) — same no-dependency convention as `ProviderIconComponent`'s OAuth brand marks — rather than an `lucide-angular`/icon-font dependency. `Inter` (the brand typeface) is loaded via a preconnected Google Fonts `<link>` in `index.html` rather than self-hosted, the one deliberate exception to this app's general third-party-request avoidance (§1.5's OAuth-popup-resolver note); Lighthouse (§4.4) is the guardrail that keeps this from silently regressing performance.
 
 ### 2.2 Tooling
 
