@@ -86,6 +86,12 @@ service cloud.firestore {
         allow read, create: if isRealAuthedUser() && request.auth.uid == uid;
       }
 
+      match /portal_sessions/{id} {
+        // Same handshake as checkout_sessions above, but for opening
+        // Stripe's hosted billing portal (`createPortalSession`).
+        allow read, create: if isRealAuthedUser() && request.auth.uid == uid;
+      }
+
       match /subscriptions/{id} {
         // Synced read-only from Stripe by `stripeWebhook`; drives the
         // real-time `isProUser` UI signal.

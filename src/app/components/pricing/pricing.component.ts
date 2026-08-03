@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { SubscriptionService } from '../../services/subscription.service';
@@ -9,6 +9,7 @@ type CheckoutQueryStatus = 'success' | 'cancelled' | null;
 @Component({
   selector: 'app-pricing',
   standalone: true,
+  imports: [RouterLink],
   templateUrl: './pricing.component.html',
   styleUrl: './pricing.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -194,6 +194,19 @@
       >
         Upgrade to Pro to add questions
       </a>
+    } @else {
+      <button
+        type="button"
+        (click)="manageSubscription()"
+        [disabled]="isOpeningPortal()"
+        class="block w-full text-center text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-60 mb-3"
+      >
+        @if (isOpeningPortal()) {
+          Opening billing portal&hellip;
+        } @else {
+          Manage subscription
+        }
+      </button>
     }
 
     <button
