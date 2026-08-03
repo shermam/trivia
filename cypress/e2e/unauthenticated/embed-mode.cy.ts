@@ -8,7 +8,7 @@ describe('embed mode', () => {
     cy.visit('/?embed=1');
     cy.get('header').should('not.exist');
     // The game itself must stay fully usable with no top bar.
-    cy.contains('Trivia Time');
+    cy.contains('Trivimind');
     cy.contains('button', 'Start Game').should('exist');
   });
 });
