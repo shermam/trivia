@@ -42,6 +42,7 @@ export class AuthMenuComponent {
   protected readonly emailFormMode = signal<EmailFormMode>('signup');
   protected readonly showMoreProviders = signal(false);
   protected readonly isSubmitting = signal(false);
+  protected readonly isOpeningPortal = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly infoMessage = signal<string | null>(null);
 
@@ -128,6 +129,22 @@ export class AuthMenuComponent {
       await this.authService.updateDisplayName(name);
     } catch {
       this.errorMessage.set('Could not update your name. Please try again.');
+    }
+  }
+
+  protected async manageSubscription(): Promise<void> {
+    if (this.isOpeningPortal()) {
+      return;
+    }
+    this.isOpeningPortal.set(true);
+    this.errorMessage.set(null);
+    try {
+      // Redirects the page to the Stripe billing portal on success, so
+      // there's nothing further to do here in the happy path.
+      await this.subscriptionService.openBillingPortal();
+    } catch {
+      this.errorMessage.set('Could not open the billing portal. Please try again.');
+      this.isOpeningPortal.set(false);
     }
   }
 

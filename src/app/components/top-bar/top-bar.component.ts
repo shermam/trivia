@@ -6,6 +6,7 @@ import {
   computed,
   inject,
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { AuthMenuComponent } from './auth-menu.component';
@@ -19,7 +20,7 @@ import { AuthMenuComponent } from './auth-menu.component';
 @Component({
   selector: 'app-top-bar',
   standalone: true,
-  imports: [AuthMenuComponent],
+  imports: [AuthMenuComponent, RouterLink],
   templateUrl: './top-bar.component.html',
   styleUrl: './top-bar.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

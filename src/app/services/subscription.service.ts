@@ -194,4 +194,52 @@ export class SubscriptionService {
 
     window.location.assign(checkoutUrl);
   }
+
+  /**
+   * Creates a Stripe billing portal session doc, waits for
+   * `createPortalSession` (functions/src/billing-portal.ts) to write back a
+   * hosted portal URL, and redirects the browser to it — lets a Pro
+   * subscriber manage their payment method or cancel from Stripe's own UI.
+   * Same doc-create-then-listen handshake as `startProCheckout` above.
+   */
+  async openBillingPortal(): Promise<void> {
+    const user = this.authService.user();
+    if (!user || user.isAnonymous) {
+      throw new Error('Sign in before managing your subscription.');
+    }
+
+    const { firestore, firestoreModule } = await this.firebaseService.getFirestore();
+
+    const sessionRef = await firestoreModule.addDoc(
+      firestoreModule.collection(firestore, CUSTOMERS_COLLECTION, user.uid, 'portal_sessions'),
+      { return_url: `${window.location.origin}/pricing` },
+    );
+
+    const portalUrl = await withTimeout(
+      new Promise<string>((resolve, reject) => {
+        const unsubscribe = firestoreModule.onSnapshot(
+          sessionRef,
+          (snapshot) => {
+            const data = snapshot.data() as
+              { url?: string; error?: { message?: string } } | undefined;
+            if (data?.error) {
+              unsubscribe();
+              reject(new Error(data.error.message ?? 'Billing portal could not be opened.'));
+            } else if (data?.url) {
+              unsubscribe();
+              resolve(data.url);
+            }
+          },
+          (error) => {
+            unsubscribe();
+            reject(error);
+          },
+        );
+      }),
+      CHECKOUT_TIMEOUT_MS,
+      'Timed out waiting for the billing portal to open.',
+    );
+
+    window.location.assign(portalUrl);
+  }
 }
