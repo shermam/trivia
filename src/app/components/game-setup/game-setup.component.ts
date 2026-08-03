@@ -5,11 +5,12 @@ import { GameConfig } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
+import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-game-setup',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, IconComponent],
   templateUrl: './game-setup.component.html',
   styleUrl: './game-setup.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

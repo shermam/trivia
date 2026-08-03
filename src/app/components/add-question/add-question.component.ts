@@ -7,11 +7,12 @@ import { AuthService } from '../../services/auth.service';
 import { FirebaseService } from '../../services/firebase.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
+import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-add-question',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, IconComponent],
   templateUrl: './add-question.component.html',
   styleUrl: './add-question.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

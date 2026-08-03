@@ -10,6 +10,7 @@ import { RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { SubscriptionService } from '../../services/subscription.service';
+import { IconComponent } from '../icon/icon.component';
 import { AuthMenuComponent } from './auth-menu.component';
 
 /**
@@ -21,7 +22,7 @@ import { AuthMenuComponent } from './auth-menu.component';
 @Component({
   selector: 'app-top-bar',
   standalone: true,
-  imports: [AuthMenuComponent, RouterLink],
+  imports: [AuthMenuComponent, RouterLink, IconComponent],
   templateUrl: './top-bar.component.html',
   styleUrl: './top-bar.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

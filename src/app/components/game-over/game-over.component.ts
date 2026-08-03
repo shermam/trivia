@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -8,15 +8,28 @@ import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
+import { IconComponent } from '../icon/icon.component';
 
 function isPermissionDeniedError(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === 'permission-denied';
 }
 
+/** Derives initials for a leaderboard avatar, e.g. "Jane Doe" -> "JD". */
+function initialsFor(name: string): string {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+  return initials || '?';
+}
+
 @Component({
   selector: 'app-game-over',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, IconComponent],
   templateUrl: './game-over.component.html',
   styleUrl: './game-over.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -29,6 +42,8 @@ export class GameOverComponent implements OnInit {
   private readonly firebaseService = inject(FirebaseService);
   private readonly router = inject(Router);
 
+  protected readonly initialsFor = initialsFor;
+
   protected playerName = '';
   protected readonly isSaving = signal(false);
   protected readonly hasSaved = signal(false);
@@ -36,6 +51,37 @@ export class GameOverComponent implements OnInit {
   protected readonly leaderboard = signal<LeaderboardEntry[]>([]);
   protected readonly isLoadingLeaderboard = signal(true);
   protected readonly leaderboardError = signal<string | null>(null);
+
+  protected readonly performanceLabel = computed(() => {
+    const percentage = this.gameController.percentage();
+    if (percentage >= 90) return 'Outstanding!';
+    if (percentage >= 70) return 'Great job!';
+    if (percentage >= 50) return 'Good effort!';
+    return 'Keep practicing!';
+  });
+
+  protected readonly performanceColorClass = computed(() => {
+    const percentage = this.gameController.percentage();
+    if (percentage >= 90) return 'text-green-700';
+    if (percentage >= 70) return 'text-indigo-600';
+    if (percentage >= 50) return 'text-amber-700';
+    return 'text-red-700';
+  });
+
+  /**
+   * Rank among the fetched top 10 only — there's no cheap way to know a
+   * player's exact rank if their score didn't make the top 10 without a
+   * dedicated Firestore count query, so this stays `null` in that case
+   * rather than guessing.
+   */
+  protected readonly playerRank = computed(() => {
+    const uid = this.authService.user()?.uid;
+    if (!uid) {
+      return null;
+    }
+    const index = this.leaderboard().findIndex((entry) => entry.uid === uid);
+    return index === -1 ? null : index + 1;
+  });
 
   ngOnInit(): void {
     if (this.gameController.totalQuestions() === 0) {
