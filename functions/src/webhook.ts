@@ -18,7 +18,12 @@ import { syncSubscriptionToFirestore } from './subscriptions';
  * `delete()`), so Stripe's at-least-once webhook delivery is safe to retry.
  */
 export const stripeWebhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret] },
+  // Stripe calls this with no Google-issued auth token — it authenticates
+  // via the Stripe-Signature header instead (verified below) — so the
+  // underlying Cloud Run service must explicitly allow unauthenticated
+  // invocations, or every delivery gets rejected with a 403 before this
+  // handler ever runs.
+  { secrets: [stripeSecretKey, stripeWebhookSecret], invoker: 'public' },
   async (req, res) => {
     const signature = req.headers['stripe-signature'];
     if (!signature) {
