@@ -68,7 +68,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected answerClass(answer: string): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
-      return 'bg-white hover:bg-slate-50 hover:border-indigo-600 hover:shadow-[0_0_0_3px_rgba(79,70,229,0.08)] border-slate-900/15 text-slate-900';
+      return 'bg-white hover:bg-zinc-50 hover:border-zinc-900 hover:shadow-[0_0_0_3px_rgba(0,0,0,0.08)] border-zinc-900/15 text-zinc-900';
     }
 
     const isCorrectAnswer = answer === question.correct_answer;
@@ -80,13 +80,13 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (isSelected) {
       return 'bg-red-50 border-red-700 text-red-900';
     }
-    return 'bg-white border-slate-900/8 text-slate-400 opacity-60';
+    return 'bg-white border-zinc-900/8 text-zinc-400 opacity-60';
   }
 
   protected answerBadgeClass(answer: string): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
-      return 'bg-slate-100 text-slate-600';
+      return 'bg-zinc-100 text-zinc-600';
     }
 
     const isCorrectAnswer = answer === question.correct_answer;
@@ -98,7 +98,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (isSelected) {
       return 'bg-red-700 text-white';
     }
-    return 'bg-slate-100 text-slate-600';
+    return 'bg-zinc-100 text-zinc-600';
   }
 
   private startTimer(): void {

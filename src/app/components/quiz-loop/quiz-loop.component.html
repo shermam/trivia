@@ -1,15 +1,15 @@
 @if (gameController.currentQuestion(); as question) {
-  <div class="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-8">
+  <div class="min-h-screen bg-zinc-50 flex items-center justify-center px-4 py-8">
     <div class="w-full max-w-xl bg-white rounded-3xl shadow-card-lg overflow-hidden">
-      <div class="flex items-center justify-between px-6 py-5 border-b border-slate-900/6 text-sm sm:text-base">
-        <span class="font-semibold text-slate-600">
+      <div class="flex items-center justify-between px-6 py-5 border-b border-zinc-900/6 text-sm sm:text-base">
+        <span class="font-semibold text-zinc-600">
           Question
-          <span class="text-slate-900 font-extrabold"
+          <span class="text-zinc-900 font-extrabold"
             >{{ gameController.currentIndex() + 1 }}</span
           >
           / {{ gameController.totalQuestions() }}
         </span>
-        <span class="font-semibold text-indigo-600">Score: {{ gameController.score() }}</span>
+        <span class="font-semibold text-zinc-900">Score: {{ gameController.score() }}</span>
 
         <div class="relative flex h-12 w-12 items-center justify-center">
           <svg class="absolute inset-0 -rotate-90" viewBox="0 0 44 44" width="48" height="48">
@@ -18,7 +18,7 @@
               cy="22"
               [attr.r]="timerRingRadius"
               fill="none"
-              [class.stroke-indigo-100]="timeLeft() > 5"
+              [class.stroke-zinc-200]="timeLeft() > 5"
               [class.stroke-red-100]="timeLeft() <= 5"
               stroke-width="3"
             />
@@ -27,7 +27,7 @@
               cy="22"
               [attr.r]="timerRingRadius"
               fill="none"
-              [class.stroke-indigo-600]="timeLeft() > 5"
+              [class.stroke-zinc-900]="timeLeft() > 5"
               [class.stroke-red-700]="timeLeft() <= 5"
               stroke-width="3"
               stroke-linecap="round"
@@ -38,16 +38,16 @@
           </svg>
           <span
             class="relative text-xs font-bold"
-            [class.text-indigo-600]="timeLeft() > 5"
+            [class.text-zinc-900]="timeLeft() > 5"
             [class.text-red-700]="timeLeft() <= 5"
             >{{ timeLeft() }}s</span
           >
         </div>
       </div>
 
-      <div class="h-1 bg-slate-100">
+      <div class="h-1 bg-zinc-100">
         <div
-          class="h-full bg-gradient-to-r from-indigo-600 to-violet-600 transition-all duration-400 ease-out"
+          class="h-full bg-gradient-to-r from-zinc-900 to-zinc-600 transition-all duration-400 ease-out"
           [style.width.%]="(gameController.currentIndex() / gameController.totalQuestions()) * 100"
         ></div>
       </div>
@@ -55,18 +55,18 @@
       <div class="p-6">
         <div class="flex flex-wrap items-center gap-2 mb-5">
           <span
-            class="text-[11px] font-bold uppercase tracking-wide bg-indigo-100 text-indigo-600 rounded-full px-2.5 py-1"
+            class="text-[11px] font-bold uppercase tracking-wide bg-zinc-200 text-zinc-900 rounded-full px-2.5 py-1"
           >
             {{ question.category }}
           </span>
           <span
-            class="text-[11px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 rounded-full px-2.5 py-1"
+            class="text-[11px] font-bold uppercase tracking-wide bg-zinc-100 text-zinc-500 rounded-full px-2.5 py-1"
           >
             {{ question.difficulty }}
           </span>
         </div>
 
-        <h2 class="text-xl sm:text-2xl font-bold text-slate-900 leading-snug mb-6">
+        <h2 class="text-xl sm:text-2xl font-bold text-zinc-900 leading-snug mb-6">
           {{ question.question }}
         </h2>
 

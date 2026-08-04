@@ -1,18 +1,18 @@
-<div class="min-h-screen bg-slate-50 px-4 sm:px-6 py-10 sm:py-14">
+<div class="min-h-screen bg-zinc-50 px-4 sm:px-6 py-10 sm:py-14">
   <div class="max-w-3xl mx-auto">
     <a
       routerLink="/"
-      class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-indigo-600 transition-colors mb-8"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors mb-8"
     >
       <app-icon name="arrow-left" [size]="15" />
       Back to game
     </a>
 
     <div class="text-center mb-10">
-      <h1 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mb-2">
+      <h1 class="text-3xl sm:text-4xl font-extrabold text-zinc-900 tracking-tight mb-2">
         Pricing
       </h1>
-      <p class="text-slate-500">Play free forever, or go Pro to contribute your own questions.</p>
+      <p class="text-zinc-500">Play free forever, or go Pro to contribute your own questions.</p>
     </div>
 
     @if (checkoutStatus() === 'success') {
@@ -56,23 +56,23 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
       <!-- Starter (Free) -->
       <div
-        class="bg-white rounded-3xl border border-slate-900/8 shadow-card p-8 flex flex-col"
+        class="bg-white rounded-3xl border border-zinc-900/8 shadow-card p-8 flex flex-col"
       >
         <div
-          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 mb-5"
+          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 mb-5"
         >
-          <app-icon name="zap" [size]="22" class="text-slate-500" />
+          <app-icon name="zap" [size]="22" class="text-zinc-500" />
         </div>
-        <h2 class="text-xl font-extrabold text-slate-900 mb-1">Starter</h2>
-        <p class="text-sm text-slate-500 mb-5">Everything you need to play and compete.</p>
+        <h2 class="text-xl font-extrabold text-zinc-900 mb-1">Starter</h2>
+        <p class="text-sm text-zinc-500 mb-5">Everything you need to play and compete.</p>
         <p class="flex items-baseline gap-1 mb-6">
-          <span class="text-4xl font-extrabold text-slate-900 tracking-tight">$0</span>
-          <span class="text-sm font-medium text-slate-400">/month</span>
+          <span class="text-4xl font-extrabold text-zinc-900 tracking-tight">$0</span>
+          <span class="text-sm font-medium text-zinc-400">/month</span>
         </p>
 
-        <div class="h-px bg-slate-900/6 mb-6"></div>
+        <div class="h-px bg-zinc-900/6 mb-6"></div>
 
-        <ul class="space-y-1 text-slate-700 flex-1 mb-8">
+        <ul class="space-y-1 text-zinc-700 flex-1 mb-8">
           <li class="flex items-start gap-2.5 py-1.5">
             <span
               class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-50 mt-0.5"
@@ -93,7 +93,7 @@
 
         @if (!isProUser()) {
           <div
-            class="flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-slate-900/20 text-slate-900 text-center font-bold py-3"
+            class="flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-zinc-900/20 text-zinc-900 text-center font-bold py-3"
           >
             <app-icon name="check" [size]="16" [strokeWidth]="2.5" />
             Your current plan
@@ -103,30 +103,30 @@
 
       <!-- Pro -->
       <div
-        class="relative overflow-hidden bg-white rounded-3xl border-2 border-indigo-600 shadow-pro-card p-8 flex flex-col"
+        class="relative overflow-hidden bg-white rounded-3xl border-2 border-zinc-900 shadow-pro-card p-8 flex flex-col"
       >
-        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-600 to-violet-600"></div>
+        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-zinc-900 to-zinc-600"></div>
         <span
-          class="absolute top-5 right-5 rounded-full bg-indigo-600 text-white text-[11px] font-extrabold px-2.5 py-1 tracking-wide"
+          class="absolute top-5 right-5 rounded-full bg-zinc-900 text-white text-[11px] font-extrabold px-2.5 py-1 tracking-wide"
         >
           PRO
         </span>
 
         <div
-          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-cta mb-5"
+          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-zinc-900 to-zinc-600 shadow-cta mb-5"
         >
           <app-icon name="sparkles" [size]="22" class="text-white" />
         </div>
-        <h2 class="text-xl font-extrabold text-slate-900 mb-1">Pro</h2>
-        <p class="text-sm text-slate-500 mb-5">Contribute questions and shape the game.</p>
+        <h2 class="text-xl font-extrabold text-zinc-900 mb-1">Pro</h2>
+        <p class="text-sm text-zinc-500 mb-5">Contribute questions and shape the game.</p>
         <p class="flex items-baseline gap-1 mb-6">
-          <span class="text-4xl font-extrabold text-indigo-600 tracking-tight">$0.99</span>
-          <span class="text-sm font-medium text-slate-400">/month</span>
+          <span class="text-4xl font-extrabold text-zinc-900 tracking-tight">$0.99</span>
+          <span class="text-sm font-medium text-zinc-400">/month</span>
         </p>
 
-        <div class="h-px bg-indigo-600/10 mb-6"></div>
+        <div class="h-px bg-zinc-900/10 mb-6"></div>
 
-        <ul class="space-y-1 text-slate-700 flex-1 mb-8">
+        <ul class="space-y-1 text-zinc-700 flex-1 mb-8">
           <li class="flex items-start gap-2.5 py-1.5">
             <span
               class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-50 mt-0.5"
@@ -143,11 +143,11 @@
             </span>
             <span class="text-sm">Create and add custom questions to the global question bank</span>
           </li>
-          <li class="flex items-start gap-2.5 py-1.5 text-slate-400">
+          <li class="flex items-start gap-2.5 py-1.5 text-zinc-400">
             <span
-              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 mt-0.5"
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 mt-0.5"
             >
-              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-slate-400" />
+              <app-icon name="check" [size]="11" [strokeWidth]="3" class="text-zinc-400" />
             </span>
             <span class="text-sm">More features coming soon</span>
           </li>
@@ -165,7 +165,7 @@
             type="button"
             (click)="subscribe()"
             [disabled]="isSubscribing() || !authReady()"
-            class="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
+            class="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-zinc-900 to-zinc-600 hover:shadow-cta-hover disabled:from-zinc-300 disabled:to-zinc-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (!authReady()) {
               Loading&hellip;
@@ -191,6 +191,6 @@
       </div>
     </div>
 
-    <p class="text-center text-xs text-slate-400 mt-10">Cancel anytime. No hidden fees.</p>
+    <p class="text-center text-xs text-zinc-400 mt-10">Cancel anytime. No hidden fees.</p>
   </div>
 </div>
