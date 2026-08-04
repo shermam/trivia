@@ -6,10 +6,12 @@ import {
   computed,
   inject,
 } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { SubscriptionService } from '../../services/subscription.service';
+import { ThemeService } from '../../services/theme.service';
 import { IconComponent } from '../icon/icon.component';
 import { AuthMenuComponent } from './auth-menu.component';
 
@@ -22,7 +24,7 @@ import { AuthMenuComponent } from './auth-menu.component';
 @Component({
   selector: 'app-top-bar',
   standalone: true,
-  imports: [AuthMenuComponent, RouterLink, IconComponent],
+  imports: [AuthMenuComponent, RouterLink, IconComponent, NgClass],
   templateUrl: './top-bar.component.html',
   styleUrl: './top-bar.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -31,6 +33,7 @@ export class TopBarComponent {
   protected readonly authService = inject(AuthService);
   protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly authMenuState = inject(AuthMenuStateService);
+  protected readonly themeService = inject(ThemeService);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
 
   protected readonly isMenuOpen = this.authMenuState.isOpen;
@@ -64,6 +67,10 @@ export class TopBarComponent {
 
   protected toggleMenu(): void {
     this.authMenuState.toggle();
+  }
+
+  protected toggleTheme(): void {
+    this.themeService.toggle();
   }
 
   protected closeMenu(): void {

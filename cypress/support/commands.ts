@@ -85,7 +85,7 @@ Cypress.Commands.add('answerQuestion', (answerText: string) => {
 });
 
 Cypress.Commands.add('openAuthMenu', () => {
-  cy.get('header button').click();
+  cy.get('[data-cy=auth-menu-trigger]').click();
 });
 
 // Scoped to <app-auth-menu> throughout: the setup screen's own form (and its

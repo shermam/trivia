@@ -1,5 +1,10 @@
 @import 'tailwindcss';
 
+/* Dark mode is a manual `dark` class on <html> (toggled by ThemeService),
+   not Tailwind v4's default `prefers-color-scheme` media strategy — the top
+   bar needs a real toggle button, not just OS-following. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Brand typography (see BRAND_DESIGN_SYSTEM.md §2) — Inter everywhere,
    loaded via Google Fonts <link> in index.html (preconnected, display=swap)
    rather than a self-hosted/npm font package, matching this app's existing
@@ -48,6 +53,14 @@
    the base layer so any explicit disabled:cursor-* utility on a component
    still wins via Tailwind's cascade layers. */
 @layer base {
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-slate-50 dark:bg-slate-950 transition-colors;
+  }
+
   button:not(:disabled),
   [type='button']:not(:disabled),
   [type='submit']:not(:disabled),
