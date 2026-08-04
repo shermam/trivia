@@ -4,7 +4,7 @@
   <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
     <a routerLink="/" class="flex items-center gap-2">
       <span
-        class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-600 to-amber-600 text-white"
+        class="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white"
       >
         <app-icon name="sparkles" [size]="16" />
       </span>
@@ -38,7 +38,7 @@
             <span class="text-sm font-medium text-slate-700">Sign in</span>
           } @else {
             <span
-              class="relative flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-amber-600 text-white text-xs font-bold"
+              class="relative flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-white text-xs font-bold"
             >
               {{ initials() }}
               @if (needsVerification()) {

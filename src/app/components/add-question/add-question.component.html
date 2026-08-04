@@ -2,7 +2,7 @@
   <div class="w-full max-w-xl bg-white rounded-3xl shadow-card-lg p-6 sm:p-8">
     <div class="text-center mb-6">
       <div
-        class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-amber-600 shadow-cta"
+        class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 shadow-cta"
       >
         <app-icon name="plus-circle" [size]="24" class="text-white" />
       </div>
@@ -16,7 +16,7 @@
         <button
           type="button"
           (click)="openSignIn()"
-          class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
         >
           Sign in
         </button>
@@ -35,7 +35,7 @@
     } @else if (!subscriptionService.isProUser()) {
       <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-8">
         <div
-          class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-amber-600"
+          class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600"
         >
           <app-icon name="sparkles" [size]="20" class="text-white" />
         </div>
@@ -47,7 +47,7 @@
         <button
           type="button"
           (click)="goToPricing()"
-          class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
         >
           Upgrade to Pro
         </button>
@@ -60,7 +60,7 @@
           <button
             type="button"
             (click)="addAnother()"
-            class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
+            class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
           >
             Add another
           </button>
@@ -225,7 +225,7 @@
           <button
             type="submit"
             [disabled]="isSubmitting()"
-            class="flex-1 rounded-xl bg-gradient-to-br from-emerald-600 to-amber-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
+            class="flex-1 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (isSubmitting()) {
               Saving&hellip;

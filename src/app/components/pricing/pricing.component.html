@@ -107,13 +107,13 @@
       >
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-600 to-amber-600"></div>
         <span
-          class="absolute top-5 right-5 rounded-full bg-emerald-600 text-white text-[11px] font-extrabold px-2.5 py-1 tracking-wide"
+          class="absolute top-5 right-5 rounded-full bg-emerald-700 text-white text-[11px] font-extrabold px-2.5 py-1 tracking-wide"
         >
           PRO
         </span>
 
         <div
-          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-amber-600 shadow-cta mb-5"
+          class="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-600 shadow-cta mb-5"
         >
           <app-icon name="sparkles" [size]="22" class="text-white" />
         </div>
@@ -165,7 +165,7 @@
             type="button"
             (click)="subscribe()"
             [disabled]="isSubscribing() || !authReady()"
-            class="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-emerald-600 to-amber-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
+            class="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (!authReady()) {
               Loading&hellip;

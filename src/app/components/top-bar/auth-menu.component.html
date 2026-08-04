@@ -57,7 +57,7 @@
       <button
         type="submit"
         [disabled]="isSubmitting()"
-        class="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold py-2.5 text-sm transition-colors"
+        class="w-full rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-semibold py-2.5 text-sm transition-colors"
       >
         @if (isSubmitting()) {
           Please wait&hellip;
@@ -177,10 +177,8 @@
       <button
         type="button"
         (click)="saveDisplayName()"
-        class="flex items-center gap-1 rounded-xl text-white text-sm font-semibold px-3 transition-colors"
-        [class.bg-emerald-700]="nameSaved()"
-        [class.bg-emerald-600]="!nameSaved()"
-        [class.hover:bg-emerald-700]="!nameSaved()"
+        class="flex items-center gap-1 rounded-xl bg-emerald-700 text-white text-sm font-semibold px-3 transition-colors"
+        [class.hover:bg-emerald-800]="!nameSaved()"
       >
         <app-icon [name]="nameSaved() ? 'check' : 'save'" [size]="13" />
         {{ nameSaved() ? 'Saved!' : 'Save' }}
@@ -197,7 +195,7 @@
     <a
       routerLink="/add-question"
       (click)="closeRequested.emit()"
-      class="flex items-center justify-center gap-1.5 w-full text-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2.5 mb-2 transition-colors"
+      class="flex items-center justify-center gap-1.5 w-full text-center rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold py-2.5 mb-2 transition-colors"
     >
       <app-icon name="plus-circle" [size]="15" />
       Add a question

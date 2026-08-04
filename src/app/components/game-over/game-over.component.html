@@ -2,7 +2,7 @@
   <div class="w-full max-w-xl flex flex-col gap-4">
     <div class="bg-white rounded-3xl shadow-card-lg px-6 sm:px-8 py-8 text-center">
       <div
-        class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-amber-400 shadow-[0_8px_24px_rgba(245,158,11,0.3)]"
+        class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500 shadow-[0_8px_24px_rgba(245,158,11,0.3)]"
       >
         <app-icon name="trophy" [size]="28" class="text-white" />
       </div>
@@ -61,7 +61,7 @@
             type="button"
             data-cy="open-sign-in"
             (click)="openSignIn()"
-            class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 transition-colors"
+            class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
           >
             Sign in
           </button>
@@ -97,7 +97,7 @@
           <button
             type="submit"
             [disabled]="isSaving() || !playerName.trim()"
-            class="rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
+            class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
           >
             @if (isSaving()) {
               Saving&hellip;
@@ -159,11 +159,9 @@
               </span>
 
               <span
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold text-white"
-                [class.from-emerald-600]="entry.uid === authService.user()?.uid"
-                [class.to-amber-600]="entry.uid === authService.user()?.uid"
-                [class.from-slate-300]="entry.uid !== authService.user()?.uid"
-                [class.to-slate-400]="entry.uid !== authService.user()?.uid"
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                [class.bg-emerald-700]="entry.uid === authService.user()?.uid"
+                [class.bg-slate-500]="entry.uid !== authService.user()?.uid"
               >
                 {{ initialsFor(entry.name) }}
               </span>
