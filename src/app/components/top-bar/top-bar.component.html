@@ -1,5 +1,5 @@
 <header
-  class="sticky top-0 z-50 bg-white/85 backdrop-blur-md border-b border-slate-900/8"
+  class="sticky top-0 z-50 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-900/8 dark:border-white/10"
 >
   <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
     <a routerLink="/" class="flex items-center gap-2">
@@ -8,34 +8,44 @@
       >
         <app-icon name="sparkles" [size]="16" />
       </span>
-      <span class="font-extrabold text-emerald-600 text-lg tracking-tight">Trivimind</span>
+      <span class="font-extrabold text-emerald-600 dark:text-emerald-400 text-lg tracking-tight"
+        >Trivimind</span
+      >
     </a>
 
     <div class="flex items-center gap-6">
       <a
         routerLink="/pricing"
-        class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
+        class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
       >
         Pricing
       </a>
+
+      <button
+        type="button"
+        (click)="toggleTheme()"
+        [attr.aria-label]="themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+        class="flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+      >
+        <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
+      </button>
 
       <div class="relative">
         <button
           type="button"
           (click)="toggleMenu()"
-          class="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 border border-slate-900/10 transition-colors"
-          [class.bg-slate-50]="isMenuOpen()"
-          [class.bg-white]="!isMenuOpen()"
+          class="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 border border-slate-900/10 dark:border-white/10 transition-colors"
+          [ngClass]="isMenuOpen() ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'"
           [class.shadow-[0_0_0_3px_rgba(5,150,105,0.12)]]="isMenuOpen()"
         >
           @if (!authService.authReady()) {
             <span class="text-sm text-slate-400 px-1">Loading&hellip;</span>
           } @else if (authService.isAnonymous()) {
             <span
-              class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-500 text-sm"
+              class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm"
               >&#128100;</span
             >
-            <span class="text-sm font-medium text-slate-700">Sign in</span>
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Sign in</span>
           } @else {
             <span
               class="relative flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-white text-xs font-bold"
@@ -43,17 +53,19 @@
               {{ initials() }}
               @if (needsVerification()) {
                 <span
-                  class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white"
+                  class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900"
                 ></span>
               }
             </span>
             <span class="flex items-center gap-1.5 min-w-0">
-              <span class="text-sm font-medium text-slate-900 max-w-[10rem] truncate">
+              <span
+                class="text-sm font-medium text-slate-900 dark:text-slate-50 max-w-[10rem] truncate"
+              >
                 {{ authService.user()?.displayName || authService.user()?.email }}
               </span>
               @if (subscriptionService.isProUser()) {
                 <span
-                  class="shrink-0 rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                  class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
                   >PRO</span
                 >
               }
@@ -62,7 +74,7 @@
           <app-icon
             name="chevron-down"
             [size]="14"
-            class="text-slate-500 transition-transform"
+            class="text-slate-500 dark:text-slate-400 transition-transform"
             [class.rotate-180]="isMenuOpen()"
           />
         </button>

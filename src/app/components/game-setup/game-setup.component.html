@@ -9,20 +9,24 @@
     class="pointer-events-none absolute -bottom-32 -left-16 h-[400px] w-[500px] rounded-full bg-emerald-700/40 blur-[100px]"
   ></div>
 
-  <div class="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-hero-card p-8 sm:p-10">
+  <div
+    class="relative z-10 w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-hero-card p-8 sm:p-10"
+  >
     <div class="text-center mb-8">
       <div
         class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 shadow-cta"
       >
         <app-icon name="sparkles" [size]="24" class="text-white" />
       </div>
-      <h1 class="text-3xl font-extrabold text-emerald-600 tracking-tight mb-1">Trivimind</h1>
-      <p class="text-slate-500">Configure your quiz and test your knowledge</p>
+      <h1 class="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mb-1">
+        Trivimind
+      </h1>
+      <p class="text-slate-500 dark:text-slate-400">Configure your quiz and test your knowledge</p>
     </div>
 
     @if (categoriesError()) {
       <p
-        class="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4"
+        class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-3 py-2 mb-4"
       >
         <app-icon name="triangle-alert" [size]="16" class="shrink-0 mt-0.5" />
         {{ categoriesError() }}
@@ -31,7 +35,7 @@
 
     @if (gameController.loadError()) {
       <p
-        class="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-4"
+        class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mb-4"
       >
         <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
         {{ gameController.loadError() }}
@@ -40,14 +44,14 @@
 
     <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4 mb-6">
       <div>
-        <label for="amount" class="block text-sm font-semibold text-slate-500 mb-1.5"
+        <label for="amount" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
           >Number of Questions</label
         >
         <div class="relative">
           <select
             id="amount"
             formControlName="amount"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+            class="w-full appearance-none rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 pr-10 text-slate-900 dark:text-slate-50 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
             <option [value]="5">5</option>
             <option [value]="10">10</option>
@@ -58,20 +62,20 @@
           <app-icon
             name="chevron-down"
             [size]="16"
-            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400"
           />
         </div>
       </div>
 
       <div>
-        <label for="category" class="block text-sm font-semibold text-slate-500 mb-1.5"
+        <label for="category" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
           >Category</label
         >
         <div class="relative">
           <select
             id="category"
             formControlName="category"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+            class="w-full appearance-none rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 pr-10 text-slate-900 dark:text-slate-50 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
             <option value="">Any Category</option>
             @for (category of categories(); track category.id) {
@@ -81,20 +85,20 @@
           <app-icon
             name="chevron-down"
             [size]="16"
-            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400"
           />
         </div>
       </div>
 
       <div>
-        <label for="difficulty" class="block text-sm font-semibold text-slate-500 mb-1.5"
+        <label for="difficulty" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
           >Difficulty</label
         >
         <div class="relative">
           <select
             id="difficulty"
             formControlName="difficulty"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+            class="w-full appearance-none rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 pr-10 text-slate-900 dark:text-slate-50 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
             <option value="">Any Difficulty</option>
             <option value="easy">Easy</option>
@@ -104,19 +108,24 @@
           <app-icon
             name="chevron-down"
             [size]="16"
-            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400"
           />
         </div>
       </div>
 
       <div>
-        <span class="block text-sm font-semibold text-slate-500 mb-1.5">Question Source</span>
-        <div class="flex gap-0.5 rounded-xl bg-slate-100 p-1">
+        <span class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+          >Question Source</span
+        >
+        <div class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
           <label
             class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
             [class.bg-emerald-100]="form.value.source === 'open_trivia'"
+            [class.dark:bg-emerald-500/20]="form.value.source === 'open_trivia'"
             [class.text-emerald-700]="form.value.source === 'open_trivia'"
+            [class.dark:text-emerald-400]="form.value.source === 'open_trivia'"
             [class.text-slate-600]="form.value.source !== 'open_trivia'"
+            [class.dark:text-slate-400]="form.value.source !== 'open_trivia'"
           >
             <input type="radio" formControlName="source" value="open_trivia" class="sr-only" />
             Open Trivia
@@ -124,8 +133,11 @@
           <label
             class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
             [class.bg-emerald-100]="form.value.source === 'custom'"
+            [class.dark:bg-emerald-500/20]="form.value.source === 'custom'"
             [class.text-emerald-700]="form.value.source === 'custom'"
+            [class.dark:text-emerald-400]="form.value.source === 'custom'"
             [class.text-slate-600]="form.value.source !== 'custom'"
+            [class.dark:text-slate-400]="form.value.source !== 'custom'"
           >
             <input type="radio" formControlName="source" value="custom" class="sr-only" />
             Custom
@@ -133,8 +145,11 @@
           <label
             class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
             [class.bg-emerald-100]="form.value.source === 'mixed'"
+            [class.dark:bg-emerald-500/20]="form.value.source === 'mixed'"
             [class.text-emerald-700]="form.value.source === 'mixed'"
+            [class.dark:text-emerald-400]="form.value.source === 'mixed'"
             [class.text-slate-600]="form.value.source !== 'mixed'"
+            [class.dark:text-slate-400]="form.value.source !== 'mixed'"
           >
             <input type="radio" formControlName="source" value="mixed" class="sr-only" />
             Mixed
@@ -145,7 +160,7 @@
       <button
         type="submit"
         [disabled]="gameController.isLoading()"
-        class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
+        class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
       >
         @if (gameController.isLoading()) {
           Loading Questions&hellip;
@@ -158,17 +173,17 @@
 
     <a
       routerLink="/add-question"
-      class="flex items-center justify-center gap-1.5 text-center text-sm font-medium text-slate-500 hover:text-emerald-600 hover:bg-slate-50 rounded-lg py-1.5 transition-colors"
+      class="flex items-center justify-center gap-1.5 text-center text-sm font-medium text-slate-500 hover:text-emerald-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-emerald-400 dark:hover:bg-slate-800 rounded-lg py-1.5 transition-colors"
     >
       + Create custom question
       @if (subscriptionService.isProUser()) {
         <span
-          class="rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+          class="rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
           >PRO</span
         >
       } @else {
         <span
-          class="rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+          class="rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
           >PRO</span
         >
       }
