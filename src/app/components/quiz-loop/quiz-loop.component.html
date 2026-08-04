@@ -1,15 +1,19 @@
 @if (gameController.currentQuestion(); as question) {
-  <div class="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-8">
-    <div class="w-full max-w-xl bg-white rounded-3xl shadow-card-lg overflow-hidden">
-      <div class="flex items-center justify-between px-6 py-5 border-b border-slate-900/6 text-sm sm:text-base">
-        <span class="font-semibold text-slate-600">
+  <div class="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center px-4 py-8">
+    <div class="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
+      <div
+        class="flex items-center justify-between px-6 py-5 border-b border-slate-900/6 dark:border-white/10 text-sm sm:text-base"
+      >
+        <span class="font-semibold text-slate-600 dark:text-slate-400">
           Question
-          <span class="text-slate-900 font-extrabold"
+          <span class="text-slate-900 dark:text-slate-50 font-extrabold"
             >{{ gameController.currentIndex() + 1 }}</span
           >
           / {{ gameController.totalQuestions() }}
         </span>
-        <span class="font-semibold text-emerald-600">Score: {{ gameController.score() }}</span>
+        <span class="font-semibold text-emerald-600 dark:text-emerald-400"
+          >Score: {{ gameController.score() }}</span
+        >
 
         <div class="relative flex h-12 w-12 items-center justify-center">
           <svg class="absolute inset-0 -rotate-90" viewBox="0 0 44 44" width="48" height="48">
@@ -19,7 +23,9 @@
               [attr.r]="timerRingRadius"
               fill="none"
               [class.stroke-emerald-100]="timeLeft() > 5"
+              [class.dark:stroke-emerald-900]="timeLeft() > 5"
               [class.stroke-red-100]="timeLeft() <= 5"
+              [class.dark:stroke-red-900]="timeLeft() <= 5"
               stroke-width="3"
             />
             <circle
@@ -28,7 +34,9 @@
               [attr.r]="timerRingRadius"
               fill="none"
               [class.stroke-emerald-600]="timeLeft() > 5"
+              [class.dark:stroke-emerald-400]="timeLeft() > 5"
               [class.stroke-red-700]="timeLeft() <= 5"
+              [class.dark:stroke-red-400]="timeLeft() <= 5"
               stroke-width="3"
               stroke-linecap="round"
               [attr.stroke-dasharray]="timerRingCircumference"
@@ -39,13 +47,15 @@
           <span
             class="relative text-xs font-bold"
             [class.text-emerald-600]="timeLeft() > 5"
+            [class.dark:text-emerald-400]="timeLeft() > 5"
             [class.text-red-700]="timeLeft() <= 5"
+            [class.dark:text-red-400]="timeLeft() <= 5"
             >{{ timeLeft() }}s</span
           >
         </div>
       </div>
 
-      <div class="h-1 bg-slate-100">
+      <div class="h-1 bg-slate-100 dark:bg-slate-800">
         <div
           class="h-full bg-emerald-600 transition-all duration-400 ease-out"
           [style.width.%]="(gameController.currentIndex() / gameController.totalQuestions()) * 100"
@@ -55,18 +65,18 @@
       <div class="p-6">
         <div class="flex flex-wrap items-center gap-2 mb-5">
           <span
-            class="text-[11px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-600 rounded-full px-2.5 py-1"
+            class="text-[11px] font-bold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-full px-2.5 py-1"
           >
             {{ question.category }}
           </span>
           <span
-            class="text-[11px] font-bold uppercase tracking-wide bg-slate-100 text-slate-500 rounded-full px-2.5 py-1"
+            class="text-[11px] font-bold uppercase tracking-wide bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-full px-2.5 py-1"
           >
             {{ question.difficulty }}
           </span>
         </div>
 
-        <h2 class="text-xl sm:text-2xl font-bold text-slate-900 leading-snug mb-6">
+        <h2 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-50 leading-snug mb-6">
           {{ question.question }}
         </h2>
 
@@ -92,26 +102,28 @@
         @if (isAnswered()) {
           @if (selectedAnswer() === question.correct_answer) {
             <div
-              class="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3"
+              class="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3"
             >
               <span class="text-lg">&#127881;</span>
-              <span class="text-sm font-semibold text-emerald-800">Correct! Well done.</span>
+              <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300"
+                >Correct! Well done.</span
+              >
             </div>
           } @else if (selectedAnswer() === null) {
             <div
-              class="mt-5 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3"
+              class="mt-5 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
             >
               <span class="text-lg">&#9200;</span>
-              <span class="text-sm font-semibold text-red-800"
+              <span class="text-sm font-semibold text-red-800 dark:text-red-300"
                 >Time's up! The answer was {{ question.correct_answer }}.</span
               >
             </div>
           } @else {
             <div
-              class="mt-5 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3"
+              class="mt-5 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
             >
               <span class="text-lg">&#10060;</span>
-              <span class="text-sm font-semibold text-red-800"
+              <span class="text-sm font-semibold text-red-800 dark:text-red-300"
                 >Incorrect. The correct answer is {{ question.correct_answer }}.</span
               >
             </div>

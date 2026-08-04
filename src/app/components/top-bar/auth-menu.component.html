@@ -1,20 +1,20 @@
 <div
-  class="relative w-80 max-w-[90vw] rounded-2xl border border-slate-900/8 bg-white shadow-dropdown p-5 text-left"
+  class="relative w-80 max-w-[90vw] rounded-2xl border border-slate-900/8 dark:border-white/10 bg-white dark:bg-slate-900 shadow-dropdown p-5 text-left"
 >
   <button
     type="button"
     (click)="closeRequested.emit()"
-    class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
+    class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
     aria-label="Close"
   >
     <app-icon name="x" [size]="14" />
   </button>
 
   @if (!authService.authReady()) {
-    <p class="text-sm text-slate-500">Loading&hellip;</p>
+    <p class="text-sm text-slate-500 dark:text-slate-400">Loading&hellip;</p>
   } @else if (authService.isAnonymous()) {
     <!-- Signed-out / anonymous: sign-in & sign-up -->
-    <h2 class="text-base font-bold text-slate-900 mb-3 pr-6">
+    <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-3 pr-6">
       {{ emailFormMode() === 'signup' ? 'Create an account' : 'Sign in' }}
     </h2>
 
@@ -22,16 +22,16 @@
       type="button"
       (click)="continueWithProvider('google.com')"
       [disabled]="isSubmitting()"
-      class="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-900/15 hover:bg-slate-50 disabled:opacity-60 text-slate-700 font-medium py-2.5 mb-3 transition-colors"
+      class="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60 text-slate-700 dark:text-slate-300 font-medium py-2.5 mb-3 transition-colors"
     >
       <app-provider-icon providerId="google.com" />
       Continue with Google
     </button>
 
     <div class="flex items-center gap-2 mb-3">
-      <div class="h-px flex-1 bg-slate-200"></div>
-      <span class="text-xs text-slate-400">or</span>
-      <div class="h-px flex-1 bg-slate-200"></div>
+      <div class="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
+      <span class="text-xs text-slate-400 dark:text-slate-500">or</span>
+      <div class="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
     </div>
 
     <form (ngSubmit)="submitEmailForm()" class="space-y-2">
@@ -42,7 +42,7 @@
         placeholder="Email"
         required
         autocomplete="email"
-        class="w-full rounded-xl border border-slate-900/15 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white transition-colors"
+        class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-colors"
       />
       <input
         type="password"
@@ -52,7 +52,7 @@
         required
         minlength="6"
         [autocomplete]="emailFormMode() === 'signup' ? 'new-password' : 'current-password'"
-        class="w-full rounded-xl border border-slate-900/15 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white transition-colors"
+        class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-colors"
       />
       <button
         type="submit"
@@ -82,7 +82,7 @@
     <button
       type="button"
       (click)="toggleMoreProviders()"
-      class="w-full text-center text-xs text-slate-500 hover:text-slate-700 mt-3 pt-3 border-t border-slate-100"
+      class="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 mt-3 pt-3 border-t border-slate-100 dark:border-white/10"
     >
       {{ showMoreProviders() ? 'Hide other sign-in options' : 'More sign-in options' }}
     </button>
@@ -94,7 +94,7 @@
             type="button"
             (click)="continueWithProvider(providerId)"
             [disabled]="isSubmitting()"
-            class="flex items-center justify-center gap-1.5 rounded-xl border border-slate-900/15 hover:bg-slate-50 disabled:opacity-60 text-slate-700 text-xs font-medium py-2 transition-colors"
+            class="flex items-center justify-center gap-1.5 rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60 text-slate-700 dark:text-slate-300 text-xs font-medium py-2 transition-colors"
           >
             <app-provider-icon [providerId]="providerId" />
             {{ providerLabels[providerId] }}
@@ -105,7 +105,7 @@
 
     @if (errorMessage()) {
       <p
-        class="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mt-3"
+        class="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-alert" [size]="14" class="shrink-0 mt-0.5" />
         {{ errorMessage() }}
@@ -113,7 +113,7 @@
     }
     @if (infoMessage()) {
       <p
-        class="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 mt-3"
+        class="flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-check-big" [size]="14" class="shrink-0 mt-0.5" />
         {{ infoMessage() }}
@@ -121,31 +121,31 @@
     }
   } @else if (!authService.isFullyAuthenticated()) {
     <!-- Signed in with email/password, awaiting verification -->
-    <h2 class="text-base font-bold text-slate-900 mb-2 pr-6 flex items-center gap-2">
-      <app-icon name="mail" [size]="16" class="text-emerald-600" />
+    <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-2 pr-6 flex items-center gap-2">
+      <app-icon name="mail" [size]="16" class="text-emerald-600 dark:text-emerald-400" />
       Verify your email
     </h2>
-    <p class="text-sm text-slate-500 mb-3">
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
       We sent a verification link to <span class="font-medium">{{ authService.user()?.email }}</span
       >. Verify it to finish signing in and save scores to the leaderboard.
     </p>
     <button
       type="button"
       (click)="resendVerification()"
-      class="w-full rounded-xl border border-slate-900/15 hover:bg-slate-50 text-slate-700 text-sm font-medium py-2.5 mb-2 transition-colors"
+      class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium py-2.5 mb-2 transition-colors"
     >
       Resend verification email
     </button>
     <button
       type="button"
       (click)="signOut()"
-      class="w-full text-center text-xs text-slate-500 hover:text-slate-700"
+      class="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
     >
       Sign out
     </button>
     @if (errorMessage()) {
       <p
-        class="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mt-3"
+        class="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-alert" [size]="14" class="shrink-0 mt-0.5" />
         {{ errorMessage() }}
@@ -153,7 +153,7 @@
     }
     @if (infoMessage()) {
       <p
-        class="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 mt-3"
+        class="flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-check-big" [size]="14" class="shrink-0 mt-0.5" />
         {{ infoMessage() }}
@@ -161,9 +161,9 @@
     }
   } @else {
     <!-- Fully authenticated: profile management -->
-    <h2 class="text-base font-bold text-slate-900 mb-3 pr-6">Your profile</h2>
+    <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-3 pr-6">Your profile</h2>
 
-    <label for="displayName" class="block text-xs font-medium text-slate-500 mb-1"
+    <label for="displayName" class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1"
       >Display name</label
     >
     <div class="flex gap-2 mb-3">
@@ -172,7 +172,7 @@
         type="text"
         [(ngModel)]="nameDraft"
         maxlength="30"
-        class="flex-1 rounded-xl border border-slate-900/15 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white transition-colors"
+        class="flex-1 rounded-xl border border-slate-900/15 dark:border-white/15 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-colors"
       />
       <button
         type="button"
@@ -185,10 +185,10 @@
       </button>
     </div>
 
-    <p class="text-xs text-slate-500 mb-4">
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
       {{ authService.user()?.email }}
       @if (authService.isEmailPasswordAccount()) {
-        <span class="ml-1 text-emerald-700 font-medium">&check; Verified</span>
+        <span class="ml-1 text-emerald-700 dark:text-emerald-400 font-medium">&check; Verified</span>
       }
     </p>
 
@@ -208,7 +208,7 @@
       <a
         routerLink="/pricing"
         (click)="closeRequested.emit()"
-        class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 mb-3"
+        class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 mb-3"
       >
         Upgrade to Pro to add questions
       </a>
@@ -217,7 +217,7 @@
         type="button"
         (click)="manageSubscription()"
         [disabled]="isOpeningPortal()"
-        class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 disabled:opacity-60 mb-3"
+        class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 disabled:opacity-60 mb-3"
       >
         @if (isOpeningPortal()) {
           Opening billing portal&hellip;
@@ -227,11 +227,11 @@
       </button>
     }
 
-    <div class="h-px bg-slate-100 mb-3"></div>
+    <div class="h-px bg-slate-100 dark:bg-white/10 mb-3"></div>
     <button
       type="button"
       (click)="signOut()"
-      class="w-full flex items-center justify-center gap-2 rounded-xl border border-red-200 text-red-700 hover:bg-red-50 text-sm font-medium py-2 transition-colors"
+      class="w-full flex items-center justify-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 text-sm font-medium py-2 transition-colors"
     >
       <app-icon name="log-out" [size]="14" />
       Sign out
@@ -239,7 +239,7 @@
 
     @if (errorMessage()) {
       <p
-        class="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mt-3"
+        class="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-alert" [size]="14" class="shrink-0 mt-0.5" />
         {{ errorMessage() }}

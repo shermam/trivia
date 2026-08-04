@@ -1,27 +1,37 @@
-<div class="min-h-screen bg-slate-50 flex items-start justify-center px-4 py-10">
+<div class="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-start justify-center px-4 py-10">
   <div class="w-full max-w-xl flex flex-col gap-4">
-    <div class="bg-white rounded-3xl shadow-card-lg px-6 sm:px-8 py-8 text-center">
+    <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg px-6 sm:px-8 py-8 text-center">
       <div
         class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500 shadow-[0_8px_24px_rgba(245,158,11,0.3)]"
       >
         <app-icon name="trophy" [size]="28" class="text-white" />
       </div>
-      <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight mb-1">Game Over!</h1>
-      <p class="text-slate-500 mb-6">Here's how you did</p>
+      <h1 class="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-1">
+        Game Over!
+      </h1>
+      <p class="text-slate-500 dark:text-slate-400 mb-6">Here's how you did</p>
 
       <div class="grid grid-cols-2 gap-4">
-        <div class="rounded-2xl border border-slate-900/7 bg-slate-50 px-4 py-5">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Score</p>
-          <p class="text-4xl font-extrabold text-emerald-600 tracking-tight">
+        <div
+          class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
+        >
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+            Score
+          </p>
+          <p class="text-4xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight">
             {{ gameController.score() }}
-            <span class="text-xl font-medium text-slate-400"
+            <span class="text-xl font-medium text-slate-400 dark:text-slate-500"
               >/ {{ gameController.totalQuestions() }}</span
             >
           </p>
-          <p class="text-xs text-slate-500 mt-1">correct answers</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">correct answers</p>
         </div>
-        <div class="rounded-2xl border border-slate-900/7 bg-slate-50 px-4 py-5">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Accuracy</p>
+        <div
+          class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
+        >
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+            Accuracy
+          </p>
           <p class="text-4xl font-extrabold tracking-tight" [class]="performanceColorClass()">
             {{ gameController.percentage() }}%
           </p>
@@ -35,27 +45,33 @@
     @if (hasSaved()) {
       @if (saveError()) {
         <div
-          class="flex items-start gap-2.5 text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4"
+          class="flex items-start gap-2.5 text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl px-5 py-4"
         >
           <app-icon name="triangle-alert" [size]="18" class="shrink-0 mt-0.5" />
           <p>{{ saveError() }}</p>
         </div>
       } @else {
         <div
-          class="flex items-start gap-2.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4"
+          class="flex items-start gap-2.5 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl px-5 py-4"
         >
           <app-icon name="circle-check-big" [size]="18" class="shrink-0 mt-0.5" />
           <div>
             <p class="font-semibold">Score saved to the leaderboard!</p>
             @if (playerRank(); as rank) {
-              <p class="text-sm text-emerald-800/80">You're ranked #{{ rank }} on the leaderboard.</p>
+              <p class="text-sm text-emerald-800/80 dark:text-emerald-300/80">
+                You're ranked #{{ rank }} on the leaderboard.
+              </p>
             }
           </div>
         </div>
       }
     } @else if (authService.isAnonymous()) {
-      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-5">
-        <p class="text-slate-700 mb-3">Sign in to save this score to the leaderboard.</p>
+      <div
+        class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
+      >
+        <p class="text-slate-700 dark:text-slate-300 mb-3">
+          Sign in to save this score to the leaderboard.
+        </p>
         @if (!embedMode.isEmbedded()) {
           <button
             type="button"
@@ -68,19 +84,25 @@
         }
       </div>
     } @else if (!authService.isFullyAuthenticated()) {
-      <div class="text-center bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-5">
-        <p class="text-slate-700 mb-3">Verify your email to save this score to the leaderboard.</p>
+      <div
+        class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
+      >
+        <p class="text-slate-700 dark:text-slate-300 mb-3">
+          Verify your email to save this score to the leaderboard.
+        </p>
         <button
           type="button"
           (click)="resendVerification()"
-          class="rounded-xl border border-emerald-300 hover:bg-emerald-100 text-emerald-700 font-semibold px-5 py-2.5 transition-colors"
+          class="rounded-xl border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold px-5 py-2.5 transition-colors"
         >
           Resend verification email
         </button>
       </div>
     } @else {
-      <div class="bg-emerald-100 rounded-2xl px-5 py-5 border border-emerald-600/15">
-        <p class="flex items-center gap-1.5 text-sm font-bold text-emerald-900 mb-3">
+      <div
+        class="bg-emerald-100 dark:bg-emerald-500/15 rounded-2xl px-5 py-5 border border-emerald-600/15 dark:border-emerald-400/20"
+      >
+        <p class="flex items-center gap-1.5 text-sm font-bold text-emerald-900 dark:text-emerald-200 mb-3">
           <app-icon name="save" [size]="15" />
           Save your score to the leaderboard
         </p>
@@ -92,12 +114,12 @@
             placeholder="Enter your name"
             maxlength="30"
             required
-            class="flex-1 rounded-xl border border-emerald-600/25 bg-white px-3.5 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
+            class="flex-1 rounded-xl border border-emerald-600/25 dark:border-emerald-400/25 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
           />
           <button
             type="submit"
             [disabled]="isSaving() || !playerName.trim()"
-            class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
+            class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
           >
             @if (isSaving()) {
               Saving&hellip;
@@ -110,33 +132,34 @@
     }
     @if (saveError() && !hasSaved()) {
       <p
-        class="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-2xl px-4 py-3"
+        class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl px-4 py-3"
       >
         <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
         {{ saveError() }}
       </p>
     }
 
-    <div class="bg-white rounded-3xl shadow-card-lg overflow-hidden">
-      <div class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6">
+    <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
+      <div class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10">
         <app-icon name="medal" [size]="18" class="text-amber-500" />
-        <h2 class="text-base font-bold text-slate-900">Top 10 Leaderboard</h2>
+        <h2 class="text-base font-bold text-slate-900 dark:text-slate-50">Top 10 Leaderboard</h2>
       </div>
 
       @if (isLoadingLeaderboard()) {
-        <p class="text-slate-500 text-sm px-6 py-4">Loading leaderboard&hellip;</p>
+        <p class="text-slate-500 dark:text-slate-400 text-sm px-6 py-4">Loading leaderboard&hellip;</p>
       } @else if (leaderboardError()) {
-        <p class="text-sm text-red-700 px-6 py-4">
+        <p class="text-sm text-red-700 dark:text-red-300 px-6 py-4">
           {{ leaderboardError() }}
         </p>
       } @else if (leaderboard().length === 0) {
-        <p class="text-slate-500 text-sm px-6 py-4">No scores yet. Be the first!</p>
+        <p class="text-slate-500 dark:text-slate-400 text-sm px-6 py-4">No scores yet. Be the first!</p>
       } @else {
         <ol class="py-2">
           @for (entry of leaderboard(); track entry.id; let i = $index) {
             <li
               class="flex items-center gap-3.5 px-6 py-2.5"
               [class.bg-emerald-50]="entry.uid === authService.user()?.uid"
+              [class.dark:bg-emerald-500/10]="entry.uid === authService.user()?.uid"
               [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
               [class.border-emerald-600]="entry.uid === authService.user()?.uid"
             >
@@ -146,6 +169,7 @@
                 [class.text-sm]="i >= 3"
                 [class.font-bold]="i >= 3"
                 [class.text-slate-400]="i >= 3"
+                [class.dark:text-slate-500]="i >= 3"
               >
                 @if (i === 0) {
                   &#129351;
@@ -168,23 +192,25 @@
 
               <span class="flex-1 min-w-0">
                 <span
-                  class="font-medium text-slate-900 truncate"
+                  class="font-medium text-slate-900 dark:text-slate-50 truncate"
                   [class.font-bold]="entry.uid === authService.user()?.uid"
                   [class.text-emerald-600]="entry.uid === authService.user()?.uid"
+                  [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
                 >
                   {{ entry.name }}
                 </span>
                 @if (entry.uid === authService.user()?.uid) {
                   <span
-                    class="ml-1.5 rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                    class="ml-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
                     >YOU</span
                   >
                 }
               </span>
 
               <span
-                class="text-sm font-bold text-slate-900"
+                class="text-sm font-bold text-slate-900 dark:text-slate-50"
                 [class.text-emerald-600]="entry.uid === authService.user()?.uid"
+                [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
               >
                 {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
               </span>
@@ -197,7 +223,7 @@
     <button
       type="button"
       (click)="playAgain()"
-      class="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 shadow-[0_4px_16px_rgba(15,23,42,0.2)] transition-colors"
+      class="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-white font-bold py-4 shadow-[0_4px_16px_rgba(15,23,42,0.2)] transition-colors"
     >
       <app-icon name="rotate-ccw" [size]="18" />
       Play Again

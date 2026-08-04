@@ -68,25 +68,25 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected answerClass(answer: string): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
-      return 'bg-white hover:bg-slate-50 hover:border-emerald-600 hover:shadow-[0_0_0_3px_rgba(5,150,105,0.08)] border-slate-900/15 text-slate-900';
+      return 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-emerald-600 hover:shadow-[0_0_0_3px_rgba(5,150,105,0.08)] border-slate-900/15 dark:border-white/15 text-slate-900 dark:text-slate-50';
     }
 
     const isCorrectAnswer = answer === question.correct_answer;
     const isSelected = answer === this.selectedAnswer();
 
     if (isCorrectAnswer) {
-      return 'bg-emerald-50 border-emerald-700 text-emerald-900';
+      return 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-700 dark:border-emerald-400 text-emerald-900 dark:text-emerald-200';
     }
     if (isSelected) {
-      return 'bg-red-50 border-red-700 text-red-900';
+      return 'bg-red-50 dark:bg-red-500/15 border-red-700 dark:border-red-400 text-red-900 dark:text-red-200';
     }
-    return 'bg-white border-slate-900/8 text-slate-400 opacity-60';
+    return 'bg-white dark:bg-slate-800 border-slate-900/8 dark:border-white/10 text-slate-400 dark:text-slate-500 opacity-60';
   }
 
   protected answerBadgeClass(answer: string): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
-      return 'bg-slate-100 text-slate-600';
+      return 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300';
     }
 
     const isCorrectAnswer = answer === question.correct_answer;
@@ -98,7 +98,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (isSelected) {
       return 'bg-red-700 text-white';
     }
-    return 'bg-slate-100 text-slate-600';
+    return 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300';
   }
 
   private startTimer(): void {

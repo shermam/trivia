@@ -62,10 +62,10 @@ export class GameOverComponent implements OnInit {
 
   protected readonly performanceColorClass = computed(() => {
     const percentage = this.gameController.percentage();
-    if (percentage >= 90) return 'text-emerald-700';
-    if (percentage >= 70) return 'text-emerald-600';
-    if (percentage >= 50) return 'text-amber-700';
-    return 'text-red-700';
+    if (percentage >= 90) return 'text-emerald-700 dark:text-emerald-400';
+    if (percentage >= 70) return 'text-emerald-600 dark:text-emerald-400';
+    if (percentage >= 50) return 'text-amber-700 dark:text-amber-400';
+    return 'text-red-700 dark:text-red-400';
   });
 
   /**

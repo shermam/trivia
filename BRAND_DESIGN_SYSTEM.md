@@ -31,7 +31,20 @@
 * **Pro Badge (Unlocked)**: `#D97706` fill (Gold) with `#FFFFFF` text.
 * **Pro Badge (Locked)**: `#E2E8F0` fill with `#64748B` text.
 
+### Dark Theme
 
+A manual light/dark toggle (top-bar sun/moon button, `ThemeService`) applies a `dark` class on `<html>` — Tailwind's `dark:` variant is repointed at that class (`@custom-variant dark` in `src/styles.css`) rather than the default `prefers-color-scheme` media strategy, since a real toggle needs to be able to override the OS setting. The initial value still defaults to the OS preference (via an inline no-flash script in `index.html`) when there's no stored choice yet.
+
+Dark-mode token mapping, applied via `dark:` utility variants alongside every light-mode class rather than as a separate stylesheet:
+
+* **Page background**: `slate-50` → `slate-950`.
+* **Surface / Card**: `white` → `slate-900`; a secondary/inset panel (e.g. stat tiles) uses `slate-800`/`slate-800/60`.
+* **Outline / Border**: `slate-900/N%` opacity borders → `white/N%` at the same opacity step (e.g. `border-slate-900/8` → `dark:border-white/10`).
+* **On Surface (headings/body)**: `slate-900` → `slate-50`; `slate-700` → `slate-300`; `slate-600`/`slate-500` → `slate-400`; `slate-400` → `slate-500`.
+* **Primary (brand emerald)**: `emerald-600` text/headings → `dark:text-emerald-400` (better contrast against a dark surface); solid `emerald-700` CTA fills are unchanged in dark mode — they already meet contrast against white button text regardless of page theme.
+* **Primary Container**: `emerald-50`/`emerald-100` tinted surfaces (badges, callouts, PRO pills) → `emerald-500/10`–`/20` translucent fills with `emerald-300`/`emerald-400` text, rather than a solid dark-emerald swatch — keeps them legible at low opacity over any dark surface.
+* **Status surfaces** (success/error/warning banners): same translucent-fill pattern — `{color}-50`/`{color}-200` → `dark:bg-{color}-500/10 dark:border-{color}-500/20 dark:text-{color}-300`.
+* **Inverted neutral CTA** ("Play Again", `bg-slate-900` on white text): flips to a light fill in dark mode (`dark:bg-slate-100 dark:text-slate-900`) rather than disappearing into the dark background.
 
 ---
 

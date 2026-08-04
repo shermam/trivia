@@ -19,10 +19,8 @@ describe('email sign-up and verification', () => {
     cy.get('app-auth-menu').contains('button', 'Sign out').click();
     // `signOut()` only closes the dropdown after its async re-anonymous-sign-in
     // resolves (AuthService.signOut -> ensureSignedIn) — without waiting for
-    // that here, `signInViaUi`'s own `openAuthMenu()` can race it and find
-    // the still-open, still-rendering-multiple-buttons dropdown underneath
-    // the header's own toggle button, i.e. more than the one element a plain
-    // `cy.get('header button').click()` expects.
+    // that here, `signInViaUi`'s own `openAuthMenu()` can race it and click
+    // the trigger button while the still-open dropdown is rendering behind it.
     cy.get('app-auth-menu').should('not.exist');
     cy.signInViaUi(email, password);
 
