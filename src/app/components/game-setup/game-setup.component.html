@@ -1,22 +1,22 @@
 <div
-  class="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-indigo-900 via-indigo-600 to-violet-800 px-4 py-10"
+  class="relative min-h-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-900 via-emerald-600 to-amber-800 px-4 py-10"
 >
   <!-- Decorative background blobs -->
   <div
-    class="pointer-events-none absolute -top-20 -right-20 h-[400px] w-[400px] rounded-full bg-violet-500/30 blur-[80px]"
+    class="pointer-events-none absolute -top-20 -right-20 h-[400px] w-[400px] rounded-full bg-amber-500/30 blur-[80px]"
   ></div>
   <div
-    class="pointer-events-none absolute -bottom-32 -left-16 h-[400px] w-[500px] rounded-full bg-indigo-700/40 blur-[100px]"
+    class="pointer-events-none absolute -bottom-32 -left-16 h-[400px] w-[500px] rounded-full bg-emerald-700/40 blur-[100px]"
   ></div>
 
   <div class="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-hero-card p-8 sm:p-10">
     <div class="text-center mb-8">
       <div
-        class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-cta"
+        class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 shadow-cta"
       >
         <app-icon name="sparkles" [size]="24" class="text-white" />
       </div>
-      <h1 class="text-3xl font-extrabold text-indigo-600 tracking-tight mb-1">Trivimind</h1>
+      <h1 class="text-3xl font-extrabold text-emerald-600 tracking-tight mb-1">Trivimind</h1>
       <p class="text-slate-500">Configure your quiz and test your knowledge</p>
     </div>
 
@@ -47,7 +47,7 @@
           <select
             id="amount"
             formControlName="amount"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
             <option [value]="5">5</option>
             <option [value]="10">10</option>
@@ -71,7 +71,7 @@
           <select
             id="category"
             formControlName="category"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
             <option value="">Any Category</option>
             @for (category of categories(); track category.id) {
@@ -94,7 +94,7 @@
           <select
             id="difficulty"
             formControlName="difficulty"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            class="w-full appearance-none rounded-xl border border-slate-900/15 px-3.5 py-2.5 pr-10 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
             <option value="">Any Difficulty</option>
             <option value="easy">Easy</option>
@@ -114,8 +114,8 @@
         <div class="flex gap-0.5 rounded-xl bg-slate-100 p-1">
           <label
             class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-            [class.bg-indigo-100]="form.value.source === 'open_trivia'"
-            [class.text-indigo-600]="form.value.source === 'open_trivia'"
+            [class.bg-emerald-100]="form.value.source === 'open_trivia'"
+            [class.text-emerald-700]="form.value.source === 'open_trivia'"
             [class.text-slate-600]="form.value.source !== 'open_trivia'"
           >
             <input type="radio" formControlName="source" value="open_trivia" class="sr-only" />
@@ -123,8 +123,8 @@
           </label>
           <label
             class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-            [class.bg-indigo-100]="form.value.source === 'custom'"
-            [class.text-indigo-600]="form.value.source === 'custom'"
+            [class.bg-emerald-100]="form.value.source === 'custom'"
+            [class.text-emerald-700]="form.value.source === 'custom'"
             [class.text-slate-600]="form.value.source !== 'custom'"
           >
             <input type="radio" formControlName="source" value="custom" class="sr-only" />
@@ -132,8 +132,8 @@
           </label>
           <label
             class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
-            [class.bg-indigo-100]="form.value.source === 'mixed'"
-            [class.text-indigo-600]="form.value.source === 'mixed'"
+            [class.bg-emerald-100]="form.value.source === 'mixed'"
+            [class.text-emerald-700]="form.value.source === 'mixed'"
             [class.text-slate-600]="form.value.source !== 'mixed'"
           >
             <input type="radio" formControlName="source" value="mixed" class="sr-only" />
@@ -145,7 +145,7 @@
       <button
         type="submit"
         [disabled]="gameController.isLoading()"
-        class="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 hover:shadow-cta-hover disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
+        class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
       >
         @if (gameController.isLoading()) {
           Loading Questions&hellip;
@@ -158,12 +158,12 @@
 
     <a
       routerLink="/add-question"
-      class="flex items-center justify-center gap-1.5 text-center text-sm font-medium text-slate-500 hover:text-indigo-600 hover:bg-slate-50 rounded-lg py-1.5 transition-colors"
+      class="flex items-center justify-center gap-1.5 text-center text-sm font-medium text-slate-500 hover:text-emerald-600 hover:bg-slate-50 rounded-lg py-1.5 transition-colors"
     >
       + Create custom question
       @if (subscriptionService.isProUser()) {
         <span
-          class="rounded-full bg-indigo-100 text-indigo-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+          class="rounded-full bg-emerald-100 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
           >PRO</span
         >
       } @else {
