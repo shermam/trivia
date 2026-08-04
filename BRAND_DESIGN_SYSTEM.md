@@ -1,42 +1,41 @@
-## 1. Material Design 3 Color Palette
+## 1. Material Design 3 Color Palette (Emerald & Gold)
 
-To reflect the energy of a trivia game while remaining crisp, readable, and aligned with Material Design 3 guidelines (M3 Roles & Tonal Palettes), we use **Deep Indigo** as the primary brand anchor, balanced by **Electric Violet** for game highlights and **Warm Amber** for accents/badges.
+### Primary Tonal System (Emerald Green)
 
-### Primary Tonal System (Indigo)
-
-* **Primary (`#4F46E5`)**: Main CTA buttons, active radio segments, logo header, focus states.
+* **Primary (`#059669`)**: Logo header, focus states, icon-only badges, borders, and large-text (≥24px) headings/prices. **Not** used as a solid fill behind white text at body/button size — see the CTA note below.
 * **On Primary (`#FFFFFF`)**: Text/icons rendered over the Primary color.
-* **Primary Container (`#E0E7FF`)**: Light indigo backgrounds (segmented radio selected fills, callout cards).
-* **On Primary Container (`#312E81`)**: Text/icons inside Primary Container elements.
+* **Primary Container (`#D1FAE5`)**: Light emerald background (segmented radio selected fills, callout cards).
+* **On Primary Container (`#064E3B`)**: Text/icons inside Primary Container elements.
+* **CTA fill (`#047857`, Emerald 700)**: Solid buttons and badges that carry white text (e.g. "Start Game", "Subscribe", avatar initials, the PRO ribbon). `#059669` (Primary) measures only ~3.7:1 against white — short of the 4.5:1 WCAG AA minimum for body-size text — so every button/badge with white text uses this one step darker instead. Hover states go one step darker again (`#065F46`, Emerald 800).
 
-### Secondary Tonal System (Violet & Slate)
+### Secondary Tonal System (Trophy Gold)
 
-* **Secondary (`#7C3AED`)**: Gamification highlights, progress bars, countdown timer border.
-* **Secondary Container (`#EDE9FE`)**: Category pill tags, secondary active badges.
-* **On Secondary Container (`#4C1D95`)**: Text inside secondary pill tags.
+* **Secondary (`#D97706`)**: Gamification highlights, top-rank badges.
+* **Secondary Container (`#FEF3C7`)**: Category pill tags, secondary active badges, highlight containers.
+* **On Secondary Container (`#78350F`)**: Text inside secondary gold pill tags.
 
 ### Neutral & Surface System
 
-* **Surface Background (`#F8FAFC`)**: Page background (Slate 50).
-* **Surface Container / Card (`#FFFFFF`)**: Central cards, modals, dropdowns (Slate White).
-* **Outline / Border (`#E2E8F0`)**: Card borders, input field outlines, secondary buttons (Slate 200).
+* **Surface Background (`#F7F9F8`)**: Page background (Subtle warm light tint).
+* **Surface Container / Card (`#FFFFFF`)**: Central cards, modals, dropdowns (Pure White).
+* **Outline / Border (`#E2E8F0`)**: Card borders, input field outlines, secondary buttons.
 * **On Surface (High Contrast) (`#0F172A`)**: Headings, body text (Slate 900).
 * **On Surface Variant (Muted) (`#64748B`)**: Labels, subheadings, placeholders (Slate 500).
 
 ### Status & Feedback System (6.3 In-App System)
 
 * **Error / Correct-Incorrect System**:
-* **Success Surface (`#F0FDF4`) / Border (`#BBF7D0`) / Text (`#15803D`)**: Correct answer, score saved, verified status.
+* **Success Surface (`#ECFDF5`) / Border (`#A7F3D0`) / Text (`#047857`)**: Correct answer, score saved, verified status.
 * **Error Surface (`#FEF2F2`) / Border (`#FECACA`) / Text (`#B91C1C`)**: Wrong answer, timer warning (≤5s), error banners.
 * **Warning Surface (`#FFFBEB`) / Border (`#FDE68A`) / Text (`#B45309`)**: Amber warnings, unverified email dot, non-fatal notes.
-* **Pro Badge (Unlocked)**: `#4F46E5` fill with `#FFFFFF` text.
+* **Pro Badge (Unlocked)**: `#D97706` fill (Gold) with `#FFFFFF` text.
 * **Pro Badge (Locked)**: `#E2E8F0` fill with `#64748B` text.
 
 
 
 ---
 
-## 2. Brand Manual & Design Guidelines (Material 3 Expressive)
+## 2. Brand Manual & Design Guidelines (Material 3 Expressive — Emerald & Gold)
 
 ### Typography Hierarchy (Roboto / Inter)
 
@@ -49,15 +48,16 @@ To reflect the energy of a trivia game while remaining crisp, readable, and alig
 ### Component Styling Directives
 
 1. **Cards & Surface Elevation**:
-* Centered containers max-width 480px (for game loops and forms) and 960px (for 2-column pricing comparison).
-* Soft M3 shadows (`0px 4px 20px rgba(15, 23, 42, 0.08)`), rounded corners (`16px` border-radius).
+* Centered containers max-width 480px (game setup/loops) and 960px (2-column pricing comparison).
+* Soft M3 elevated shadows (`0px 4px 20px rgba(5, 150, 105, 0.06)`), rounded corners (`16px` border-radius).
 
 
 2. **Buttons & Inputs**:
 * Corner radius: `12px` (Medium shape scale).
 * Height: `48px` standard for primary touch targets.
-* Inputs: `1px` border (`#E2E8F0`), active focus ring `2px` (`#4F46E5`).
+* Inputs: `1px` border (`#E2E8F0`), active focus ring `2px` (`#059669`).
+* **Solid fills only — no gradients** on buttons or icon badges. Reserve gradients (if used at all) for large decorative surfaces only (e.g. a full-page hero background), never anything a user clicks or a glyph sits on top of.
 
 
 3. **Segmented Radio Groups**:
-* Container radius `12px`, padding `4px`. Unselected segments have no border and muted text. Selected segment has full `#E0E7FF` surface and `#4F46E5` outline with bold text.
+* Container radius `12px`, padding `4px`. Unselected segments have no border and muted text. Selected segment has full `#D1FAE5` surface and `#059669` outline with bold text.
