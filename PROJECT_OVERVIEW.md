@@ -134,6 +134,8 @@ A manual toggle in the top bar (sun/moon icon button) switches the whole app bet
 
 The visual design system (colors, typography, shadows, radii, component styling directives) is documented in **`BRAND_DESIGN_SYSTEM.md`** — the single reference for styling any new or restyled UI component; there is no Figma export in the repo to cross-check against. Icons are inline SVG (lucide-static path data, ISC license) rendered via a single shared `IconComponent` (`src/app/components/icon/icon.component.ts`) — same no-dependency convention as `ProviderIconComponent`'s OAuth brand marks — rather than an `lucide-angular`/icon-font dependency. `Inter` (the brand typeface) is loaded via a preconnected Google Fonts `<link>` in `index.html` rather than self-hosted, the one deliberate exception to this app's general third-party-request avoidance (§1.5's OAuth-popup-resolver note); Lighthouse (§4.4) is the guardrail that keeps this from silently regressing performance.
 
+App icons (`public/favicon.svg`/`.ico`, `public/apple-touch-icon.png`, linked from `index.html`) are the Trivimind brain/lightbulb/question-mark mark recolored into the Emerald & Gold palette: a solid `#059669` (Primary) rounded-square background with the brain/bulb/`?` silhouette in solid white on top, built as two stacked SVG paths (a white backing shape behind an emerald copy of the full artwork) so the icon's interior is fully opaque — the original source art defines that silhouette as literal transparent cutouts in a single navy path, which read fine on a white canvas but would show whatever's behind them (e.g. bleed through to a dark tab background) if used as-is.
+
 ### 2.2 Tooling
 
 - **Angular CLI 22** (`@angular/cli`, `@angular/build`) — build, dev-server, scaffolding.
