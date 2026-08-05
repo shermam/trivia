@@ -7,4 +7,12 @@
 export const environment = {
   production: false,
   useEmulators: true,
+  // Off here (unlike environment.ts/environment.development.ts): the background prefetch
+  // fires its own opentdb.com/custom_questions requests on a timer independent of any
+  // single test, so it can race Cypress's `cy.wait('@questions')` intercepts (see
+  // stubOpenTrivia() in cypress/support/commands.ts) and steal a match meant for the
+  // request a test actually triggered. Also keeps Lighthouse's audited page load free of
+  // an extra background fetch it doesn't need (this file is reused by the `lighthouse`
+  // build configuration too).
+  enableOfflinePrefetch: false,
 };

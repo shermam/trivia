@@ -47,6 +47,33 @@ Conventions to carry into a new project:
 
 ---
 
+## 2a. Progressive Web App: manifest + service worker
+
+**Scaffold** (the Angular-recommended path — do this before hand-writing a manifest or service worker):
+
+```bash
+npx ng add @angular/pwa
+```
+
+This generates `public/manifest.webmanifest`, `ngsw-config.json`, placeholder icons, wires `provideServiceWorker('ngsw-worker.js', { enabled: !isDevMode(), registrationStrategy: 'registerWhenStable:30000' })` into `app.config.ts` (or the `NgModule` equivalent on older Angular), points `angular.json`'s production build configuration at `ngsw-config.json`, and adds a `manifest`/icon `<link>`s to `index.html`.
+
+Two sharp edges hit when doing this against a very recent Angular major, worth checking for on any future re-run:
+
+- **`ng add @angular/pwa` (no version pin) can resolve to a wildly outdated npm dist-tag** — on this project (Angular 22), the unpinned command resolved to `@angular/pwa@12.2.18` and failed outright (`Main file (undefined) not found`) rather than doing anything harmful, so the failure mode is at least loud. Pin it to the exact Angular CLI major/minor already installed (check `@angular/cli`'s installed version first): `npx ng add @angular/pwa@<matching-version> --skip-confirmation`.
+- **Even version-pinned, the schematic's own `package.json` edit can add `@angular/service-worker` with a caret range (`^22.0.0`) that `npm install` then resolves to a newer minor than the rest of the Angular packages already installed** (e.g. `22.1.0` when everything else is pinned at `22.0.8`), which fails with an `ERESOLVE` peer-dependency conflict (`@angular/service-worker@22.1.0` requiring `@angular/core@"22.1.0"` exactly). Fix by pinning that one dependency to the exact version already installed for the rest of `@angular/*` before running `npm install` again.
+
+**Manifest content** — don't ship the schematic's placeholder Angular-logo icons or generic `name`:
+
+- Rasterize the app's actual icon source (this project's `public/favicon.svg`) at every size Chrome/Android installability + home-screen icons need (72/96/128/144/152/192/384/512px) — `rsvg-convert -w <size> -h <size> public/favicon.svg -o public/icons/icon-<size>x<size>.png` (or an equivalent SVG rasterizer) per size, overwriting the schematic's placeholders.
+- Set `name`/`short_name` to the real product name, `theme_color` to the brand's primary color (kept in sync with the `theme-color` `<meta>` tag added to `index.html`), and `background_color`/`display: standalone` deliberately rather than leaving the scaffolded defaults.
+- **Only claim `purpose: maskable` if the icon was actually designed with a maskable safe zone** (important content kept within the inner ~80%-diameter circle so Android's adaptive-icon mask never crops it mid-glyph) — the schematic defaults every icon to `purpose: "maskable any"` regardless. If the source mark is a full-bleed icon that wasn't designed with that safe zone in mind (common for an icon that started life as a plain favicon), ship `purpose: any` only rather than shipping an unverified maskable claim.
+
+**Don't let an app-level background task (e.g. an offline-data prefetch) fire unconditionally on every build** — gate it behind the project's existing environment-file split (§4) the same way `useEmulators` already is, and turn it off specifically under the `e2e`/`lighthouse` build configurations: a background task that fires its own HTTP requests on a timer can race Cypress's `cy.intercept`-based request waits (satisfying the wrong intercepted request) and has no reason to compete for resources during a Lighthouse-audited page load either.
+
+**Keep `ngsw-config.json` to the default app-shell `assetGroups`** (prefetch the JS/CSS/HTML/manifest, lazily cache images/fonts) rather than reaching for its `dataGroups` to cache calls to a third-party API. A rate-limited third-party API (or one needing app-level normalization/filtering, like this project's Firestore-backed question bank) is better served by a purpose-built app-level cache (e.g. IndexedDB) that the app controls the fetch/eviction policy for, than by the service worker's generic HTTP-cache-with-a-strategy model.
+
+---
+
 ## 3. Firebase project setup
 
 **Scaffold:**
@@ -162,5 +189,6 @@ Rough order, each step independently verifiable before moving to the next:
 10. Turn on branch protection requiring the preview-e2e check (§6.4) once that workflow exists and has gone green at least once.
 11. Add Lighthouse CI last, once there's a real build to audit — start with generous thresholds and tighten them once you have a few clean baseline runs, rather than guessing thresholds up front.
 12. Only once all of the above are wired and green should any payment/serverless-backend integration (§5) be added — it depends on Cloud Functions + secrets + webhooks all already working.
+13. `npx ng add @angular/pwa` (§2a) for installability — check the version-pinning caveats there first if the Angular major is recent. Rasterize real icons before shipping; don't leave the schematic's placeholders in.
 
 Write (or update) this same file, and the app-functionality-focused `PROJECT_OVERVIEW.md` counterpart, as the new project's infra takes shape — don't backfill either from memory after the fact.

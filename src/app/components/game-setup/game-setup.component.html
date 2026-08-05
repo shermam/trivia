@@ -14,11 +14,28 @@
   >
     <div class="text-center mb-8">
       <app-logo [size]="56" class="mb-4 rounded-2xl shadow-cta text-emerald-600" />
-      <h1 class="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mb-1">
+      <h1
+        class="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mb-1"
+      >
         Trivimind
       </h1>
       <p class="text-slate-500 dark:text-slate-400">Configure your quiz and test your knowledge</p>
     </div>
+
+    @if (!connectivity.isOnline()) {
+      <p
+        class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-3 py-2 mb-4"
+      >
+        <app-icon name="wifi-off" [size]="16" class="shrink-0 mt-0.5" />
+        @if (offlineQuestions.cachedCount() > 0) {
+          You're offline — Trivimind will play from {{ offlineQuestions.cachedCount() }} questions
+          saved for offline play.
+        } @else {
+          You're offline and no questions are saved yet for offline play. Reconnect once to let
+          Trivimind cache a batch for next time.
+        }
+      </p>
+    }
 
     @if (categoriesError()) {
       <p
@@ -40,7 +57,9 @@
 
     <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4 mb-6">
       <div>
-        <label for="amount" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+        <label
+          for="amount"
+          class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
           >Number of Questions</label
         >
         <div class="relative">
@@ -64,7 +83,9 @@
       </div>
 
       <div>
-        <label for="category" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+        <label
+          for="category"
+          class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
           >Category</label
         >
         <div class="relative">
@@ -87,7 +108,9 @@
       </div>
 
       <div>
-        <label for="difficulty" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+        <label
+          for="difficulty"
+          class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
           >Difficulty</label
         >
         <div class="relative">
