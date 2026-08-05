@@ -68,18 +68,24 @@ export class OfflineQuestionsService {
   }
 
   /**
-   * Best-effort offline draw: prefers questions matching category/difficulty, but
-   * falls back to the whole pool if too few match — a mismatched offline game beats
-   * no offline game at all.
+   * Best-effort offline draw: never crosses `source` — a "Custom" request only ever draws from
+   * cached `custom`-sourced questions (and vice versa for "Open Trivia"), never silently
+   * substituting the other, since that's a stronger promise to the player than category/
+   * difficulty ("community question bank" vs "random trivia" isn't a matter of degree). Within
+   * that source-scoped pool, category/difficulty are only a *preference* — falls back to the
+   * whole source-scoped pool if too few match, since a mismatched-topic offline game beats no
+   * offline game at all.
    */
   async getOfflineQuestions(config: GameConfig): Promise<TriviaQuestion[]> {
-    const { amount, category, difficulty } = config;
+    const { amount, category, difficulty, source } = config;
     const all = await this.getAllQuestions();
 
-    const filtered = all.filter(
+    const sourceScoped = source === 'mixed' ? all : all.filter((q) => q.source === source);
+
+    const filtered = sourceScoped.filter(
       (q) => (!category || q.category === category) && (!difficulty || q.difficulty === difficulty),
     );
-    const pool = filtered.length >= Math.min(amount, all.length) ? filtered : all;
+    const pool = filtered.length >= Math.min(amount, sourceScoped.length) ? filtered : sourceScoped;
 
     return shuffleArray(pool).slice(0, amount);
   }

@@ -53,16 +53,20 @@ export class TriviaService {
 
   /**
    * Unified entry point: fetches questions from Open Trivia DB, Firestore, or both — falling
-   * back to the offline IndexedDB pool (`OfflineQuestionsService`) if the browser is offline
-   * or the network fetch itself fails. A legitimate "no questions for this filter" result
-   * (empty array, no error) is left alone — only a failed/skipped network attempt falls back.
+   * back to the offline IndexedDB pool (`OfflineQuestionsService`) if the network fetch itself
+   * fails. A legitimate "no questions for this filter" result (empty array, no error) is left
+   * alone — only a failed network attempt falls back.
+   *
+   * Deliberately does NOT pre-check `navigator.onLine` to skip straight to the offline pool:
+   * that property is well-known to misreport `false` in some headless/CI/sandboxed browser
+   * environments even when the network is fine (confirmed the hard way — it made this method
+   * skip a working Firestore fetch during a real CI run, silently substituting cached offline
+   * content for the live one). Always attempting the real fetch first and only falling back on
+   * an actual thrown failure is both more robust and no slower in the genuinely-offline case —
+   * every underlying network call here already has its own timeout (`withTimeout` in
+   * `FirebaseService`, the `HttpClient` call failing fast on a real connection error).
    */
   async getQuestions(config: GameConfig): Promise<TriviaQuestion[]> {
-    if (!navigator.onLine) {
-      this.playingOffline.set(true);
-      return this.offlineQuestionsService.getOfflineQuestions(config);
-    }
-
     try {
       const questions = await this.fetchQuestions(config);
       this.playingOffline.set(false);

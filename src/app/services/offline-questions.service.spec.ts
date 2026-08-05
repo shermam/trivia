@@ -125,6 +125,57 @@ describe('OfflineQuestionsService', () => {
     expect(result).toHaveLength(3);
   });
 
+  it('getOfflineQuestions() never crosses source — a "custom" request only draws custom questions', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    await service.saveQuestions([
+      makeQuestion({ question: 'q1', source: 'custom' }),
+      makeQuestion({ question: 'q2', source: 'open_trivia' }),
+      makeQuestion({ question: 'q3', source: 'open_trivia' }),
+      makeQuestion({ question: 'q4', source: 'open_trivia' }),
+    ]);
+
+    const result = await service.getOfflineQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+    });
+
+    // Only 1 custom-sourced question is cached — must not pad with open_trivia ones.
+    expect(result).toEqual([expect.objectContaining({ question: 'q1', source: 'custom' })]);
+  });
+
+  it('getOfflineQuestions() returns nothing for a source with no cached questions of that kind', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    await service.saveQuestions([makeQuestion({ question: 'q1', source: 'open_trivia' })]);
+
+    const result = await service.getOfflineQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('getOfflineQuestions() draws from every source when "mixed" is requested', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    await service.saveQuestions([
+      makeQuestion({ question: 'q1', source: 'custom' }),
+      makeQuestion({ question: 'q2', source: 'open_trivia' }),
+    ]);
+
+    const result = await service.getOfflineQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'mixed',
+    });
+
+    expect(result).toHaveLength(2);
+  });
+
   it('getOfflineQuestions() slices down to the requested amount', async () => {
     const service = TestBed.inject(OfflineQuestionsService);
     await service.saveQuestions([makeQuestion(), makeQuestion(), makeQuestion()]);
