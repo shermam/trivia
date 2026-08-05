@@ -162,6 +162,42 @@ describe('TriviaService offline fallback', () => {
     await expect(promise).rejects.toBeTruthy();
   });
 
+  it('initOfflinePrefetch() does not schedule anything when navigator.webdriver is true', () => {
+    // navigator.webdriver is set by every browser-automation framework (Cypress, Selenium,
+    // Playwright) — a real preview-e2e CI run confirmed this task's own background requests
+    // can compete with the same Cypress-driven tests for a real, shared, rate-limited backend
+    // closely enough to cause unrelated specs to time out.
+    // jsdom's Navigator has no `webdriver` property at all — vi.spyOn requires the property to
+    // already exist to spy on its getter, so it's defined directly instead.
+    Object.defineProperty(navigator, 'webdriver', { value: true, configurable: true });
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+
+    try {
+      TestBed.inject(TriviaService).initOfflinePrefetch();
+
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+      expect(addEventListenerSpy).not.toHaveBeenCalledWith('online', expect.anything());
+    } finally {
+      delete (navigator as { webdriver?: boolean }).webdriver;
+    }
+  });
+
+  it('initOfflinePrefetch() schedules a refill when navigator.webdriver is not set', () => {
+    // Fake timers so the scheduled setTimeout(run, 2000) never actually fires and fires off a
+    // real (unawaited, unverifiable) fetch attempt after this test has already finished.
+    vi.useFakeTimers();
+    try {
+      const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+
+      TestBed.inject(TriviaService).initOfflinePrefetch();
+
+      expect(addEventListenerSpy).toHaveBeenCalledWith('online', expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not fall back to the offline pool on a successful network response', async () => {
     const triviaService = TestBed.inject(TriviaService);
     const promise = triviaService.getQuestions({
