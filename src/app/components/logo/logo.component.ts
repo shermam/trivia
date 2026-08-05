@@ -1,17 +1,29 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 
 /**
- * The Trivimind brand mark, kept as a self-contained inline SVG (own
- * baked-in emerald rounded-square background + white "?" glyph, sourced
- * from public/favicon.svg) — same no-CDN/no-icon-library convention as
- * ProviderIconComponent's OAuth brand marks, rather than fitting it into
- * IconComponent's single-color stroke-icon system, since this is a fixed
- * filled mark, not a 24x24 stroke glyph.
+ * The Trivimind brand mark, kept as a self-contained inline SVG (a rounded
+ * square + white "?" glyph, sourced from public/favicon.svg) — same
+ * no-CDN/no-icon-library convention as ProviderIconComponent's OAuth brand
+ * marks, rather than fitting it into IconComponent's single-color
+ * stroke-icon system, since this is a fixed filled mark, not a 24x24
+ * stroke glyph. The background fills with `currentColor` (like
+ * IconComponent's `stroke="currentColor"`), so callers set the exact brand
+ * shade via a `text-*` class on `app-logo` itself, e.g. `text-emerald-600`
+ * — favicon.svg hardcodes that same hex since static icon files have no
+ * ambient CSS `color` to inherit from.
+ *
+ * `host: { class: 'inline-block' }` matters: without it this element's
+ * display defaults to a plain block box with `width: auto`, which (unlike
+ * the inner `<svg>`, a replaced element sized by its own width/height
+ * attributes) has no intrinsic size and stretches to fill its container —
+ * any `rounded-*`/`shadow-*` class on `app-logo` would then wrap that
+ * full-width invisible box instead of the icon itself.
  */
 @Component({
   selector: 'app-logo',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'inline-block' },
   template: `
     <svg
       [attr.width]="size()"
@@ -26,7 +38,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
        width="144"
        height="144"
        rx="32"
-       fill="#0fa968"
+       fill="currentColor"
        id="rect1"
        x="0"
        y="0" />
