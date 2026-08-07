@@ -2,11 +2,17 @@ name: Deploy to Firebase Hosting
 
 # Fires only when a PR targeting main is closed AND merged (not just closed/declined).
 #
-# This intentionally does not re-run e2e itself: gating is structural via
-# GitHub branch protection on main, which requires the `E2E (preview)` job
-# from firebase-preview.yml to pass before a PR can be merged at all — so by
-# the time this workflow fires, that check has already passed against a real
-# deployed preview build of this exact code.
+# This intentionally re-runs no tests of its own: gating is structural. A
+# repository ruleset on `main` (enforcement: active) requires all five CI
+# checks — `test`, `e2e`, `lighthouse`, `Deploy preview channel` and
+# `E2E (preview)` — to pass before a PR can merge, with
+# strict_required_status_checks_policy on so the branch must also be up to
+# date first. By the time this workflow fires, every one of those has already
+# passed against this exact code, including a real deployed preview build.
+#
+# Note it is a *ruleset*, not classic branch protection: the legacy
+# /branches/main/protection API returns 404 "Branch not protected" regardless.
+# Check /rules/branches/main instead before concluding gating is missing.
 on:
   pull_request:
     types: [closed]
