@@ -2,7 +2,9 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@ang
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { GameConfig } from '../../models/question.model';
+import { ConnectivityService } from '../../services/connectivity.service';
 import { GameControllerService } from '../../services/game-controller.service';
+import { OfflineQuestionsService } from '../../services/offline-questions.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
@@ -21,6 +23,8 @@ export class GameSetupComponent implements OnInit {
   private readonly triviaService = inject(TriviaService);
   protected readonly gameController = inject(GameControllerService);
   protected readonly subscriptionService = inject(SubscriptionService);
+  protected readonly connectivity = inject(ConnectivityService);
+  protected readonly offlineQuestions = inject(OfflineQuestionsService);
 
   protected readonly categories = signal<TriviaCategory[]>([]);
   protected readonly categoriesError = signal<string | null>(null);
