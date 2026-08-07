@@ -121,7 +121,9 @@
     }
   } @else if (!authService.isFullyAuthenticated()) {
     <!-- Signed in with email/password, awaiting verification -->
-    <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-2 pr-6 flex items-center gap-2">
+    <h2
+      class="text-base font-bold text-slate-900 dark:text-slate-50 mb-2 pr-6 flex items-center gap-2"
+    >
       <app-icon name="mail" [size]="16" class="text-emerald-600 dark:text-emerald-400" />
       Verify your email
     </h2>
@@ -163,7 +165,9 @@
     <!-- Fully authenticated: profile management -->
     <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-3 pr-6">Your profile</h2>
 
-    <label for="displayName" class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1"
+    <label
+      for="displayName"
+      class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1"
       >Display name</label
     >
     <div class="flex gap-2 mb-3">
@@ -188,7 +192,9 @@
     <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
       {{ authService.user()?.email }}
       @if (authService.isEmailPasswordAccount()) {
-        <span class="ml-1 text-emerald-700 dark:text-emerald-400 font-medium">&check; Verified</span>
+        <span class="ml-1 text-emerald-700 dark:text-emerald-400 font-medium"
+          >&check; Verified</span
+        >
       }
     </p>
 

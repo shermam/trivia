@@ -24,7 +24,10 @@
     "cypress:run": "ELECTRON_RUN_AS_NODE= cypress run",
     "build:lighthouse": "ng build --configuration=lighthouse",
     "lighthouse:runner": "lhci autorun --config=./lighthouserc.json",
-    "lighthouse": "npm run build:lighthouse && npx --yes firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only hosting,auth,firestore \"npm run lighthouse:runner\""
+    "lighthouse": "npm run build:lighthouse && npx --yes firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only hosting,auth,firestore \"npm run lighthouse:runner\"",
+    "lint": "ng lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "private": true,
   "packageManager": "npm@11.12.1",
@@ -44,9 +47,12 @@
     "@angular/build": "^22.0.8",
     "@angular/cli": "^22.0.8",
     "@angular/compiler-cli": "^22.0.0",
+    "@eslint/js": "^10.0.1",
     "@lhci/cli": "^0.15.1",
     "@tailwindcss/postcss": "^4.3.3",
+    "angular-eslint": "22.1.0",
     "cypress": "^15.19.0",
+    "eslint": "^10.6.0",
     "fake-indexeddb": "^6.2.5",
     "firebase-admin": "^14.2.0",
     "firebase-tools": "^14.27.0",
@@ -56,6 +62,7 @@
     "start-server-and-test": "^3.0.11",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
+    "typescript-eslint": "8.62.1",
     "vitest": "^4.0.8"
   }
 }

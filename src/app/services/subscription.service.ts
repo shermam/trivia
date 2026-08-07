@@ -63,7 +63,7 @@ export class SubscriptionService {
       return;
     }
 
-    this.firebaseService.getFirestore().then(({ firestore, firestoreModule }) => {
+    void this.firebaseService.getFirestore().then(({ firestore, firestoreModule }) => {
       // The signed-in user may have changed again while this promise was
       // in flight — don't attach a listener for a uid we've since moved on
       // from.

@@ -47,7 +47,7 @@ export class PricingComponent {
 
   protected dismissCheckoutStatus(): void {
     this.checkoutStatus.set(null);
-    this.router.navigate([], { queryParams: {}, replaceUrl: true });
+    void this.router.navigate([], { queryParams: {}, replaceUrl: true });
   }
 
   protected async subscribe(): Promise<void> {

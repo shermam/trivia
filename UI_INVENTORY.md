@@ -1,6 +1,6 @@
 # Trivimind — UI Inventory
 
-This document is a complete, as-implemented inventory of every screen, UI element, and piece of user-facing copy currently in the app, plus every distinct UI *state* those elements can be in. It exists as raw material for a brand design cookbook and Figma prototypes — it describes **what exists today**, not proposed design.
+This document is a complete, as-implemented inventory of every screen, UI element, and piece of user-facing copy currently in the app, plus every distinct UI _state_ those elements can be in. It exists as raw material for a brand design cookbook and Figma prototypes — it describes **what exists today**, not proposed design.
 
 Source of truth: `src/app/**` (Angular 22, standalone components, Tailwind CSS 4). Cross-check `PROJECT_OVERVIEW.md` for behavioral/backend context.
 
@@ -33,17 +33,17 @@ Sticky header, present on every screen except in **embed mode**.
 
 #### Account trigger — states
 
-| State | Visual | Text/content |
-|---|---|---|
-| **Auth not ready yet** (`authReady()` false) | Plain text | "Loading…" |
-| **Anonymous** | Grey circular avatar with a person glyph (👤) | "Sign in" |
-| **Signed in** (any real account) | Gradient (indigo→violet) circular avatar showing the user's **initials** (first letter of display name or email, uppercased; falls back to "?") | Display name (or email if no display name set), truncated at ~10rem with ellipsis |
-| **Signed in, PRO** | Same as above, plus a **PRO badge** (indigo-100 pill, indigo-600 bold "PRO" text) next to the name | — |
-| **Signed in, email unverified** | Small amber dot badge overlaid on the bottom-right corner of the avatar | — |
+| State                                        | Visual                                                                                                                                          | Text/content                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Auth not ready yet** (`authReady()` false) | Plain text                                                                                                                                      | "Loading…"                                                                        |
+| **Anonymous**                                | Grey circular avatar with a person glyph (👤)                                                                                                   | "Sign in"                                                                         |
+| **Signed in** (any real account)             | Gradient (indigo→violet) circular avatar showing the user's **initials** (first letter of display name or email, uppercased; falls back to "?") | Display name (or email if no display name set), truncated at ~10rem with ellipsis |
+| **Signed in, PRO**                           | Same as above, plus a **PRO badge** (indigo-100 pill, indigo-600 bold "PRO" text) next to the name                                              | —                                                                                 |
+| **Signed in, email unverified**              | Small amber dot badge overlaid on the bottom-right corner of the avatar                                                                         | —                                                                                 |
 
 ### 0.2 Auth Menu (`AuthMenuComponent`) — dropdown panel
 
-A single panel (white card, rounded-2xl, shadowed, ~320px wide, small "x" close button top-right in every state) whose *entire contents* switch based on auth state. Also reused (opened programmatically) from the "Sign in" buttons on Game Over and Add a Question screens.
+A single panel (white card, rounded-2xl, shadowed, ~320px wide, small "x" close button top-right in every state) whose _entire contents_ switch based on auth state. Also reused (opened programmatically) from the "Sign in" buttons on Game Over and Add a Question screens.
 
 #### State A — Signed out / anonymous
 
@@ -121,15 +121,15 @@ Full-screen centered card on an indigo/purple gradient background.
 
 ### States
 
-| State | Effect |
-|---|---|
-| Initial load | Categories fetch in background; form usable immediately with "Any Category" |
-| Categories fetch failed | Amber inline warning shown; category dropdown just shows "Any Category" |
-| Form submitted while invalid | Validation errors marked (all fields touched); no navigation |
-| Submitting (`gameController.isLoading()`) | Submit button disabled, label → "Loading Questions…" |
+| State                                                | Effect                                                                                                                 |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Initial load                                         | Categories fetch in background; form usable immediately with "Any Category"                                            |
+| Categories fetch failed                              | Amber inline warning shown; category dropdown just shows "Any Category"                                                |
+| Form submitted while invalid                         | Validation errors marked (all fields touched); no navigation                                                           |
+| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"                                                                   |
 | Game start failed — no questions matched the filters | Red inline error: "No questions were found for the selected options. Try a different category, difficulty, or source." |
-| Game start failed — network/fetch error | Red inline error: "Failed to load questions. Please check your connection and try again." |
-| Success | Navigates to `/play` |
+| Game start failed — network/fetch error              | Red inline error: "Failed to load questions. Please check your connection and try again."                              |
+| Success                                              | Navigates to `/play`                                                                                                   |
 
 ---
 
@@ -153,25 +153,25 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 
 ### States
 
-| State | Timer ring / bar color | Answer buttons |
-|---|---|---|
-| **Countdown, >5s left** | Indigo ring + number, indigo progress bar | All enabled; default styling (white bg, slate border; indigo hover tint) |
-| **Countdown, ≤5s left** | Red ring + number | Same as above (still answerable) |
-| **Timer hits 0 (no answer chosen)** | Locks at 0 | Auto-submits a "no answer" — same as an incorrect answer, no option highlighted green except the correct one |
-| **Answer selected — correct** | frozen | Selected/correct button (and its letter badge) turns **green**; all other buttons disabled |
-| **Answer selected — incorrect** | frozen | Chosen button (and its letter badge) turns **red**; the actual correct answer turns **green**; all remaining (non-chosen, non-correct) buttons dim to 60% opacity, grey text; all buttons disabled |
-| **Post-answer delay (2s)** | — | Result banner + colors stay visible for 2 seconds before auto-advancing |
-| **Advance** | — | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over` |
+| State                               | Timer ring / bar color                    | Answer buttons                                                                                                                                                                                     |
+| ----------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Countdown, >5s left**             | Indigo ring + number, indigo progress bar | All enabled; default styling (white bg, slate border; indigo hover tint)                                                                                                                           |
+| **Countdown, ≤5s left**             | Red ring + number                         | Same as above (still answerable)                                                                                                                                                                   |
+| **Timer hits 0 (no answer chosen)** | Locks at 0                                | Auto-submits a "no answer" — same as an incorrect answer, no option highlighted green except the correct one                                                                                       |
+| **Answer selected — correct**       | frozen                                    | Selected/correct button (and its letter badge) turns **green**; all other buttons disabled                                                                                                         |
+| **Answer selected — incorrect**     | frozen                                    | Chosen button (and its letter badge) turns **red**; the actual correct answer turns **green**; all remaining (non-chosen, non-correct) buttons dim to 60% opacity, grey text; all buttons disabled |
+| **Post-answer delay (2s)**          | —                                         | Result banner + colors stay visible for 2 seconds before auto-advancing                                                                                                                            |
+| **Advance**                         | —                                         | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over`                                                              |
 
 Score only increments on a correct, non-timed-out answer.
 
 #### Result feedback banner (per outcome)
 
-| Outcome | Banner | Message |
-|---|---|---|
-| Correct | Green (🎉) | "Correct! Well done." |
-| Timed out (no answer) | Red (⏰) | "Time's up! The answer was {{ correct_answer }}." |
-| Incorrect (wrong answer picked) | Red (❌) | "Incorrect. The correct answer is {{ correct_answer }}." |
+| Outcome                         | Banner     | Message                                                  |
+| ------------------------------- | ---------- | -------------------------------------------------------- |
+| Correct                         | Green (🎉) | "Correct! Well done."                                    |
+| Timed out (no answer)           | Red (⏰)   | "Time's up! The answer was {{ correct_answer }}."        |
+| Incorrect (wrong answer picked) | Red (❌)   | "Incorrect. The correct answer is {{ correct_answer }}." |
 
 ---
 
@@ -192,23 +192,23 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 
 ### States — Save-score area
 
-| State | Content |
-|---|---|
-| **Already saved this session, no error** | Green success banner: "Score saved to the leaderboard!", plus "You're ranked #N on the leaderboard." if (and only if) the player's own entry is present in the fetched top 10 — no rank is claimed otherwise |
-| **Already saved this session, but with a non-fatal note** (e.g. existing best was higher) | Amber banner with the specific message, e.g. "Your best score is already higher — nice consistency! We kept your existing best." |
-| **Anonymous player** | Indigo info box: "Sign in to save this score to the leaderboard." + **"Sign in" button** (hidden entirely in embed mode) that opens the Auth Menu |
-| **Signed in but not fully authenticated** (unverified email) | Indigo info box: "Verify your email to save this score to the leaderboard." + **"Resend verification email" button** |
-| **Fully authenticated, not yet saved** | Form: text input (placeholder "Enter your name", prefilled from profile display name, max 30 chars, required) + **"Save Score" button** (disabled while saving or while name is blank; label → "Saving…" while in flight) |
-| **Save failed** (generic) | Red inline error: "Could not save your score. Please try again." |
+| State                                                                                     | Content                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Already saved this session, no error**                                                  | Green success banner: "Score saved to the leaderboard!", plus "You're ranked #N on the leaderboard." if (and only if) the player's own entry is present in the fetched top 10 — no rank is claimed otherwise              |
+| **Already saved this session, but with a non-fatal note** (e.g. existing best was higher) | Amber banner with the specific message, e.g. "Your best score is already higher — nice consistency! We kept your existing best."                                                                                          |
+| **Anonymous player**                                                                      | Indigo info box: "Sign in to save this score to the leaderboard." + **"Sign in" button** (hidden entirely in embed mode) that opens the Auth Menu                                                                         |
+| **Signed in but not fully authenticated** (unverified email)                              | Indigo info box: "Verify your email to save this score to the leaderboard." + **"Resend verification email" button**                                                                                                      |
+| **Fully authenticated, not yet saved**                                                    | Form: text input (placeholder "Enter your name", prefilled from profile display name, max 30 chars, required) + **"Save Score" button** (disabled while saving or while name is blank; label → "Saving…" while in flight) |
+| **Save failed** (generic)                                                                 | Red inline error: "Could not save your score. Please try again."                                                                                                                                                          |
 
 ### States — Leaderboard list
 
-| State | Content |
-|---|---|
-| **Loading** | Grey text: "Loading leaderboard…" |
+| State          | Content                                                                     |
+| -------------- | --------------------------------------------------------------------------- |
+| **Loading**    | Grey text: "Loading leaderboard…"                                           |
 | **Load error** | Red inline error: "Could not load the leaderboard. Please try again later." |
-| **Empty** | Grey text: "No scores yet. Be the first!" |
-| **Loaded** | Ranked list (1–10), refreshed automatically after a successful save |
+| **Empty**      | Grey text: "No scores yet. Be the first!"                                   |
+| **Loaded**     | Ranked list (1–10), refreshed automatically after a successful save         |
 
 ---
 
@@ -225,24 +225,29 @@ Full-screen centered card on a light slate background. Reachable via the game-se
 ### States (in the order the template checks them)
 
 **A — Anonymous**
+
 - Indigo info box: "Sign in to submit a question to the shared bank." + **"Sign in" button** → opens Auth Menu
 
 **B — Signed in, not fully authenticated (unverified email)**
+
 - Indigo info box: "Verify your email to submit a question." + **"Resend verification email" button**
 
 **C — Fully authenticated, not a Pro subscriber** (empty-state upsell)
+
 - Gradient (indigo→violet) icon badge (sparkles glyph)
 - Heading: "This one's for Pro members"
 - Body: "Upgrade to Pro ($0.99/month) to create and add your own questions to the shared question bank."
 - **"Upgrade to Pro" button** (indigo) → navigates to `/pricing`
 
 **D — Fully authenticated + Pro, just submitted successfully**
+
 - Green success box: "Thanks! Your question was added to the bank."
 - Two buttons side by side:
   - "Add another" (indigo) — resets the form back to state E
   - "Back to game" (outlined) — navigates to `/`
 
 **E — Fully authenticated + Pro, form**
+
 - **Field: "Category"** — free-text input, placeholder "e.g. Science", with a `<datalist>` of suggestions sourced from the cached Open Trivia category list
 - **Field: "Difficulty"** — `<select>`; options "Easy", "Medium", "Hard" (default "Medium")
 - **Field: "Question Type"** — 2-segment button-style radio group: "Multiple Choice" (default) / "True / False"
@@ -273,6 +278,7 @@ Full-width page (not a single centered card — a two-column comparison layout) 
 A "← Back to game" link (→ `/`) sits above the header.
 
 #### Starter card
+
 - Icon badge (slate, zap glyph)
 - Heading: "Starter", subtitle "Everything you need to play and compete."
 - Price: "$0" + "/month"
@@ -282,10 +288,11 @@ A "← Back to game" link (→ `/`) sits above the header.
 - Footer badge (only shown while the viewer is **not** Pro): "Your current plan" (outlined, muted, check icon)
 
 #### Pro card
+
 - Gradient top accent bar; corner badge "PRO" (indigo pill, top-right)
 - Icon badge (indigo→violet gradient, sparkles glyph)
 - Heading: "Pro", subtitle "Contribute questions and shape the game."
-- Price: "$0.99" + "/month" (static display text — the actual Stripe price *ID* used at checkout is resolved dynamically, never hardcoded; see `PROJECT_OVERVIEW.md` §1.6)
+- Price: "$0.99" + "/month" (static display text — the actual Stripe price _ID_ used at checkout is resolved dynamically, never hardcoded; see `PROJECT_OVERVIEW.md` §1.6)
 - Feature list (green check-circle icons, last item styled as "coming soon" with a muted icon instead of a check):
   - "Everything in Starter"
   - "Create and add custom questions to the global question bank"
@@ -296,35 +303,39 @@ A "← Back to game" link (→ `/`) sits above the header.
 
 ### States — checkout status banner (from `?checkout=success|cancelled` query param)
 
-| State | Content |
-|---|---|
-| `checkout=success` | Green banner: "Subscription started! It may take a few seconds to finish activating." + "Start playing" link (→ `/`) + "Dismiss" button |
-| `checkout=cancelled` | Amber banner: "Checkout was cancelled — no charge was made." + "Dismiss" button |
-| No query param | No banner |
+| State                | Content                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `checkout=success`   | Green banner: "Subscription started! It may take a few seconds to finish activating." + "Start playing" link (→ `/`) + "Dismiss" button |
+| `checkout=cancelled` | Amber banner: "Checkout was cancelled — no charge was made." + "Dismiss" button                                                         |
+| No query param       | No banner                                                                                                                               |
 
 ### States — Pro card footer / Subscribe button
 
-| State | Content |
-|---|---|
-| **Already subscribed (Pro)** | Green box: "✓ You're subscribed" (Starter's "Your current plan" label is hidden in this state so only one card claims to be current) |
-| **Auth not ready yet** | Button disabled, label "Loading…" |
-| **Not signed in (anonymous)** | Button label "Sign in to subscribe" — clicking opens the Auth Menu instead of starting checkout |
-| **Signed in, unverified email** | Clicking shows red error: "Verify your email first, then come back to subscribe." |
-| **Redirecting to Stripe Checkout** | Button disabled, label "Redirecting…" |
-| **Ready to subscribe** | Button label "Subscribe — $0.99/mo" |
-| **Checkout start failed** | Red inline error: "Could not start checkout. Please try again." |
+| State                              | Content                                                                                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Already subscribed (Pro)**       | Green box: "✓ You're subscribed" (Starter's "Your current plan" label is hidden in this state so only one card claims to be current) |
+| **Auth not ready yet**             | Button disabled, label "Loading…"                                                                                                    |
+| **Not signed in (anonymous)**      | Button label "Sign in to subscribe" — clicking opens the Auth Menu instead of starting checkout                                      |
+| **Signed in, unverified email**    | Clicking shows red error: "Verify your email first, then come back to subscribe."                                                    |
+| **Redirecting to Stripe Checkout** | Button disabled, label "Redirecting…"                                                                                                |
+| **Ready to subscribe**             | Button label "Subscribe — $0.99/mo"                                                                                                  |
+| **Checkout start failed**          | Red inline error: "Could not start checkout. Please try again."                                                                      |
 
 ---
 
 ## 6. Cross-cutting elements & patterns
 
 ### 6.1 PRO badge
+
 A small rounded pill, bold uppercase "PRO" text. Two visual variants used consistently everywhere it appears (game-setup footer link, Auth Menu "Add a question" link, top-bar account trigger):
+
 - **Locked** (non-Pro user): grey background, muted grey text
 - **Unlocked** (Pro user): indigo-100 background, indigo-600 text (indigo-600/white on the "Add a question" button itself, which is solid indigo)
 
 ### 6.2 Buttons
+
 Consistent visual vocabulary across the whole app:
+
 - **Primary (hero CTAs)**: gradient indigo→violet fill, white text, elevated shadow that intensifies on hover (game setup's "Start Game", add-question's "Add Question", pricing's "Subscribe")
 - **Primary (standard)**: solid indigo-600 background, white text, darkens on hover
 - Both primary variants grey out (`disabled:bg-slate-300`/gradient-to-slate) and show a "not-allowed" cursor when disabled
@@ -333,6 +344,7 @@ Consistent visual vocabulary across the whole app:
 - **Destructive-looking dark button**: "Play Again" uses a dark slate fill (distinct from primary indigo), signaling a full reset action
 
 ### 6.3 Inline banners (consistent 3-color system across every screen)
+
 - **Red** (`bg-red-50`/`border-red-200`/`text-red-700`): hard errors (failed save, failed load, failed submit)
 - **Amber** (`bg-amber-50`/`border-amber-200`/`text-amber-700`): soft warnings / non-fatal notices (categories failed to load but game still playable; checkout cancelled; existing best score was already higher)
 - **Green** (`bg-green-50`/`border-green-200`/`text-green-700`): success confirmations (score saved, question added, verification email sent, subscription active)
@@ -340,18 +352,22 @@ Consistent visual vocabulary across the whole app:
 - Most banners now carry a small leading icon reinforcing their color (triangle-alert/circle-alert for amber/red, circle-check-big for green, mail for the verify-email prompt)
 
 ### 6.4 Loading / busy conventions
+
 - Buttons that trigger an async action disable themselves and swap their label to a present-participle phrase ending in an ellipsis: "Loading Questions…", "Saving…", "Please wait…", "Redirecting…", "Opening billing portal…"
 - The top bar and Pricing's Subscribe button both guard on `authReady()` specifically (distinct from "anonymous") to avoid a one-frame flash of the wrong state before Firebase's first auth callback resolves — shown as "Loading…" in both places.
 
 ### 6.5 Form field conventions
+
 - All labels are `<label>` elements, small, semibold, slate-500/600, positioned directly above their control with a small gap
 - All text/select inputs share the same shape: `rounded-xl` corners, thin slate border, indigo focus ring; `<select>`s use a custom chevron-down icon (native arrow hidden via `appearance-none`)
 - Segmented "pill" radio groups (Question Source, Question Type, True/False, Multiple/True-False question type) are used instead of native radio buttons or dropdowns wherever the option set is small (2–3 choices) — the underlying `<input type="radio">` is visually hidden (`sr-only`) and its wrapping `<label>` is styled as the visible control, with the selected option getting an indigo-100 fill + indigo-600 bold text; unselected labels use slate-600 (not a lighter grey) to keep body text at a readable contrast ratio against the segmented control's slate-100 track
 
 ### 6.6 Elevation & shape tokens
+
 Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s shadow scale so every surface pulls from the same set: `shadow-card` (subtle card shadow), `shadow-card-lg` (quiz/game-over/leaderboard cards), `shadow-hero-card` (game-setup's large gradient-backed card), `shadow-dropdown` (auth menu), `shadow-cta`/`shadow-cta-hover` (primary gradient buttons), `shadow-pro-card` (pricing's Pro card). Corner radii follow Tailwind's default scale: `rounded-3xl` (24px, cards), `rounded-2xl` (16px, dropdowns/sub-cards), `rounded-xl` (12px, buttons/inputs/segmented controls).
 
 ### 6.7 Embed mode (`?embed=1`)
+
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
 - On Game Over, the "Sign in" button in the anonymous-player prompt is also hidden (there's nowhere for it to open a menu into), leaving just the explanatory text.
 - All other screens/logic behave identically; this only affects the top bar's presence and that one button.
@@ -360,14 +376,14 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 ## 7. Full route table
 
-| Path | Component | Guard | Purpose |
-|---|---|---|---|
-| `/` | `GameSetupComponent` | none | Configure & start a game |
-| `/play` | `QuizLoopComponent` | redirects to `/` if no active question in memory | Answer questions against a timer |
-| `/game-over` | `GameOverComponent` | redirects to `/` if no completed game in memory | Final score, save to leaderboard, view top 10 |
-| `/add-question` | `AddQuestionComponent` | none (in-page gating by auth/Pro state instead) | Submit a question to the custom bank (Pro only) |
-| `/pricing` | `PricingComponent` | none | Compare Starter vs. Pro, subscribe via Stripe |
-| `*` (unmatched) | — | redirects to `/` | — |
+| Path            | Component              | Guard                                            | Purpose                                         |
+| --------------- | ---------------------- | ------------------------------------------------ | ----------------------------------------------- |
+| `/`             | `GameSetupComponent`   | none                                             | Configure & start a game                        |
+| `/play`         | `QuizLoopComponent`    | redirects to `/` if no active question in memory | Answer questions against a timer                |
+| `/game-over`    | `GameOverComponent`    | redirects to `/` if no completed game in memory  | Final score, save to leaderboard, view top 10   |
+| `/add-question` | `AddQuestionComponent` | none (in-page gating by auth/Pro state instead)  | Submit a question to the custom bank (Pro only) |
+| `/pricing`      | `PricingComponent`     | none                                             | Compare Starter vs. Pro, subscribe via Stripe   |
+| `*` (unmatched) | —                      | redirects to `/`                                 | —                                               |
 
 ---
 

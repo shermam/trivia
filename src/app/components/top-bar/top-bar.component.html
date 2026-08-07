@@ -20,7 +20,9 @@
       <button
         type="button"
         (click)="toggleTheme()"
-        [attr.aria-label]="themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+        [attr.aria-label]="
+          themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+        "
         class="flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
       >
         <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />

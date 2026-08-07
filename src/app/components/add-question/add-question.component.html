@@ -6,10 +6,14 @@
       >
         <app-icon name="plus-circle" [size]="24" class="text-white" />
       </div>
-      <h1 class="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mb-1">
+      <h1
+        class="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mb-1"
+      >
         Add a Question
       </h1>
-      <p class="text-slate-500 dark:text-slate-400">Contribute a question to the shared custom bank</p>
+      <p class="text-slate-500 dark:text-slate-400">
+        Contribute a question to the shared custom bank
+      </p>
     </div>
 
     @if (authService.isAnonymous()) {
@@ -31,7 +35,9 @@
       <div
         class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
       >
-        <p class="text-slate-700 dark:text-slate-300 mb-3">Verify your email to submit a question.</p>
+        <p class="text-slate-700 dark:text-slate-300 mb-3">
+          Verify your email to submit a question.
+        </p>
         <button
           type="button"
           (click)="resendVerification()"
@@ -96,7 +102,9 @@
     } @else {
       <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
         <div>
-          <label for="category" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+          <label
+            for="category"
+            class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
             >Category</label
           >
           <input
@@ -115,7 +123,9 @@
         </div>
 
         <div>
-          <label for="difficulty" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+          <label
+            for="difficulty"
+            class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
             >Difficulty</label
           >
           <div class="relative">
@@ -169,7 +179,9 @@
         </div>
 
         <div>
-          <label for="question" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+          <label
+            for="question"
+            class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
             >Question</label
           >
           <textarea
@@ -215,7 +227,9 @@
           </div>
         } @else {
           <div>
-            <label for="correctAnswer" class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+            <label
+              for="correctAnswer"
+              class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
               >Correct Answer</label
             >
             <input

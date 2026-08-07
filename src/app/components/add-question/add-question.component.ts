@@ -48,7 +48,15 @@ export class AddQuestionComponent implements OnInit {
     ]),
   });
 
-  async ngOnInit(): Promise<void> {
+  // Angular calls `ngOnInit` and discards whatever it returns, so an `async`
+  // one is an interface misuse: any rejection escapes as an unhandled promise
+  // rather than being reported. Keep the hook synchronous and kick the async
+  // work off explicitly.
+  ngOnInit(): void {
+    void this.loadCategories();
+  }
+
+  private async loadCategories(): Promise<void> {
     try {
       this.categories.set(await this.triviaService.getCategories());
     } catch {
@@ -133,10 +141,10 @@ export class AddQuestionComponent implements OnInit {
   }
 
   protected backToGame(): void {
-    this.router.navigateByUrl('/');
+    void this.router.navigateByUrl('/');
   }
 
   protected goToPricing(): void {
-    this.router.navigateByUrl('/pricing');
+    void this.router.navigateByUrl('/pricing');
   }
 }

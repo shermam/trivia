@@ -8,7 +8,9 @@ describe('App', () => {
   beforeEach(async () => {
     // Real background prefetch schedules a timer + a real opentdb.com fetch (see
     // TriviaService.initOfflinePrefetch) — neither belongs in a unit test.
-    vi.spyOn(TriviaService.prototype, 'initOfflinePrefetch').mockImplementation(() => {});
+    vi.spyOn(TriviaService.prototype, 'initOfflinePrefetch').mockImplementation(() => {
+      /* intentional no-op */
+    });
 
     await TestBed.configureTestingModule({
       imports: [App],

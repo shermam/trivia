@@ -1,8 +1,21 @@
-name: Unit Tests
+name: Lint & Unit Tests
 
-# Runs the Vitest unit suite on every PR targeting main, plus main itself as
-# a safety net — separate from the Cypress e2e workflow (e2e.yml) so a slow
-# e2e run never blocks fast feedback on unit-level regressions.
+# Runs formatting, lint and the Vitest unit suite on every PR targeting main,
+# plus main itself as a safety net — separate from the Cypress e2e workflow
+# (e2e.yml) so a slow e2e run never blocks fast feedback on unit-level
+# regressions.
+#
+# Lint and format:check deliberately live in *this* job rather than a new
+# workflow of their own. `main`'s ruleset requires the status checks `test`,
+# `e2e`, `lighthouse`, `Deploy preview channel` and `E2E (preview)` by name,
+# and that list can only be changed by a repo admin — so a brand-new workflow
+# would produce a check that gates nothing until someone remembers to add it.
+# Folding these steps into the already-required `test` job means they gate
+# merges the moment this lands, with no settings change.
+#
+# For the same reason: do NOT give this job a `name:`. Without one the check
+# context is the job id (`test`), which is what the ruleset matches on;
+# adding a display name would silently rename the check and disable the gate.
 on:
   pull_request:
     branches: [main]
@@ -24,6 +37,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Ordered cheapest-first so the fastest signal fails first: formatting
+      # is a pure text check, lint needs a TypeScript program, tests need a
+      # built app.
+      - name: Check formatting (Prettier)
+        run: npm run format:check
+
+      - name: Lint (ESLint + angular-eslint)
+        run: npm run lint
 
       - name: Run unit tests (Vitest)
         run: npm test

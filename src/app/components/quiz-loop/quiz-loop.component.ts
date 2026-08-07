@@ -7,6 +7,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { Router } from '@angular/router';
 import { GameControllerService } from '../../services/game-controller.service';
 
@@ -19,7 +20,7 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 @Component({
   selector: 'app-quiz-loop',
   standalone: true,
-  imports: [],
+  imports: [NgClass],
   templateUrl: './quiz-loop.component.html',
   styleUrl: './quiz-loop.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -47,7 +48,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     if (!this.gameController.currentQuestion()) {
-      this.router.navigateByUrl('/');
+      void this.router.navigateByUrl('/');
       return;
     }
     this.startTimer();
