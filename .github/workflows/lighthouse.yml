@@ -30,6 +30,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
 
       - name: Set up Java (required by the Firestore emulator)
         uses: actions/setup-java@v4
