@@ -28,5 +28,17 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./components/pricing/pricing.component').then((m) => m.PricingComponent),
   },
+  {
+    path: 'privacy',
+    loadComponent: () =>
+      import('./components/legal/privacy-policy.component').then((m) => m.PrivacyPolicyComponent),
+  },
+  {
+    path: 'terms',
+    loadComponent: () =>
+      import('./components/legal/terms-of-service.component').then(
+        (m) => m.TermsOfServiceComponent,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

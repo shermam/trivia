@@ -4,3 +4,6 @@
 <main>
   <router-outlet />
 </main>
+@if (!embedMode.isEmbedded()) {
+  <app-footer />
+}
