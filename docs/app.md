@@ -12,17 +12,21 @@ Part of the project overview — start at [`PROJECT_OVERVIEW.md`](../PROJECT_OVE
 
 ### 1.1 Game flow
 
-The app is a five-screen flow, implemented as five lazily-loaded standalone Angular routes:
+The app is a five-screen game flow, plus two static legal pages, implemented as lazily-loaded standalone Angular routes:
 
-| Route           | Component              | Purpose                                                                    |
-| --------------- | ---------------------- | -------------------------------------------------------------------------- |
-| `/`             | `GameSetupComponent`   | Configure and start a new game                                             |
-| `/play`         | `QuizLoopComponent`    | Answer questions one at a time, against a timer                            |
-| `/game-over`    | `GameOverComponent`    | Show final score, submit to leaderboard, view top 10                       |
-| `/add-question` | `AddQuestionComponent` | Submit a new question to the custom question bank (**Pro only**, see §1.6) |
-| `/pricing`      | `PricingComponent`     | Compare Starter vs. Pro and subscribe via Stripe Checkout (§1.6)           |
+| Route           | Component                 | Purpose                                                                    |
+| --------------- | ------------------------- | -------------------------------------------------------------------------- |
+| `/`             | `GameSetupComponent`      | Configure and start a new game                                             |
+| `/play`         | `QuizLoopComponent`       | Answer questions one at a time, against a timer                            |
+| `/game-over`    | `GameOverComponent`       | Show final score, submit to leaderboard, view top 10                       |
+| `/add-question` | `AddQuestionComponent`    | Submit a new question to the custom question bank (**Pro only**, see §1.6) |
+| `/pricing`      | `PricingComponent`        | Compare Starter vs. Pro and subscribe via Stripe Checkout (§1.6)           |
+| `/privacy`      | `PrivacyPolicyComponent`  | Privacy Policy (§1.9)                                                      |
+| `/terms`        | `TermsOfServiceComponent` | Terms of Service (§1.9)                                                    |
 
 Any unmatched route redirects back to `/`.
+
+**Every route carries a `title`, including the two legal pages.** `AppTitleStrategy` reads it out to assistive tech on navigation, because client-side routing is otherwise completely silent (finding G5), and `app.spec.ts` fails on a route that lacks one. Worth stating here because it is exactly what a textual merge cannot see: when these two routes were rebased forward across the G5 work, they merged cleanly and titleless, and only the spec caught it.
 
 **Game setup (`/`)**
 
