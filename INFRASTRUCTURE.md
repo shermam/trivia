@@ -199,3 +199,43 @@ Rough order, each step independently verifiable before moving to the next:
 13. `npx ng add @angular/pwa` (§2a) for installability — check the version-pinning caveats there first if the Angular major is recent. Rasterize real icons before shipping; don't leave the schematic's placeholders in.
 
 Write (or update) this same file, and the app-functionality-focused `PROJECT_OVERVIEW.md` counterpart, as the new project's infra takes shape — don't backfill either from memory after the fact.
+
+---
+
+## 10. Infra guardrails that must not regress
+
+The app-layer counterpart to this list lives in `CLAUDE.md` §4. Everything here was a real gap found in an audit of this repo, and every one of them is generalizable — if you scaffold a new project via §9, these are the infra decisions that are easy to get wrong once and then never look at again.
+
+### 10.1 Deploy ordering and gating
+
+- **Deploy the backend contract before the frontend that depends on it.** Rules and serverless functions go out _first_, hosting last. The reverse order (this repo's original) puts a new client live against an old backend for the length of the remaining deploy steps — a window that only ever bites on the release where it matters, because that's the release that changed both.
+- **A deploy pipeline that runs no tests is only as safe as the thing gating merges into it.** Merge-to-deploy is a fine pattern, but it means branch protection _is_ your test gate. A required status check that was never actually enabled in repo settings is not a gate — it's a comment in a YAML file. Verify the setting exists, don't infer it from the workflow. This is repo-admin-only and cannot be set from CI, so it's easy to write the workflow, believe it's enforced, and never check.
+- **…and verify it at the right endpoint.** GitHub now has two independent mechanisms — classic _branch protection_ and _rulesets_ — and the legacy `GET /repos/{owner}/{repo}/branches/{branch}/protection` API reports `404 "Branch not protected"` for a branch fully protected by a ruleset. The 404 is not evidence of anything. Check `GET /repos/{owner}/{repo}/rules/branches/{branch}` (effective rules from all sources) or `/rulesets` before concluding gating is missing — this repo's `main` is ruleset-protected and 404s on the legacy path, which is a false negative waiting to be acted on by anyone auditing it.
+- **Have a post-deploy signal and a rollback path.** A multi-step deploy (hosting, then rules, then functions) can half-succeed. Without a smoke check afterwards, a partial deploy is indistinguishable from a clean one until a user finds it.
+
+### 10.2 Secrets in CI
+
+- **Pass secrets through `env:`, never interpolate them into a `run:` string.** `echo '${{ secrets.FOO }}' > file` makes the secret part of the command line, which is the documented anti-pattern: it breaks on any value containing a quote, and it puts the value somewhere shell tracing and error messages can reach. Bind it as an environment variable and `printf '%s' "$FOO" > file` instead.
+- **Clean up written credential files with `if: always()`**, so a failed step doesn't leave a service account key on the runner.
+- **Prefer the narrowest workflow trigger that works.** `pull_request` withholds secrets from fork PRs by default, which is what you want; `pull_request_target` does not, and is how CI secrets get exfiltrated by a PR that only changed a build script.
+
+### 10.3 Dependency and audit policy
+
+- **Triage production and development advisories separately.** A single `npm audit` number conflates "ships to users" with "runs on a CI box", and the two deserve completely different urgency. In a repo with a nested serverless-functions package, run the audit _there_ too — its dependencies are production runtime, even though the root's overlapping ones are dev-only.
+- **Never take `npm audit fix --force` without reading the plan.** Its "fix" for a transitive advisory with no upstream patch is frequently a multi-major _downgrade_ to a version that predates the vulnerable subtree entirely. That's not a patch; it's a regression with a green audit score.
+- **Record why an unfixable advisory is being accepted, where the fix is blocked, and what unblocks it.** An undocumented accepted advisory is indistinguishable from one nobody noticed.
+
+### 10.4 Hosting response headers
+
+- **Security headers are part of the app's contract, not an optional extra.** A static SPA still needs `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy` and a `Permissions-Policy`. Lighthouse's best-practices category does not score these, so a 1.0 there says nothing about whether they exist.
+- **Verify header rules against real response headers, never against your reading of the config.** Hosting header/rewrite precedence is genuinely unintuitive — this repo has already shipped one rule scoped to `/index.html` that silently never matched any request (every route is served via the `**` rewrite, so nothing ever requests that path literally). `curl -I` the emulator or a preview channel.
+- **If the app supports iframe embedding, scope it.** Omitting `X-Frame-Options` to allow embedding is not the same as deciding who may embed; use CSP `frame-ancestors` to state the allowlist explicitly.
+
+### 10.5 Lockfile determinism
+
+- **`npm ci` must mean `npm ci` all the way down.** A root `postinstall` that runs `npm install` inside a nested package (§7) quietly reintroduces non-determinism into every CI run that thought it was doing a clean install, and can rewrite the nested lockfile as a side effect. Use `npm ci` there too when a lockfile is present.
+- **Every workflow's dependency cache key covers every lockfile that workflow installs**, or the cache silently serves the wrong tree.
+
+### 10.6 Operational note: verification cannot be parallelized
+
+The emulator ports (Firestore `8080`, Auth `9099`, Functions `5001`, Hosting `5000`) and the Cypress dev-server port (`4200`) are fixed in `firebase.json`, `cypress.config.ts` and the npm scripts. Two `npm run e2e` or `npm run lighthouse` invocations on the same machine collide immediately. Plan long batches of work as sequential — splitting the _writing_ across parallel workers doesn't help when every unit still has to take its turn on the one emulator suite, and it multiplies conflicts in the files (`firestore.rules`, `PROJECT_OVERVIEW.md`, `package.json`) that most changes touch.
