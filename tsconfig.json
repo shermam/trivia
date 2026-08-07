@@ -3,6 +3,14 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
+    /* The Angular CLI scaffolds this on, but it was absent here, so the whole
+       frontend was compiling with `strictNullChecks` and `noImplicitAny` off —
+       while `functions/tsconfig.json` had them on. The app turned out to
+       already be strict-clean (zero errors on enabling both this and
+       `strictTemplates` below), so this costs nothing today and exists to keep
+       it that way: without it, a `User | null` collapses to `User` and the
+       null-safety the services are visibly written for stops being checked. */
+    "strict": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
@@ -17,7 +25,11 @@
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
     "strictInjectionParameters": true,
-    "strictInputAccessModifiers": true
+    "strictInputAccessModifiers": true,
+    /* Type-checks expressions inside templates too. Without it, a template is
+       an unchecked surface: a renamed signal, a wrong `@Input` type, or a
+       binding to something nullable all compile fine and fail at runtime. */
+    "strictTemplates": true
   },
   "files": [],
   "references": [
