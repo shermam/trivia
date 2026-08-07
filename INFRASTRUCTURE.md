@@ -82,7 +82,7 @@ Two sharp edges hit when doing this against a very recent Angular major, worth c
 
 **Scaffold:**
 ```bash
-npm install -g firebase-tools   # or use npx firebase-tools@<pinned-major> per script, see §7
+npm install -g firebase-tools   # or use npx --yes firebase-tools@<pinned-major> per script, see §7
 firebase login
 firebase init firestore hosting functions
 ```
@@ -164,8 +164,10 @@ Every PR to `main` + push to `main`. Build with a dedicated Lighthouse build con
 ## 7. Tooling version pinning
 
 - Pin the package manager itself (`"packageManager": "npm@<version>"` in `package.json`) to avoid lockfile-format drift across contributor/CI Node installs.
+- **Pin the Node version itself, and bump it in one place at a time everywhere it's declared**: the serverless-functions package's `engines.node` (this is what the deploy platform actually provisions), every CI workflow's `setup-node` step (kept at the same version as the functions runtime — §6.1), and a committed root `.node-version` for local `nodenv` users so a fresh clone auto-selects the right version instead of silently building/testing against whatever a contributor's shell happens to default to. Treat these three as one unit — bumping only one is how "works in CI, fails/differs locally" (or vice versa) drift creeps in.
 - If a CLI tool's *major version* behaves differently depending on what else is in the repo (e.g. a serverless-functions runtime major-version bump removing an API the CLI's older major still probes for unconditionally), pin *different* majors of that CLI per script depending on what the script touches, rather than forcing one global version that breaks half your scripts. Document exactly why in the script/README — this kind of pin looks like an accident if unexplained.
-- Prefer `npx <tool>@<pinned-major>` in package.json scripts over a devDependency when different scripts genuinely need different majors of the same tool.
+- When different scripts genuinely need different majors of the same CLI, you can't make it a single `devDependency` (one package name, one version, in `package.json`). Handle the two majors asymmetrically instead of falling back to `npx` for both: make the major that backs your *frequently-run* local scripts (e.g. an e2e suite invoked many times a day) a real `devDependency`, pinned exactly — `npm` scripts already put `node_modules/.bin` first on `PATH`, so those scripts can call the bare tool name and always get that exact locally-installed version, no per-run `npx` cache/registry round-trip. Leave the rarer major on `npx <tool>@<pinned-major>`. Either way, pass `--yes` on the `npx` calls — without it, npm ≥7 stops and prompts ("Need to install the following packages... Ok to proceed?") the first time that pin isn't already in the local npx cache, which only ever surfaces locally (CI's non-interactive shell never sees the prompt either way, so this is purely a local-DX fix, not a CI behavior change). A CI step that deploys with one of these tools can stay on the explicit `npx <tool>@<pinned-major>` form even after the same major becomes a local `devDependency` — a one-shot deploy on a fresh runner doesn't benefit from the local-cache win, and an explicit, self-contained pin on that one line keeps "what exact tool version did the last deploy" answerable without cross-referencing `package.json`.
+- A package with its own `package.json`/lockfile nested in the repo (e.g. a Firebase Functions source dir) is invisible to the root `npm install`/`npm ci` — wire a root `postinstall` script that installs it too, so a single `npm install` after cloning is enough to run every local script, instead of a manual extra install step that's easy to forget and shows up as a confusing "Cannot find module" from that package's own build/typecheck step.
 
 ---
 

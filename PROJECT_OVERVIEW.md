@@ -155,6 +155,7 @@ The same mark is also used in-app as the brand badge — top bar logo, `GameSetu
 
 ### 2.2 Tooling
 
+- **Node 24** — the version floor everywhere: `functions/package.json`'s `engines.node` (the actual Cloud Functions deploy runtime), every CI workflow's `actions/setup-node`, and the repo-root `.node-version` for local `nodenv` users (`nodenv` auto-selects it on `cd` into the repo; other version managers should match it manually until/unless an `.nvmrc` is added). All three are bumped together on purpose, so `npm ci`-vs-local drift and the functions deploy runtime never disagree — see INFRASTRUCTURE.md §7.
 - **Angular CLI 22** (`@angular/cli`, `@angular/build`) — build, dev-server, scaffolding.
 - **Vitest 4** — the project's unit test runner (Angular CLI's new default test builder, `@angular/build:unit-test`), using **jsdom** as the DOM environment. Run via `npm test` (`ng test`).
 - **fake-indexeddb** (devDependency) — polyfills `indexedDB` for `OfflineQuestionsService`'s/`TriviaService`'s unit tests (jsdom itself has no IndexedDB implementation); imported via `fake-indexeddb/auto` at the top of the relevant `.spec.ts` files only, never shipped in the app bundle.
@@ -165,7 +166,7 @@ The same mark is also used in-app as the brand badge — top bar logo, `GameSetu
 - **Prettier 3** — code formatting; configured for 100-char print width, single quotes, and the Angular HTML parser for `.html` templates (`.prettierrc`).
 - **PostCSS** — pipes Tailwind through `@tailwindcss/postcss` (`.postcssrc.json`).
 - **EditorConfig** — enforces 2-space indentation, UTF-8, single quotes in TS across editors.
-- **Firebase CLI** (`firebase-tools`) — local emulation and deployment; invoked both from local npm scripts and CI. Pinned to **`@13`** for the Auth/Firestore-only scripts (unchanged, long-stable), but **`@14`** for anything touching `functions/` (`e2e`, `e2e:open`, the Cloud Functions deploy step) — `@13`'s bundled Functions tooling unconditionally probes for `functions.config()`, an API `firebase-functions` v7 removed outright, crashing every invocation; `@14` detects v7+ and skips that legacy path. Confirmed by running the emulator directly with `--debug` and comparing the two.
+- **Firebase CLI** (`firebase-tools`) — local emulation and deployment; invoked both from local npm scripts and CI. Two majors are in play on purpose: **`@13`** for the Auth/Firestore-only scripts (unchanged, long-stable), but **`@14`** for anything touching `functions/` (`e2e`, `e2e:open`, the Cloud Functions deploy step) — `@13`'s bundled Functions tooling unconditionally probes for `functions.config()`, an API `firebase-functions` v7 removed outright, crashing every invocation; `@14` detects v7+ and skips that legacy path. Confirmed by running the emulator directly with `--debug` and comparing the two. Since `@14` is what the frequently-run local `e2e`/`e2e:open` scripts need, it's a real **`devDependency`** (`^14.27.0`) rather than an `npx`-fetched tool — `npm` scripts already put `node_modules/.bin` first on `PATH`, so those two scripts just call the bare `firebase` binary and always get the exact locally-installed version, with no per-run npx cache/registry round-trip. `@13` only backs the single `lighthouse` script, so it stays on `npx --yes firebase-tools@13` — a second major can't coexist as a second `devDependency` entry under the same package name, and `--yes` skips npm's interactive "ok to install?" prompt the first time that pin isn't already in the local npx cache (CI never sees that prompt either way, since its shell is non-interactive). The CI functions-deploy step (`firebase-deploy.yml`, §4.2) is deliberately left on `npx firebase-tools@14 deploy` rather than switched to the devDependency too — a one-shot deploy on a fresh runner doesn't benefit from the local-cache win, and keeping that line's version pin self-contained makes "what exact tool deployed production" answerable by reading that one line alone.
 - **firebase-functions 7** / **stripe (Node SDK) 22** — the `functions/` package's only two runtime dependencies beyond `firebase-admin`; see §2.4.
 
 ### 2.3 Firebase client integration details
@@ -293,7 +294,7 @@ No composite indexes are currently defined (`firestore.indexes.json` is empty); 
 Steps:
 
 1. Checkout `main`.
-2. Set up Node 22 (with npm cache, keyed off both `package-lock.json` and `functions/package-lock.json`).
+2. Set up Node 24 (with npm cache, keyed off both `package-lock.json` and `functions/package-lock.json`).
 3. `npm ci`.
 4. `npm run build:prod` (production Angular build).
 5. Deploy the built app to **Firebase Hosting** via `FirebaseExtended/action-hosting-deploy@v0` (channel: `live`), authenticated with the `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` repo secret.
@@ -313,7 +314,7 @@ This is a **merge-to-deploy** pipeline: every PR merged into `main` auto-deploys
 
 Two sequential jobs:
 
-1. **`deploy-preview`** — checkout → Node 22 → `npm ci` → `npm run build:prod` → `FirebaseExtended/action-hosting-deploy@v0` deploying to an ephemeral channel named `pr-<number>` (7-day expiry) instead of `channelId: live`. The action posts/updates a PR comment with the preview URL on every push. The step's `urls` JSON output is parsed (`jq`) into a job output consumed by the next job.
+1. **`deploy-preview`** — checkout → Node 24 → `npm ci` → `npm run build:prod` → `FirebaseExtended/action-hosting-deploy@v0` deploying to an ephemeral channel named `pr-<number>` (7-day expiry) instead of `channelId: live`. The action posts/updates a PR comment with the preview URL on every push. The step's `urls` JSON output is parsed (`jq`) into a job output consumed by the next job.
 2. **`e2e-preview`** (job name `E2E (preview)`) — runs a scoped slice of the Cypress suite (§4.3) against the just-deployed preview URL, hitting the **real** `intellectura-3b26a` project instead of an emulator.
 
 Preview channels are a **Hosting-only** feature — there's still a single Firestore database for the project, so a preview build (and its e2e run) reads/writes the same production `custom_questions`/`leaderboard` data as `main` and live. Firestore rules/indexes are also not redeployed per-preview (they're project-wide, not channel-scoped); only §4.2's merge pipeline touches them. There is no isolated staging _database_ — just an isolated hosting URL, backed by production data, that's now also exercised end-to-end before merge.
@@ -356,7 +357,7 @@ npm run build          # ng build (dev config)
 npm run build:prod     # ng build --configuration production
 npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom)
-npm run functions:install # npm install inside functions/
+npm run functions:install # npm install inside functions/ (also runs automatically via the root `postinstall` hook)
 npm run functions:build   # tsc-build functions/ (src/ -> lib/)
 npm run functions:test    # build, then node --test against functions/lib
 npm run e2e            # functions:build, then Cypress e2e suite (headless) against the Firebase Emulator Suite (incl. Functions)
@@ -367,7 +368,7 @@ npm run firebase:emulate  # build:prod, functions:build, then firebase emulators
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore,functions
 ```
 
-Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is a separate npm package with its own `package.json`/lockfile (standard Firebase CLI convention) — its dependencies are _not_ installed by the root `npm ci`.
+Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is a separate npm package with its own `package.json`/lockfile (standard Firebase CLI convention), so the root `npm install`/`npm ci` doesn't reach it on its own — a root-level `postinstall` script (`npm run functions:install`) closes that gap automatically so a plain `npm install` at the repo root is enough for `npm run functions:build`/`npm run e2e` to work right after cloning, without a separate manual step. `npm run e2e`/`npm run e2e:open` call the `firebase` binary directly now that `firebase-tools@14` is a real `devDependency` (§2.2) instead of an `npx`-fetched tool. `npm run lighthouse` still needs the older `@13` major, which can't also be a `devDependency` alongside `@14`, so it stays on `npx --yes firebase-tools@13` — the `--yes` skips npm's interactive "ok to install?" prompt the first time that pin isn't already in the local npx cache (CI's shell is non-interactive, so it never saw that prompt either way; this is purely a local-DX fix).
 
 ### 4.6 Environments
 
@@ -401,3 +402,4 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is
 - The e2e suite (§4.3) covers the core unauthenticated/authenticated flows plus Pro-gated `/add-question` access and the checkout-session creation function, but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator) or the "mixed" question source end-to-end (unit-level coverage only).
 - The `E2E (preview)` job (§4.2a) needs to actually be turned on as a required status check in GitHub branch protection settings for `main` — it's not enforced yet. GitHub Actions jobs can't gate a merge on their own; that has to come from branch protection, and setting it up needs repo-admin access that CI/automation credentials don't have.
 - `stripeWebhook`'s signature verification and end-to-end Stripe event handling have **not** been exercised against a real Stripe webhook delivery (test or live mode) — only the Firestore/claim _outcome_ of a successful webhook is simulated in tests (`setProSubscription`, §4.3). This should be manually verified with a real test-mode checkout now that the one-time Stripe/Secret-Manager/IAM setup (§4.2) is complete.
+- `npm audit` reports a critical `tar` advisory (plus several moderate/low ones) via `firebase-tools@14`'s `@google-cloud/pubsub`/`gaxios` transitive chain — devDependency-only, never shipped in the app bundle. The real fix is bumping to `firebase-tools@15`, which resolves the critical finding, but `@15` hard-requires a JDK ≥21 for the Firestore emulator (confirmed by actually running it — this isn't just a future warning) and no such JDK is installed locally yet; CI already runs JDK 21 (`e2e.yml`), so the bump is safe there once made. A handful of remaining moderate findings (via `firebase-admin`'s and `@lhci/cli`'s own transitive deps) have no fix at all yet — both packages are already pinned to their latest published version; `npm audit fix --force`'s suggested "fix" for those is a multi-major downgrade (e.g. `@lhci/cli` 0.15.1 → 0.1.0) that only avoids the vulnerable subtree by reverting to a version that predates it, not a real patch — don't take it. `functions/`'s own `firebase-admin` dependency carries the same moderate `uuid` finding, also with no upstream fix yet.
