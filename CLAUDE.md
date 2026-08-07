@@ -37,3 +37,86 @@ npm run lighthouse      # Lighthouse CI (perf/accessibility/best-practices/SEO) 
 - If a failure looks pre-existing and unrelated to your change, say so explicitly to the user and get confirmation before ignoring it — don't silently skip it.
 - Never "fix" a failure by loosening a threshold (e.g. `lighthouserc.json` scores), deleting/skipping a test, or adding `continue-on-error`/`--no-verify` to make CI green. Fix the underlying issue.
 - Only once all four commands are green (or the user has explicitly signed off on a documented exception) is the task ready for a PR.
+
+### 3a. Risk-scoped local verification (standing exception)
+
+`npm run e2e` and `npm run lighthouse` each take minutes. Running all four commands on a change that cannot possibly affect runtime behavior is pure cost, so the following exception is **signed off as standing policy** — it is the only sanctioned deviation from §3, and it does not weaken the gate, because `e2e.yml`, `lighthouse.yml` and `firebase-preview.yml` still run the full suite on every PR regardless.
+
+Run **all four** commands when the change touches any of:
+
+- anything under `src/app/` other than a comment
+- `firestore.rules`, `firestore.indexes.json`, `firebase.json`
+- anything under `functions/src/`
+- `angular.json`, `ngsw-config.json`, `src/index.html`, `src/styles.css`, routing, or an `environment.*.ts`
+
+Run **`npm test` + `npm run functions:test` + `npm run build:prod`** only when the change is confined to:
+
+- Markdown/docs, `.editorconfig`, `.prettierrc`, `.gitignore`
+- CI workflow files (they are exercised by being run on the PR itself)
+- lint/format configuration that produces no source changes
+
+When you take the exception, say so explicitly in the PR body and name which commands you ran. Never take it silently, and never take it for a change you are unsure about — the whole point is that the judgment call is visible.
+
+---
+
+## 4. Invariants that must not regress
+
+Everything below was a real defect found in an audit of this repo. Each one is cheap to reintroduce while adding an unrelated feature, and most are invisible to the existing test suite. Treat this section as a contract: if a change violates one of these, either fix the change or update this section _with the reasoning_ in the same PR — don't leave a silent exception.
+
+Each guardrail is tagged with the mechanism that catches a violation:
+
+- **[review-only]** — nothing automated will ever catch this. It depends on you actually checking.
+- **[rules tests]**, **[functions tests]**, **[lint]** — a machine check catches it, _once that check exists_.
+
+**Enforcement is still being built out.** The audit that produced this section is being remediated as a PR series, and the checks referenced above (`firestore.rules` unit tests, ESLint with template a11y rules, expanded `functions/` coverage) arrive partway through it. Until a given mechanism has landed, treat that guardrail as **[review-only]** too — the tag describes what will catch it, not proof that something already does. Verify the check actually exists before relying on it; `npm run lint` either resolves or it doesn't.
+
+### 4.1 Trust boundaries and data
+
+- **A value a client can write is not a value you can trust — anywhere it has security or billing consequence.** Firestore is a _public API_: any authenticated user can write straight to it from a console, entirely bypassing the app. If a Cloud Function reads a client-written field and acts on it (a Stripe price, a redirect URL, a mode flag), that field must be validated **both** in `firestore.rules` and again in the function. Rules alone are not enough — rules can't check a value against an external catalog. _(This is how `createCheckoutSession` ended up passing an arbitrary client-chosen `price` and `success_url` straight to Stripe.)_ **[review-only]**
+- **Every client-writable collection needs all three of:** an exact-key `hasOnly()` allowlist, a type-and-range check on every field, and an ownership check (`request.auth.uid == ...`). A new client-writable collection or subcollection ships its rules and its rules tests in the same PR as the feature. _(`checkout_sessions` and `portal_sessions` shipped with an ownership check and nothing else, so any field of any size could be written.)_ **[rules tests]**
+- **Any public ranking or score a user writes about themselves must be server-attested or hard-bounded.** Shape validation is not anti-cheat: `score >= 0` and `totalQuestions >= score` still permit `999999`. If a number is going to be shown to other users as an achievement, the server has to have a reason to believe it. **[rules tests]**
+- **No unbounded collection reads in app code.** Every `getDocs` needs a `where` and a `limit`. Filtering client-side over a whole collection is billed per document, scales linearly with someone else's contributions, and on a public-read collection is trivially scriptable into a bill. **[review-only]**
+- **Any client-writable path that triggers a Cloud Function needs a volume cap**, or a user can spend your Functions quota and your Stripe rate limit at will just by writing documents in a loop. **[rules tests]**
+- **User-generated content that renders publicly stores its author's uid at write time.** Retrofitting attribution is impossible; without it you cannot ban, bulk-remove, or even answer an abuse report. Note that an exact-key `hasOnly()` allowlist actively _prevents_ adding this later, so it has to be in the schema from the start. **[rules tests]**
+
+### 4.2 Auth, claims, and privilege
+
+- **Set custom claims by key, never wholesale.** `setCustomUserClaims(uid, null)` erases _every_ claim on the user, not just yours. Read the existing claims, change your key, write the merged object. **[functions tests]**
+- **Revoking a privilege revokes the token that carries it.** Unsetting a claim leaves already-issued ID tokens valid for up to an hour. A downgrade path that matters (paid → unpaid, admin → not) calls `revokeRefreshTokens` too. **[functions tests]**
+- **Client-side entitlement signals are UX, never authority.** `SubscriptionService.isProUser` exists so the UI can react instantly; the thing that actually gates a privileged write is the `stripeRole` custom claim checked in `firestore.rules`. Never add a privileged operation whose only gate is a client signal, and never "optimize away" the rules check because the UI already checked. **[review-only]**
+
+### 4.3 External events and payments
+
+- **Webhook handlers verify the signature, assert the mode, and tolerate reordering.** Stripe does not guarantee delivery order and retries on failure, so a handler that blindly `set()`s state can overwrite newer data with older. Keep a high-water mark (event timestamp or id) per synced document, and assert `event.livemode` matches the environment so a test-mode delivery can never mutate production state. **[functions tests]**
+- **A mock/test-mode flag must be structurally impossible to enable in production.** Gate it on something that cannot be true in a real project (a `demo-` project ID prefix), not on an environment variable alone. An env var can be set anywhere; a project ID cannot. **[functions tests]**
+
+### 4.4 Frontend correctness
+
+- **`@for` track expressions must be a stable unique id, never user-controlled text.** Two answers with the same string produce duplicate track keys, render twice, and — because the quiz matched answers by string value — let a wrong answer score as correct. Track the id; compare by id. **[lint]**
+- **Never cache a rejected promise.** A memoized `Promise` that isn't cleared in a `.catch` turns one transient network blip into a permanently degraded session. `SubscriptionService.getProPriceId()` has the correct pattern; copy it. **[lint]**
+- **Every `setTimeout`, `setInterval` and `addEventListener` has a matching teardown**, including inside a `Promise.race` helper that resolves early. **[lint]**
+- **Error messages must not narrate a cause they didn't verify.** Mapping a broad error code (`permission-denied`) onto one friendly story ("your best score is already higher") tells users something false whenever the real cause was different, and here it also blocked retry. Either distinguish the cases or stay generic. **[review-only]**
+- **State a user would be annoyed to lose survives a reload.** An in-progress game held only in signals is gone on refresh, tab crash, or PWA relaunch — which is exactly the population offline play is for. **[review-only]**
+- **Apply transformations per-source, not globally.** `decodeHtmlEntities` exists because Open Trivia DB returns entity-encoded text; running it over Firestore-authored questions silently rewrites what a user typed. Normalize at the adapter for each source, not in the shared mapper. **[review-only]**
+- **A timer that enforces a deadline reads the wall clock.** Accumulating `setInterval` ticks drifts, and browsers throttle timers in background tabs — so a countdown built that way pauses when the tab is hidden. **[review-only]**
+
+### 4.5 Accessibility
+
+**A Lighthouse accessibility score of 1.0 is not accessibility coverage.** Its automated audits reach roughly a third of WCAG and cannot detect any of the failures below. Do not treat a green Lighthouse run as evidence that a new interactive component is accessible.
+
+Any new interactive UI is checked by hand against these before the PR:
+
+- **Disclosure/menu widgets**: trigger has `aria-expanded` + `aria-haspopup` + `aria-controls`; panel has a role; Escape closes it; focus moves in on open and returns to the trigger on close. **[lint, partially]**
+- **Async status** (saved, failed, correct, incorrect) is announced via `role="status"` or `aria-live` — otherwise a screen reader user gets nothing, which matters most when the UI auto-advances on a timer. **[review-only]**
+- **Grouped form controls** (segmented pickers, custom radios) carry `role="radiogroup"` and `aria-labelledby`, or the group's label is never conveyed. **[lint]**
+- **Timing limits** are adjustable, extendable, or can be turned off (WCAG 2.2.1). A hard 15-second countdown with no alternative is a real barrier. **[review-only]**
+- **Route changes** are announced, and there's a skip link. SPA navigation is otherwise silent to assistive tech. **[review-only]**
+
+### 4.6 Test coverage obligations
+
+These are not suggestions — a PR that changes one of these without its test is incomplete:
+
+- **A `firestore.rules` change ships with rules unit tests in the same PR**, covering the reject cases, not just the happy path. The rules are the app's real security boundary; inferring their behavior from a green e2e run is how a hole stays open.
+- **A Cloud Function that makes a security or billing decision has a direct unit test for that decision.** Keep the decision in a pure function (see `functions/src/role.ts`) so this stays cheap.
+- **A new or changed service holding auth, entitlement, or payment logic ships with a spec.** `AuthService` alone has already produced three real bugs found only by e2e; unit-level coverage is much cheaper feedback.
+- **A bug fix ships with the test that would have caught it.** Every item in §4 exists because something shipped without one.
