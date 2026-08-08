@@ -88,6 +88,31 @@ export function validQuestion(createdBy: string, overrides: Record<string, unkno
 }
 
 /**
+ * A document ID the session-document volume cap accepts: `{window}-{slot}`,
+ * where the window is the current 5-minute bucket of wall-clock time and the
+ * slot is a digit. This mirrors what `SubscriptionService.createSessionDoc`
+ * computes, deliberately — if the two ever disagree about the arithmetic, the
+ * real client can't create a session either, and these tests should say so.
+ *
+ * `windowOffset` steps whole windows forward or backward, for the tests that
+ * probe how far outside the current one the rules will still reach.
+ */
+export function sessionDocId(slot: number | string = 0, windowOffset = 0): string {
+  const SESSION_WINDOW_MS = 300_000;
+  return `${Math.floor(Date.now() / SESSION_WINDOW_MS) + windowOffset}-${slot}`;
+}
+
+/** A schema-valid `checkout_sessions` document; spread over it for invalid variants. */
+export function validCheckoutSession(overrides: Record<string, unknown> = {}) {
+  return { price: 'price_test_pro', origin: 'https://example.web.app', ...overrides };
+}
+
+/** A schema-valid `portal_sessions` document; spread over it for invalid variants. */
+export function validPortalSession(overrides: Record<string, unknown> = {}) {
+  return { origin: 'https://example.web.app', ...overrides };
+}
+
+/**
  * A schema-valid `leaderboard/{uid}` document; spread over it to build invalid
  * variants.
  *
