@@ -276,6 +276,16 @@ createdAt: int         (epoch ms)
 
 No composite indexes are currently defined (`firestore.indexes.json` is empty); the leaderboard's `orderBy('score', 'desc').limit(10)` query only needs the automatic single-field index.
 
+### Rules test suite
+
+`firestore.rules` is the app's real security boundary, so it has a dedicated unit suite (`npm run rules:test`, `firestore-tests/`, 86 tests) built on `@firebase/rules-unit-testing` and run against the Firestore emulator. Deliberately outside `src/` and driven by its own `vitest.rules.config.ts`, so the Angular build, `ng test` and the ESLint globs never pick it up.
+
+- **Every branch is covered by its reject case, not just its happy path** — signed-out, anonymous, unverified-password, verified-but-not-Pro, a `stripeRole` that is set but isn't `pro`, cross-uid writes, every schema bound, and default-deny on an undeclared collection.
+- **Auth contexts always set `firebase.sign_in_provider` explicitly** (`firestore-tests/helpers.ts`). Omitting it yields a provider that satisfies `!= 'anonymous'`, so a test leaning on the default would pass for the wrong reason and would keep passing if the anonymous check were deleted outright.
+- **Each spec file uses its own `projectId`**, because `clearFirestore()` wipes a whole project — sharing one would make parallel files race each other's fixtures.
+- **The suite was mutation-tested when written**: breaking `isProUser()` to always return true, deleting the anonymous check, and dropping the leaderboard's improving-score condition each produced failures (3, 4 and 2 respectively). A rules suite that passes against broken rules is worse than none, so this is worth repeating whenever the suite is extended.
+- **Two findings are pinned with `assertSucceeds` and a `CURRENTLY ACCEPTS` label** — the unbounded leaderboard score (A1) and the unvalidated checkout-session payload (A2/A3). They document today's behaviour rather than endorsing it; the PRs that close those findings flip the expectation to `assertFails`, so the change is visible in the diff instead of silent.
+
 ---
 
 ## 4. Deployment & CI/CD
@@ -330,8 +340,9 @@ Preview channels are a **Hosting-only** feature — there's still a single Fires
 | `Deploy preview channel` | `firebase-preview.yml` |
 | `E2E (preview)`          | `firebase-preview.yml` |
 | `lint`                   | `lint.yml`             |
+| `rules-tests`            | `rules-tests.yml`      |
 
-> **`lint` is not in the ruleset yet.** It runs on every PR and reports pass/fail, but a workflow cannot add itself as a required check — that needs a repo admin in Settings → Rules. Until it's added, a red `lint` will not block a merge. Adding a new check is the accepted cost of keeping one workflow per concern (see `INFRASTRUCTURE.md` §8); the alternative, bolting the steps onto an already-required job, trades a permanently muddier signal for a one-off settings step.
+> **`lint` and `rules-tests` are not in the ruleset yet.** Both run on every PR and report pass/fail, but a workflow cannot add itself as a required check — that needs a repo admin in Settings → Rules. Until they are added, a red `lint` or `rules-tests` will not block a merge. Adding a new check is the accepted cost of keeping one workflow per concern (see `INFRASTRUCTURE.md` §8); the alternative, bolting the steps onto an already-required job, trades a permanently muddier signal for a one-off settings step.
 
 `strict_required_status_checks_policy` is on, so a branch must also be up to date with `main` before merging. The ruleset additionally requires a pull request (with zero required approvals — this is a solo repo) and blocks branch deletion and non-fast-forward pushes.
 
@@ -377,6 +388,7 @@ npm run functions:install # npm ci inside functions/ (also runs automatically vi
 npm run functions:install:update # npm install inside functions/ — only when adding/bumping a functions dependency
 npm run functions:build   # tsc-build functions/ (src/ -> lib/)
 npm run functions:test    # build, then node --test against functions/lib
+npm run rules:test        # firestore.rules unit suite (Vitest) against the Firestore emulator
 npm run e2e            # functions:build, then Cypress e2e suite (headless) against the Firebase Emulator Suite (incl. Functions)
 npm run e2e:open       # same, but with the interactive Cypress runner
 npm run e2e:preview    # scoped Cypress suite against a real deployed preview (needs PREVIEW_URL + GOOGLE_APPLICATION_CREDENTIALS)

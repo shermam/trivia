@@ -66,8 +66,11 @@ Everything below was a real defect found in an audit of this repo. Each one is c
 Each guardrail is tagged with the mechanism that catches a violation:
 
 - **[review-only]** — nothing automated will ever catch this. It depends on you actually checking.
-- **[lint]** — `npm run lint` fails. **Live now**, and required on `main` via the `test` status check.
-- **[rules tests]**, **[functions tests]** — a machine check catches it, _once that check exists_. These arrive later in the audit-remediation PR series; until then, treat the guardrail as review-only. The tag describes what will catch it, not proof that something already does.
+- **[lint]** — `npm run lint` fails. **Live now**, reported by the `lint` CI check.
+- **[rules tests]** — `npm run rules:test` fails (`firestore-tests/`). **Live now**, reported by the `rules-tests` CI check.
+- **[functions tests]** — a machine check catches it, _once that check exists_. This one arrives later in the audit-remediation PR series; until then, treat the guardrail as review-only. The tag describes what will catch it, not proof that something already does.
+
+**Reporting is not the same as gating.** `lint` and `rules-tests` run on every PR, but a workflow cannot add itself to a branch ruleset — until a repo admin adds each one under Settings → Rules, a red check reports the failure without blocking the merge. Check which are actually required before treating a green PR as proof; see `PROJECT_OVERVIEW.md` §4.2a for the current list.
 
 **A note on what lint turned out not to be able to do.** When these tags were first written, five guardrails were optimistically marked `[lint]`. Wiring ESLint up showed that no rule exists — in `angular-eslint`, `typescript-eslint` or core ESLint — for any of them:
 
@@ -127,7 +130,7 @@ Any new interactive UI is checked by hand against these before the PR:
 
 These are not suggestions — a PR that changes one of these without its test is incomplete:
 
-- **A `firestore.rules` change ships with rules unit tests in the same PR**, covering the reject cases, not just the happy path. The rules are the app's real security boundary; inferring their behavior from a green e2e run is how a hole stays open.
+- **A `firestore.rules` change ships with rules unit tests in the same PR** (`firestore-tests/`, `npm run rules:test`), covering the reject cases, not just the happy path. The rules are the app's real security boundary; inferring their behavior from a green e2e run is how a hole stays open. **Then break the rule on purpose and confirm a test fails.** Rules tests are unusually easy to write vacuously — an auth context built slightly wrong passes for a reason unrelated to the rule it names, and keeps passing after the rule is deleted.
 - **A Cloud Function that makes a security or billing decision has a direct unit test for that decision.** Keep the decision in a pure function (see `functions/src/role.ts`) so this stays cheap.
 - **A new or changed service holding auth, entitlement, or payment logic ships with a spec.** `AuthService` alone has already produced three real bugs found only by e2e; unit-level coverage is much cheaper feedback.
 - **A bug fix ships with the test that would have caught it.** Every item in §4 exists because something shipped without one.
