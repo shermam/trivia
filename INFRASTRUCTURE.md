@@ -145,6 +145,14 @@ Every PR to `main` + push to `main`. Same shape as §6.1, running `format:check`
 
 Separate from §6.1 rather than bolted onto it, per §8's one-workflow-per-concern rule — they run concurrently, so a lint failure and a test failure surface on the same push instead of the first masking the second.
 
+### 6.1b Security-rules tests (`rules-tests.yml`)
+
+Every PR to `main` + push to `main`. Needs a JDK and the emulator binary (cache both), then runs the rules suite against the database emulator alone — no auth, no functions, no dev server, no browser, so it lands much closer to §6.1's cost than §6.2's.
+
+Its own workflow rather than steps in §6.1, per §8: paying a JDK and emulator download on every fast unit-test run, purely to avoid adding a workflow file, is the wrong trade.
+
+**Write the reject cases, and then break the rules on purpose to confirm the suite notices.** A rules suite is uniquely prone to passing vacuously — a context constructed slightly wrong (see §8's note on unset token claims) makes a test pass for a reason unrelated to the rule it names. Mutate the rule, watch a test fail, restore. That's the only evidence the suite has teeth.
+
 ### 6.2 E2E (`e2e.yml`)
 
 Every PR to `main` + push to `main`. Needs, beyond Node: a JRE (if your DB emulator runs on the JVM, e.g. Firestore's), and caching for both the emulator binaries and the e2e tool's own binary cache (e.g. `~/.cache/Cypress`) keyed off the runner OS. Steps: install root deps, install the serverless-functions package's deps separately (it's a separate npm package, §4), run its unit tests, then run the full e2e suite (which itself wraps `emulators:exec` so the emulator trio starts/stops around the test run). Upload screenshots/videos as a build artifact on failure only.
