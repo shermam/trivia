@@ -25,9 +25,9 @@ import { syncSubscriptionToFirestore } from './subscriptions';
  * different failures:
  *
  * 1. **Signature verification** — is this really from Stripe.
- * 2. **`livemode`** — is it from the *right* Stripe, i.e. the mode this project
- *    is (see `isEventForThisEnvironment`). Test-mode traffic must never be able
- *    to mutate live billing state.
+ * 2. **`livemode`** — is it from the *right* Stripe, i.e. the mode the deployed
+ *    secret key talks to (see `isEventForThisEnvironment`). Test-mode traffic
+ *    must never be able to mutate live billing state.
  * 3. **A per-document high-water mark** (`event-order.ts`) — is it newer than
  *    what the document already holds. Every write here is idempotent, so a
  *    redelivery was always safe; what was not safe is Stripe's total absence of
@@ -58,7 +58,7 @@ export const stripeWebhook = onRequest(
       return;
     }
 
-    if (!isEventForThisEnvironment(event.livemode, currentProjectId())) {
+    if (!isEventForThisEnvironment(event.livemode, stripeSecretKey.value(), currentProjectId())) {
       // Acknowledged, not rejected. A 4xx would make Stripe retry and
       // eventually disable the endpoint, and there is nothing to retry: the
       // delivery is simply for the other mode. Refusing to act on it is the

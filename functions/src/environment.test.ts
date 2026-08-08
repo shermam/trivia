@@ -5,6 +5,7 @@ import {
   isEventForThisEnvironment,
   isMockCheckoutEnabled,
   resolveProjectId,
+  stripeModeOfKey,
 } from './environment';
 
 describe('resolveProjectId', () => {
@@ -90,31 +91,80 @@ describe('isMockCheckoutEnabled', () => {
   });
 });
 
+describe('stripeModeOfKey', () => {
+  it('classifies both standard key modes', () => {
+    assert.equal(stripeModeOfKey('sk_live_51AbCdEfGh'), 'live');
+    assert.equal(stripeModeOfKey('sk_test_51AbCdEfGh'), 'test');
+  });
+
+  // Matched on the mode infix, not an `sk_` prefix, so restricted keys — and
+  // any future key type — classify rather than falling through as unknown.
+  it('classifies restricted keys', () => {
+    assert.equal(stripeModeOfKey('rk_live_51AbCdEfGh'), 'live');
+    assert.equal(stripeModeOfKey('rk_test_51AbCdEfGh'), 'test');
+  });
+
+  it('classifies nothing it cannot read', () => {
+    assert.equal(stripeModeOfKey(undefined), null);
+    assert.equal(stripeModeOfKey(''), null);
+    assert.equal(stripeModeOfKey('placeholder-value'), null);
+  });
+});
+
+const LIVE_KEY = 'sk_live_51AbCdEfGh';
+const TEST_KEY = 'sk_test_51AbCdEfGh';
+const REAL = 'intellectura-3b26a';
+const DEMO = 'demo-trivia-app-e2e';
+
 describe('isEventForThisEnvironment', () => {
-  it('accepts a live event on the real project', () => {
-    assert.equal(isEventForThisEnvironment(true, 'intellectura-3b26a'), true);
+  it('accepts a live event when a live key is deployed', () => {
+    assert.equal(isEventForThisEnvironment(true, LIVE_KEY, REAL), true);
   });
 
   // The failure this exists for: the test and live signing secrets are one
-  // `functions:secrets:set` apart, and with the wrong one installed every
-  // test-mode event a developer triggers verifies cleanly and rewrites real
-  // customers, claims and prices.
-  it('rejects a test-mode event on the real project', () => {
-    assert.equal(isEventForThisEnvironment(false, 'intellectura-3b26a'), false);
+  // `functions:secrets:set` apart, and with the wrong one installed alongside a
+  // live key, every test-mode event a developer triggers verifies cleanly and
+  // rewrites real customers, claims and prices.
+  it('rejects a test-mode event when a live key is deployed', () => {
+    assert.equal(isEventForThisEnvironment(false, LIVE_KEY, REAL), false);
   });
 
-  it('accepts a test-mode event on a demo project', () => {
-    assert.equal(isEventForThisEnvironment(false, 'demo-trivia-app-e2e'), true);
+  /*
+   * The regression this replaced. The check used to derive the expected mode
+   * from the project ID — a real project must mean live — which is false here:
+   * production deliberately runs a test key before launch (PROJECT_OVERVIEW §6).
+   * That rule refused every genuine delivery, so a completed checkout would
+   * never have granted anyone Pro. The key is the right authority because it
+   * *defines* which Stripe the deployment talks to.
+   */
+  it('accepts a test-mode event on the real project when a test key is deployed', () => {
+    assert.equal(isEventForThisEnvironment(false, TEST_KEY, REAL), true);
   });
 
-  it('rejects a live event on a demo project', () => {
-    assert.equal(isEventForThisEnvironment(true, 'demo-trivia-app-e2e'), false);
+  it('rejects a live event when only a test key is deployed', () => {
+    assert.equal(isEventForThisEnvironment(true, TEST_KEY, REAL), false);
+  });
+
+  // The emulator runs on placeholder secrets that classify as neither mode, so
+  // a demo project is pinned to test rather than left unclassifiable.
+  it('pins a demo project to test mode whatever the key looks like', () => {
+    assert.equal(isEventForThisEnvironment(false, 'placeholder', DEMO), true);
+    assert.equal(isEventForThisEnvironment(true, 'placeholder', DEMO), false);
+    assert.equal(isEventForThisEnvironment(false, LIVE_KEY, DEMO), true);
   });
 
   // A dropped event on a misconfigured deploy is recoverable; live billing
   // state mutated by a test is not.
-  it('accepts nothing when the project cannot be identified', () => {
-    assert.equal(isEventForThisEnvironment(true, undefined), false);
-    assert.equal(isEventForThisEnvironment(false, undefined), false);
+  it('accepts nothing when the key cannot be classified', () => {
+    assert.equal(isEventForThisEnvironment(true, 'placeholder', REAL), false);
+    assert.equal(isEventForThisEnvironment(false, 'placeholder', REAL), false);
+    assert.equal(isEventForThisEnvironment(true, undefined, REAL), false);
+  });
+
+  // The project ID only decides the demo pin; once past that the key is the
+  // authority, so an unidentifiable project is not by itself disqualifying.
+  it('still trusts a classifiable key when the project cannot be identified', () => {
+    assert.equal(isEventForThisEnvironment(true, LIVE_KEY, undefined), true);
+    assert.equal(isEventForThisEnvironment(false, LIVE_KEY, undefined), false);
   });
 });
