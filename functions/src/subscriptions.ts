@@ -2,6 +2,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import type Stripe from 'stripe';
+import { isPrivilegeDowngrade, readStripeRole, withStripeRoleClaim } from './claims';
 import { deriveClaimRole } from './role';
 
 /**
@@ -71,10 +72,34 @@ async function recomputeStripeRoleClaim(uid: string): Promise<void> {
   if (!user) {
     return;
   }
-  if ((user.customClaims?.['stripeRole'] ?? null) === role) {
+
+  const previousRole = readStripeRole(user.customClaims);
+  if (previousRole === role) {
     // No-op: avoids invalidating the user's existing token (and everyone
     // else's cached listener state) for a claim that hasn't actually changed.
+    // Stripe redelivers webhooks, so this is the common case, not the rare
+    // one — and it is what keeps the revocation below from signing users out
+    // on every duplicate delivery.
     return;
   }
-  await auth.setCustomUserClaims(uid, role ? { stripeRole: role } : null);
+
+  // Merged, never wholesale. `setCustomUserClaims` replaces the entire claims
+  // object, so writing `{ stripeRole }` — or `null` to clear it — deletes
+  // every other claim the user has. See claims.ts.
+  await auth.setCustomUserClaims(uid, withStripeRoleClaim(user.customClaims, role));
+
+  if (isPrivilegeDowngrade(previousRole, role)) {
+    // Unsetting the claim only changes what the *next* ID token says. The one
+    // in the user's browser keeps asserting the old role until it expires, so
+    // taking the entitlement away has to invalidate the session carrying it,
+    // not just the record behind it.
+    //
+    // Deliberately after the claim write: if this throws, the entitlement is
+    // already gone and only the session lingers. The other order would sign
+    // the user out while leaving them Pro.
+    await auth.revokeRefreshTokens(uid);
+    logger.info(
+      `Revoked refresh tokens for ${uid}: stripeRole ${previousRole} -> ${role ?? 'none'}`,
+    );
+  }
 }
