@@ -1,6 +1,6 @@
 # Audit Remediation Plan
 
-A full audit of this repo (security, correctness, data model, CI/CD, testing, accessibility, product/compliance) produced **55 findings**. They are being fixed as a series of small, individually-reviewable pull requests.
+A full audit of this repo (security, correctness, data model, CI/CD, testing, accessibility, product/compliance) produced **55 findings**, and fixing them has since surfaced one more — **56** in the register today. They are being fixed as a series of small, individually-reviewable pull requests.
 
 This file is the **shared source of truth** for that work: what was found, what is done, what is next, and the decisions taken along the way. It is deliberately in the repo rather than in any assistant's private memory, so progress is reviewable and the work can be picked up in a new session — or by a different person — without reconstructing context.
 
@@ -16,14 +16,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 11       |
-| 🔵 In review        | 4        |
-| ⬜ Not started      | 40       |
-| **Total**           | **55**   |
+| ✅ Fixed and merged | 14       |
+| 🔵 In review        | 3        |
+| ⬜ Not started      | 39       |
+| **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#47](https://github.com/shermam/trivia/pull/47) (A2 + A3 + A7, checkout input validation).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#48](https://github.com/shermam/trivia/pull/48) (A4 + A5, claim scoping and token revocation).
 
 ---
 
@@ -57,7 +57,7 @@ That is enough. The assistant will read this file, `CLAUDE.md`, and `PROJECT_OVE
 
 Agreed at the start of the series and unchanged since:
 
-1. **One PR per finding**, except where two findings edit the same lines and can't be reviewed apart. Roughly ~25–30 PRs for 55 findings.
+1. **One PR per finding**, except where two findings edit the same lines and can't be reviewed apart. Roughly ~25–30 PRs for 56 findings.
 1. **Branch fresh off `main`** by default. Stack only when a conflict is genuinely unavoidable, and say so in the PR body.
 1. **Integrate `main` by rebasing**, never by merging `main` into the branch. Push with `--force-with-lease`, and re-run the verification gates _after_ rebasing — integrating `main` is exactly where a newly-added gate breaks.
 1. **Risk-scoped verification** (`CLAUDE.md` §3a): the full four-command suite for anything touching `src/app/`, `firestore.rules`, `firebase.json`, or `functions/src/`; unit + functions + build only for docs/CI/config-only changes. Always name which commands ran in the PR body.
@@ -102,20 +102,21 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 
 ### A — Security
 
-| ID      | Finding                                                                                                                           | Status                                                                                          |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced | ✅ [#43](https://github.com/shermam/trivia/pull/43) — _bounded; mitigation not closure, see §4_ |
-| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                        | 🔵 [#47](https://github.com/shermam/trivia/pull/47)                                             |
-| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                 | 🔵 [#47](https://github.com/shermam/trivia/pull/47)                                             |
-| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                 | ⬜                                                                                              |
-| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                    | ⬜                                                                                              |
-| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                               | ⬜                                                                                              |
-| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                        | 🔵 [#47](https://github.com/shermam/trivia/pull/47)                                             |
-| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                | ⬜                                                                                              |
-| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                              | ⬜                                                                                              |
-| **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                           | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_             |
-| **A11** | Service-account secret interpolated directly into shell `run:` blocks                                                             | ⬜                                                                                              |
-| **A12** | `npm audit`: 7 moderate findings in `functions/` are **production runtime**, distinct from the documented devDependency ones      | ⬜                                                                                              |
+| ID      | Finding                                                                                                                                                                                                                                | Status                                                                                          |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced                                                                                                      | ✅ [#43](https://github.com/shermam/trivia/pull/43) — _bounded; mitigation not closure, see §4_ |
+| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                                                                                                                             | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
+| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                                                                                                                      | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
+| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                                                                                                                      | 🔵 [#48](https://github.com/shermam/trivia/pull/48)                                             |
+| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                                                                                                                         | 🔵 [#48](https://github.com/shermam/trivia/pull/48) — _narrowed, not closed; see A13_           |
+| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                                                                                                                                    | ⬜                                                                                              |
+| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                                                                                                                             | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
+| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                                                                                                                     | ⬜                                                                                              |
+| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                                                                                                                                   | ⬜                                                                                              |
+| **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                                                                                                                                | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_             |
+| **A11** | Service-account secret interpolated directly into shell `run:` blocks                                                                                                                                                                  | ⬜                                                                                              |
+| **A12** | `npm audit`: 7 moderate findings in `functions/` are **production runtime**, distinct from the documented devDependency ones                                                                                                           | ⬜                                                                                              |
+| **A13** | **`firestore.rules` doesn't check token revocation**, so a lapsed subscriber's already-issued ID token still satisfies `isProUser()` until it expires (≤1hr). A5's `revokeRefreshTokens` forces re-auth but cannot retract that token. | ⬜ _(found during A4/A5)_                                                                       |
 
 ### B — Correctness
 
@@ -202,7 +203,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 ## 6. Suggested order from here
 
 1. ~~**A2 + A3 + A7**~~ — checkout input validation. [#47](https://github.com/shermam/trivia/pull/47).
-2. **A4 + A5** — claim scoping and revocation, same function.
+2. ~~**A4 + A5**~~ — claim scoping and revocation. [#48](https://github.com/shermam/trivia/pull/48). **A13 came out of it and is unstarted** — decide it before or after A6, but don't lose it.
 3. **A6** — webhook ordering, idempotency, `livemode`.
 4. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
 5. **A8 + A9** — CSP and security headers.
@@ -216,6 +217,17 @@ Two things were worth more than the plan anticipated, and one was a trap.
 **The strongest fix for three of the four A2 fields was to stop accepting them.** `mode` had exactly one possible value; `success_url`/`cancel_url` had exactly one possible shape. Validating them would have been busywork guarding a field nobody needed — removing them means there is no client-chosen value left on that path to get the validation wrong about. Only `price` survives as client input, and only because keeping it avoids reaching into two unrelated findings (§4).
 
 **The A3 cap needed a mechanism, not a threshold.** The obvious reading of "add a rate limit" is a number, but rules have nothing to count with. The document ID turned out to be the whole answer: `create` is the one verb that already refuses to run twice on the same name, so a name derived from server time _is_ a counter, at zero extra reads. The cost is that the client has to derive the same name from its own clock, which is why the window is 5 minutes wide and ±1 window is tolerated — the same skew `isNearRequestTime()` already accepts.
+
+### What A4 + A5 actually shipped, and the finding it produced
+
+**A4 was bigger than the register said.** The finding named `setCustomUserClaims(uid, null)` as the destructive call. It is — but so is the other branch: the API replaces the entire claims object, so `setCustomUserClaims(uid, { stripeRole: 'pro' })` erases every claim that isn't `stripeRole` just as completely. Both paths now go through a read-merge-write. Worth noting _why_ this was invisible: with exactly one claim in the system, both calls are correct by accident. The bug activates the day someone adds a second claim, in a file they didn't touch, on the next webhook delivery.
+
+**A5 is narrowed, not closed, and the invariant that specified it was overconfident.** `CLAUDE.md` §4.2 said revoking a privilege "revokes the token that carries it". `revokeRefreshTokens` does not do that: it invalidates refresh tokens, so the user cannot mint a new ID token and is forced to re-authenticate — but the ID token already in their browser keeps asserting `stripeRole: 'pro'` until it expires, and **`firestore.rules` does not check revocation**. So a lapsed subscriber can still write a custom question for up to an hour. That is a real improvement over doing nothing, and it is not what the invariant claimed. §4.2 has been rewritten to say what revocation does and does not buy, per §4's own rule about not leaving silent exceptions.
+
+The residual is now **A13**. It is closable: `request.auth.token.iat`, `auth_time` and `exp` were all probed against the emulator and are addressable in rules. Two mechanisms, neither free, which is why it is its own decision rather than scope creep here:
+
+- **Compare `iat` against a server-written "entitlement changed at" timestamp.** Exact, but costs a `get()` — one billed read on every privileged write.
+- **Require a freshly-issued token for privileged writes** (`iat` within N minutes). Costs nothing, and `AddQuestionComponent` already force-refreshes immediately before its write, so the client satisfies it today. But it couples the rules to that client behaviour, and a failed refresh becomes a rejected write.
 
 **`math.floor()` in the rules language returns a float.** `string(math.floor(x))` renders `"5954006.0"`, so every legitimate checkout was rejected and every hostile one was too — a rule that looks like it works and fails 100% closed. Plain integer division is correct. Caught only because the suite asserts the _accept_ cases as well as the reject ones; a suite of nothing but `assertFails` would have passed against it happily. Worth remembering next to the `math.round()` check A1 did: the rules language is close enough to JavaScript to be trusted by reflex, and isn't.
 
