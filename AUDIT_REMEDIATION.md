@@ -17,8 +17,8 @@ Related documents:
 |                     | Findings |
 | ------------------- | -------- |
 | ✅ Fixed and merged | 10       |
-| 🔵 In review        | 1        |
-| ⬜ Not started      | 44       |
+| 🔵 In review        | 2        |
+| ⬜ Not started      | 43       |
 | **Total**           | **55**   |
 
 Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41).
@@ -187,19 +187,19 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 
 ### H — Product & compliance
 
-| ID     | Finding                                                                                                                                                                                        | Status                                                                         |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **H1** | No password reset — an email/password user who forgets is locked out of a paid subscription                                                                                                    | ⬜                                                                             |
-| **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items |
-| **H3** | No account deletion or data export                                                                                                                                                             | ⬜ **pulled forward** — blocks #37                                             |
-| **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                             |
-| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ⬜ _(found during the work)_                                                   |
+| ID     | Finding                                                                                                                                                                                        | Status                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **H1** | No password reset — an email/password user who forgets is locked out of a paid subscription                                                                                                    | ⬜                                                                                       |
+| **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items           |
+| **H3** | No account deletion or data export                                                                                                                                                             | 🔵 [#44](https://github.com/shermam/trivia/pull/44) — _deletion done; export still open_ |
+| **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                                       |
+| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ⬜ _(found during the work)_                                                             |
 
 ---
 
 ## 6. Suggested order from here
 
-1. **H3** — account deletion + export. Unblocks the retention sections of #37.
+1. **H3 (export half)** — deletion shipped in #44, which unblocks #37's retention section; the data-export half still blocks its data-subject-rights section.
 2. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
 3. **A4 + A5** — claim scoping and revocation, same function.
 4. **A6** — webhook ordering, idempotency, `livemode`.
