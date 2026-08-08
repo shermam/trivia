@@ -68,8 +68,12 @@ export const asWrongRole = (env: RulesTestEnvironment, uid: string): RulesTestCo
 export const asSignedOut = (env: RulesTestEnvironment): RulesTestContext =>
   env.unauthenticatedContext();
 
-/** A schema-valid `custom_questions` document; spread over it to build invalid variants. */
-export function validQuestion(overrides: Record<string, unknown> = {}) {
+/**
+ * A schema-valid `custom_questions` document; spread over it to build invalid
+ * variants. `createdBy` must match the uid of whichever context writes it, so
+ * it's a required argument rather than a default nobody notices is wrong.
+ */
+export function validQuestion(createdBy: string, overrides: Record<string, unknown> = {}) {
   return {
     category: 'Science',
     type: 'multiple',
@@ -77,6 +81,8 @@ export function validQuestion(overrides: Record<string, unknown> = {}) {
     question: 'What is the chemical symbol for water?',
     correct_answer: 'H2O',
     incorrect_answers: ['CO2', 'O2', 'NaCl'],
+    createdBy,
+    createdAt: Date.now(),
     ...overrides,
   };
 }

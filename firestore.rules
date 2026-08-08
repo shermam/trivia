@@ -41,10 +41,22 @@ service cloud.firestore {
             && request.resource.data.createdAt is int;
     }
 
+    // Bounds on a client-supplied epoch-ms timestamp: it must sit close to
+    // when the server actually saw the request. Generous on the past side for
+    // a slow connection or a clock a few minutes behind, tight on the future
+    // side. Without this, `createdAt` is decoration — a client can write any
+    // number it likes, including one chosen to sort itself first.
+    function isNearRequestTime(millis) {
+      return millis is int
+             && millis <= request.time.toMillis() + 60000
+             && millis >= request.time.toMillis() - 300000;
+    }
+
     function isValidCustomQuestion() {
       let data = request.resource.data;
       return data.keys().hasOnly(
-                ['category', 'type', 'difficulty', 'question', 'correct_answer', 'incorrect_answers']
+                ['category', 'type', 'difficulty', 'question', 'correct_answer',
+                 'incorrect_answers', 'createdBy', 'createdAt']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
             && data.type in ['multiple', 'boolean']
@@ -53,7 +65,14 @@ service cloud.firestore {
             && data.correct_answer is string
             && data.correct_answer.size() > 0 && data.correct_answer.size() <= 200
             && data.incorrect_answers is list
-            && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 5;
+            && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 5
+            // Attribution is mandatory and self-asserting only: a submitter
+            // can name themselves and nobody else. This is what makes an abuse
+            // report actionable, and what lets account deletion find a user's
+            // contributions — neither is retrofittable, because no backfill
+            // can invent an author for a document that never recorded one.
+            && data.createdBy is string && data.createdBy == request.auth.uid
+            && isNearRequestTime(data.createdAt);
     }
 
     // Question bank: readable by anyone playing the game. Creating a new

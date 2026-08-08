@@ -2,7 +2,11 @@ import { Injectable, inject } from '@angular/core';
 import type { Firestore } from 'firebase/firestore';
 import { Observable, defer, map } from 'rxjs';
 import { environment } from '../../environments/environment';
-import { CustomQuestionDoc, LeaderboardEntry } from '../models/question.model';
+import {
+  CustomQuestionDoc,
+  LeaderboardEntry,
+  NewCustomQuestionDoc,
+} from '../models/question.model';
 import { withTimeout } from '../utils/with-timeout.util';
 import { FirebaseAppService } from './firebase-app.service';
 
@@ -79,8 +83,13 @@ export class FirebaseService {
    * `addDoc` (unlike the leaderboard, there's no per-user document to
    * upsert). Rejected outright by `firestore.rules` for anonymous/unverified
    * callers or a malformed payload — see `isValidCustomQuestion` there.
+   *
+   * The caller supplies `createdBy`/`createdAt` (same convention as
+   * `saveHighScore` taking `uid`). The rules reject a `createdBy` that isn't
+   * the caller's own uid, so passing the wrong one fails the write rather
+   * than mis-attributing the question.
    */
-  async addCustomQuestion(question: CustomQuestionDoc): Promise<void> {
+  async addCustomQuestion(question: NewCustomQuestionDoc): Promise<void> {
     const { firestore, firestoreModule } = await this.getFirestore();
     await withTimeout(
       firestoreModule.addDoc(
