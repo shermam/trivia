@@ -27,6 +27,31 @@ const EXPORT_TIMEOUT_MS = 30_000;
 
 type FunctionsModule = typeof import('firebase/functions');
 
+/**
+ * Turns a callable failure into something worth showing a user.
+ *
+ * `functions/not-found` gets its own message for a specific reason: Cloud
+ * Functions are **not** channel-scoped. A Hosting preview channel serves the
+ * PR's client code, but the functions in the project are whatever the
+ * merge-to-deploy pipeline last shipped — so any PR that adds a new callable
+ * shows a broken feature on its own preview until it merges. Telling that user
+ * to "please try again" is actively wrong: retrying can never succeed, and
+ * nothing about the message hints at the real cause.
+ *
+ * This is the `CLAUDE.md` §4.4 guardrail — an error message must not narrate a
+ * cause it hasn't verified — applied to the one code we *can* verify.
+ */
+function accountErrorMessage(error: unknown, action: string): string {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'functions/not-found') {
+    return `This feature isn't available on this deployment yet. Cloud Functions only go live when a change is merged, so it will work on the live site but not on a preview.`;
+  }
+  if (code === 'functions/unauthenticated') {
+    return 'Your session expired. Sign in again and retry.';
+  }
+  return `Could not ${action}. Please try again.`;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AccountService {
   private readonly firebaseAppService = inject(FirebaseAppService);
@@ -75,11 +100,17 @@ export class AccountService {
       functions,
       'exportAccountData',
     );
-    const result = await withTimeout(
-      callable(),
-      EXPORT_TIMEOUT_MS,
-      'Preparing your data is taking longer than expected.',
-    );
+
+    let result: { data: unknown };
+    try {
+      result = await withTimeout(
+        callable(),
+        EXPORT_TIMEOUT_MS,
+        'Preparing your data is taking longer than expected.',
+      );
+    } catch (error) {
+      throw new Error(accountErrorMessage(error, 'prepare your data'), { cause: error });
+    }
 
     const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -108,11 +139,15 @@ export class AccountService {
   async deleteAccount(): Promise<void> {
     const { functions, functionsModule } = await this.getFunctions();
     const callable = functionsModule.httpsCallable(functions, 'deleteAccount');
-    await withTimeout(
-      callable(),
-      DELETE_ACCOUNT_TIMEOUT_MS,
-      'Deleting your account is taking longer than expected.',
-    );
+    try {
+      await withTimeout(
+        callable(),
+        DELETE_ACCOUNT_TIMEOUT_MS,
+        'Deleting your account is taking longer than expected.',
+      );
+    } catch (error) {
+      throw new Error(accountErrorMessage(error, 'delete your account'), { cause: error });
+    }
     await this.authService.signOut();
   }
 }
