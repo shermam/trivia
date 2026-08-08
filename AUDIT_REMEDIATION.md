@@ -16,14 +16,16 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 17       |
-| 🔵 In review        | 2        |
+| ✅ Fixed and merged | 18       |
+| 🔵 In review        | 1        |
 | ⬜ Not started      | 37       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#51](https://github.com/shermam/trivia/pull/51) (H5, self-hosted Inter).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review).
+
+> A PR in this series can never mark _itself_ merged — the commit that updates the register is the one being reviewed. So the entry for the most recently merged finding is routinely one PR behind, and the next PR tidies it. If you are reading this between merges, trust the `Status` column over this line.
 
 ---
 
@@ -196,7 +198,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 | **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items                         |
 | **H3** | No account deletion or data export                                                                                                                                                             | ✅ [#44](https://github.com/shermam/trivia/pull/44) + [#45](https://github.com/shermam/trivia/pull/45) |
 | **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                                                     |
-| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | 🔵 [#51](https://github.com/shermam/trivia/pull/51)                                                    |
+| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ✅ [#51](https://github.com/shermam/trivia/pull/51)                                                    |
 
 ---
 
@@ -244,6 +246,10 @@ The residual is now **A13**. It is closable: `request.auth.token.iat`, `auth_tim
 **The idempotency record the finding asked for turned out to be the wrong mechanism.** Every write in the handler is already a `set(..., {merge:true})` or a `delete()`, so a redelivery changes nothing — duplication was never the bug. Ordering was: Stripe guarantees at-least-once and says nothing about order, so a stale `cancelled` could land on a fresh `active` and the `stripeRole` claim would then be recomputed from the older truth. A global processed-event log would have needed its own collection, its own TTL (cf. C2), and a read on every delivery to answer a question no document actually asked. A **per-document high-water mark** — the `created` of the event that last wrote it — covers both, and `CLAUDE.md` §4.3 already specified it that way.
 
 **Deletes are the awkward case and needed the same guard.** Deleting a document takes its high-water mark with it, so a late `product.deleted` arriving after the product was recreated has nothing left to compare against. Deletes therefore go through the same transaction, checking the mark before removing the document.
+
+**The `livemode` check shipped wrong and was fixed in a follow-up ([#52](https://github.com/shermam/trivia/pull/52)).** It derived the expected mode from the project ID — a real project must mean live — which is false on this very project: production deliberately runs an `sk_test_` key before launch (`PROJECT_OVERVIEW.md` §6, recorded in [#50](https://github.com/shermam/trivia/pull/50) hours after A6 merged). The rule therefore refused _every_ genuine delivery, and the symptom would have been a completed checkout silently never granting Pro. Nothing was actually dropped — no events arrived between the deploy and the fix — but that was luck, not margin.
+
+The expectation now comes from the deployed secret key's own `_live_`/`_test_` infix. That is the right authority because it _defines_ which Stripe the deployment talks to, so the check cannot contradict reality; the project ID was a guess about configuration that configuration was free to disagree with. Generalised into `CLAUDE.md` §4.2 as its own invariant, because "am I in production" gating on an environment's _name_ rather than its _credential_ is a shape that will recur.
 
 **The `livemode` check acknowledges rather than rejects.** Returning 4xx would make Stripe retry and eventually disable the endpoint, and there is nothing to retry — the delivery is simply for the other mode. It returns 200 and writes nothing, which is the actual security property.
 

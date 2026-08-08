@@ -66,32 +66,69 @@ export function isMockCheckoutEnabled(
 }
 
 /**
+ * Which Stripe a secret key talks to, read from the key's own shape.
+ *
+ * Stripe's key format encodes the mode (`sk_test_…`, `sk_live_…`, and the
+ * restricted `rk_` variants of both), so this is the deployment's own statement
+ * of which Stripe it is configured against — not an inference about it.
+ * Matched on the `_live_`/`_test_` infix rather than a `sk_`/`rk_` prefix so a
+ * new key *type* doesn't silently become unclassifiable.
+ *
+ * The key itself must never be logged or returned; only this classification.
+ */
+export function stripeModeOfKey(secretKey: string | undefined): 'live' | 'test' | null {
+  if (!secretKey) {
+    return null;
+  }
+  if (secretKey.includes('_live_')) {
+    return 'live';
+  }
+  if (secretKey.includes('_test_')) {
+    return 'test';
+  }
+  return null;
+}
+
+/**
  * Whether a Stripe event belongs to the environment receiving it.
  *
  * Stripe lets the same URL be registered as a webhook endpoint in **both** test
  * and live mode, each with its own signing secret. Normally the wrong-mode
  * delivery fails signature verification and never gets here — but the two
  * secrets are one `firebase functions:secrets:set` apart, and if the test one
- * is ever set on production, every test-mode event a developer triggers starts
- * verifying cleanly and writing to real customers: cancelling live
- * subscriptions, revoking real `stripeRole` claims, rewriting the price
+ * is ever set alongside a *live* secret key, every test-mode event a developer
+ * triggers starts verifying cleanly and writing to real customers: cancelling
+ * live subscriptions, revoking real `stripeRole` claims, rewriting the price
  * catalogue the pricing page reads.
  *
- * Checking `livemode` against the project makes that structurally impossible
- * rather than dependent on which secret happens to be installed — the same
- * reasoning as gating mock checkout on a `demo-` project ID (A7), and the same
- * asymmetry: a secret can be pasted anywhere, a project ID cannot.
+ * The expectation comes from **the deployed secret key**, not from the project.
+ * An earlier version of this derived it from the project ID — a real project
+ * must mean live mode — which is wrong, and expensively so: this project runs
+ * deliberately in Stripe test mode before launch (`PROJECT_OVERVIEW.md` §6), so
+ * that rule rejected every genuine delivery and would have stopped checkout
+ * granting anyone Pro. The key is the right authority because it *defines*
+ * which Stripe the deployment talks to, so this check can never contradict
+ * reality: with a live key installed a test event is still refused, and with a
+ * test key installed there is no live state to protect in the first place.
  *
- * An unidentifiable project accepts nothing. Failing closed here costs a
- * dropped event on a misconfigured deploy; failing open costs live billing
- * state mutated by a test.
+ * A demo project is pinned to test mode regardless — the emulator runs on
+ * placeholder secrets that classify as neither.
+ *
+ * An unclassifiable key accepts nothing. Failing closed costs a dropped event
+ * on a misconfigured deploy; failing open costs live billing state mutated by
+ * a test.
  */
 export function isEventForThisEnvironment(
   eventLivemode: boolean,
+  secretKey: string | undefined,
   projectId: string | undefined,
 ): boolean {
-  if (projectId === undefined) {
+  if (isDemoProject(projectId)) {
+    return eventLivemode === false;
+  }
+  const mode = stripeModeOfKey(secretKey);
+  if (mode === null) {
     return false;
   }
-  return eventLivemode === !isDemoProject(projectId);
+  return eventLivemode === (mode === 'live');
 }
