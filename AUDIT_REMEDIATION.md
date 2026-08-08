@@ -1,0 +1,233 @@
+# Audit Remediation Plan
+
+A full audit of this repo (security, correctness, data model, CI/CD, testing, accessibility, product/compliance) produced **55 findings**. They are being fixed as a series of small, individually-reviewable pull requests.
+
+This file is the **shared source of truth** for that work: what was found, what is done, what is next, and the decisions taken along the way. It is deliberately in the repo rather than in any assistant's private memory, so progress is reviewable and the work can be picked up in a new session — or by a different person — without reconstructing context.
+
+Related documents:
+
+- **`CLAUDE.md` §4** — the invariants these fixes establish, written as a contract so they can't silently regress.
+- **`INFRASTRUCTURE.md` §10** — the infra-layer counterpart.
+- **`PROJECT_OVERVIEW.md` §6** — Known Gaps, the running record of what is still open in the product itself.
+
+---
+
+## 1. Status at a glance
+
+|                     | Findings |
+| ------------------- | -------- |
+| ✅ Fixed and merged | 9        |
+| 🔵 In review        | 1        |
+| ⬜ Not started      | 45       |
+| **Total**           | **55**   |
+
+Merged so far: [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41).
+
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review).
+
+---
+
+## 2. How to resume this work in a new session
+
+Start a new Claude Code session in this repo and paste something like:
+
+> Read `AUDIT_REMEDIATION.md`, then continue the audit remediation from where it left off. Follow the working rules in §3 and pick up the next item in §5.
+
+That is enough. The assistant will read this file, `CLAUDE.md`, and `PROJECT_OVERVIEW.md`, and has everything it needs.
+
+**To work on something specific instead**, name the finding ID:
+
+> Read `AUDIT_REMEDIATION.md`, then fix finding **B3** (cached rejected promise in `TriviaService.getCategories`). One PR, branched fresh off `main`.
+
+**Useful things to say when resuming:**
+
+| You want                    | Say                                                                |
+| --------------------------- | ------------------------------------------------------------------ |
+| Just keep going             | "Continue from §5, next unstarted item."                           |
+| A specific finding          | "Fix finding **A6**."                                              |
+| Several small ones together | "Fix **B6** and **B7** in one PR — they're both one-line changes." |
+| Re-prioritise               | "Do the accessibility findings (G1–G6) next."                      |
+| Check state                 | "What's the current status of the audit remediation?"              |
+
+**Keep this file current.** Every PR in the series should update §1 and §5 as part of the change, the same way `CLAUDE.md` §2 requires `PROJECT_OVERVIEW.md` to be updated. A stale plan is worse than none.
+
+---
+
+## 3. Working rules
+
+Agreed at the start of the series and unchanged since:
+
+1. **One PR per finding**, except where two findings edit the same lines and can't be reviewed apart. Roughly ~25–30 PRs for 55 findings.
+2. **Branch fresh off `main`** by default. Stack only when a conflict is genuinely unavoidable, and say so in the PR body.
+3. **Integrate `main` by rebasing**, never by merging `main` into the branch. Push with `--force-with-lease`, and re-run the verification gates _after_ rebasing — integrating `main` is exactly where a newly-added gate breaks.
+4. **Risk-scoped verification** (`CLAUDE.md` §3a): the full four-command suite for anything touching `src/app/`, `firestore.rules`, `firebase.json`, or `functions/src/`; unit + functions + build only for docs/CI/config-only changes. Always name which commands ran in the PR body.
+5. **A `firestore.rules` change ships with rules tests, and the rules get mutation-tested** — break the rule on purpose, confirm a test fails, restore. A rules suite that passes against broken rules is worse than none.
+6. **New CI checks get their own workflow**, even though that means a manual step to add them to the ruleset. One workflow per concern; a bundled check produces a muddier signal permanently to save a one-off settings change.
+
+### Verification commands
+
+```bash
+npm run format:check   # Prettier
+npm run lint           # ESLint + angular-eslint
+npm test               # Vitest unit suite
+npm run functions:test # Cloud Functions unit tests
+npm run rules:test     # firestore.rules suite against the Firestore emulator
+npm run e2e            # Cypress against the full Firebase Emulator Suite
+npm run lighthouse     # Lighthouse CI
+```
+
+Approximate local cost: e2e ~4m, Lighthouse ~2m15s, rules ~6s, everything else seconds. Verification **cannot be parallelised** — the emulator ports are fixed, so two suites on one machine collide.
+
+---
+
+## 4. Decisions taken
+
+Recorded so they aren't silently revisited.
+
+| Decision                                                                      | Rationale                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **A1 (leaderboard forgery): bounded rules, not server-attested game tokens.** | Avoids per-game server code. Worth noting the cost concern was probably not binding — a token approach is ~2 Cloud Function invocations per completed game against a 2M/month free tier, i.e. ~1M games/month before any charge. Deferred on complexity grounds; revisit if cheating appears. Dropping the competitive framing was rejected — it's the product's appeal. |
+| **Legal pages ship as drafts**, revisited after the features they depend on.  | Retention and data-subject-rights sections can't make a truthful promise until account deletion (H3) exists; contributed-content removal can't be promised until attribution (A10) exists. A10 has since landed.                                                                                                                                                         |
+| **H3 and A10 pulled forward** from their natural queue positions.             | Both block the legal pages. A10 also had to precede H3 — deleting a user's questions is impossible while nothing records who wrote them.                                                                                                                                                                                                                                 |
+| **A10 attribution shipped without a rate limit.**                             | Firestore rules cannot count a user's documents; a cap needs a counter doc the client can decline to update, or a Cloud Function on the write path. Different mechanism. Unlike attribution, a rate limit can be added at any time without a migration.                                                                                                                  |
+| **Basecamp's CC BY 4.0 policies as the legal skeleton**, not Automattic's.    | Automattic's are CC BY-**SA**; the share-alike term would oblige these pages to carry the same licence.                                                                                                                                                                                                                                                                  |
+
+---
+
+## 5. The findings register
+
+Legend: ✅ merged · 🔵 in review · ⬜ not started
+
+### A — Security
+
+| ID      | Finding                                                                                                                           | Status                                                                              |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced | ⬜ **next**                                                                         |
+| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                        | ⬜                                                                                  |
+| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                 | ⬜                                                                                  |
+| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                 | ⬜                                                                                  |
+| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                    | ⬜                                                                                  |
+| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                               | ⬜                                                                                  |
+| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                        | ⬜                                                                                  |
+| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                | ⬜                                                                                  |
+| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                              | ⬜                                                                                  |
+| **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                           | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_ |
+| **A11** | Service-account secret interpolated directly into shell `run:` blocks                                                             | ⬜                                                                                  |
+| **A12** | `npm audit`: 7 moderate findings in `functions/` are **production runtime**, distinct from the documented devDependency ones      | ⬜                                                                                  |
+
+### B — Correctness
+
+| ID      | Finding                                                                                                                                             | Status |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| **B1**  | Nothing prevents `correct_answer` also appearing in `incorrect_answers`; the quiz matches answers by string, so a wrong duplicate scores as correct | ⬜     |
+| **B2**  | `ANSWER_LABELS` has 4 entries but the rules permit 6 answers                                                                                        | ⬜     |
+| **B3**  | A failed `getCategories()` is cached forever — one blip degrades the whole session                                                                  | ⬜     |
+| **B4**  | Every `permission-denied` is reported as "your best score is already higher", and blocks retry                                                      | ⬜     |
+| **B5**  | `playingOffline` is dead code — the player is never told they're on cached questions                                                                | ⬜     |
+| **B6**  | `withTimeout` never clears its timer                                                                                                                | ⬜     |
+| **B7**  | Quiz progress bar is off by one — 0% on Q1, never reaches 100%                                                                                      | ⬜     |
+| **B8**  | In-flight game state is memory-only; a refresh loses it                                                                                             | ⬜     |
+| **B9**  | `decodeHtmlEntities` runs over Firestore questions, silently rewriting user text                                                                    | ⬜     |
+| **B10** | The 15s countdown uses `setInterval`, which browsers throttle in hidden tabs                                                                        | ⬜     |
+
+### C — Data model, scalability, cost
+
+| ID     | Finding                                                                               | Status |
+| ------ | ------------------------------------------------------------------------------------- | ------ |
+| **C1** | `getCustomQuestions()` downloads the entire public collection every custom/mixed game | ⬜     |
+| **C2** | No TTL on `checkout_sessions` / `portal_sessions`                                     | ⬜     |
+| **C3** | Anonymous accounts grow monotonically; every sign-out mints another                   | ⬜     |
+| **C4** | IndexedDB keyed on question _text_, so identical text collides across sources         | ⬜     |
+| **C5** | `getProPriceId()` is a sequential N+1                                                 | ⬜     |
+
+### D — Reliability & release
+
+| ID     | Finding                                                                                                                                                                                 | Status                                                                                   |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **D1** | Branch protection not enabled                                                                                                                                                           | ✅ [#36](https://github.com/shermam/trivia/pull/36) — enabled; all 7 checks now required |
+| **D2** | Deploy order is hosting → rules → functions, putting the new client live before its backend                                                                                             | ⬜                                                                                       |
+| **D3** | No post-deploy smoke test or rollback path                                                                                                                                              | ⬜                                                                                       |
+| **D4** | Root `postinstall` ran `npm install` in `functions/`; 3 of 5 workflows had incomplete cache keys                                                                                        | ✅ [#39](https://github.com/shermam/trivia/pull/39)                                      |
+| **D5** | Committed `functions/.secret.local` placeholder — decision to re-confirm                                                                                                                | ⬜                                                                                       |
+| **D6** | **Lighthouse asserts the best of 3 runs, not the median** — `aggregationMethod` defaults to `optimistic`. Observed 0.84/0.66/0.62 against a 0.75 threshold, passing. Docs claim median. | ⬜ _(found during the work)_                                                             |
+
+### E — Testing
+
+| ID     | Finding                                                                                         | Status                                                                            |
+| ------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **E1** | `firestore.rules` had no unit tests at all                                                      | ✅ [#40](https://github.com/shermam/trivia/pull/40) — 94 tests, mutation-verified |
+| **E2** | No coverage of `AuthService`, `SubscriptionService`, `FirebaseService`, `GameControllerService` | ⬜                                                                                |
+| **E3** | `functions/` tests only `deriveClaimRole`; webhook and claim logic uncovered                    | ⬜                                                                                |
+| **E4** | `stripeWebhook` never exercised against a real Stripe delivery                                  | ✅ [#36](https://github.com/shermam/trivia/pull/36) — manually verified           |
+| **E5** | No coverage reporting or thresholds                                                             | ⬜                                                                                |
+
+### F — Tooling & code quality
+
+| ID     | Finding                                                                     | Status                                                                      |
+| ------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **F1** | `strict` and `strictTemplates` were off for the whole frontend              | ✅ [#35](https://github.com/shermam/trivia/pull/35)                         |
+| **F2** | No ESLint at all                                                            | ✅ [#38](https://github.com/shermam/trivia/pull/38) — found 25 real defects |
+| **F3** | Prettier installed but never enforced; 12 files had drifted                 | ✅ [#38](https://github.com/shermam/trivia/pull/38)                         |
+| **F4** | `/play` and `/game-over` redirect from `ngOnInit` instead of route guards   | ⬜                                                                          |
+| **F5** | `PROJECT_OVERVIEW.md` is 67KB doing three jobs; split the history into ADRs | ⬜                                                                          |
+| **F6** | Committed Angular CLI analytics UUID                                        | ✅ [#38](https://github.com/shermam/trivia/pull/38)                         |
+
+### G — Accessibility
+
+None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `templateAccessibility` set reports zero errors, while every item below is still present — confirmed empirically in #38.
+
+| ID     | Finding                                                                                         | Status |
+| ------ | ----------------------------------------------------------------------------------------------- | ------ |
+| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | ⬜     |
+| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | ⬜     |
+| **G3** | Quiz result banner has no `aria-live`; the 15s limit can't be extended (WCAG 2.2.1)             | ⬜     |
+| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | ⬜     |
+| **G5** | No skip link, no route-change announcement                                                      | ⬜     |
+| **G6** | Auth form `autocomplete` attributes need confirming                                             | ⬜     |
+
+### H — Product & compliance
+
+| ID     | Finding                                                                                                                                                                                        | Status                                                                         |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **H1** | No password reset — an email/password user who forgets is locked out of a paid subscription                                                                                                    | ⬜                                                                             |
+| **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items |
+| **H3** | No account deletion or data export                                                                                                                                                             | ⬜ **pulled forward** — blocks #37                                             |
+| **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                             |
+| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ⬜ _(found during the work)_                                                   |
+
+---
+
+## 6. Suggested order from here
+
+1. **A1** — bounded leaderboard rules. Flips #40's two `CURRENTLY ACCEPTS` pins to `assertFails`.
+2. **H3** — account deletion + export. Unblocks the retention sections of #37.
+3. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
+4. **A4 + A5** — claim scoping and revocation, same function.
+5. **A6** — webhook ordering, idempotency, `livemode`.
+6. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
+7. **A8 + A9** — CSP and security headers.
+8. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
+9. Then B (correctness), C (cost), G (accessibility), and the rest.
+
+### In-flight analysis for A1
+
+Worth preserving, because it isn't obvious and it changes the design:
+
+**`totalQuestions` cannot be constrained to the offered game sizes (5/10/15/20/25).** A custom or mixed game returns _fewer_ questions than requested when the bank doesn't have enough — `fetchCustomQuestions` does `.slice(0, amount)` over whatever matched. Asking for 25 custom questions when 7 exist yields `totalQuestions: 7`. Constraining to the menu options would reject legitimate games. Bound it to `1..50` instead (50 being `Validators.max` on the form and Open Trivia DB's own ceiling).
+
+Also planned for A1: `percentage` must agree with `score`/`totalQuestions` (verify Firestore's `math.round()` half-way behaviour against JavaScript's before relying on exact equality — a tolerance of ±1 avoids a rounding-mode mismatch); `createdAt` bounded via the existing `isNearRequestTime()` helper added in #41; and a minimum elapsed time between improving updates, derived from `totalQuestions`. **Check the e2e specs before adding that last one** — `sign-in-save-score.cy.ts` seeds an entry and then saves over it, so too aggressive a floor would break it.
+
+---
+
+## 7. Outstanding manual steps
+
+Things that cannot be done from CI or by an assistant.
+
+| Item                                                                 | Status                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable branch protection on `main`                                   | ✅ done — all 7 checks required                                                                                                                                                                                                                                                                             |
+| Verify `stripeWebhook` against a real Stripe delivery                | ✅ done                                                                                                                                                                                                                                                                                                     |
+| Install JDK 21 for `firebase-tools@15` (A12)                         | ✅ installed via Homebrew — **keg-only**, so `java` still resolves to 14. Either `export PATH="/usr/local/opt/openjdk@21/bin:$PATH"` in your shell profile, or `sudo ln -sfn /usr/local/opt/openjdk@21/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk-21.jdk` to make it the system default. |
+| **Legal review of [#37](https://github.com/shermam/trivia/pull/37)** | ⬜ 13 items marked `<app-review-required>`. Three are blocked on H3/A10 rather than on a lawyer.                                                                                                                                                                                                            |
+| Decide the outstanding legal questions                               | ⬜ contact address, governing law, refund policy, children/COPPA, Firestore region, warranty & liability (left deliberately blank)                                                                                                                                                                          |
+| Confirm Firestore database region                                    | ⬜ needed for #37's international-transfers section                                                                                                                                                                                                                                                         |
