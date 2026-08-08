@@ -3,6 +3,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import type Stripe from 'stripe';
 import { isPrivilegeDowngrade, readStripeRole, withStripeRoleClaim } from './claims';
+import { setIfNotStale } from './event-order';
 import { deriveClaimRole } from './role';
 
 /**
@@ -15,6 +16,7 @@ import { deriveClaimRole } from './role';
  */
 export async function syncSubscriptionToFirestore(
   subscription: Stripe.Subscription,
+  eventCreated: number,
 ): Promise<void> {
   const uid = subscription.metadata?.['firebaseUID'];
   if (!uid) {
@@ -31,22 +33,34 @@ export async function syncSubscriptionToFirestore(
       : price.product.id
     : null;
 
-  await getFirestore()
-    .collection('customers')
-    .doc(uid)
-    .collection('subscriptions')
-    .doc(subscription.id)
-    .set(
-      {
-        status: subscription.status,
-        role: priceRole,
-        price: price?.id ?? null,
-        product: productId,
-        cancel_at_period_end: subscription.cancel_at_period_end,
-      },
-      { merge: true },
+  const written = await setIfNotStale(
+    getFirestore()
+      .collection('customers')
+      .doc(uid)
+      .collection('subscriptions')
+      .doc(subscription.id),
+    {
+      status: subscription.status,
+      role: priceRole,
+      price: price?.id ?? null,
+      product: productId,
+      cancel_at_period_end: subscription.cancel_at_period_end,
+    },
+    eventCreated,
+  );
+  if (!written) {
+    logger.info(
+      `Ignored out-of-order Stripe event for subscription ${subscription.id}: a newer one already wrote it.`,
     );
+  }
 
+  // Recomputed even when the write was dropped, and deliberately so. The claim
+  // is derived from all of the user's subscription documents, so it is correct
+  // for whatever state won — and a redelivery exists precisely because some
+  // earlier attempt failed, which may well have been this step after the
+  // document write already succeeded. Skipping it here would leave that
+  // failure with nothing to retry it. It is cheap to repeat: the claim write
+  // itself no-ops when nothing changed.
   await recomputeStripeRoleClaim(uid);
 }
 

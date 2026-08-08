@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isDemoProject, isMockCheckoutEnabled, resolveProjectId } from './environment';
+import {
+  isDemoProject,
+  isEventForThisEnvironment,
+  isMockCheckoutEnabled,
+  resolveProjectId,
+} from './environment';
 
 describe('resolveProjectId', () => {
   it('prefers the runtime-provided GCLOUD_PROJECT', () => {
@@ -82,5 +87,34 @@ describe('isMockCheckoutEnabled', () => {
   // on the wrong side of the decision.
   it('is off when the project cannot be identified', () => {
     assert.equal(isMockCheckoutEnabled(undefined, 'true'), false);
+  });
+});
+
+describe('isEventForThisEnvironment', () => {
+  it('accepts a live event on the real project', () => {
+    assert.equal(isEventForThisEnvironment(true, 'intellectura-3b26a'), true);
+  });
+
+  // The failure this exists for: the test and live signing secrets are one
+  // `functions:secrets:set` apart, and with the wrong one installed every
+  // test-mode event a developer triggers verifies cleanly and rewrites real
+  // customers, claims and prices.
+  it('rejects a test-mode event on the real project', () => {
+    assert.equal(isEventForThisEnvironment(false, 'intellectura-3b26a'), false);
+  });
+
+  it('accepts a test-mode event on a demo project', () => {
+    assert.equal(isEventForThisEnvironment(false, 'demo-trivia-app-e2e'), true);
+  });
+
+  it('rejects a live event on a demo project', () => {
+    assert.equal(isEventForThisEnvironment(true, 'demo-trivia-app-e2e'), false);
+  });
+
+  // A dropped event on a misconfigured deploy is recoverable; live billing
+  // state mutated by a test is not.
+  it('accepts nothing when the project cannot be identified', () => {
+    assert.equal(isEventForThisEnvironment(true, undefined), false);
+    assert.equal(isEventForThisEnvironment(false, undefined), false);
   });
 });
