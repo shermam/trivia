@@ -2,7 +2,9 @@ name: Unit Tests
 
 # Runs the Vitest unit suite on every PR targeting main, plus main itself as
 # a safety net — separate from the Cypress e2e workflow (e2e.yml) so a slow
-# e2e run never blocks fast feedback on unit-level regressions.
+# e2e run never blocks fast feedback on unit-level regressions, and separate
+# from the static checks (lint.yml) for the same reason in reverse: a lint
+# failure shouldn't stop us also learning whether the tests pass.
 on:
   pull_request:
     branches: [main]

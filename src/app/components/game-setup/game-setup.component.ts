@@ -36,7 +36,12 @@ export class GameSetupComponent implements OnInit {
     source: ['open_trivia' as GameConfig['source'], Validators.required],
   });
 
-  async ngOnInit(): Promise<void> {
+  // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
+  ngOnInit(): void {
+    void this.loadCategories();
+  }
+
+  private async loadCategories(): Promise<void> {
     try {
       const categories = await this.triviaService.getCategories();
       this.categories.set(categories);

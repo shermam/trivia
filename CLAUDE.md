@@ -66,9 +66,20 @@ Everything below was a real defect found in an audit of this repo. Each one is c
 Each guardrail is tagged with the mechanism that catches a violation:
 
 - **[review-only]** — nothing automated will ever catch this. It depends on you actually checking.
-- **[rules tests]**, **[functions tests]**, **[lint]** — a machine check catches it, _once that check exists_.
+- **[lint]** — `npm run lint` fails. **Live now**, and required on `main` via the `test` status check.
+- **[rules tests]**, **[functions tests]** — a machine check catches it, _once that check exists_. These arrive later in the audit-remediation PR series; until then, treat the guardrail as review-only. The tag describes what will catch it, not proof that something already does.
 
-**Enforcement is still being built out.** The audit that produced this section is being remediated as a PR series, and the checks referenced above (`firestore.rules` unit tests, ESLint with template a11y rules, expanded `functions/` coverage) arrive partway through it. Until a given mechanism has landed, treat that guardrail as **[review-only]** too — the tag describes what will catch it, not proof that something already does. Verify the check actually exists before relying on it; `npm run lint` either resolves or it doesn't.
+**A note on what lint turned out not to be able to do.** When these tags were first written, five guardrails were optimistically marked `[lint]`. Wiring ESLint up showed that no rule exists — in `angular-eslint`, `typescript-eslint` or core ESLint — for any of them:
+
+| Guardrail                                       | Why lint can't catch it                                                                                              |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `@for` track must be a stable id, not user text | `use-track-by-function` is about `*ngFor` trackBy functions; nothing inspects an `@for` track expression's semantics |
+| Never cache a rejected promise                  | Needs whole-program dataflow, not a syntactic rule                                                                   |
+| Every timer/listener has a teardown             | Same — requires reasoning about component lifetime                                                                   |
+| Disclosure widgets need `aria-expanded`         | `valid-aria` checks that ARIA attributes present are _correct_; nothing requires one to _exist_                      |
+| Grouped controls need `role="radiogroup"`       | `role-has-required-aria` validates a role once declared; nothing requires the role                                   |
+
+All five are now correctly marked `[review-only]`. This is worth remembering as a general point: **"a linter will catch it" is a hypothesis, not a plan.** Check that the rule exists before relying on it, or the guardrail is weaker than it reads.
 
 ### 4.1 Trust boundaries and data
 
@@ -92,9 +103,9 @@ Each guardrail is tagged with the mechanism that catches a violation:
 
 ### 4.4 Frontend correctness
 
-- **`@for` track expressions must be a stable unique id, never user-controlled text.** Two answers with the same string produce duplicate track keys, render twice, and — because the quiz matched answers by string value — let a wrong answer score as correct. Track the id; compare by id. **[lint]**
-- **Never cache a rejected promise.** A memoized `Promise` that isn't cleared in a `.catch` turns one transient network blip into a permanently degraded session. `SubscriptionService.getProPriceId()` has the correct pattern; copy it. **[lint]**
-- **Every `setTimeout`, `setInterval` and `addEventListener` has a matching teardown**, including inside a `Promise.race` helper that resolves early. **[lint]**
+- **`@for` track expressions must be a stable unique id, never user-controlled text.** Two answers with the same string produce duplicate track keys, render twice, and — because the quiz matched answers by string value — let a wrong answer score as correct. Track the id; compare by id. **[review-only]**
+- **Never cache a rejected promise.** A memoized `Promise` that isn't cleared in a `.catch` turns one transient network blip into a permanently degraded session. `SubscriptionService.getProPriceId()` has the correct pattern; copy it. **[review-only]**
+- **Every `setTimeout`, `setInterval` and `addEventListener` has a matching teardown**, including inside a `Promise.race` helper that resolves early. **[review-only]**
 - **Error messages must not narrate a cause they didn't verify.** Mapping a broad error code (`permission-denied`) onto one friendly story ("your best score is already higher") tells users something false whenever the real cause was different, and here it also blocked retry. Either distinguish the cases or stay generic. **[review-only]**
 - **State a user would be annoyed to lose survives a reload.** An in-progress game held only in signals is gone on refresh, tab crash, or PWA relaunch — which is exactly the population offline play is for. **[review-only]**
 - **Apply transformations per-source, not globally.** `decodeHtmlEntities` exists because Open Trivia DB returns entity-encoded text; running it over Firestore-authored questions silently rewrites what a user typed. Normalize at the adapter for each source, not in the shared mapper. **[review-only]**
@@ -106,9 +117,9 @@ Each guardrail is tagged with the mechanism that catches a violation:
 
 Any new interactive UI is checked by hand against these before the PR:
 
-- **Disclosure/menu widgets**: trigger has `aria-expanded` + `aria-haspopup` + `aria-controls`; panel has a role; Escape closes it; focus moves in on open and returns to the trigger on close. **[lint, partially]**
+- **Disclosure/menu widgets**: trigger has `aria-expanded` + `aria-haspopup` + `aria-controls`; panel has a role; Escape closes it; focus moves in on open and returns to the trigger on close. **[review-only]**
 - **Async status** (saved, failed, correct, incorrect) is announced via `role="status"` or `aria-live` — otherwise a screen reader user gets nothing, which matters most when the UI auto-advances on a timer. **[review-only]**
-- **Grouped form controls** (segmented pickers, custom radios) carry `role="radiogroup"` and `aria-labelledby`, or the group's label is never conveyed. **[lint]**
+- **Grouped form controls** (segmented pickers, custom radios) carry `role="radiogroup"` and `aria-labelledby`, or the group's label is never conveyed. **[review-only]**
 - **Timing limits** are adjustable, extendable, or can be turned off (WCAG 2.2.1). A hard 15-second countdown with no alternative is a real barrier. **[review-only]**
 - **Route changes** are announced, and there's a skip link. SPA navigation is otherwise silent to assistive tech. **[review-only]**
 

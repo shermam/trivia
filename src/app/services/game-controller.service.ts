@@ -59,7 +59,7 @@ export class GameControllerService {
 
   advanceQuestion(): void {
     if (this.isLastQuestion()) {
-      this.router.navigateByUrl('/game-over');
+      void this.router.navigateByUrl('/game-over');
       return;
     }
     this.currentIndex.update((value) => value + 1);
@@ -71,6 +71,6 @@ export class GameControllerService {
     this.currentIndex.set(0);
     this.score.set(0);
     this.loadError.set(null);
-    this.router.navigateByUrl('/');
+    void this.router.navigateByUrl('/');
   }
 }

@@ -1,0 +1,52 @@
+name: Lint & Format
+
+# Static checks — Prettier formatting and ESLint — on every PR targeting
+# main, plus main itself as a safety net.
+#
+# Its own workflow rather than extra steps inside unit-tests.yml, matching
+# this repo's one-workflow-per-concern convention (see the same reasoning in
+# unit-tests.yml's own header about staying separate from e2e.yml). Two
+# concrete benefits over bundling: it runs *concurrently* with the unit
+# suite instead of in front of it, so a lint failure and a test failure both
+# surface on the same push rather than the first hiding the second; and the
+# red check names the actual problem without anyone opening the log.
+#
+# Both checks live in one job on purpose — they're a single "does this code
+# meet the bar" question, and splitting them would pay for a second `npm ci`
+# to tell us something a step name already makes obvious.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # NOTE: this job id is the status-check context (`lint`). It has to be
+  # added to main's ruleset by a repo admin before it actually gates a merge
+  # — a workflow can't require itself. Don't add a `name:` here either: that
+  # would replace the context and silently detach it from the ruleset.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cheapest first: formatting is a pure text check, lint needs a
+      # TypeScript program built from the whole app.
+      - name: Check formatting (Prettier)
+        run: npm run format:check
+
+      - name: Lint (ESLint + angular-eslint)
+        run: npm run lint

@@ -164,7 +164,7 @@ export class AuthService {
           this.suppressNextNullState = false;
           this.userSignal.set(user);
           this.authReadySignal.set(true);
-          this.loadStripeRoleClaim(authModule, user);
+          void this.loadStripeRoleClaim(authModule, user);
         });
         return { auth, authModule };
       });
@@ -222,7 +222,7 @@ export class AuthService {
         await authModule.sendEmailVerification(auth.currentUser);
       }
     } catch (error) {
-      throw new Error(friendlyAuthErrorMessage(error));
+      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 
@@ -231,7 +231,7 @@ export class AuthService {
     try {
       await authModule.signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
-      throw new Error(friendlyAuthErrorMessage(error));
+      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 
@@ -291,10 +291,10 @@ export class AuthService {
           if (isUserCancelledPopup(retryError)) {
             return;
           }
-          throw new Error(friendlyAuthErrorMessage(retryError));
+          throw new Error(friendlyAuthErrorMessage(retryError), { cause: retryError });
         }
       }
-      throw new Error(friendlyAuthErrorMessage(error));
+      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 
@@ -323,7 +323,7 @@ export class AuthService {
     if (!auth.currentUser) {
       this.userSignal.set(null);
       this.authReadySignal.set(true);
-      this.loadStripeRoleClaim(authModule, null);
+      void this.loadStripeRoleClaim(authModule, null);
     }
   }
 

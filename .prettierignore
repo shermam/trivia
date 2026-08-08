@@ -1,0 +1,23 @@
+# Prettier has no default ignore beyond node_modules, so anything generated,
+# vendored or lockfile-shaped has to be listed here — otherwise
+# `npm run format:check` (CI) fails on files nobody edits by hand.
+
+# Dependencies & build output
+node_modules/
+dist/
+.angular/
+functions/lib/
+functions/node_modules/
+
+# Lockfiles — npm owns their formatting
+package-lock.json
+functions/package-lock.json
+
+# Generated reports & emulator artifacts
+.lighthouseci/
+lighthouse-reports/
+coverage/
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+*-debug.log

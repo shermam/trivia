@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -29,7 +37,7 @@ function initialsFor(name: string): string {
 @Component({
   selector: 'app-game-over',
   standalone: true,
-  imports: [FormsModule, IconComponent],
+  imports: [FormsModule, IconComponent, NgClass],
   templateUrl: './game-over.component.html',
   styleUrl: './game-over.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -85,7 +93,7 @@ export class GameOverComponent implements OnInit {
 
   ngOnInit(): void {
     if (this.gameController.totalQuestions() === 0) {
-      this.router.navigateByUrl('/');
+      void this.router.navigateByUrl('/');
       return;
     }
     this.playerName = this.authService.user()?.displayName ?? '';
