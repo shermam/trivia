@@ -16,14 +16,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 14       |
-| 🔵 In review        | 3        |
-| ⬜ Not started      | 39       |
+| ✅ Fixed and merged | 16       |
+| 🔵 In review        | 2        |
+| ⬜ Not started      | 38       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#48](https://github.com/shermam/trivia/pull/48) (A4 + A5, claim scoping and token revocation).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#49](https://github.com/shermam/trivia/pull/49) (A6, webhook ordering and `livemode`).
 
 ---
 
@@ -107,9 +107,9 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced                                                                                                      | ✅ [#43](https://github.com/shermam/trivia/pull/43) — _bounded; mitigation not closure, see §4_ |
 | **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                                                                                                                             | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
 | **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                                                                                                                      | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
-| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                                                                                                                      | 🔵 [#48](https://github.com/shermam/trivia/pull/48)                                             |
-| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                                                                                                                         | 🔵 [#48](https://github.com/shermam/trivia/pull/48) — _narrowed, not closed; see A13_           |
-| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                                                                                                                                    | ⬜                                                                                              |
+| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                                                                                                                      | ✅ [#48](https://github.com/shermam/trivia/pull/48)                                             |
+| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                                                                                                                         | ✅ [#48](https://github.com/shermam/trivia/pull/48) — _narrowed, not closed; see A13_           |
+| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                                                                                                                                    | 🔵 [#49](https://github.com/shermam/trivia/pull/49)                                             |
 | **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                                                                                                                             | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
 | **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                                                                                                                     | ⬜                                                                                              |
 | **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                                                                                                                                   | ⬜                                                                                              |
@@ -204,7 +204,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 
 1. ~~**A2 + A3 + A7**~~ — checkout input validation. [#47](https://github.com/shermam/trivia/pull/47).
 2. ~~**A4 + A5**~~ — claim scoping and revocation. [#48](https://github.com/shermam/trivia/pull/48). **A13 came out of it and is unstarted** — decide it before or after A6, but don't lose it.
-3. **A6** — webhook ordering, idempotency, `livemode`.
+3. ~~**A6**~~ — webhook ordering and `livemode`. [#49](https://github.com/shermam/trivia/pull/49).
 4. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
 5. **A8 + A9** — CSP and security headers.
 6. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
@@ -228,6 +228,14 @@ The residual is now **A13**. It is closable: `request.auth.token.iat`, `auth_tim
 
 - **Compare `iat` against a server-written "entitlement changed at" timestamp.** Exact, but costs a `get()` — one billed read on every privileged write.
 - **Require a freshly-issued token for privileged writes** (`iat` within N minutes). Costs nothing, and `AddQuestionComponent` already force-refreshes immediately before its write, so the client satisfies it today. But it couples the rules to that client behaviour, and a failed refresh becomes a rejected write.
+
+### What A6 actually shipped
+
+**The idempotency record the finding asked for turned out to be the wrong mechanism.** Every write in the handler is already a `set(..., {merge:true})` or a `delete()`, so a redelivery changes nothing — duplication was never the bug. Ordering was: Stripe guarantees at-least-once and says nothing about order, so a stale `cancelled` could land on a fresh `active` and the `stripeRole` claim would then be recomputed from the older truth. A global processed-event log would have needed its own collection, its own TTL (cf. C2), and a read on every delivery to answer a question no document actually asked. A **per-document high-water mark** — the `created` of the event that last wrote it — covers both, and `CLAUDE.md` §4.3 already specified it that way.
+
+**Deletes are the awkward case and needed the same guard.** Deleting a document takes its high-water mark with it, so a late `product.deleted` arriving after the product was recreated has nothing left to compare against. Deletes therefore go through the same transaction, checking the mark before removing the document.
+
+**The `livemode` check acknowledges rather than rejects.** Returning 4xx would make Stripe retry and eventually disable the endpoint, and there is nothing to retry — the delivery is simply for the other mode. It returns 200 and writes nothing, which is the actual security property.
 
 **`math.floor()` in the rules language returns a float.** `string(math.floor(x))` renders `"5954006.0"`, so every legitimate checkout was rejected and every hostile one was too — a rule that looks like it works and fails 100% closed. Plain integer division is correct. Caught only because the suite asserts the _accept_ cases as well as the reject ones; a suite of nothing but `assertFails` would have passed against it happily. Worth remembering next to the `math.round()` check A1 did: the rules language is close enough to JavaScript to be trusted by reflex, and isn't.
 

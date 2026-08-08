@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import type Stripe from 'stripe';
 import { isSellableProPrice } from './checkout-request';
+import { deleteIfNotStale, setIfNotStale } from './event-order';
 
 /**
  * Mirrors the Stripe product/price catalog into the public `products`/
@@ -8,56 +9,65 @@ import { isSellableProPrice } from './checkout-request';
  * `SubscriptionService.getProPriceId()` reads to resolve the current Pro
  * price without ever hardcoding it client-side.
  */
-export async function syncProductToFirestore(product: Stripe.Product): Promise<void> {
-  await getFirestore()
-    .collection('products')
-    .doc(product.id)
-    .set(
-      {
-        active: product.active,
-        name: product.name,
-        description: product.description ?? null,
-        role: (product.metadata?.['firebaseRole'] as string | undefined) ?? null,
-        images: product.images ?? [],
-      },
-      { merge: true },
-    );
+export async function syncProductToFirestore(
+  product: Stripe.Product,
+  eventCreated: number,
+): Promise<boolean> {
+  return setIfNotStale(
+    getFirestore().collection('products').doc(product.id),
+    {
+      active: product.active,
+      name: product.name,
+      description: product.description ?? null,
+      role: (product.metadata?.['firebaseRole'] as string | undefined) ?? null,
+      images: product.images ?? [],
+    },
+    eventCreated,
+  );
 }
 
-export async function deleteProductFromFirestore(productId: string): Promise<void> {
-  await getFirestore().collection('products').doc(productId).delete();
+export async function deleteProductFromFirestore(
+  productId: string,
+  eventCreated: number,
+): Promise<boolean> {
+  return deleteIfNotStale(getFirestore().collection('products').doc(productId), eventCreated);
 }
 
 function resolveProductId(product: Stripe.Price['product']): string {
   return typeof product === 'string' ? product : product.id;
 }
 
-export async function syncPriceToFirestore(price: Stripe.Price): Promise<void> {
-  await getFirestore()
-    .collection('products')
-    .doc(resolveProductId(price.product))
-    .collection('prices')
-    .doc(price.id)
-    .set(
-      {
-        active: price.active,
-        currency: price.currency,
-        unit_amount: price.unit_amount,
-        type: price.type,
-        interval: price.recurring?.interval ?? null,
-        interval_count: price.recurring?.interval_count ?? null,
-      },
-      { merge: true },
-    );
+export async function syncPriceToFirestore(
+  price: Stripe.Price,
+  eventCreated: number,
+): Promise<boolean> {
+  return setIfNotStale(
+    priceRef(price),
+    {
+      active: price.active,
+      currency: price.currency,
+      unit_amount: price.unit_amount,
+      type: price.type,
+      interval: price.recurring?.interval ?? null,
+      interval_count: price.recurring?.interval_count ?? null,
+    },
+    eventCreated,
+  );
 }
 
-export async function deletePriceFromFirestore(price: Stripe.Price): Promise<void> {
-  await getFirestore()
+export async function deletePriceFromFirestore(
+  price: Stripe.Price,
+  eventCreated: number,
+): Promise<boolean> {
+  return deleteIfNotStale(priceRef(price), eventCreated);
+}
+
+function priceRef(price: Stripe.Price) {
+  return getFirestore()
     .collection('products')
     .doc(resolveProductId(price.product))
     .collection('prices')
-    .doc(price.id)
-    .delete();
+    .doc(price.id);
 }
 
 /**

@@ -64,3 +64,34 @@ export function isMockCheckoutEnabled(
 ): boolean {
   return flag === 'true' && isDemoProject(projectId);
 }
+
+/**
+ * Whether a Stripe event belongs to the environment receiving it.
+ *
+ * Stripe lets the same URL be registered as a webhook endpoint in **both** test
+ * and live mode, each with its own signing secret. Normally the wrong-mode
+ * delivery fails signature verification and never gets here — but the two
+ * secrets are one `firebase functions:secrets:set` apart, and if the test one
+ * is ever set on production, every test-mode event a developer triggers starts
+ * verifying cleanly and writing to real customers: cancelling live
+ * subscriptions, revoking real `stripeRole` claims, rewriting the price
+ * catalogue the pricing page reads.
+ *
+ * Checking `livemode` against the project makes that structurally impossible
+ * rather than dependent on which secret happens to be installed — the same
+ * reasoning as gating mock checkout on a `demo-` project ID (A7), and the same
+ * asymmetry: a secret can be pasted anywhere, a project ID cannot.
+ *
+ * An unidentifiable project accepts nothing. Failing closed here costs a
+ * dropped event on a misconfigured deploy; failing open costs live billing
+ * state mutated by a test.
+ */
+export function isEventForThisEnvironment(
+  eventLivemode: boolean,
+  projectId: string | undefined,
+): boolean {
+  if (projectId === undefined) {
+    return false;
+  }
+  return eventLivemode === !isDemoProject(projectId);
+}
