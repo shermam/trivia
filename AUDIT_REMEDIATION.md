@@ -16,14 +16,16 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 17       |
-| 🔵 In review        | 2        |
+| ✅ Fixed and merged | 18       |
+| 🔵 In review        | 1        |
 | ⬜ Not started      | 37       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#51](https://github.com/shermam/trivia/pull/51) (H5, self-hosted Inter).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review).
+
+> A PR in this series can never mark _itself_ merged — the commit that updates the register is the one being reviewed. So the entry for the most recently merged finding is routinely one PR behind, and the next PR tidies it. If you are reading this between merges, trust the `Status` column over this line.
 
 ---
 
@@ -196,7 +198,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 | **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items                         |
 | **H3** | No account deletion or data export                                                                                                                                                             | ✅ [#44](https://github.com/shermam/trivia/pull/44) + [#45](https://github.com/shermam/trivia/pull/45) |
 | **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                                                     |
-| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | 🔵 [#51](https://github.com/shermam/trivia/pull/51)                                                    |
+| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ✅ [#51](https://github.com/shermam/trivia/pull/51)                                                    |
 
 ---
 
