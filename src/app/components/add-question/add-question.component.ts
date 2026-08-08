@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
-import { CustomQuestionDoc, Difficulty, QuestionType } from '../../models/question.model';
+import { Difficulty, NewCustomQuestionDoc, QuestionType } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { FirebaseService } from '../../services/firebase.service';
@@ -106,13 +106,26 @@ export class AddQuestionComponent implements OnInit {
       return;
     }
 
-    const question: CustomQuestionDoc = {
+    // `isFullyAuthenticated()` above already implies a signed-in user, but the
+    // uid is needed as a value here, so read it explicitly rather than
+    // asserting non-null.
+    const author = this.authService.user();
+    if (!author) {
+      return;
+    }
+
+    const question: NewCustomQuestionDoc = {
       category: raw.category.trim(),
       type: raw.type,
       difficulty: raw.difficulty,
       question: raw.question.trim(),
       correct_answer: raw.correctAnswer.trim(),
       incorrect_answers: incorrectAnswers,
+      // Attribution. `firestore.rules` requires createdBy to equal the
+      // caller's own uid and createdAt to be near server time, so a submission
+      // can't be attributed to someone else or backdated.
+      createdBy: author.uid,
+      createdAt: Date.now(),
     };
 
     this.isSubmitting.set(true);

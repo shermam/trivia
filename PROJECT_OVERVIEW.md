@@ -203,11 +203,20 @@ difficulty: 'easy' | 'medium' | 'hard'
 question: string
 correct_answer: string
 incorrect_answers: string[]
+createdBy: string      (Firebase uid of the submitter)
+createdAt: int         (epoch ms, must be near server time)
 ```
 
 - **Read**: public (`allow read: if true`)
 - **Create**: requires a "real" account — same `isRealAuthedUser()` gate as the leaderboard (non-anonymous, and email-verified if it's a password account) — **plus an active Pro subscription** (`isProUser()`: `request.auth.token.stripeRole == 'pro'`, §1.6) — plus schema validation (`isValidCustomQuestion()`: exact key set, `type` in `['multiple','boolean']`, `difficulty` in `['easy','medium','hard']`, string length bounds, `incorrect_answers` a list of 1–5 entries). Written from the client via the `/add-question` screen (§1.1, §1.4).
 - **Update / Delete**: none from the client (`allow update, delete: if false`) — console-only for now.
+
+**Attribution (`createdBy` / `createdAt`) is mandatory and self-asserting.** The rules require `createdBy == request.auth.uid`, so a submitter can name themselves and nobody else, and `createdAt` must sit within roughly `[request.time - 5min, request.time + 1min]` (`isNearRequestTime()`), so a submission can't be backdated to look older than it is. Without the time bound, `createdAt` would be decoration — a client can write any number it likes.
+
+Two consequences worth being explicit about:
+
+- **This was not retrofittable, which is why it landed before the features that need it.** No backfill can invent an author for a document that never recorded one, and the exact-key `hasOnly()` allowlist actively _rejects_ adding the field to an existing document. Attribution is what makes an abuse report actionable and what lets account deletion (Known Gaps) find a user's contributions at all.
+- **Documents created before this change have no `createdBy` and never will.** `CustomQuestionDoc` therefore types both fields as optional on the _read_ path while `NewCustomQuestionDoc` requires them on the _write_ path — the asymmetry is deliberate, because typing the read shape as always-attributed would be a lie the compiler then helps spread. Those legacy questions remain permanently unattributable.
 
 ### `customers` — Stripe subscription state (managed by `functions/`, §2.4)
 
@@ -428,7 +437,8 @@ Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is
 
 - Email-alias blocking is client-side only (regex on sign-up) — a determined user could still call the Auth API directly to create alias accounts. Closing that gap requires a Firebase Auth blocking Cloud Function (`beforeCreate`) — the `functions/` package and its CI deploy step (§2.4, §4.2) now exist for the Pro subscription backend, so the infrastructure blocker is gone, but the blocking function itself still isn't written. The rules-enforced "not anonymous, verified if password" check is the actual anti-flood defense and doesn't depend on this.
 - Play Games and Game Center sign-in are listed in the Firebase console but not offered in the app — no Web SDK equivalent exists for either (native Android/Apple only).
-- The `/add-question` screen only supports _creating_ a question — no in-app way to edit or delete an existing `custom_questions` doc yet (console-only for now, per the rules comments). There's also no moderation/review step: any fully authenticated Pro subscriber can add directly to the shared, public bank.
+- The `/add-question` screen only supports _creating_ a question — no in-app way to edit or delete an existing `custom_questions` doc yet (console-only for now, per the rules comments). There's also no moderation/review step: any fully authenticated Pro subscriber can add directly to the shared, public bank. Submissions are now attributed (`createdBy`, §3), so a report is at least actionable and a user's contributions are findable — but nothing reviews them before they go live, and there is no reporting path.
+- **There is no per-user rate limit on `custom_questions` writes.** A single Pro subscriber can still submit in a loop. This was deliberately not bundled with the attribution change because Firestore rules cannot count a user's documents: enforcing a cap needs either a companion counter document the client also writes (which the client can then simply decline to update, unless both writes are forced into one batch) or a Cloud Function on the write path. Both are a different mechanism and a different PR, and neither was worth delaying attribution — which, unlike a rate limit, cannot be added retroactively.
 - The offline question pool (§1.8) is refilled only in the foreground (idle callback + `online` event) while the app has a tab open — it doesn't use the Background Sync API, so a PWA installed but never opened between sessions won't have a freshly-topped-up pool. The manifest icons are `purpose: any` only; the Trivimind mark wasn't designed with a maskable safe zone, so a true `maskable` icon variant (padded so Android's adaptive-icon mask never crops the glyph) isn't provided yet.
 - The e2e suite (§4.3) covers the core unauthenticated/authenticated flows plus Pro-gated `/add-question` access and the checkout-session creation function, but not OAuth sign-in (Google/Facebook/etc. — popup-based, not practical to automate against the emulator) or the "mixed" question source end-to-end (unit-level coverage only).
 - ESLint (§2.2) covers `src/` only. `cypress/` (its own tsconfig plus Cypress globals) and `functions/` (a separate npm package with its own tsconfig — and the one that actually ships to the Cloud Functions runtime) are not linted yet; both need their own flat-config entry with the right `projectService` wiring.
