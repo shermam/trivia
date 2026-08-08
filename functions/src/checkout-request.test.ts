@@ -46,6 +46,24 @@ describe('isAllowedRedirectOrigin', () => {
     assert.equal(isAllowedRedirectOrigin(`https://${REAL}--pr-46-a1b2c3d4.web.app`, REAL), true);
   });
 
+  // The custom domain is where real users actually are, so getting this wrong
+  // breaks checkout for everyone while every `.web.app` test still passes.
+  it('accepts the custom domain, apex and www', () => {
+    assert.equal(isAllowedRedirectOrigin('https://trivimind.com', REAL), true);
+    assert.equal(isAllowedRedirectOrigin('https://www.trivimind.com', REAL), true);
+  });
+
+  it('rejects a host that only looks like the custom domain', () => {
+    assert.equal(isAllowedRedirectOrigin('https://trivimind.com.evil.test', REAL), false);
+    assert.equal(isAllowedRedirectOrigin('https://eviltrivimind.com', REAL), false);
+    assert.equal(isAllowedRedirectOrigin('https://trivimind.co', REAL), false);
+    assert.equal(isAllowedRedirectOrigin('https://evil.trivimind.com', REAL), false);
+  });
+
+  it('rejects a downgrade to http on the custom domain', () => {
+    assert.equal(isAllowedRedirectOrigin('http://trivimind.com', REAL), false);
+  });
+
   // The finding itself: `success_url` was passed to Stripe verbatim, so
   // anyone able to write a session document could have Stripe bounce the user
   // to a host they controlled, arriving from a genuine Stripe redirect.
@@ -82,6 +100,12 @@ describe('isAllowedRedirectOrigin', () => {
     assert.equal(isAllowedRedirectOrigin('http://localhost:4200', DEMO), true);
     assert.equal(isAllowedRedirectOrigin('http://127.0.0.1:5000', DEMO), true);
     assert.equal(isAllowedRedirectOrigin('http://localhost:4200', REAL), false);
+  });
+
+  // A demo project has no domain attached, so offering it the production one
+  // would only ever be a way for a test fixture to look more real than it is.
+  it('does not offer the custom domain to a demo project', () => {
+    assert.equal(isAllowedRedirectOrigin('https://trivimind.com', DEMO), false);
   });
 
   it('rejects everything when the project cannot be identified', () => {

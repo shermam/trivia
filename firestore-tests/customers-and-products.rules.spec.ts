@@ -196,6 +196,21 @@ describe.each([
       );
     });
 
+    // Rules deliberately don't know which hostnames are ours — the custom
+    // domain, the two `.web.app` names and a preview channel are all just
+    // well-formed origins here, and the function decides between them. That
+    // split is why attaching a custom domain needs no rules change at all.
+    it('accepts a custom-domain origin, leaving the allowlist to the function', async () => {
+      await assertSucceeds(
+        create(
+          asVerifiedPassword(env, OWNER),
+          OWNER,
+          sessionDocId(),
+          validPayload({ origin: 'https://trivimind.com' }),
+        ),
+      );
+    });
+
     // The emulator serves the app from localhost, so these rules — the same
     // file production runs — have to accept it. Narrowing localhost to demo
     // projects is the function's job, since rules can't know the project.

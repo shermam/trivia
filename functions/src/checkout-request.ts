@@ -52,6 +52,29 @@ const LOCAL_ORIGIN_PATTERN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 
 const PREVIEW_CHANNEL_PATTERN = /^[a-z0-9-]+$/;
 
+/**
+ * Origins this app is served from that cannot be derived from the project ID.
+ *
+ * Every Firebase project gets `{project}.web.app` and `.firebaseapp.com` for
+ * free, and a preview channel is a predictable variation on the first — but a
+ * custom domain is an arbitrary name attached in the Firebase console, and
+ * nothing available to the runtime can enumerate them. So this is the one part
+ * of the allowlist that is a constant, and therefore the one part that can go
+ * stale.
+ *
+ * **Attaching a custom domain in the Firebase console means adding it here in
+ * the same change.** Checkout is refused on any origin not on this list, so the
+ * symptom of forgetting is narrow and easy to miss: the new domain quietly
+ * sells nothing while every other one keeps working. Each refusal is logged
+ * with the offending origin, which is the string to search for if it happens.
+ *
+ * `www` is listed alongside the apex whether or not Hosting currently serves
+ * it. Both names belong to whoever owns the domain, so listing one that isn't
+ * wired up costs nothing, while omitting one that is breaks checkout for
+ * whoever lands on it.
+ */
+const CUSTOM_APP_ORIGINS = ['https://trivimind.com', 'https://www.trivimind.com'];
+
 export function isPriceIdShaped(price: unknown): price is string {
   return typeof price === 'string' && PRICE_ID_PATTERN.test(price);
 }
@@ -75,6 +98,9 @@ export function isPriceIdShaped(price: unknown): price is string {
  *   Hosting truncates the project ID in that hostname if the whole thing would
  *   exceed the 63-character DNS label limit; `intellectura-3b26a` is short
  *   enough that it doesn't, but a longer project ID would need this widened.
+ * - `CUSTOM_APP_ORIGINS` — the custom domain, which is the one entry that
+ *   can't be derived and has to be maintained by hand. Not offered to a demo
+ *   project, which by definition has no domain attached.
  * - localhost, **only** on a demo project — the emulator, where there is no
  *   real Stripe to redirect to in the first place.
  */
@@ -91,7 +117,10 @@ export function isAllowedRedirectOrigin(origin: unknown, projectId: string | und
   if (isPreviewChannelOrigin(origin, projectId)) {
     return true;
   }
-  return isDemoProject(projectId) && LOCAL_ORIGIN_PATTERN.test(origin);
+  if (isDemoProject(projectId)) {
+    return LOCAL_ORIGIN_PATTERN.test(origin);
+  }
+  return CUSTOM_APP_ORIGINS.includes(origin);
 }
 
 function isPreviewChannelOrigin(origin: string, projectId: string): boolean {
