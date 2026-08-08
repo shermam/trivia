@@ -65,3 +65,7 @@ serviceAccountKey*.json
 *-service-account*.json
 .env
 .env.*
+
+# Derived from firebase.json by scripts/make-lighthouse-firebase-config.mjs;
+# widens connect-src for the emulator-backed Lighthouse run only.
+firebase.lighthouse.json
