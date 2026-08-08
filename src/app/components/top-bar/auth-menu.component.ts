@@ -42,6 +42,7 @@ export class AuthMenuComponent {
   protected readonly secondaryProviders = SECONDARY_OAUTH_PROVIDERS;
   protected readonly providerLabels = OAUTH_PROVIDER_LABELS;
 
+  protected readonly isExporting = signal(false);
   protected readonly isConfirmingDelete = signal(false);
   protected readonly isDeleting = signal(false);
   protected readonly emailFormMode = signal<EmailFormMode>('signup');
@@ -153,6 +154,21 @@ export class AuthMenuComponent {
     } catch {
       this.errorMessage.set('Could not open the billing portal. Please try again.');
       this.isOpeningPortal.set(false);
+    }
+  }
+
+  protected async downloadMyData(): Promise<void> {
+    if (this.isExporting()) {
+      return;
+    }
+    this.isExporting.set(true);
+    this.errorMessage.set(null);
+    try {
+      await this.accountService.downloadMyData();
+    } catch {
+      this.errorMessage.set('Could not prepare your data. Please try again.');
+    } finally {
+      this.isExporting.set(false);
     }
   }
 

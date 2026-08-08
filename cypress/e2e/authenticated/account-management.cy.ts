@@ -6,7 +6,7 @@ const password = 'Str0ngPassw0rd!';
  * the backend directly via the Admin SDK — the risk this guards against is a
  * step that silently doesn't run, which looks identical from the front end.
  */
-describe('account deletion', () => {
+describe('account management: export and deletion', () => {
   let email: string;
   let uid: string;
 
@@ -65,6 +65,59 @@ describe('account deletion', () => {
         expect(state.questionCreatedBy, 'author link stripped').to.eq('[deleted-user]');
       });
     });
+  });
+
+  it('exports everything held about the user as a downloadable file', () => {
+    cy.then(() => {
+      cy.seedLeaderboardEntry({
+        uid,
+        name: 'Curious Player',
+        score: 3,
+        totalQuestions: 5,
+        percentage: 60,
+      });
+      cy.seedCustomQuestions([
+        {
+          id: 'authored-for-export',
+          category: 'History',
+          type: 'multiple',
+          difficulty: 'medium',
+          question: 'A question this user contributed',
+          correct_answer: 'Yes',
+          incorrect_answers: ['No', 'Maybe', 'Perhaps'],
+          createdBy: uid,
+          createdAt: Date.now(),
+        },
+      ]);
+    });
+
+    cy.stubOpenTrivia();
+    cy.visit('/');
+    cy.signInViaUi(email, password);
+
+    cy.openAuthMenu();
+    cy.get('[data-cy=download-my-data]').click();
+
+    // Assert on the delivered file, not on the UI: the point of an export is
+    // that what lands on disk is complete and honest.
+    cy.readFile('cypress/downloads/trivimind-my-data.json', { timeout: 30000 }).then(
+      (data: Record<string, never>) => {
+        const exported = data as unknown as {
+          account: { uid: string; email: string; signInProviders: string[] };
+          leaderboardEntry: { score: number } | null;
+          contributedQuestions: { id: string }[];
+          notHeldHere: string[];
+        };
+        expect(exported.account.uid).to.eq(uid);
+        expect(exported.account.email).to.eq(email);
+        expect(exported.account.signInProviders).to.include('password');
+        expect(exported.leaderboardEntry?.score).to.eq(3);
+        expect(exported.contributedQuestions.map((q) => q.id)).to.include('authored-for-export');
+        // The export has to say what it deliberately does not contain,
+        // otherwise a missing card number reads as concealment.
+        expect(exported.notHeldHere.join(' ')).to.match(/stripe/i);
+      },
+    );
   });
 
   it('can be backed out of without deleting anything', () => {

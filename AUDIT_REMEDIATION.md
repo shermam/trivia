@@ -16,8 +16,8 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 10       |
-| 🔵 In review        | 2        |
+| ✅ Fixed and merged | 11       |
+| 🔵 In review        | 1        |
 | ⬜ Not started      | 43       |
 | **Total**           | **55**   |
 
@@ -58,11 +58,11 @@ That is enough. The assistant will read this file, `CLAUDE.md`, and `PROJECT_OVE
 Agreed at the start of the series and unchanged since:
 
 1. **One PR per finding**, except where two findings edit the same lines and can't be reviewed apart. Roughly ~25–30 PRs for 55 findings.
-2. **Branch fresh off `main`** by default. Stack only when a conflict is genuinely unavoidable, and say so in the PR body.
-3. **Integrate `main` by rebasing**, never by merging `main` into the branch. Push with `--force-with-lease`, and re-run the verification gates _after_ rebasing — integrating `main` is exactly where a newly-added gate breaks.
-4. **Risk-scoped verification** (`CLAUDE.md` §3a): the full four-command suite for anything touching `src/app/`, `firestore.rules`, `firebase.json`, or `functions/src/`; unit + functions + build only for docs/CI/config-only changes. Always name which commands ran in the PR body.
-5. **A `firestore.rules` change ships with rules tests, and the rules get mutation-tested** — break the rule on purpose, confirm a test fails, restore. A rules suite that passes against broken rules is worse than none.
-6. **New CI checks get their own workflow**, even though that means a manual step to add them to the ruleset. One workflow per concern; a bundled check produces a muddier signal permanently to save a one-off settings change.
+1. **Branch fresh off `main`** by default. Stack only when a conflict is genuinely unavoidable, and say so in the PR body.
+1. **Integrate `main` by rebasing**, never by merging `main` into the branch. Push with `--force-with-lease`, and re-run the verification gates _after_ rebasing — integrating `main` is exactly where a newly-added gate breaks.
+1. **Risk-scoped verification** (`CLAUDE.md` §3a): the full four-command suite for anything touching `src/app/`, `firestore.rules`, `firebase.json`, or `functions/src/`; unit + functions + build only for docs/CI/config-only changes. Always name which commands ran in the PR body.
+1. **A `firestore.rules` change ships with rules tests, and the rules get mutation-tested** — break the rule on purpose, confirm a test fails, restore. A rules suite that passes against broken rules is worse than none.
+1. **New CI checks get their own workflow**, even though that means a manual step to add them to the ruleset. One workflow per concern; a bundled check produces a muddier signal permanently to save a one-off settings change.
 
 ### Verification commands
 
@@ -187,26 +187,25 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 
 ### H — Product & compliance
 
-| ID     | Finding                                                                                                                                                                                        | Status                                                                                   |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **H1** | No password reset — an email/password user who forgets is locked out of a paid subscription                                                                                                    | ⬜                                                                                       |
-| **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items           |
-| **H3** | No account deletion or data export                                                                                                                                                             | 🔵 [#44](https://github.com/shermam/trivia/pull/44) — _deletion done; export still open_ |
-| **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                                       |
-| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ⬜ _(found during the work)_                                                             |
+| ID     | Finding                                                                                                                                                                                        | Status                                                                                                 |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **H1** | No password reset — an email/password user who forgets is locked out of a paid subscription                                                                                                    | ⬜                                                                                                     |
+| **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items                         |
+| **H3** | No account deletion or data export                                                                                                                                                             | ✅ [#44](https://github.com/shermam/trivia/pull/44) + [#45](https://github.com/shermam/trivia/pull/45) |
+| **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                                                     |
+| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ⬜ _(found during the work)_                                                                           |
 
 ---
 
 ## 6. Suggested order from here
 
-1. **H3 (export half)** — deletion shipped in #44, which unblocks #37's retention section; the data-export half still blocks its data-subject-rights section.
-2. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
-3. **A4 + A5** — claim scoping and revocation, same function.
-4. **A6** — webhook ordering, idempotency, `livemode`.
-5. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
-6. **A8 + A9** — CSP and security headers.
-7. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
-8. Then B (correctness), C (cost), G (accessibility), and the rest.
+1. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
+2. **A4 + A5** — claim scoping and revocation, same function.
+3. **A6** — webhook ordering, idempotency, `livemode`.
+4. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
+5. **A8 + A9** — CSP and security headers.
+6. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
+7. Then B (correctness), C (cost), G (accessibility), and the rest.
 
 ### What A1 actually shipped, and what changed from the plan
 

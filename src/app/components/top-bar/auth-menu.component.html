@@ -243,6 +243,20 @@
       Sign out
     </button>
 
+    <button
+      type="button"
+      data-cy="download-my-data"
+      (click)="downloadMyData()"
+      [disabled]="isExporting()"
+      class="mt-2 block w-full text-center text-xs text-slate-600 transition-colors hover:text-slate-900 disabled:opacity-60 dark:text-slate-400 dark:hover:text-slate-50"
+    >
+      @if (isExporting()) {
+        Preparing your data&hellip;
+      } @else {
+        Download my data
+      }
+    </button>
+
     @if (isConfirmingDelete()) {
       <div
         role="alertdialog"

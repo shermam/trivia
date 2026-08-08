@@ -5,6 +5,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type Stripe from 'stripe';
 import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
+import { buildAccountExport } from './account-export';
 
 /**
  * Deletes the caller's account and everything attached to it.
@@ -48,6 +49,56 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
 
   logger.info(`deleteAccount completed for uid=${uid}`);
   return { deleted: true };
+});
+
+/**
+ * Returns everything this application holds about the caller.
+ *
+ * Same authorisation boundary as `deleteAccount`: the uid comes from the
+ * verified token, never the payload, so a caller can only ever export
+ * themselves. Read-only, so unlike deletion there is no ordering to get right.
+ *
+ * Returned inline rather than written to Storage and linked. The payload is a
+ * handful of documents — one leaderboard entry, some questions, a few billing
+ * records — comfortably inside the callable response limit, and an inline
+ * response avoids minting a signed URL that would itself become a way to reach
+ * someone's personal data.
+ */
+export const exportAccountData = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in before exporting your data.');
+  }
+
+  logger.info(`exportAccountData invoked for uid=${uid}`);
+  const firestore = getFirestore();
+  const customerRef = firestore.collection('customers').doc(uid);
+
+  try {
+    const [user, leaderboard, questions, customer, subscriptions, checkouts, portals] =
+      await Promise.all([
+        getAuth().getUser(uid),
+        firestore.collection('leaderboard').doc(uid).get(),
+        firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
+        customerRef.get(),
+        customerRef.collection('subscriptions').get(),
+        customerRef.collection('checkout_sessions').get(),
+        customerRef.collection('portal_sessions').get(),
+      ]);
+
+    return buildAccountExport({
+      user,
+      leaderboardEntry: leaderboard.exists ? (leaderboard.data() ?? null) : null,
+      contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
+      subscriptions: subscriptions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      checkoutSessions: checkouts.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      portalSessions: portals.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+    });
+  } catch (error) {
+    logger.error(`Failed to export account data for ${uid}`, error);
+    throw new HttpsError('internal', 'Could not export your data. Please try again.');
+  }
 });
 
 /**
