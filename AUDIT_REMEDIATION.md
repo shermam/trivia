@@ -16,12 +16,12 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 9        |
+| ✅ Fixed and merged | 10       |
 | 🔵 In review        | 1        |
-| ⬜ Not started      | 45       |
+| ⬜ Not started      | 44       |
 | **Total**           | **55**   |
 
-Merged so far: [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41).
 
 Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review).
 
@@ -100,20 +100,20 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 
 ### A — Security
 
-| ID      | Finding                                                                                                                           | Status                                                                              |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced | ⬜ **next**                                                                         |
-| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                        | ⬜                                                                                  |
-| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                 | ⬜                                                                                  |
-| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                 | ⬜                                                                                  |
-| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                    | ⬜                                                                                  |
-| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                               | ⬜                                                                                  |
-| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                        | ⬜                                                                                  |
-| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                | ⬜                                                                                  |
-| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                              | ⬜                                                                                  |
-| **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                           | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_ |
-| **A11** | Service-account secret interpolated directly into shell `run:` blocks                                                             | ⬜                                                                                  |
-| **A12** | `npm audit`: 7 moderate findings in `functions/` are **production runtime**, distinct from the documented devDependency ones      | ⬜                                                                                  |
+| ID      | Finding                                                                                                                           | Status                                                                                          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced | ✅ [#43](https://github.com/shermam/trivia/pull/43) — _bounded; mitigation not closure, see §4_ |
+| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                        | ⬜                                                                                              |
+| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                 | ⬜                                                                                              |
+| **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                 | ⬜                                                                                              |
+| **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                    | ⬜                                                                                              |
+| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                               | ⬜                                                                                              |
+| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                        | ⬜                                                                                              |
+| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                | ⬜                                                                                              |
+| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                              | ⬜                                                                                              |
+| **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                           | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_             |
+| **A11** | Service-account secret interpolated directly into shell `run:` blocks                                                             | ⬜                                                                                              |
+| **A12** | `npm audit`: 7 moderate findings in `functions/` are **production runtime**, distinct from the documented devDependency ones      | ⬜                                                                                              |
 
 ### B — Correctness
 
@@ -199,23 +199,24 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 
 ## 6. Suggested order from here
 
-1. **A1** — bounded leaderboard rules. Flips #40's two `CURRENTLY ACCEPTS` pins to `assertFails`.
-2. **H3** — account deletion + export. Unblocks the retention sections of #37.
-3. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
-4. **A4 + A5** — claim scoping and revocation, same function.
-5. **A6** — webhook ordering, idempotency, `livemode`.
-6. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
-7. **A8 + A9** — CSP and security headers.
-8. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
-9. Then B (correctness), C (cost), G (accessibility), and the rest.
+1. **H3** — account deletion + export. Unblocks the retention sections of #37.
+2. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
+3. **A4 + A5** — claim scoping and revocation, same function.
+4. **A6** — webhook ordering, idempotency, `livemode`.
+5. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
+6. **A8 + A9** — CSP and security headers.
+7. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
+8. Then B (correctness), C (cost), G (accessibility), and the rest.
 
-### In-flight analysis for A1
+### What A1 actually shipped, and what changed from the plan
 
-Worth preserving, because it isn't obvious and it changes the design:
+The planned design held on two points and was dropped on a third.
 
-**`totalQuestions` cannot be constrained to the offered game sizes (5/10/15/20/25).** A custom or mixed game returns _fewer_ questions than requested when the bank doesn't have enough — `fetchCustomQuestions` does `.slice(0, amount)` over whatever matched. Asking for 25 custom questions when 7 exist yields `totalQuestions: 7`. Constraining to the menu options would reject legitimate games. Bound it to `1..50` instead (50 being `Validators.max` on the form and Open Trivia DB's own ceiling).
+**Held — `totalQuestions` is a range, not the menu options.** A `custom` or `mixed` game legitimately returns fewer questions than requested when the bank is short, so 1–25 is the correct bound; restricting to 5/10/15/20/25 would have rejected real games. `GameSetupComponent`'s `Validators.max` was also tightened 50 → 25 to match, since 50 was never reachable through the UI.
 
-Also planned for A1: `percentage` must agree with `score`/`totalQuestions` (verify Firestore's `math.round()` half-way behaviour against JavaScript's before relying on exact equality — a tolerance of ±1 avoids a rounding-mode mismatch); `createdAt` bounded via the existing `isNearRequestTime()` helper added in #41; and a minimum elapsed time between improving updates, derived from `totalQuestions`. **Check the e2e specs before adding that last one** — `sign-in-save-score.cy.ts` seeds an entry and then saves over it, so too aggressive a floor would break it.
+**Held, and simplified — `percentage` uses exact equality.** The plan hedged toward a ±1 tolerance to dodge a possible rounding-mode mismatch. Probing Firestore's `math.round()` against JavaScript's `Math.round()` across `.5` boundaries (1/8, 3/8, 5/8, 7/8, 1/16 …) showed they agree on every case, so the tolerance was unnecessary.
+
+**Dropped — the minimum-elapsed-time rule between improving updates.** The reasoning that justified it doesn't survive scrutiny: an elapsed-time check can only apply to _updates_, since a create has no prior document to compare against — and the maximum achievable score is reachable in a single create. It would have slowed incremental score-climbing, which no attacker needs to do, while risking rejection of a legitimately fast player. Dropped rather than shipped as security theatre.
 
 ---
 

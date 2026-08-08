@@ -87,14 +87,26 @@ export function validQuestion(createdBy: string, overrides: Record<string, unkno
   };
 }
 
-/** A schema-valid `leaderboard/{uid}` document; spread over it to build invalid variants. */
+/**
+ * A schema-valid `leaderboard/{uid}` document; spread over it to build invalid
+ * variants.
+ *
+ * `percentage` must now agree with `score`/`totalQuestions`, so it is derived
+ * rather than hardcoded — otherwise overriding `score` alone would produce an
+ * entry that fails for an inconsistent percentage instead of the reason the
+ * test is actually about, and the test would pass for the wrong reason.
+ * Pass `percentage` explicitly to test the consistency rule itself.
+ */
 export function validEntry(uid: string, overrides: Record<string, unknown> = {}) {
+  const score = 'score' in overrides ? (overrides['score'] as number) : 7;
+  const totalQuestions =
+    'totalQuestions' in overrides ? (overrides['totalQuestions'] as number) : 10;
   return {
     uid,
     name: 'Ada',
-    score: 7,
-    totalQuestions: 10,
-    percentage: 70,
+    score,
+    totalQuestions,
+    percentage: Math.round((score / totalQuestions) * 100),
     createdAt: Date.now(),
     ...overrides,
   };
