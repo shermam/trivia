@@ -27,10 +27,11 @@
     "cypress:run": "ELECTRON_RUN_AS_NODE= cypress run",
     "build:lighthouse": "ng build --configuration=lighthouse",
     "lighthouse:runner": "lhci autorun --config=./lighthouserc.json",
-    "lighthouse": "npm run build:lighthouse && npx --yes firebase-tools@13 emulators:exec --project demo-trivia-app-e2e --only hosting,auth,firestore \"npm run lighthouse:runner\"",
+    "lighthouse": "npm run build:lighthouse && npm run lighthouse:config && npx --yes firebase-tools@13 emulators:exec --config firebase.lighthouse.json --project demo-trivia-app-e2e --only hosting,auth,firestore \"npm run lighthouse:runner\"",
     "lint": "ng lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lighthouse:config": "node scripts/make-lighthouse-firebase-config.mjs"
   },
   "private": true,
   "packageManager": "npm@11.12.1",
