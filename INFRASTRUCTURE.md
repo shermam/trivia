@@ -179,6 +179,8 @@ Caveats worth carrying into a new project:
 - Give any preview-created test data unique-per-run identifiers (e.g. timestamp-suffixed) so two previews running concurrently against the same real backend never collide.
 - Track and sweep up anything a preview-e2e run creates in the real backend (an `after`/teardown hook + a real-project-flavored variant of your task/seed helpers) — there's no throwaway emulator to just tear down here.
 
+**Preview channels cover hosting, not compute.** A preview deploys the PR's static build against the project's _already-deployed_ serverless functions, so a PR that adds a new function shows a broken feature on its own preview until it merges — the client calls something that isn't there. Worth knowing before debugging a phantom bug, and worth handling in the client: map the platform's "no such function" error to a message saying so, because the default advice to retry is wrong in a way the user cannot discover. Verify these features against the local emulator instead, and re-check on the live site after merge.
+
 ### 6.5 Lighthouse (`lighthouse.yml`)
 
 Every PR to `main` + push to `main`. Build with a dedicated Lighthouse build configuration (same optimizations as production, but pointed at your local emulator suite via the same environment-swap mechanism as e2e — §4), start the Hosting (+ any backend your app calls on load) emulators, run Lighthouse CI 3× against the emulator-served Hosting URL, assert median scores per category against `lighthouserc.json`. Upload HTML/JSON reports as a build artifact unconditionally (`if: always()`), pass or fail.

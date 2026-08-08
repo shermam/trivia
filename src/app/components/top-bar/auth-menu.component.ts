@@ -165,8 +165,13 @@ export class AuthMenuComponent {
     this.errorMessage.set(null);
     try {
       await this.accountService.downloadMyData();
-    } catch {
-      this.errorMessage.set('Could not prepare your data. Please try again.');
+    } catch (error) {
+      // Surface the service's message rather than overwriting it: it
+      // distinguishes a missing deployment (retrying can never help) from a
+      // transient failure (retrying is exactly right).
+      this.errorMessage.set(
+        error instanceof Error ? error.message : 'Could not prepare your data. Please try again.',
+      );
     } finally {
       this.isExporting.set(false);
     }
@@ -196,10 +201,13 @@ export class AuthMenuComponent {
     try {
       await this.accountService.deleteAccount();
       this.closeRequested.emit();
-    } catch {
-      // The callable is atomic enough to retry: it re-reads state each time,
-      // and every step is idempotent. Leave the panel open so they can.
-      this.errorMessage.set('Could not delete your account. Please try again.');
+    } catch (error) {
+      // Every step of the callable is idempotent and re-reads state, so
+      // retrying is safe — leave the panel open. The service's message says
+      // whether retrying is worth it.
+      this.errorMessage.set(
+        error instanceof Error ? error.message : 'Could not delete your account. Please try again.',
+      );
     } finally {
       this.isDeleting.set(false);
     }
