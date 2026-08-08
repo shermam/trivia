@@ -6,9 +6,47 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Brand typography (see BRAND_DESIGN_SYSTEM.md §2) — Inter everywhere,
-   loaded via Google Fonts <link> in index.html (preconnected, display=swap)
-   rather than a self-hosted/npm font package, matching this app's existing
-   minimal-dependency approach for third-party assets. */
+   self-hosted from public/fonts rather than hot-linked from Google Fonts.
+   A Google-hosted webfont sends every visitor's IP address to Google before
+   the page has asked for any consent, which LG München I (3 O 17493/20) held
+   to be a GDPR breach; self-hosting removes the transfer entirely, and takes
+   two preconnects and a render-blocking stylesheet with it.
+
+   One variable file per subset covers every weight the app uses (400/500/600/
+   700/800) — `font-weight: 100 900` is the axis range, not five separate
+   faces. `unicode-range` is what makes shipping latin-ext free: the browser
+   fetches it only if a glyph in that range is actually rendered, which for an
+   English trivia app is rare, but `custom_questions` is user-authored so it
+   does happen. Anything outside these two subsets (Cyrillic, Greek,
+   Vietnamese) falls through to the system stack below, which renders
+   correctly — just not in Inter.
+
+   Filenames carry Google's `v20` revision because `public/` is copied to the
+   build verbatim, with no content hash, while `firebase.json` caches woff2 as
+   `immutable` for a year. Updating Inter therefore means a new filename, not
+   a new file at the same URL that returning visitors would never re-fetch. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-v20-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-v20-latin-ext.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
 @theme {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif, 'Apple Color Emoji',

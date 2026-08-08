@@ -16,14 +16,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 16       |
+| ✅ Fixed and merged | 17       |
 | 🔵 In review        | 2        |
-| ⬜ Not started      | 38       |
+| ⬜ Not started      | 37       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#49](https://github.com/shermam/trivia/pull/49) (A6, webhook ordering and `livemode`).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#51](https://github.com/shermam/trivia/pull/51) (H5, self-hosted Inter).
 
 ---
 
@@ -109,7 +109,7 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                                                                                                                      | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
 | **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                                                                                                                      | ✅ [#48](https://github.com/shermam/trivia/pull/48)                                             |
 | **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                                                                                                                         | ✅ [#48](https://github.com/shermam/trivia/pull/48) — _narrowed, not closed; see A13_           |
-| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                                                                                                                                    | 🔵 [#49](https://github.com/shermam/trivia/pull/49)                                             |
+| **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                                                                                                                                    | ✅ [#49](https://github.com/shermam/trivia/pull/49)                                             |
 | **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                                                                                                                             | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
 | **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                                                                                                                     | ⬜                                                                                              |
 | **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                                                                                                                                   | ⬜                                                                                              |
@@ -196,7 +196,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 | **H2** | No privacy policy or terms                                                                                                                                                                     | 🔵 [#37](https://github.com/shermam/trivia/pull/37) — drafted, 13 review items                         |
 | **H3** | No account deletion or data export                                                                                                                                                             | ✅ [#44](https://github.com/shermam/trivia/pull/44) + [#45](https://github.com/shermam/trivia/pull/45) |
 | **H4** | No moderation on public user-generated text                                                                                                                                                    | ⬜                                                                                                     |
-| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | ⬜ _(found during the work)_                                                                           |
+| **H5** | **Hot-linked Google Fonts sends every visitor's IP to Google pre-consent** — LG München I held this breaches GDPR. Self-hosting also removes two preconnects and a render-blocking stylesheet. | 🔵 [#51](https://github.com/shermam/trivia/pull/51)                                                    |
 
 ---
 
@@ -205,7 +205,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 1. ~~**A2 + A3 + A7**~~ — checkout input validation. [#47](https://github.com/shermam/trivia/pull/47).
 2. ~~**A4 + A5**~~ — claim scoping and revocation. [#48](https://github.com/shermam/trivia/pull/48). **A13 came out of it and is unstarted** — decide it before or after A6, but don't lose it.
 3. ~~**A6**~~ — webhook ordering and `livemode`. [#49](https://github.com/shermam/trivia/pull/49).
-4. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
+4. ~~**H5**~~ — self-host Inter. [#51](https://github.com/shermam/trivia/pull/51).
 5. **A8 + A9** — CSP and security headers.
 6. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
 7. Then B (correctness), C (cost), G (accessibility), and the rest.
@@ -228,6 +228,16 @@ The residual is now **A13**. It is closable: `request.auth.token.iat`, `auth_tim
 
 - **Compare `iat` against a server-written "entitlement changed at" timestamp.** Exact, but costs a `get()` — one billed read on every privileged write.
 - **Require a freshly-issued token for privileged writes** (`iat` within N minutes). Costs nothing, and `AddQuestionComponent` already force-refreshes immediately before its write, so the client satisfies it today. But it couples the rules to that client behaviour, and a failed refresh becomes a rejected write.
+
+### What H5 actually shipped
+
+**The guidance in `INFRASTRUCTURE.md` §2 said to do the opposite, and was wrong.** It advised loading a brand font from Google Fonts via a preconnected `<link>` and treating the Lighthouse budget as the guardrail. No performance budget catches a legal exposure — that bullet is now rewritten to say self-host, with the reasoning, so a future project scaffolded from that file doesn't inherit the same finding on day one.
+
+**Vendored rather than `@fontsource`**, chosen deliberately over an npm dependency: this repo already avoids one for icons (inline SVG, not `lucide-angular`), for Firebase (no AngularFire) and for IndexedDB (raw API), and a font is static bytes with no reason to be an exception. The SIL OFL text ships beside the files, which the licence requires of anyone redistributing them.
+
+**Two subsets, not one, and the extra one is free.** `latin-ext` is 85 KB against `latin`'s 48 KB, which looks like a poor trade for an English trivia app — except `unicode-range` means the browser never fetches it unless a glyph in that range is actually rendered. Verified in a real browser rather than assumed: the page loads with `latin` alone, and `latin-ext` appears in the network log the moment an `Ā` is put on screen. It matters because `custom_questions` is user-authored.
+
+**The filenames carry Google's `v20` revision.** `public/` is copied into the build verbatim with no content hash, while `firebase.json` serves `woff2` as `immutable` for a year — replacing a file in place would be invisible to every returning visitor for that year. The refresh procedure is in `public/fonts/README.md`, which is excluded from the deployed bundle while `LICENSE.txt` deliberately is not.
 
 ### What A6 actually shipped
 

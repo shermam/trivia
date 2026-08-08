@@ -14,11 +14,21 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Inter is self-hosted (public/fonts, @font-face in styles.css). Only the
+         latin subset is preloaded: it is the one every page needs, and starting
+         it here rather than waiting for the CSS to be parsed removes a step from
+         the critical path. latin-ext is deliberately not preloaded — its
+         unicode-range means the browser only fetches it if a glyph in that range
+         is actually rendered, and preloading a file most visitors never use
+         would cost more than it saves. `crossorigin` is required even
+         same-origin: fonts are always fetched in CORS mode, and without it the
+         preload is discarded and fetched a second time. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
+      rel="preload"
+      href="fonts/inter-v20-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
     <script>
       // Applied before Angular bootstraps so there's no flash of the wrong
