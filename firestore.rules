@@ -23,24 +23,6 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.stripeRole == 'pro';
     }
 
-    function isValidLeaderboardEntry(uid) {
-      return request.resource.data.keys().hasOnly(
-                ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt']
-              )
-            && request.resource.data.uid == uid
-            && request.resource.data.name is string
-            && request.resource.data.name.size() > 0
-            && request.resource.data.name.size() <= 30
-            && request.resource.data.score is int
-            && request.resource.data.score >= 0
-            && request.resource.data.totalQuestions is int
-            && request.resource.data.totalQuestions >= request.resource.data.score
-            && request.resource.data.percentage is number
-            && request.resource.data.percentage >= 0
-            && request.resource.data.percentage <= 100
-            && request.resource.data.createdAt is int;
-    }
-
     // Bounds on a client-supplied epoch-ms timestamp: it must sit close to
     // when the server actually saw the request. Generous on the past side for
     // a slow connection or a clock a few minutes behind, tight on the future
@@ -50,6 +32,42 @@ service cloud.firestore {
       return millis is int
              && millis <= request.time.toMillis() + 60000
              && millis >= request.time.toMillis() - 300000;
+    }
+
+    // The longest game the app can produce. GameSetupComponent offers
+    // 5/10/15/20/25 questions, so 25 is the ceiling a real game can reach.
+    //
+    // Deliberately NOT restricted to that exact set: a `custom` or `mixed`
+    // game legitimately returns *fewer* questions than requested when the
+    // bank doesn't have enough (TriviaService slices over whatever matched),
+    // so asking for 25 when 7 exist produces a genuine 7-question game.
+    // Allowing 1..25 accepts every real game and nothing longer.
+    //
+    // Raising the option list above 25 means raising this too — the rules
+    // tests will fail loudly if the two ever disagree, which is the point.
+    function isValidLeaderboardEntry(uid) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+                ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt']
+              )
+            && data.uid == uid
+            && data.name is string
+            && data.name.size() > 0
+            && data.name.size() <= 30
+            && data.score is int
+            && data.score >= 0
+            && data.totalQuestions is int
+            && data.totalQuestions >= 1
+            && data.totalQuestions <= 25
+            && data.totalQuestions >= data.score
+            // Must agree with score/totalQuestions rather than being a free
+            // 0..100 field — otherwise 1 correct out of 10 can be published as
+            // 100%. Firestore's math.round() was verified to match
+            // JavaScript's Math.round() on .5 boundaries, so exact equality is
+            // safe here and no tolerance is needed.
+            && data.percentage is int
+            && data.percentage == math.round(data.score * 100.0 / data.totalQuestions)
+            && isNearRequestTime(data.createdAt);
     }
 
     function isValidCustomQuestion() {

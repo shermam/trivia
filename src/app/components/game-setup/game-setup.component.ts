@@ -30,7 +30,11 @@ export class GameSetupComponent implements OnInit {
   protected readonly categoriesError = signal<string | null>(null);
 
   protected readonly form = this.fb.nonNullable.group({
-    amount: [10, [Validators.required, Validators.min(5), Validators.max(50)]],
+    // Max 25, matching the options actually offered below. It was 50, which
+    // no UI path could produce — and `firestore.rules` now caps a leaderboard
+    // entry's totalQuestions at 25, so the two must agree or a tampered form
+    // would produce a game whose score can never be saved.
+    amount: [10, [Validators.required, Validators.min(5), Validators.max(25)]],
     category: [''],
     difficulty: [''],
     source: ['open_trivia' as GameConfig['source'], Validators.required],

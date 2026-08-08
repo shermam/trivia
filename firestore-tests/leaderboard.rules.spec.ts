@@ -100,16 +100,11 @@ describe('leaderboard: create — schema validation', () => {
     await assertFails(setDoc(entryRef(asVerifiedPassword(env, 'u'), 'u'), withoutPercentage));
   });
 
-  /*
-   * Documents the current bound rather than asserting it is sufficient. Shape
-   * validation is not anti-cheat: nothing here ties the numbers to a game that
-   * was actually played, so a hand-written 999999 is accepted today. That is
-   * finding A1, and the PR that bounds these values will flip this expectation
-   * to assertFails — this test exists so that change is visible in the diff
-   * rather than silent.
-   */
-  it('CURRENTLY ACCEPTS an implausible score (finding A1 — see PR bounding these)', async () => {
-    await assertSucceeds(
+  // Both of these were pinned with `assertSucceeds` and a CURRENTLY ACCEPTS
+  // label when the suite was written, documenting finding A1 rather than
+  // endorsing it. Flipping them here is the visible moment that finding closes.
+  it('rejects an implausible score (finding A1)', async () => {
+    await assertFails(
       setDoc(
         entryRef(asVerifiedPassword(env, 'u'), 'u'),
         validEntry('u', { score: 999999, totalQuestions: 999999, percentage: 100 }),
@@ -117,13 +112,67 @@ describe('leaderboard: create — schema validation', () => {
     );
   });
 
-  it('CURRENTLY ACCEPTS a percentage inconsistent with score/totalQuestions (finding A1)', async () => {
-    await assertSucceeds(
+  it('rejects a percentage inconsistent with score/totalQuestions (finding A1)', async () => {
+    await assertFails(
       setDoc(
         entryRef(asVerifiedPassword(env, 'u'), 'u'),
         validEntry('u', { score: 1, totalQuestions: 10, percentage: 100 }),
       ),
     );
+  });
+});
+
+describe('leaderboard: create — bounded to what a real game can produce', () => {
+  const write = (overrides: Record<string, unknown>) =>
+    setDoc(entryRef(asVerifiedPassword(env, 'u'), 'u'), validEntry('u', overrides));
+
+  it('accepts the longest game the app offers (25 questions)', async () => {
+    await assertSucceeds(write({ score: 25, totalQuestions: 25 }));
+  });
+
+  it('rejects a game longer than the app can produce', async () => {
+    await assertFails(write({ score: 26, totalQuestions: 26 }));
+  });
+
+  it('rejects zero questions', async () => {
+    await assertFails(write({ score: 0, totalQuestions: 0, percentage: 0 }));
+  });
+
+  /*
+   * The important regression guard. A `custom` or `mixed` game returns fewer
+   * questions than requested when the bank is short — asking for 25 when 7
+   * exist is a genuine 7-question game. Bounding totalQuestions to the menu
+   * options (5/10/15/20/25) instead of a range would reject these.
+   */
+  it('accepts a short game from a thin question bank (3 questions)', async () => {
+    await assertSucceeds(write({ score: 2, totalQuestions: 3 }));
+  });
+
+  it('accepts a single-question game', async () => {
+    await assertSucceeds(write({ score: 1, totalQuestions: 1 }));
+  });
+
+  it('rejects a percentage off by one', async () => {
+    await assertFails(write({ score: 7, totalQuestions: 10, percentage: 71 }));
+  });
+
+  // Firestore's math.round() was verified to match JavaScript's on .5
+  // boundaries; this pins that agreement so a future rules change can't
+  // silently start rejecting honest scores.
+  it('accepts a percentage landing exactly on a .5 rounding boundary', async () => {
+    await assertSucceeds(write({ score: 1, totalQuestions: 8, percentage: 13 }));
+  });
+
+  it('rejects a backdated createdAt', async () => {
+    await assertFails(write({ createdAt: Date.now() - 60 * 60 * 1000 }));
+  });
+
+  it('rejects a future-dated createdAt', async () => {
+    await assertFails(write({ createdAt: Date.now() + 60 * 60 * 1000 }));
+  });
+
+  it('tolerates a clock a couple of minutes behind', async () => {
+    await assertSucceeds(write({ createdAt: Date.now() - 2 * 60 * 1000 }));
   });
 });
 

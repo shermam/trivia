@@ -272,16 +272,24 @@ products/{id}/prices/{id}
 ```
 uid: string            (doc ID; must equal request.auth.uid)
 name: string          (1–30 chars)
-score: int             (>= 0)
-totalQuestions: int    (>= score)
-percentage: number     (0–100)
-createdAt: int         (epoch ms)
+score: int             (0 .. totalQuestions)
+totalQuestions: int    (1–25; the longest game the app offers)
+percentage: int        (must equal round(score * 100 / totalQuestions))
+createdAt: int         (epoch ms, must be near server time)
 ```
 
 - **Read**: public.
 - **Create / Update**: requires a non-anonymous, (if password-based) email-verified caller writing to their own uid's doc — schema is strictly validated in `firestore.rules` (exact key set, types, bounds) and an update is only accepted if `score` improves on the existing value.
 - **Delete**: disallowed.
 - One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes; a rejected write means "not a new personal best", not necessarily an error.
+
+**The numeric bounds are anti-cheat, not just shape validation.** Previously the rules checked only that `score >= 0` and `totalQuestions >= score`, which accepted a hand-written `999999` and made rank #1 permanently unassailable (an update requires beating the existing score). Three constraints now tie an entry to something a real game could have produced:
+
+- **`totalQuestions` is capped at 25**, the longest game `GameSetupComponent` offers. Deliberately a _range_ (1–25) rather than the exact option set: a `custom` or `mixed` game legitimately returns fewer questions than requested when the bank is short, so asking for 25 when 7 exist produces a genuine 7-question game. **Raising the option list above 25 requires raising this cap too** — the rules tests fail loudly if the two disagree, and `GameSetupComponent`'s own `Validators.max` was tightened from 50 to 25 to match, since 50 was never reachable through the UI.
+- **`percentage` must equal `round(score * 100 / totalQuestions)`** rather than being a free 0–100 field, so 1 correct out of 10 can no longer be published as 100%. Firestore's `math.round()` was verified empirically against JavaScript's `Math.round()` across `.5` boundaries before relying on exact equality — they agree, so no tolerance is needed.
+- **`createdAt` must sit near server time** (`isNearRequestTime()`, shared with `custom_questions`), so an entry can't be backdated.
+
+**This is mitigation, not closure.** Nothing here proves a game was actually played — a determined attacker can still write a plausible 25/25. What it removes is the cheap, unbounded version: the ceiling for a forged entry is now the same as the ceiling for an honest one. Closing it properly needs a server-attested game token, which was considered and deliberately deferred — see `AUDIT_REMEDIATION.md` §4.
 
 No composite indexes are currently defined (`firestore.indexes.json` is empty); the leaderboard's `orderBy('score', 'desc').limit(10)` query only needs the automatic single-field index.
 
