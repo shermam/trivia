@@ -373,7 +373,8 @@ npm run build          # ng build (dev config)
 npm run build:prod     # ng build --configuration production
 npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom)
-npm run functions:install # npm install inside functions/ (also runs automatically via the root `postinstall` hook)
+npm run functions:install # npm ci inside functions/ (also runs automatically via the root `postinstall` hook)
+npm run functions:install:update # npm install inside functions/ — only when adding/bumping a functions dependency
 npm run functions:build   # tsc-build functions/ (src/ -> lib/)
 npm run functions:test    # build, then node --test against functions/lib
 npm run e2e            # functions:build, then Cypress e2e suite (headless) against the Firebase Emulator Suite (incl. Functions)
@@ -384,7 +385,7 @@ npm run firebase:emulate  # build:prod, functions:build, then firebase emulators
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore,functions
 ```
 
-Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is a separate npm package with its own `package.json`/lockfile (standard Firebase CLI convention), so the root `npm install`/`npm ci` doesn't reach it on its own — a root-level `postinstall` script (`npm run functions:install`) closes that gap automatically so a plain `npm install` at the repo root is enough for `npm run functions:build`/`npm run e2e` to work right after cloning, without a separate manual step. `npm run e2e`/`npm run e2e:open` call the `firebase` binary directly now that `firebase-tools@14` is a real `devDependency` (§2.2) instead of an `npx`-fetched tool. `npm run lighthouse` still needs the older `@13` major, which can't also be a `devDependency` alongside `@14`, so it stays on `npx --yes firebase-tools@13` — the `--yes` skips npm's interactive "ok to install?" prompt the first time that pin isn't already in the local npx cache (CI's shell is non-interactive, so it never saw that prompt either way; this is purely a local-DX fix).
+Package manager is pinned via `"packageManager": "npm@11.12.1"`. `functions/` is a separate npm package with its own `package.json`/lockfile (standard Firebase CLI convention), so the root `npm install`/`npm ci` doesn't reach it on its own — a root-level `postinstall` script (`npm run functions:install`) closes that gap automatically so a plain `npm install` at the repo root is enough for `npm run functions:build`/`npm run e2e` to work right after cloning, without a separate manual step. That hook runs **`npm ci`**, not `npm install`: it used to be the latter, which meant every `npm ci` in CI — the command whose entire purpose is a reproducible tree — silently ran a non-deterministic install in `functions/` that was free to rewrite `functions/package-lock.json` as a side effect. The trade-off is that editing `functions/package.json` now makes the next root install fail loudly with an out-of-sync lockfile error; `npm run functions:install:update` is the deliberate escape hatch for that case, and the failure is the point — a lockfile should only change when someone meant to change it. `npm run e2e`/`npm run e2e:open` call the `firebase` binary directly now that `firebase-tools@14` is a real `devDependency` (§2.2) instead of an `npx`-fetched tool. `npm run lighthouse` still needs the older `@13` major, which can't also be a `devDependency` alongside `@14`, so it stays on `npx --yes firebase-tools@13` — the `--yes` skips npm's interactive "ok to install?" prompt the first time that pin isn't already in the local npx cache (CI's shell is non-interactive, so it never saw that prompt either way; this is purely a local-DX fix).
 
 ### 4.6 Environments
 
