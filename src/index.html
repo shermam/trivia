@@ -30,18 +30,17 @@
       type="font/woff2"
       crossorigin
     />
-    <script>
-      // Applied before Angular bootstraps so there's no flash of the wrong
-      // theme — kept in sync with ThemeService (src/app/services/theme.service.ts),
-      // which reads this same class/localStorage key back on startup.
-      (function () {
-        var stored = localStorage.getItem('trivia-theme');
-        var isDark = stored
-          ? stored === 'dark'
-          : matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.classList.toggle('dark', isDark);
-      })();
-    </script>
+    <!-- Deliberately an external file, and deliberately render-blocking: it has
+         to run before first paint or the wrong theme flashes, and it cannot be
+         inline because the CSP in firebase.json allows no inline script at all.
+         A hash would have worked too, but silently: breaking it on purpose
+         showed the browser refuses the script while the app still boots and
+         still ends up styled correctly (ThemeService reapplies the class), so
+         nothing — not the console, not Lighthouse, not e2e — goes red. Only a
+         first-paint flash remains. An external file cannot drift.
+         Served no-cache (see firebase.json) because public/ is copied without
+         a content hash, the same reason ngsw-worker.js is excluded there. -->
+    <script src="theme-init.js"></script>
   </head>
   <body>
     <app-root></app-root>
