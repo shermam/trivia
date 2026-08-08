@@ -16,11 +16,13 @@ These apply to every session in this repository. Follow them without being asked
 
 - **Read `PROJECT_OVERVIEW.md` in full first.** It is the source of truth for what this app does, how it's built, its Firestore data model, its Firebase/Stripe integration, and its CI/CD setup. Don't assume — confirm against it before touching code.
 - **Read `INFRASTRUCTURE.md`** whenever the task touches build tooling, hosting, CI/CD, or any other infra-layer decision rather than app/game functionality. It documents this project's stack choices (Angular, Firebase, Stripe, Cypress, GitHub Actions, Lighthouse CI, etc.) independently of the trivia app itself, and is the reference to follow if scaffolding a new project on the same infra.
+- **Read `AUDIT_REMEDIATION.md`** — an audit produced 55 findings that are being fixed as a long series of small PRs, spanning many sessions. It records what is done, what is next, the working rules for the series, and the decisions already taken (so they aren't silently revisited). If the task is "continue the audit work", that file _is_ the brief. If the task is an unrelated feature, still skim §5 — you may be about to touch something with a known open finding against it, and §4 may already record why it looks the way it does.
 
 ## 2. After making any change
 
 - **Update `PROJECT_OVERVIEW.md`** so it stays accurate: new/changed routes, services, Firestore collections/rules, CI steps, config, or closed items in "Known Gaps." A stale overview is a bug — treat it as part of the change, not an afterthought.
 - If the change is to tooling/CI/hosting rather than app functionality, update `INFRASTRUCTURE.md` instead (or in addition).
+- **If the change closes an audit finding, update `AUDIT_REMEDIATION.md`** — mark the finding in §5 with its PR link and refresh the counts in §1, in the same PR. It's the only thing tracking that series across sessions; a stale plan is worse than none.
 
 ## 3. Before sending a PR / concluding a task
 
