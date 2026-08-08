@@ -17,13 +17,13 @@ Related documents:
 |                     | Findings |
 | ------------------- | -------- |
 | ✅ Fixed and merged | 11       |
-| 🔵 In review        | 1        |
-| ⬜ Not started      | 43       |
+| 🔵 In review        | 4        |
+| ⬜ Not started      | 40       |
 | **Total**           | **55**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#47](https://github.com/shermam/trivia/pull/47) (A2 + A3 + A7, checkout input validation).
 
 ---
 
@@ -84,13 +84,15 @@ Approximate local cost: e2e ~4m, Lighthouse ~2m15s, rules ~6s, everything else s
 
 Recorded so they aren't silently revisited.
 
-| Decision                                                                      | Rationale                                                                                                                                                                                                                                                                                                                                                                |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **A1 (leaderboard forgery): bounded rules, not server-attested game tokens.** | Avoids per-game server code. Worth noting the cost concern was probably not binding — a token approach is ~2 Cloud Function invocations per completed game against a 2M/month free tier, i.e. ~1M games/month before any charge. Deferred on complexity grounds; revisit if cheating appears. Dropping the competitive framing was rejected — it's the product's appeal. |
-| **Legal pages ship as drafts**, revisited after the features they depend on.  | Retention and data-subject-rights sections can't make a truthful promise until account deletion (H3) exists; contributed-content removal can't be promised until attribution (A10) exists. A10 has since landed.                                                                                                                                                         |
-| **H3 and A10 pulled forward** from their natural queue positions.             | Both block the legal pages. A10 also had to precede H3 — deleting a user's questions is impossible while nothing records who wrote them.                                                                                                                                                                                                                                 |
-| **A10 attribution shipped without a rate limit.**                             | Firestore rules cannot count a user's documents; a cap needs a counter doc the client can decline to update, or a Cloud Function on the write path. Different mechanism. Unlike attribution, a rate limit can be added at any time without a migration.                                                                                                                  |
-| **Basecamp's CC BY 4.0 policies as the legal skeleton**, not Automattic's.    | Automattic's are CC BY-**SA**; the share-alike term would oblige these pages to carry the same licence.                                                                                                                                                                                                                                                                  |
+| Decision                                                                      | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A1 (leaderboard forgery): bounded rules, not server-attested game tokens.** | Avoids per-game server code. Worth noting the cost concern was probably not binding — a token approach is ~2 Cloud Function invocations per completed game against a 2M/month free tier, i.e. ~1M games/month before any charge. Deferred on complexity grounds; revisit if cheating appears. Dropping the competitive framing was rejected — it's the product's appeal.                                                                                                         |
+| **Legal pages ship as drafts**, revisited after the features they depend on.  | Retention and data-subject-rights sections can't make a truthful promise until account deletion (H3) exists; contributed-content removal can't be promised until attribution (A10) exists. A10 has since landed.                                                                                                                                                                                                                                                                 |
+| **H3 and A10 pulled forward** from their natural queue positions.             | Both block the legal pages. A10 also had to precede H3 — deleting a user's questions is impossible while nothing records who wrote them.                                                                                                                                                                                                                                                                                                                                         |
+| **A10 attribution shipped without a rate limit.**                             | Firestore rules cannot count a user's documents; a cap needs a counter doc the client can decline to update, or a Cloud Function on the write path. Different mechanism. Unlike attribution, a rate limit can be added at any time without a migration.                                                                                                                                                                                                                          |
+| **Basecamp's CC BY 4.0 policies as the legal skeleton**, not Automattic's.    | Automattic's are CC BY-**SA**; the share-alike term would oblige these pages to carry the same licence.                                                                                                                                                                                                                                                                                                                                                                          |
+| **A2: the client still sends `price`; the function validates it.**            | Not accepting it at all was the stronger fix and was considered. It would have deleted `SubscriptionService.getProPriceId()` — which `CLAUDE.md` §4.4 names as the reference implementation B3's fix is meant to copy — and silently closed C5 (the N+1 price lookup) inside a security PR. Validating against the mirrored catalog is also exactly what §4.1 prescribes. `mode`, `success_url` and `cancel_url` _were_ removed outright, since nothing needed them client-side. |
+| **A3: the volume cap lives in the document ID, not a counter document.**      | Rules cannot count a user's documents, and `request.time` is the only server-controlled monotonic value they get for free — so a `{window}-{slot}` ID plus the fact that `create` only applies to a non-existent document _is_ the counter. The alternative rejected for A10's rate limit (a companion counter doc the client can simply decline to update) has the same hole here and needs no migration to add later either.                                                   |
 
 ---
 
@@ -103,12 +105,12 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | ID      | Finding                                                                                                                           | Status                                                                                          |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **A1**  | Leaderboard scores are trivially forgeable — rules validate shape only, so `score: 999999` is accepted and can never be displaced | ✅ [#43](https://github.com/shermam/trivia/pull/43) — _bounded; mitigation not closure, see §4_ |
-| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                        | ⬜                                                                                              |
-| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                 | ⬜                                                                                              |
+| **A2**  | `createCheckoutSession` trusts client-written `price`, `mode`, `success_url`, `cancel_url`                                        | 🔵 [#47](https://github.com/shermam/trivia/pull/47)                                             |
+| **A3**  | Unbounded Cloud Function invocation via `checkout_sessions` — no rate limit, no schema validation                                 | 🔵 [#47](https://github.com/shermam/trivia/pull/47)                                             |
 | **A4**  | `setCustomUserClaims(uid, null)` wipes _all_ custom claims, not just `stripeRole`                                                 | ⬜                                                                                              |
 | **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                    | ⬜                                                                                              |
 | **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                               | ⬜                                                                                              |
-| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                        | ⬜                                                                                              |
+| **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                        | 🔵 [#47](https://github.com/shermam/trivia/pull/47)                                             |
 | **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                | ⬜                                                                                              |
 | **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                              | ⬜                                                                                              |
 | **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                           | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_             |
@@ -199,13 +201,23 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 
 ## 6. Suggested order from here
 
-1. **A2 + A3 + A7** — checkout input validation, together; they edit the same rules block and the same two functions.
+1. ~~**A2 + A3 + A7**~~ — checkout input validation. [#47](https://github.com/shermam/trivia/pull/47).
 2. **A4 + A5** — claim scoping and revocation, same function.
 3. **A6** — webhook ordering, idempotency, `livemode`.
 4. **H5** — self-host Inter. Removes a live GDPR exposure _and_ should improve the performance score.
 5. **A8 + A9** — CSP and security headers.
 6. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
 7. Then B (correctness), C (cost), G (accessibility), and the rest.
+
+### What A2 + A3 + A7 actually shipped
+
+Two things were worth more than the plan anticipated, and one was a trap.
+
+**The strongest fix for three of the four A2 fields was to stop accepting them.** `mode` had exactly one possible value; `success_url`/`cancel_url` had exactly one possible shape. Validating them would have been busywork guarding a field nobody needed — removing them means there is no client-chosen value left on that path to get the validation wrong about. Only `price` survives as client input, and only because keeping it avoids reaching into two unrelated findings (§4).
+
+**The A3 cap needed a mechanism, not a threshold.** The obvious reading of "add a rate limit" is a number, but rules have nothing to count with. The document ID turned out to be the whole answer: `create` is the one verb that already refuses to run twice on the same name, so a name derived from server time _is_ a counter, at zero extra reads. The cost is that the client has to derive the same name from its own clock, which is why the window is 5 minutes wide and ±1 window is tolerated — the same skew `isNearRequestTime()` already accepts.
+
+**`math.floor()` in the rules language returns a float.** `string(math.floor(x))` renders `"5954006.0"`, so every legitimate checkout was rejected and every hostile one was too — a rule that looks like it works and fails 100% closed. Plain integer division is correct. Caught only because the suite asserts the _accept_ cases as well as the reject ones; a suite of nothing but `assertFails` would have passed against it happily. Worth remembering next to the `math.round()` check A1 did: the rules language is close enough to JavaScript to be trusted by reflex, and isn't.
 
 ### What A1 actually shipped, and what changed from the plan
 

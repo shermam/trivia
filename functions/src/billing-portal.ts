@@ -1,11 +1,23 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
-import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
+import {
+  RejectedRequestError,
+  clientMessageFor,
+  isAllowedRedirectOrigin,
+} from './checkout-request';
+import { currentProjectId, getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 
+/**
+ * The one thing a client may say about a billing-portal session it wants to
+ * open. `return_url` used to be here and was passed to Stripe verbatim; the
+ * URL is now built below from a bare origin this function has checked.
+ */
 interface PortalSessionRequest {
-  return_url: string;
+  origin?: unknown;
 }
+
+const REJECTED_MESSAGE = 'Could not open the billing portal. Please reload the page and try again.';
 
 /**
  * The Angular client (`SubscriptionService.openBillingPortal`) creates a doc
@@ -26,6 +38,13 @@ export const createPortalSession = onDocumentCreated(
     logger.info(`createPortalSession invoked for uid=${uid} sessionId=${sessionId}`);
 
     try {
+      // Same two-layer check as createCheckoutSession: `firestore.rules`
+      // bounded the shape, and only this side knows which hostnames are ours.
+      const { origin } = request;
+      if (!isAllowedRedirectOrigin(origin, currentProjectId())) {
+        throw new RejectedRequestError(`origin is not an origin of this app: ${String(origin)}`);
+      }
+
       const stripeId = (await getFirestore().collection('customers').doc(uid).get()).data()?.[
         'stripeId'
       ] as string | undefined;
@@ -36,9 +55,8 @@ export const createPortalSession = onDocumentCreated(
       if (isMockMode()) {
         // Same-origin, hash-only mock URL for the same reason
         // createCheckoutSession's mock branch is — see the comment there.
-        const mockOrigin = new URL(request.return_url).origin;
         await snapshot.ref.set(
-          { url: `${mockOrigin}/pricing#mock-portal-session-${sessionId}` },
+          { url: `${origin}/pricing#mock-portal-session-${sessionId}` },
           { merge: true },
         );
         return;
@@ -47,18 +65,14 @@ export const createPortalSession = onDocumentCreated(
       const stripe = getStripeClient();
       const session = await stripe.billingPortal.sessions.create({
         customer: stripeId,
-        return_url: request.return_url,
+        return_url: `${origin}/pricing`,
       });
 
       await snapshot.ref.set({ url: session.url }, { merge: true });
     } catch (error) {
       logger.error(`Failed to create Stripe billing portal session for ${uid}`, error);
       await snapshot.ref.set(
-        {
-          error: {
-            message: error instanceof Error ? error.message : 'Could not open billing portal.',
-          },
-        },
+        { error: { message: clientMessageFor(error, REJECTED_MESSAGE) } },
         { merge: true },
       );
     }

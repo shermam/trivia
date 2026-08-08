@@ -70,6 +70,80 @@ service cloud.firestore {
             && isNearRequestTime(data.createdAt);
     }
 
+    // A bare `scheme://host[:port]` — no path, no query, no fragment, so
+    // there is nothing to smuggle into the redirect URL the Cloud Function
+    // builds from it. Which origins are actually *ours* deliberately isn't
+    // decided here: preview channels mint a new hostname per PR, and this
+    // same file runs against the emulator on localhost, so the rules can only
+    // bound the shape. The allowlist proper is in the function
+    // (functions/src/checkout-request.ts) — this is the structural half of
+    // the two-layer check, not the whole of it.
+    function isAppOrigin(origin) {
+      return origin is string
+            && origin.size() <= 200
+            && origin.matches(
+                 '^https://[a-z0-9-]+([.][a-z0-9-]+)+(:[0-9]{1,5})?$'
+                 + '|^http://(localhost|127[.]0[.]0[.]1)(:[0-9]{1,5})?$'
+               );
+    }
+
+    // The only two things a checkout-session document may carry. Everything
+    // else the Stripe call needs — the mode, and both redirect URLs — is
+    // decided by `createCheckoutSession` itself, so there is no longer a
+    // client-chosen value for it to hand to Stripe. `price` is bounded to the
+    // shape of a Stripe price ID here; whether that ID is one we actually
+    // sell is checked again in the function, against the mirrored catalog,
+    // because rules cannot look a value up in a catalog.
+    function isValidCheckoutSession() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['price', 'origin'])
+            && data.price is string
+            && data.price.matches('^price_[A-Za-z0-9_]{1,100}$')
+            && isAppOrigin(data.origin);
+    }
+
+    function isValidPortalSession() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['origin'])
+            && isAppOrigin(data.origin);
+    }
+
+    // The window a session document ID is bucketed into, as a string.
+    // 300000ms = 5 minutes, chosen to match the past-side tolerance of
+    // `isNearRequestTime()` above — that is the client-clock skew this app
+    // has already decided to live with, and a client has to derive the same
+    // bucket from its own clock to write one of these.
+    //
+    // Plain `/` and not `math.floor()`: dividing two ints in this language
+    // already truncates (and epoch millis are always positive, so truncation
+    // and floor agree), whereas `math.floor()` returns a *float*, which
+    // `string()` then renders as "5954006.0" and no client would ever match.
+    // Verified against the emulator rather than assumed, the same way
+    // `math.round()` was checked before the leaderboard relied on it.
+    function sessionWindow(offsetMillis) {
+      return string((request.time.toMillis() + offsetMillis) / 300000);
+    }
+
+    // The volume cap. Rules cannot count a user's documents, but they can
+    // constrain the document ID, and `create` only ever applies to an ID that
+    // doesn't exist yet — so restricting the ID to `{window}-{slot 0-9}`
+    // means each of those ten IDs can be used exactly once per window. That
+    // is ten Cloud Function invocations, and therefore ten Stripe API calls,
+    // per five minutes per user; without it a loop of `addDoc` calls spends
+    // the Functions quota and the Stripe rate limit as fast as it can write.
+    //
+    // The neighbouring windows are accepted too, so a clock a few minutes off
+    // — or a write that simply crosses a boundary between the client picking
+    // an ID and the server evaluating it — isn't rejected. That widens a
+    // burst to thirty, but the steady-state rate is still ten per window.
+    function isRateLimitedSessionId(sessionId) {
+      return sessionId.matches(
+        '^(' + sessionWindow(-300000)
+        + '|' + sessionWindow(0)
+        + '|' + sessionWindow(300000) + ')-[0-9]$'
+      );
+    }
+
     function isValidCustomQuestion() {
       let data = request.resource.data;
       return data.keys().hasOnly(
@@ -120,13 +194,21 @@ service cloud.firestore {
         // The client creates a session doc to kick off Checkout and reads
         // it back to learn the hosted checkout URL `createCheckoutSession`
         // writes in response; it never updates/deletes one directly.
-        allow read, create: if isRealAuthedUser() && request.auth.uid == uid;
+        allow read: if isRealAuthedUser() && request.auth.uid == uid;
+        allow create: if isRealAuthedUser()
+                      && request.auth.uid == uid
+                      && isValidCheckoutSession()
+                      && isRateLimitedSessionId(id);
       }
 
       match /portal_sessions/{id} {
         // Same handshake as checkout_sessions above, but for opening
         // Stripe's hosted billing portal (`createPortalSession`).
-        allow read, create: if isRealAuthedUser() && request.auth.uid == uid;
+        allow read: if isRealAuthedUser() && request.auth.uid == uid;
+        allow create: if isRealAuthedUser()
+                      && request.auth.uid == uid
+                      && isValidPortalSession()
+                      && isRateLimitedSessionId(id);
       }
 
       match /subscriptions/{id} {
