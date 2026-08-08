@@ -22,6 +22,9 @@ const FUNCTIONS_EMULATOR_PORT = 5001;
  */
 const DELETE_ACCOUNT_TIMEOUT_MS = 60_000;
 
+/** Read-only and cheaper than deletion, but still several Firestore round-trips. */
+const EXPORT_TIMEOUT_MS = 30_000;
+
 type FunctionsModule = typeof import('firebase/functions');
 
 @Injectable({ providedIn: 'root' })
@@ -52,6 +55,42 @@ export class AccountService {
       });
     }
     return this.functionsPromise;
+  }
+
+  /**
+   * Fetches everything the app holds about the signed-in user and saves it as
+   * a JSON file.
+   *
+   * The uid is never sent — the callable reads it from the verified token, so
+   * a caller can only ever export themselves.
+   *
+   * The object URL is revoked in a `finally`: it pins the whole payload in
+   * memory until released, and this one contains the user's personal data, so
+   * leaving it reachable for the lifetime of the tab is exactly the wrong
+   * thing to be careless about.
+   */
+  async downloadMyData(): Promise<void> {
+    const { functions, functionsModule } = await this.getFunctions();
+    const callable = functionsModule.httpsCallable<unknown, unknown>(
+      functions,
+      'exportAccountData',
+    );
+    const result = await withTimeout(
+      callable(),
+      EXPORT_TIMEOUT_MS,
+      'Preparing your data is taking longer than expected.',
+    );
+
+    const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'trivimind-my-data.json';
+      link.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   /**
