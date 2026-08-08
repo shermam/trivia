@@ -1,4 +1,6 @@
 import type {
+  AccountState,
+  AccountStateQuery,
   CustomQuestionSeed,
   LeaderboardSeed,
   ProSubscriptionSeed,
@@ -47,6 +49,8 @@ declare global {
       setProSubscription(seed: ProSubscriptionSeed): Chainable<null>;
       /** Seeds a fake Pro product/price so `getProPriceId()` resolves without a real Stripe sync. */
       seedProProduct(): Chainable<null>;
+      /** Reads back Auth/leaderboard/customer/question state after an account deletion. */
+      inspectAccountState(query: AccountStateQuery): Chainable<AccountState>;
     }
   }
 }
@@ -152,4 +156,8 @@ Cypress.Commands.add('setProSubscription', (seed: ProSubscriptionSeed) => {
 
 Cypress.Commands.add('seedProProduct', () => {
   cy.task('seedProProduct');
+});
+
+Cypress.Commands.add('inspectAccountState', (query: AccountStateQuery) => {
+  cy.task('inspectAccountState', query);
 });

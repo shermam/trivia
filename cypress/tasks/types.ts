@@ -6,6 +6,14 @@ export interface CustomQuestionSeed {
   question: string;
   correct_answer: string;
   incorrect_answers: string[];
+  /**
+   * Attribution (see PROJECT_OVERVIEW.md §3). Optional here even though
+   * `firestore.rules` requires it on a client create, because these seeds go
+   * in via the Admin SDK and bypass rules — which lets a spec deliberately
+   * seed an unattributed question to stand in for one predating attribution.
+   */
+  createdBy?: string;
+  createdAt?: number;
 }
 
 export interface LeaderboardSeed {
@@ -30,4 +38,19 @@ export interface VerifiedUserSeed {
  */
 export interface ProSubscriptionSeed {
   uid: string;
+}
+
+/** Which uid (and optionally which contributed question) to inspect after an account deletion. */
+export interface AccountStateQuery {
+  uid: string;
+  questionId?: string;
+}
+
+/** What `inspectAccountState` reports back — see the task for why it reads all four at once. */
+export interface AccountState {
+  authUserExists: boolean;
+  leaderboardExists: boolean;
+  customerExists: boolean;
+  questionExists: boolean;
+  questionCreatedBy: string | null;
 }

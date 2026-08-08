@@ -16,6 +16,7 @@ import {
   PROMINENT_OAUTH_PROVIDERS,
   SECONDARY_OAUTH_PROVIDERS,
 } from '../../services/auth.service';
+import { AccountService } from '../../services/account.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { IconComponent } from '../icon/icon.component';
 import { ProviderIconComponent } from './provider-icon.component';
@@ -33,6 +34,7 @@ type EmailFormMode = 'signup' | 'signin';
 export class AuthMenuComponent {
   protected readonly authService = inject(AuthService);
   protected readonly subscriptionService = inject(SubscriptionService);
+  private readonly accountService = inject(AccountService);
 
   @Output() closeRequested = new EventEmitter<void>();
 
@@ -40,6 +42,8 @@ export class AuthMenuComponent {
   protected readonly secondaryProviders = SECONDARY_OAUTH_PROVIDERS;
   protected readonly providerLabels = OAUTH_PROVIDER_LABELS;
 
+  protected readonly isConfirmingDelete = signal(false);
+  protected readonly isDeleting = signal(false);
   protected readonly emailFormMode = signal<EmailFormMode>('signup');
   protected readonly showMoreProviders = signal(false);
   protected readonly isSubmitting = signal(false);
@@ -149,6 +153,39 @@ export class AuthMenuComponent {
     } catch {
       this.errorMessage.set('Could not open the billing portal. Please try again.');
       this.isOpeningPortal.set(false);
+    }
+  }
+
+  protected startDelete(): void {
+    this.errorMessage.set(null);
+    this.isConfirmingDelete.set(true);
+  }
+
+  protected cancelDelete(): void {
+    this.isConfirmingDelete.set(false);
+  }
+
+  /**
+   * Deliberately behind an in-place confirmation rather than a `confirm()`
+   * dialog: this is irreversible, and the confirmation needs to say *what* is
+   * destroyed (score, subscription) and what survives (contributed questions,
+   * unlinked) — detail a native dialog can't carry.
+   */
+  protected async deleteAccount(): Promise<void> {
+    if (this.isDeleting()) {
+      return;
+    }
+    this.isDeleting.set(true);
+    this.errorMessage.set(null);
+    try {
+      await this.accountService.deleteAccount();
+      this.closeRequested.emit();
+    } catch {
+      // The callable is atomic enough to retry: it re-reads state each time,
+      // and every step is idempotent. Leave the panel open so they can.
+      this.errorMessage.set('Could not delete your account. Please try again.');
+    } finally {
+      this.isDeleting.set(false);
     }
   }
 

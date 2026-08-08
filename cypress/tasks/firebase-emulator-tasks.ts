@@ -3,6 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { CollectionReference, getFirestore } from 'firebase-admin/firestore';
 import { E2E_PROJECT_ID } from '../../cypress.config';
 import {
+  AccountStateQuery,
   CustomQuestionSeed,
   LeaderboardSeed,
   ProSubscriptionSeed,
@@ -105,6 +106,30 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         }),
       );
       return null;
+    },
+
+    /**
+     * Reads the state account deletion is supposed to leave behind, in one
+     * round trip. Deletion spans Auth, the leaderboard and the question bank,
+     * and asserting only on the UI would prove nothing about any of them —
+     * the whole risk is a step that silently doesn't run.
+     */
+    async inspectAccountState({ uid, questionId }: AccountStateQuery) {
+      const [authUser, leaderboardDoc, questionDoc, customerDoc] = await Promise.all([
+        auth.getUser(uid).catch(() => null),
+        firestore.collection('leaderboard').doc(uid).get(),
+        questionId
+          ? firestore.collection('custom_questions').doc(questionId).get()
+          : Promise.resolve(null),
+        firestore.collection('customers').doc(uid).get(),
+      ]);
+      return {
+        authUserExists: authUser !== null,
+        leaderboardExists: leaderboardDoc.exists,
+        customerExists: customerDoc.exists,
+        questionExists: questionDoc?.exists ?? false,
+        questionCreatedBy: (questionDoc?.data()?.['createdBy'] as string | undefined) ?? null,
+      };
     },
 
     async seedLeaderboardEntry(entry: LeaderboardSeed) {
