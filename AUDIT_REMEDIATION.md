@@ -9,6 +9,7 @@ Related documents:
 - **`CLAUDE.md` §4** — the invariants these fixes establish, written as a contract so they can't silently regress.
 - **`INFRASTRUCTURE.md` §10** — the infra-layer counterpart.
 - **`PROJECT_OVERVIEW.md` §6** — Known Gaps, the running record of what is still open in the product itself.
+- **`FIRESTORE_SDK_VS_REST.md`** — a costed comparison of replacing the Firestore client SDK with its REST API, written after B6 showed the SDK offers no cancellation. Not scheduled; read it before anyone proposes the migration, and before assuming the SDK's offline cache is doing something here (it is switched off).
 
 ---
 
