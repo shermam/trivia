@@ -1,6 +1,21 @@
-import { Injectable } from '@angular/core';
+import { InjectionToken, Injectable, inject } from '@angular/core';
 
-const DB_NAME = 'trivia-offline';
+/**
+ * The database's name, injectable so a test can point a service at a database
+ * of its own.
+ *
+ * That matters specifically for the schema tests: IndexedDB names are global to
+ * the origin, Vitest shares one environment across spec files, and a
+ * `deleteDatabase` blocks for as long as *any* connection is open. A test that
+ * needs to start from a known version therefore ends up racing every other spec
+ * file's connections — which passed locally and hung on CI, where the run is
+ * slower. Giving those tests a unique name removes the shared state instead of
+ * trying to sequence access to it.
+ */
+export const OFFLINE_DB_NAME = new InjectionToken<string>('OFFLINE_DB_NAME', {
+  providedIn: 'root',
+  factory: () => 'trivia-offline',
+});
 
 /**
  * One database, one version, one schema — so the version and every object store
@@ -44,12 +59,13 @@ export const CURRENT_GAME_KEY = 'current';
  */
 @Injectable({ providedIn: 'root' })
 export class OfflineDbService {
+  private readonly dbName = inject(OFFLINE_DB_NAME);
   private dbPromise: Promise<IDBDatabase> | null = null;
 
   open(): Promise<IDBDatabase> {
     if (!this.dbPromise) {
       this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        const request = indexedDB.open(this.dbName, DB_VERSION);
         request.onupgradeneeded = (event) => upgrade(request.result, event.oldVersion);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error as Error);

@@ -11,8 +11,8 @@ import { TriviaService } from './trivia.service';
 async function clearSavedGame(): Promise<void> {
   TestBed.configureTestingModule({});
   await TestBed.inject(GamePersistenceService).clear();
-  // Closing matters as much as clearing: a connection left open blocks the
-  // schema-migration spec from deleting the database to start clean.
+  // Hygiene, not load-bearing: the schema spec uses its own databases. Closing
+  // just keeps this file from leaking a connection per test.
   await TestBed.inject(OfflineDbService).close();
   TestBed.resetTestingModule();
 }

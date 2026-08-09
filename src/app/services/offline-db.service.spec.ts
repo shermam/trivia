@@ -1,6 +1,11 @@
 import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
-import { GAME_STATE_STORE, OfflineDbService, QUESTIONS_STORE } from './offline-db.service';
+import {
+  GAME_STATE_STORE,
+  OFFLINE_DB_NAME,
+  OfflineDbService,
+  QUESTIONS_STORE,
+} from './offline-db.service';
 
 /**
  * Finding B8 put a second object store into the database the offline question
@@ -11,32 +16,22 @@ import { GAME_STATE_STORE, OfflineDbService, QUESTIONS_STORE } from './offline-d
  * would wipe a player's cached questions as a side effect of adding an
  * unrelated one — taking the offline pool away at exactly the moment they may
  * have no network to refill it, and doing so without any error.
+ *
+ * **Every test here works on a database of its own** (`OFFLINE_DB_NAME`).
+ * IndexedDB names are global to the origin and Vitest shares one environment
+ * across spec files, so an earlier version of this suite tried to reach a known
+ * starting state by deleting the shared database — which blocks for as long as
+ * any other spec file holds a connection. That passed locally and hung on CI.
+ * A unique name per test removes the shared state rather than sequencing access
+ * to it, so nothing here can block on, or be blocked by, another file.
  */
 
-const DB_NAME = 'trivia-offline';
-
-/**
- * Removes the database outright. Vitest shares one environment (and so one
- * `fake-indexeddb`) across spec files, so another file may already have created
- * this database at the current version — and opening it at v2 afterwards is a
- * `VersionError`, not a downgrade. Starting from nothing is the only way to
- * model a browser arriving at v2.
- */
-function deleteDatabase(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(DB_NAME);
-    request.onsuccess = () => resolve();
-    // Another spec file's connection is still open; it holds no data this test
-    // cares about, and the delete completes once it closes.
-    request.onblocked = () => resolve();
-    request.onerror = () => reject(request.error as Error);
-  });
-}
+let dbCounter = 0;
 
 /** Builds the pre-B8 (v2) database by hand: `questions` only, holding one row. */
-function seedV2Database(): Promise<void> {
+function seedV2Database(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const open = indexedDB.open(DB_NAME, 2);
+    const open = indexedDB.open(name, 2);
     open.onupgradeneeded = () => {
       const db = open.result;
       const store = db.createObjectStore(QUESTIONS_STORE, { keyPath: 'question' });
@@ -47,7 +42,7 @@ function seedV2Database(): Promise<void> {
       const tx = db.transaction(QUESTIONS_STORE, 'readwrite');
       tx.objectStore(QUESTIONS_STORE).put({ question: 'Cached before the upgrade?', cachedAt: 1 });
       tx.oncomplete = () => {
-        // Must close, or the v3 upgrade blocks on this connection.
+        // Must close, or this connection blocks the v3 upgrade below.
         db.close();
         resolve();
       };
@@ -72,36 +67,34 @@ function countQuestions(db: IDBDatabase): Promise<number> {
 }
 
 describe('OfflineDbService schema (B8)', () => {
-  /**
-   * Connections opened by a test, closed before the next one deletes the
-   * database — an open connection blocks a delete indefinitely, and the
-   * service holds its connection for the lifetime of the injector.
-   */
+  /** Connections opened by a test, closed afterwards so none leak across the file. */
   let opened: IDBDatabase[] = [];
+  let dbName = '';
 
+  /** A service pointed at this test's own database. */
   async function openViaService(): Promise<IDBDatabase> {
-    TestBed.configureTestingModule({});
+    TestBed.configureTestingModule({
+      providers: [{ provide: OFFLINE_DB_NAME, useValue: dbName }],
+    });
     const db = await TestBed.inject(OfflineDbService).open();
     opened.push(db);
     return db;
   }
 
-  // Other spec files share this environment's `fake-indexeddb` and may already
-  // have created the database at the current version, so start from nothing
-  // rather than from whatever they left behind.
-  beforeEach(() => deleteDatabase());
+  beforeEach(() => {
+    dbName = `trivia-offline-spec-${dbCounter++}`;
+  });
 
-  afterEach(async () => {
+  afterEach(() => {
     for (const db of opened) {
       db.close();
     }
     opened = [];
     TestBed.resetTestingModule();
-    await deleteDatabase();
   });
 
   it('upgrading v2 to v3 adds the game store and keeps the cached questions', async () => {
-    await seedV2Database();
+    await seedV2Database(dbName);
 
     const db = await openViaService();
 
@@ -120,12 +113,19 @@ describe('OfflineDbService schema (B8)', () => {
   });
 
   it('opens once and shares the connection', async () => {
-    TestBed.configureTestingModule({});
+    TestBed.configureTestingModule({
+      providers: [{ provide: OFFLINE_DB_NAME, useValue: dbName }],
+    });
     const service = TestBed.inject(OfflineDbService);
 
     const [first, second] = await Promise.all([service.open(), service.open()]);
     opened.push(first);
 
     expect(first).toBe(second);
+  });
+
+  it('defaults to the app database when nothing overrides the name', () => {
+    TestBed.configureTestingModule({});
+    expect(TestBed.inject(OFFLINE_DB_NAME)).toBe('trivia-offline');
   });
 });

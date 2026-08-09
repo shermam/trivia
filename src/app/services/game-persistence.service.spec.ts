@@ -96,8 +96,9 @@ describe('GamePersistenceService (B8)', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await service.clear();
-    // Leaving the connection open would block another spec file's schema
-    // migration test from ever reaching a clean database.
+    // Hygiene, not load-bearing: the schema spec works on databases of its
+    // own, so nothing here can block it. Closing still keeps this file from
+    // leaking a connection per test.
     await TestBed.inject(OfflineDbService).close();
     TestBed.resetTestingModule();
   });
