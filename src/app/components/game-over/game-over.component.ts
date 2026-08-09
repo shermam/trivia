@@ -135,17 +135,47 @@ export class GameOverComponent implements OnInit {
       this.hasSaved.set(true);
       await this.loadLeaderboard();
     } catch (error) {
-      if (isPermissionDeniedError(error)) {
-        this.hasSaved.set(true);
-        this.saveError.set(
-          'Your best score is already higher — nice consistency! We kept your existing best.',
-        );
-      } else {
-        this.saveError.set('Could not save your score. Please try again.');
-      }
+      await this.reportSaveFailure(error, this.gameController.score());
     } finally {
       this.isSaving.set(false);
     }
+  }
+
+  /**
+   * Explains a failed save, without inventing a reason for it.
+   *
+   * `permission-denied` used to be reported as "your best score is already
+   * higher" unconditionally. Since the leaderboard rules were tightened that
+   * is one of several reasons a write is refused — a clock outside the
+   * accepted window, a name over 30 characters, an account that isn't
+   * verified, a score inconsistent with the question count — so the message
+   * was false whenever the cause was any of the others. It also set
+   * `hasSaved`, which replaces the form with the saved panel and leaves no way
+   * to retry something that might well have succeeded on a second attempt.
+   *
+   * So the claim is now checked before it is made: the leaderboard is publicly
+   * readable, and the caller's own row says whether their existing best really
+   * does beat this game. Only then is the friendly message true — and only
+   * then is suppressing retry right, because the rules will refuse the same
+   * write every time. Anything else, including a lookup that itself fails,
+   * gets the generic message and keeps the form open.
+   */
+  private async reportSaveFailure(error: unknown, attemptedScore: number): Promise<void> {
+    if (isPermissionDeniedError(error)) {
+      const existing = await this.firebaseService
+        .getLeaderboardEntry(this.authService.user()?.uid ?? '')
+        .catch(() => null);
+
+      if (existing && existing.score >= attemptedScore) {
+        this.hasSaved.set(true);
+        this.saveError.set(
+          `Your best score is already higher (${existing.score}/${existing.totalQuestions}) — ` +
+            'nice consistency! We kept your existing best.',
+        );
+        return;
+      }
+    }
+    this.saveError.set('Could not save your score. Please try again.');
   }
 
   protected playAgain(): void {
