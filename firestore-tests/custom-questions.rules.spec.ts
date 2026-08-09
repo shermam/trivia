@@ -90,9 +90,51 @@ describe('custom_questions: create — schema validation', () => {
   rejects('a correct answer over 200 chars', { correct_answer: 'x'.repeat(201) });
   rejects('incorrect_answers that is not a list', { incorrect_answers: 'CO2' });
   rejects('an empty incorrect_answers list', { incorrect_answers: [] });
-  rejects('more than 5 incorrect answers', { incorrect_answers: ['a', 'b', 'c', 'd', 'e', 'f'] });
+  // 3 is the ceiling now, not 5: the add-question form offers exactly three
+  // incorrect fields for a multiple-choice question and derives one for a
+  // boolean, so anything more was never reachable through the UI — while the
+  // quiz only ever labelled four answers (finding B2).
+  rejects('more than 3 incorrect answers', { incorrect_answers: ['a', 'b', 'c', 'd'] });
+
+  /*
+   * Finding B1. The quiz used to score a click by matching its text against
+   * `correct_answer`, so a question listing the right answer among the wrong
+   * ones let the wrong option score as correct — and `@for`'s `track` saw two
+   * identical keys. The client no longer identifies answers by text, but the
+   * data should never have carried the ambiguity: a question with two
+   * identical options has no single right answer whatever the reader does
+   * with it.
+   */
+  rejects('the correct answer repeated among the incorrect ones', {
+    correct_answer: 'H2O',
+    incorrect_answers: ['H2O', 'CO2', 'O2'],
+  });
+  rejects('a duplicate within the incorrect answers', {
+    incorrect_answers: ['CO2', 'CO2', 'O2'],
+  });
   rejects('a non-string question', { question: 42 });
   rejects('a non-string category', { category: 7 });
+
+  it('accepts the maximum three incorrect answers', async () => {
+    await assertSucceeds(
+      addDoc(
+        questions(asPro(env, 'pro-user')),
+        validQuestion('pro-user', { incorrect_answers: ['CO2', 'O2', 'NaCl'] }),
+      ),
+    );
+  });
+
+  // Only exact repeats are rejected. Answers that merely look similar are a
+  // question-quality matter, not a correctness one, and the rules have no
+  // business judging them.
+  it('accepts answers that differ only by case or spacing', async () => {
+    await assertSucceeds(
+      addDoc(
+        questions(asPro(env, 'pro-user')),
+        validQuestion('pro-user', { correct_answer: 'H2O', incorrect_answers: ['h2o', ' H2O'] }),
+      ),
+    );
+  });
 
   it('rejects a document missing a required key', async () => {
     const { incorrect_answers: _dropped, ...withoutAnswers } = validQuestion('pro-user');

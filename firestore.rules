@@ -157,7 +157,21 @@ service cloud.firestore {
             && data.correct_answer is string
             && data.correct_answer.size() > 0 && data.correct_answer.size() <= 200
             && data.incorrect_answers is list
-            && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 5
+            // 3, not 5: AddQuestionComponent offers exactly three incorrect
+            // fields for a multiple-choice question and derives one for a
+            // boolean, so 1..3 is every question the app can actually produce.
+            // The old ceiling of 5 allowed six answers in total while the quiz
+            // only ever labelled four (finding B2).
+            && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 3
+            // An answer that is both correct and incorrect is not a question,
+            // it is a scoring bug waiting to happen: the quiz used to match a
+            // click against `correct_answer` by text, so the wrong option
+            // scored as correct (finding B1). The client no longer compares by
+            // text, but the data should never have contained the ambiguity in
+            // the first place — fixing only the reader would leave the next
+            // reader to rediscover it.
+            && !(data.correct_answer in data.incorrect_answers)
+            && data.incorrect_answers.toSet().size() == data.incorrect_answers.size()
             // Attribution is mandatory and self-asserting only: a submitter
             // can name themselves and nobody else. This is what makes an abuse
             // report actionable, and what lets account deletion find a user's

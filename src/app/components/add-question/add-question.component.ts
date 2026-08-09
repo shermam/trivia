@@ -106,6 +106,20 @@ export class AddQuestionComponent implements OnInit {
       return;
     }
 
+    // `firestore.rules` rejects these outright (finding B1), so without a
+    // check here the submitter's only feedback would be a raw
+    // permission-denied that names nothing. Compared case-insensitively on
+    // trimmed text: "Paris" and "paris " are the same answer to a player, and
+    // a question offering both is broken whatever the rules make of it.
+    const duplicate = findDuplicateAnswer(raw.correctAnswer.trim(), incorrectAnswers);
+    if (duplicate) {
+      this.submitError.set(
+        `"${duplicate}" is listed more than once. Every answer has to be different, ` +
+          `or the question would have two right answers.`,
+      );
+      return;
+    }
+
     // `isFullyAuthenticated()` above already implies a signed-in user, but the
     // uid is needed as a value here, so read it explicitly rather than
     // asserting non-null.
@@ -160,4 +174,23 @@ export class AddQuestionComponent implements OnInit {
   protected goToPricing(): void {
     void this.router.navigateByUrl('/pricing');
   }
+}
+
+/**
+ * The repeated answer, if any, comparing trimmed text case-insensitively.
+ *
+ * Returns the offending text rather than a boolean so the message can name it
+ * — "one of your answers is duplicated" leaves the submitter hunting through
+ * four fields.
+ */
+function findDuplicateAnswer(correctAnswer: string, incorrectAnswers: string[]): string | null {
+  const seen = new Set<string>();
+  for (const answer of [correctAnswer, ...incorrectAnswers]) {
+    const key = answer.trim().toLowerCase();
+    if (seen.has(key)) {
+      return answer.trim();
+    }
+    seen.add(key);
+  }
+  return null;
 }
