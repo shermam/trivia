@@ -99,7 +99,7 @@ The dimension where the SDK is usually assumed to win, and where this app has al
 
 Two honest observations:
 
-- **Enabling `persistentLocalCache` is a one-line change** available _without_ any migration. If offline caching is genuinely wanted, that is the cheap experiment, and it should be tried before concluding the SDK is worth 161 kB for it.
+- **Enabling `persistentLocalCache` is a one-line change** available _without_ any migration, and it was considered as the cheap experiment before committing to anything. **Declined** — see §9.
 - **Queued offline writes are not obviously desirable here.** A leaderboard save that silently succeeds twenty minutes later, after the player has closed the tab, is worse than an error they can act on. The app already surfaces save failures properly (B4, [#57](https://github.com/shermam/trivia/pull/57)).
 
 There is one real regression to weigh: with REST, a repeated read within a session is a billed round trip where the SDK might have served it from memory. For this app's patterns — a leaderboard fetched on the game-over screen, a question bank fetched once per game — that is a handful of reads, and a small `Map` cache in `FirebaseService` would recover most of it.
@@ -157,7 +157,13 @@ Two things argue for caution: manual token handling and the typed wire format ar
 
 Rough size: a day or two, most of it on the encoder and its tests.
 
-**Before any of that, do the cheap experiment first.** Turn on `persistentLocalCache` — one line — and see whether the SDK's offline behaviour is worth having. If it is, the calculus in §5 changes and this document should be revisited. If it isn't, the last argument for the SDK is gone and the migration is straightforwardly worth it.
+### On `persistentLocalCache` — considered and declined
+
+The original version of this document recommended trying it first, on the grounds that a one-line change is cheaper than a rewrite and would settle §5 either way. That was reasonable and is no longer the plan.
+
+The reason it was dropped is better than the reason it was proposed. **Open Trivia DB questions never pass through Firestore at all**, so an offline pool for them has to be hand-written against IndexedDB regardless — which it already is, as `OfflineQuestionsService`. Turning on the SDK's cache would leave this app with _two_ offline mechanisms covering two halves of the same feature, each with its own eviction policy, its own failure modes and its own answer to "why is this question stale". Extending the pool that already exists to cover Firestore-sourced data is one mechanism instead of two, and it is the mechanism this app already understands.
+
+So the last argument for the SDK is gone on purpose rather than by experiment, and §5's "SDK if persistence were enabled" column is hypothetical — nobody intends to enable it.
 
 ---
 
