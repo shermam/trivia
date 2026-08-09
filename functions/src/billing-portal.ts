@@ -7,6 +7,7 @@ import {
   isAllowedRedirectOrigin,
 } from './checkout-request';
 import { currentProjectId, getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
+import { sessionExpiryAt } from './session-expiry';
 
 /**
  * The one thing a client may say about a billing-portal session it wants to
@@ -36,6 +37,10 @@ export const createPortalSession = onDocumentCreated(
     const { uid, sessionId } = event.params;
     const request = snapshot.data() as PortalSessionRequest;
     logger.info(`createPortalSession invoked for uid=${uid} sessionId=${sessionId}`);
+
+    // Before anything that can fail — see the same stamp in
+    // `createCheckoutSession` for why it isn't folded into the write-backs.
+    await snapshot.ref.set({ expiresAt: sessionExpiryAt(new Date()) }, { merge: true });
 
     try {
       // Same two-layer check as createCheckoutSession: `firestore.rules`
