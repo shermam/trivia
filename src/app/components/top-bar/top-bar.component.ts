@@ -4,7 +4,9 @@ import {
   DestroyRef,
   ElementRef,
   computed,
+  effect,
   inject,
+  viewChild,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -39,6 +41,24 @@ export class TopBarComponent {
 
   protected readonly isMenuOpen = this.authMenuState.isOpen;
 
+  /** Ties the trigger's `aria-controls` to the panel it opens. Only one top bar exists. */
+  protected readonly panelId = 'auth-menu-panel';
+
+  private readonly menuPanel = viewChild<ElementRef<HTMLElement>>('menuPanel');
+  private readonly menuTrigger = viewChild<ElementRef<HTMLElement>>('menuTrigger');
+
+  /**
+   * Whatever had focus when the menu opened, so it can be given back on close.
+   *
+   * Captured rather than assuming the top-bar trigger, because the menu is not
+   * only opened from there: game-over's "Sign in to save your score" button
+   * opens it too (`AuthMenuStateService` exists for exactly that). Sending
+   * focus to the top bar after closing a menu opened from the middle of the
+   * page would be its own bug.
+   */
+  private previouslyFocused: HTMLElement | null = null;
+  private wasMenuOpen = false;
+
   protected readonly needsVerification = computed(
     () => !this.authService.isAnonymous() && !this.authService.isFullyAuthenticated(),
   );
@@ -61,9 +81,58 @@ export class TopBarComponent {
       }
     };
     document.addEventListener('click', onDocumentClick, true);
-    inject(DestroyRef).onDestroy(() =>
-      document.removeEventListener('click', onDocumentClick, true),
-    );
+
+    // On `document` rather than the panel: Escape should close the menu
+    // wherever focus happens to be, including the moment before focus has
+    // moved into the panel, and after a click has taken it back out.
+    const onDocumentKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && this.isMenuOpen()) {
+        this.authMenuState.close();
+      }
+    };
+    document.addEventListener('keydown', onDocumentKeydown);
+
+    inject(DestroyRef).onDestroy(() => {
+      document.removeEventListener('click', onDocumentClick, true);
+      document.removeEventListener('keydown', onDocumentKeydown);
+    });
+
+    // Focus follows the menu: into the panel when it opens, back where it came
+    // from when it closes (G2). Without this, opening the menu leaves focus on
+    // the trigger — so a keyboard user tabs *through the whole page* to reach a
+    // panel that is already on screen — and closing it drops focus to
+    // `<body>`, losing their place entirely.
+    effect(() => {
+      const isOpen = this.isMenuOpen();
+      const panel = this.menuPanel();
+
+      if (isOpen && !this.wasMenuOpen) {
+        this.previouslyFocused = document.activeElement as HTMLElement | null;
+      }
+
+      if (isOpen && panel) {
+        // The panel itself, not its first control: it is announced as a dialog
+        // with its label, and Tab then reaches the close button first. Focusing
+        // the first control instead would skip that announcement.
+        panel.nativeElement.focus();
+      }
+
+      if (!isOpen && this.wasMenuOpen) {
+        const restoreTo = this.previouslyFocused ?? this.menuTrigger()?.nativeElement ?? null;
+        this.previouslyFocused = null;
+        // Only if it is still in the document: the opener can have been removed
+        // by the very action that closed the menu (signing in re-renders
+        // game-over's prompt), and focusing a detached node silently sends
+        // focus to `<body>`.
+        if (restoreTo?.isConnected) {
+          restoreTo.focus();
+        } else {
+          this.menuTrigger()?.nativeElement.focus();
+        }
+      }
+
+      this.wasMenuOpen = isOpen;
+    });
   }
 
   protected toggleMenu(): void {

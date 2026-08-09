@@ -17,14 +17,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 37       |
-| 🔵 In review        | 2        |
-| ⬜ Not started      | 18       |
+| ✅ Fixed and merged | 38       |
+| 🔵 In review        | 3        |
+| ⬜ Not started      | 16       |
 | **Total**           | **57**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71), [#72](https://github.com/shermam/trivia/pull/72), [#73](https://github.com/shermam/trivia/pull/73), [#74](https://github.com/shermam/trivia/pull/74), [#75](https://github.com/shermam/trivia/pull/75), [#76](https://github.com/shermam/trivia/pull/76), [#77](https://github.com/shermam/trivia/pull/77).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71), [#72](https://github.com/shermam/trivia/pull/72), [#73](https://github.com/shermam/trivia/pull/73), [#74](https://github.com/shermam/trivia/pull/74), [#75](https://github.com/shermam/trivia/pull/75), [#76](https://github.com/shermam/trivia/pull/76), [#77](https://github.com/shermam/trivia/pull/77), [#78](https://github.com/shermam/trivia/pull/78).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#78](https://github.com/shermam/trivia/pull/78) (C6, preview-e2e uid tracking).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#79](https://github.com/shermam/trivia/pull/79) (G1 + G2, accessible auth menu).
 
 > **The C group is complete.** C3's console step was applied on 2026-08-09 and verified against the Identity Platform API, so the finding is closed rather than merely decided.
 
@@ -154,7 +154,7 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **C3** | Anonymous accounts grow monotonically; every sign-out mints another                                                             | ✅ [#74](https://github.com/shermam/trivia/pull/74) |
 | **C4** | IndexedDB keyed on question _text_, so identical text collides across sources                                                   | ✅ [#71](https://github.com/shermam/trivia/pull/71) |
 | **C5** | `getProPriceId()` is a sequential N+1                                                                                           | ✅ [#72](https://github.com/shermam/trivia/pull/72) |
-| **C6** | **Preview-e2e leaks an anonymous Auth account per test** into the real project — the sweep tracks only the last uid a test held | 🔵 [#78](https://github.com/shermam/trivia/pull/78) |
+| **C6** | **Preview-e2e leaks an anonymous Auth account per test** into the real project — the sweep tracks only the last uid a test held | ✅ [#78](https://github.com/shermam/trivia/pull/78) |
 
 ### D — Reliability & release
 
@@ -192,14 +192,14 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 
 None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `templateAccessibility` set reports zero errors, while every item below is still present — confirmed empirically in #38.
 
-| ID     | Finding                                                                                         | Status |
-| ------ | ----------------------------------------------------------------------------------------------- | ------ |
-| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | ⬜     |
-| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | ⬜     |
-| **G3** | Quiz result banner has no `aria-live`; the 15s limit can't be extended (WCAG 2.2.1)             | ⬜     |
-| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | ⬜     |
-| **G5** | No skip link, no route-change announcement                                                      | ⬜     |
-| **G6** | Auth form `autocomplete` attributes need confirming                                             | ⬜     |
+| ID     | Finding                                                                                         | Status                                              |
+| ------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | 🔵 [#79](https://github.com/shermam/trivia/pull/79) |
+| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | 🔵 [#79](https://github.com/shermam/trivia/pull/79) |
+| **G3** | Quiz result banner has no `aria-live`; the 15s limit can't be extended (WCAG 2.2.1)             | ⬜                                                  |
+| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | ⬜                                                  |
+| **G5** | No skip link, no route-change announcement                                                      | ⬜                                                  |
+| **G6** | Auth form `autocomplete` attributes need confirming                                             | ⬜                                                  |
 
 ### H — Product & compliance
 
