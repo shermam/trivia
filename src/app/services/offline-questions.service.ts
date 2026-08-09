@@ -9,11 +9,42 @@ const MAX_POOL_SIZE = 200;
 interface StoredQuestion extends TriviaQuestion {
   /** `Date.now()` at save time — the trim cursor's sort key (see `trimToMaxSize`). */
   cachedAt: number;
+  /** The store's key. See `dedupeKeyFor`. */
+  dedupeKey: string;
 }
 
 /**
- * Persists a rolling pool of trivia questions in IndexedDB, keyed by question
- * text so re-fetching the same question is a no-op rather than a duplicate.
+ * Identity of a cached question, and the store's `keyPath`.
+ *
+ * The store used to be keyed on the question *text* alone, so two questions
+ * that happened to share wording collided and one silently replaced the other
+ * — **including across sources** (finding C4). That was worse than losing a
+ * row: `getOfflineQuestions()` never crosses `source`, so a custom question
+ * overwriting an Open Trivia one didn't just evict it, it moved the remaining
+ * copy into the other source's pool, shrinking what an `open_trivia` request
+ * could draw from while looking like the pool was full.
+ *
+ * The two sources need different identities, because only one of them has a
+ * stable id:
+ *
+ * - **`custom`** questions carry their Firestore document id, which is stable
+ *   across fetches and unique per document — so two contributors submitting the
+ *   same wording are correctly kept as two questions.
+ * - **`open_trivia`** questions get an id minted at fetch time
+ *   (`open-${Date.now()}-${index}`), which is different on every fetch. Keying
+ *   on it would defeat the point of upserting: the pool would fill with copies
+ *   of the same question. Its text is the only stable identity it has.
+ */
+function dedupeKeyFor(question: TriviaQuestion): string {
+  return question.source === 'custom'
+    ? `custom:${question.id}`
+    : `open_trivia:${question.question}`;
+}
+
+/**
+ * Persists a rolling pool of trivia questions in IndexedDB, keyed per source
+ * (`dedupeKeyFor`) so re-fetching the same question is a no-op rather than a
+ * duplicate, while two questions that merely share wording stay distinct.
  * Storage only: fetching fresh questions and deciding when to refill is
  * TriviaService's job (`prefetchOfflinePool`/`getQuestions`'s fallback) — kept
  * separate so this stays a dependency-free leaf that's easy to unit test
@@ -55,7 +86,11 @@ export class OfflineQuestionsService {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       for (const question of questions) {
-        store.put({ ...question, cachedAt } satisfies StoredQuestion);
+        store.put({
+          ...question,
+          cachedAt,
+          dedupeKey: dedupeKeyFor(question),
+        } satisfies StoredQuestion);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error as Error);
@@ -95,8 +130,8 @@ export class OfflineQuestionsService {
       request.onsuccess = () => resolve(request.result as StoredQuestion[]);
       request.onerror = () => reject(request.error as Error);
     });
-    // Strip the storage-only `cachedAt` field so callers only ever see a plain TriviaQuestion.
-    return stored.map(({ cachedAt: _cachedAt, ...question }) => question);
+    // Strip the storage-only fields so callers only ever see a plain TriviaQuestion.
+    return stored.map(({ cachedAt: _cachedAt, dedupeKey: _dedupeKey, ...question }) => question);
   }
 
   private async trimToMaxSize(): Promise<void> {

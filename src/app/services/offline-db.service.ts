@@ -38,8 +38,11 @@ export const OFFLINE_DB_NAME = new InjectionToken<string>('OFFLINE_DB_NAME', {
  *   *preserved* across this one: nothing about its shape changed, and wiping a
  *   player's offline pool because an unrelated store was added would take away
  *   the questions exactly when they may have no network to refill them.
+ * - **4** — `questions` re-keyed from the question text to a source-aware
+ *   `dedupeKey` (finding C4). A store's `keyPath` cannot be changed in place,
+ *   so this one does have to recreate it; `game-state` is still preserved.
  */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 /** Rolling pool of prefetched questions (`OfflineQuestionsService`). Keyed by question text. */
 export const QUESTIONS_STORE = 'questions';
@@ -107,18 +110,22 @@ export class OfflineDbService {
  * actually changed.
  */
 function upgrade(db: IDBDatabase, oldVersion: number): void {
-  // v1's `all_answers` shape is unreadable to the current code and there is
-  // nothing to migrate it from, so those rows go. Only ever applies to a
-  // browser that last ran the app before B1 shipped.
-  if (oldVersion > 0 && oldVersion < 2 && db.objectStoreNames.contains(QUESTIONS_STORE)) {
+  // Anything written before v4 is keyed by question text and cannot be
+  // rewritten in place — a store's `keyPath` is fixed at creation — and
+  // anything before v2 also holds the old `all_answers` shape, which the quiz
+  // would render as `undefined`. Both are discarded rather than migrated: this
+  // store is a cache by definition, so one refill is cheaper than a migration
+  // that would never be exercised again.
+  if (oldVersion > 0 && oldVersion < 4 && db.objectStoreNames.contains(QUESTIONS_STORE)) {
     db.deleteObjectStore(QUESTIONS_STORE);
   }
 
   if (!db.objectStoreNames.contains(QUESTIONS_STORE)) {
-    const questions = db.createObjectStore(QUESTIONS_STORE, { keyPath: 'question' });
+    const questions = db.createObjectStore(QUESTIONS_STORE, { keyPath: 'dedupeKey' });
     questions.createIndex('cachedAt', 'cachedAt');
   }
 
+  // Never recreated: it holds an in-progress game, which is not refillable.
   if (!db.objectStoreNames.contains(GAME_STATE_STORE)) {
     db.createObjectStore(GAME_STATE_STORE, { keyPath: 'id' });
   }
