@@ -36,7 +36,7 @@ Any unmatched route redirects back to `/`.
 
 **Quiz loop (`/play`)**
 
-- Guards against direct navigation: if there's no active question in memory, it redirects back to `/`.
+- Guards against direct navigation: if there's no active question in memory, it redirects back to `/`. A game restored from storage (§1.3) counts as in memory, so reloading `/play` mid-game resumes it rather than bouncing.
 - Answer option letters (A, B, C…) are computed from the index rather than read from a fixed four-entry array, so they cannot run out if the answer count ever changes.
 - Each question has a **15-second countdown timer** (visual ring that turns red in the last 5 seconds). It derives the seconds remaining from the **wall clock** — a deadline captured when the question loads, re-read on a sub-second interval — rather than decrementing a counter on each `setInterval` tick. A tick-counted countdown drifts against real time and, worse, stalls entirely in a backgrounded tab (browsers throttle `setInterval` there to as little as once a minute), so the question would silently never time out until the tab was refocused and would then resume from where it "paused" (finding B10). A `visibilitychange` listener re-syncs the moment the tab becomes visible again so expiry is immediate rather than waiting on the throttled interval; it's torn down in `ngOnDestroy` alongside the interval.
 - Selecting an answer (or the timer hitting 0, which auto-submits a "no answer") locks the question:
@@ -48,7 +48,7 @@ Any unmatched route redirects back to `/`.
 
 **Game over (`/game-over`)**
 
-- Redirects to `/` if there's no completed game in memory.
+- Redirects to `/` unless there's a **completed** game in memory — `totalQuestions > 0` _and_ `isComplete` (§1.3). Requiring the completion flag matters now that game state survives a reload: a half-played game is restorable at any time, and this screen offers to publish its score to the leaderboard.
 - Shows final score (`X / N`) and accuracy percentage, plus a derived performance label ("Outstanding!" / "Great job!" / "Good effort!" / "Keep practicing!" based on accuracy).
 - If fully authenticated (see §1.5), lets the player enter a name (≤30 chars, prefilled from their profile) and submit their score to the Firestore `leaderboard` collection — one entry per account, keeping their best score. Anonymous or unverified players see a sign-in/verify prompt instead of the form.
 - Displays the **top 10 leaderboard**, sorted by score descending, loaded from Firestore and refreshed after a successful save. After a successful save, if the player's own entry is present in that fetched top 10, their row is highlighted and their rank ("You're ranked #N on the leaderboard") is shown — derived entirely from the already-fetched top-10 list (matched by `uid`), not a dedicated rank query, so a saved score outside the top 10 shows no rank claim rather than an invented one.
@@ -79,7 +79,16 @@ Shared normalization for every question:
 
 ### 1.3 State management
 
-`GameControllerService` is a single injectable, app-wide store (Angular signals, no NgRx/state library) holding the entire lifecycle of an in-progress game: config, question list, current index, score, loading/error state, and derived signals (`totalQuestions`, `currentQuestion`, `isLastQuestion`, `percentage`). It also owns navigation between the three routes, so components stay thin and mostly declarative.
+`GameControllerService` is a single injectable, app-wide store (Angular signals, no NgRx/state library) holding the entire lifecycle of an in-progress game: config, question list, current index, score, completion flag, loading/error state, and derived signals (`totalQuestions`, `currentQuestion`, `isLastQuestion`, `percentage`, `progressPercentage`, `hasResumableGame`). It also owns navigation between the three routes, so components stay thin and mostly declarative.
+
+**That state survives a reload.** It used to live only in these signals, so a refresh, a tab crash or a PWA relaunch dropped a game part-way through with no way back — worst for exactly the offline/mobile players §1.8 exists to serve. `GamePersistenceService` (`src/app/services/game-persistence.service.ts`) now mirrors it into `localStorage` and `GameControllerService` reads it back **in its constructor**, synchronously — `/play` and `/game-over` both redirect to `/` when they find no question in memory, so restoring any later would race those guards and bounce the player off the screen they were returning to.
+
+- **`localStorage`, not `sessionStorage`**: the target population loses the whole _tab_ (crash, phone locking, PWA relaunch), which `sessionStorage` does not survive. Every access is wrapped in a `try`/`catch`, because storage throws rather than degrades when full or disabled (Safari private mode) — losing the ability to _save_ a game must never take the game itself down.
+- **A ~6h TTL**, stamped on write and checked on read. Long enough for a reload, a crash or a short break; short enough that yesterday's abandoned game doesn't resurface as an offer to "resume" something the player has forgotten starting. A save timestamped in the _future_ is kept rather than expired, so a clock correction doesn't silently eat a live game.
+- **What's restored is progress, not the moment**: config, questions (including each one's shuffled `all_answers` order, so the options don't move under the player), current index and score. The transient per-question state — which option was selected, the result banner, the seconds left — is not; a resumed question starts on a fresh 15s timer.
+- **Everything read back is validated before it reaches a signal** (schema version, TTL, config enum membership, question shape, `currentIndex` in range, `score` within bounds); anything unrecognised is discarded and the key dropped. This is a _robustness_ boundary, not a security one — it's the player's own browser holding their own score, and a leaderboard write is validated server-side by `firestore.rules` regardless. The point is that `localStorage` outlives deploys, so this code is guaranteed to meet shapes written by older builds, and an exception here fires during bootstrap, which white-screens the app rather than merely losing a game.
+- **The setup screen offers a resume banner** ("You have a game in progress — question N of M", with Resume / Discard) whenever `hasResumableGame()` is true. This is what covers the case a reload cannot: a PWA relaunch or a tap on the logo opens at `/`, not `/play`, so the saved game would otherwise sit in storage unreachable.
+- **A completed game is persisted but never offered as "resume"** — refreshing `/game-over` keeps the score about to be submitted, while resuming would send the player back to replay and re-score the final question. `isComplete` is what distinguishes the two, and `GameOverComponent`'s guard now requires it: since game state outlives the session, a half-played game is restorable at any time, and this screen offers to publish its score.
 
 ### 1.4 Custom question bank
 

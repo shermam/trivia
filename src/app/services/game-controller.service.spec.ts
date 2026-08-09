@@ -47,6 +47,9 @@ function setup(questionCount: number) {
 }
 
 describe('GameControllerService progress', () => {
+  // The service rehydrates a saved game in its constructor (B8), so each test
+  // has to start from empty storage or it inherits the previous one's game.
+  beforeEach(() => localStorage.clear());
   afterEach(() => TestBed.resetTestingModule());
 
   it('shows one question of ten as 10%, not 0%', () => {
@@ -104,3 +107,119 @@ describe('GameControllerService progress', () => {
     expect(service.percentage()).toBe(10);
   });
 });
+
+/**
+ * Finding B8. In-flight game state was memory-only, so a refresh lost it. These
+ * exercise the controller half: that a game is written as it is played, read
+ * back on construction (which is what a reload amounts to), and cleared when
+ * the player is done with it.
+ *
+ * `TestBed.resetTestingModule()` between tests builds a fresh service against
+ * the same `localStorage`, which is exactly the reload being modelled.
+ */
+describe('GameControllerService persistence (B8)', () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    localStorage.clear();
+  });
+
+  /** Plays a game far enough to have something worth saving, then flushes the persisting effect. */
+  function playAndPersist(questionCount: number, index: number, score: number) {
+    const service = setup(questionCount);
+    service.config.set({ amount: questionCount, category: '', difficulty: '', source: 'custom' });
+    service.currentIndex.set(index);
+    service.score.set(score);
+    TestBed.tick(); // effects are flushed by change detection, not synchronously
+    return service;
+  }
+
+  it('restores an in-progress game into a freshly constructed service', () => {
+    playAndPersist(10, 3, 2);
+
+    TestBed.resetTestingModule();
+    const reloaded = setupWithoutQuestions();
+
+    expect(reloaded.totalQuestions()).toBe(10);
+    expect(reloaded.currentIndex()).toBe(3);
+    expect(reloaded.score()).toBe(2);
+    expect(reloaded.currentQuestion()?.id).toBe('q3');
+    expect(reloaded.config()?.source).toBe('custom');
+  });
+
+  it('offers a resumable game only while it is unfinished', () => {
+    const service = playAndPersist(10, 3, 2);
+    expect(service.hasResumableGame()).toBe(true);
+
+    service.isComplete.set(true);
+    expect(service.hasResumableGame()).toBe(false);
+  });
+
+  // A completed game is still persisted — refreshing /game-over must not lose
+  // the score about to be submitted — but it is not offered as "resume", which
+  // would replay and re-score the final question.
+  it('still restores a completed game, without offering to resume it', () => {
+    const service = playAndPersist(5, 4, 3);
+    service.isComplete.set(true);
+    TestBed.tick();
+
+    TestBed.resetTestingModule();
+    const reloaded = setupWithoutQuestions();
+
+    expect(reloaded.totalQuestions()).toBe(5);
+    expect(reloaded.isComplete()).toBe(true);
+    expect(reloaded.hasResumableGame()).toBe(false);
+  });
+
+  it('marks the game complete when advancing past the last question', () => {
+    const service = playAndPersist(3, 2, 3);
+    expect(service.isComplete()).toBe(false);
+
+    service.advanceQuestion();
+
+    expect(service.isComplete()).toBe(true);
+    expect(service.currentIndex()).toBe(2); // did not run past the end
+  });
+
+  it('discarding clears both the state and the saved game', () => {
+    const service = playAndPersist(10, 3, 2);
+
+    service.discardSavedGame();
+    TestBed.tick();
+
+    expect(service.totalQuestions()).toBe(0);
+    expect(service.hasResumableGame()).toBe(false);
+
+    TestBed.resetTestingModule();
+    expect(setupWithoutQuestions().totalQuestions()).toBe(0);
+  });
+
+  it('resetGame clears the saved game, so Play Again does not resurrect it', () => {
+    const service = playAndPersist(10, 3, 2);
+
+    service.resetGame();
+    TestBed.tick();
+
+    TestBed.resetTestingModule();
+    expect(setupWithoutQuestions().totalQuestions()).toBe(0);
+  });
+
+  it('saves nothing for a game that was never started', () => {
+    setupWithoutQuestions();
+    TestBed.tick();
+
+    TestBed.resetTestingModule();
+    expect(setupWithoutQuestions().totalQuestions()).toBe(0);
+  });
+});
+
+/** Builds the service without seeding questions — i.e. exactly what a page load does. */
+function setupWithoutQuestions() {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: TriviaService, useValue: { getQuestions: () => Promise.resolve([]) } },
+      { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+    ],
+  });
+  return TestBed.inject(GameControllerService);
+}
