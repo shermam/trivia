@@ -73,9 +73,17 @@ export function registerFirebasePreviewTasks(on: Cypress.PluginEvents): void {
     },
 
     /** Records a uid (e.g. the app's own anonymous sign-in) for later cleanup, without writing anything. */
-    trackAuthUid(uid: string) {
-      if (uid) {
-        trackedAuthUids.add(uid);
+    /**
+     * Takes every uid a test's browser persisted, not just the one it held at
+     * the end — see `cypress/support/auth-uid-tracker.ts` (finding C6). Plural
+     * because a single test legitimately produces several: a sign-out mints a
+     * fresh anonymous account, and a sign-in can switch uid rather than link.
+     */
+    trackAuthUids(uids: string[]) {
+      for (const uid of uids) {
+        if (uid) {
+          trackedAuthUids.add(uid);
+        }
       }
       return null;
     },
