@@ -17,14 +17,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 32       |
+| ✅ Fixed and merged | 33       |
 | 🔵 In review        | 2        |
-| ⬜ Not started      | 22       |
+| ⬜ Not started      | 21       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#71](https://github.com/shermam/trivia/pull/71) (C4, offline pool key collision).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#72](https://github.com/shermam/trivia/pull/72) (C5, parallel Pro-price lookup).
 
 > A PR in this series can never mark _itself_ merged — the commit that updates the register is the one being reviewed. So the entry for the most recently merged finding is routinely one PR behind, and the next PR tidies it. If you are reading this between merges, trust the `Status` column over this line.
 
@@ -149,8 +149,8 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **C1** | `getCustomQuestions()` downloads the entire public collection every custom/mixed game | ✅ [#70](https://github.com/shermam/trivia/pull/70) |
 | **C2** | No TTL on `checkout_sessions` / `portal_sessions`                                     | ⬜                                                  |
 | **C3** | Anonymous accounts grow monotonically; every sign-out mints another                   | ⬜                                                  |
-| **C4** | IndexedDB keyed on question _text_, so identical text collides across sources         | 🔵 [#71](https://github.com/shermam/trivia/pull/71) |
-| **C5** | `getProPriceId()` is a sequential N+1                                                 | ⬜                                                  |
+| **C4** | IndexedDB keyed on question _text_, so identical text collides across sources         | ✅ [#71](https://github.com/shermam/trivia/pull/71) |
+| **C5** | `getProPriceId()` is a sequential N+1                                                 | 🔵 [#72](https://github.com/shermam/trivia/pull/72) |
 
 ### D — Reliability & release
 

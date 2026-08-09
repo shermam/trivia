@@ -83,8 +83,10 @@ const MAX_PRO_PRODUCTS = 5;
  *
  * Filters on `role` alone rather than `role` *and* `active` so the query stays
  * a single equality filter served by the automatic single-field index;
- * `active` is checked in `isSellableProPrice` instead. `firestore.indexes.json`
- * stays empty, which is worth more than saving one document read.
+ * `active` is checked in `isSellableProPrice` instead. Not needing a composite
+ * index for this is worth more than saving one document read.
+ * `SubscriptionService.getProPriceId()` filters the same way, for the same
+ * reason and so the two agree on what a Pro product is.
  */
 export async function isPriceSellableAsPro(priceId: string): Promise<boolean> {
   const products = await getFirestore()
