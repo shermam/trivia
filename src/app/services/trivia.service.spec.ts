@@ -465,3 +465,65 @@ describe('TriviaService entity decoding is per source', () => {
     expect(question.incorrect_answers).toContain("It's a protocol");
   });
 });
+
+/**
+ * Finding C1. The category/difficulty filter and the amount ceiling used to be
+ * applied here, in the browser, over every document in the collection. They are
+ * the query's job now — so what this layer must get right is *forwarding* them.
+ * Dropping that would be silent: the game would still run, still show custom
+ * questions, and simply ignore the category and difficulty the player picked.
+ */
+describe('TriviaService custom-question queries (C1)', () => {
+  function setupWithSpy() {
+    const getCustomQuestions = vi.fn(() => of([]));
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions } },
+      ],
+    });
+    return { service: TestBed.inject(TriviaService), getCustomQuestions };
+  }
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('passes the chosen category, difficulty and amount to the query', async () => {
+    const { service, getCustomQuestions } = setupWithSpy();
+
+    await service.getQuestions({
+      amount: 7,
+      category: 'History',
+      difficulty: 'hard',
+      source: 'custom',
+    });
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({
+      category: 'History',
+      difficulty: 'hard',
+      limit: 7,
+    });
+  });
+
+  it('asks for only its half of a mixed game, not the whole amount', async () => {
+    const { service, getCustomQuestions } = setupWithSpy();
+    const httpMock = TestBed.inject(HttpTestingController);
+
+    const promise = service.getQuestions({
+      amount: 10,
+      category: '',
+      difficulty: '',
+      source: 'mixed',
+    });
+    httpMock.expectOne((r) => r.url.includes('api.php')).flush({ response_code: 0, results: [] });
+    await promise;
+
+    // Mixed splits 10 into 5 from each source; asking for 10 here would double
+    // the read this finding exists to bound.
+    expect(getCustomQuestions).toHaveBeenCalledWith({
+      category: '',
+      difficulty: '',
+      limit: 5,
+    });
+  });
+});

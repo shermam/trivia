@@ -69,7 +69,7 @@ Any unmatched route redirects back to `/`.
 `TriviaService` is the single entry point for fetching quiz questions (`getQuestions(config)`), and normalizes both sources into one shared `TriviaQuestion` shape:
 
 - **Open Trivia DB** (`source: 'open_trivia'`): calls `GET https://opentdb.com/api.php` with `amount`, optional `category` (resolved from name → numeric ID via the cached categories list), and optional `difficulty`. Returns `[]` if the API reports a non-zero `response_code` (e.g. not enough questions available).
-- **Custom** (`source: 'custom'`): reads all documents from the Firestore `custom_questions` collection, filters client-side by category/difficulty, shuffles, and takes the requested amount.
+- **Custom** (`source: 'custom'`): queries the Firestore `custom_questions` collection with the chosen category/difficulty as **server-side `where` clauses and a `limit` equal to the requested amount**, then shuffles the batch. It used to read _every_ document in the collection and filter in the browser — billed per document and growing with other people's contributions rather than with anything the player asked for (§3, and `CLAUDE.md` §4.1).
 - **Mixed** (`source: 'mixed'`): splits the requested amount roughly in half between the two sources (Open Trivia questions are best-effort — a failure there is swallowed so a slow/broken third-party API doesn't sink a mixed game), merges, shuffles, and trims to the exact requested count.
 
 Shared normalization for every question:
@@ -333,7 +333,15 @@ createdAt: int         (epoch ms, must be near server time)
 
 **This is mitigation, not closure.** Nothing here proves a game was actually played — a determined attacker can still write a plausible 25/25. What it removes is the cheap, unbounded version: the ceiling for a forged entry is now the same as the ceiling for an honest one. Closing it properly needs a server-attested game token, which was considered and deliberately deferred — see `AUDIT_REMEDIATION.md` §4.
 
-No composite indexes are currently defined (`firestore.indexes.json` is empty); the leaderboard's `orderBy('score', 'desc').limit(10)` query only needs the automatic single-field index.
+**One composite index is defined** (`firestore.indexes.json`): `custom_questions` on `(category ASC, difficulty ASC, __name__ ASC)`, for the bounded question query described below. The leaderboard's `orderBy('score', 'desc').limit(10)` needs only the automatic single-field index, and so does a question query filtering on category **or** difficulty alone — Firestore's automatic single-field indexes are already `(field, __name__)`, so they serve one equality filter ordered by document ID. Only the two-filter case needs a composite.
+
+> **The emulator cannot verify this.** It answers queries whether or not a matching index is declared, so a missing index passes every local check and `npm run e2e`, then fails in production with `FAILED_PRECONDITION` and a console link. Index requirements have to be reasoned about and declared, not discovered by running the suite. The same asymmetry makes the deploy order (§4.2) worth remembering: hosting ships before indexes, and a newly declared index also takes time to build, so a brand-new query can briefly fail against production even when the declaration is correct.
+
+### How `custom_questions` is sampled
+
+The bounded query above has to stay _random_, or every player would be served the same first N questions forever. It does that with the document ID space itself: the query starts at a randomly generated document ID (`orderBy(documentId())` + `startAt(cursor)` + `limit(n)`), and wraps around with a second `endBefore(cursor)` query if the cursor landed too near the end. Firestore auto-IDs are drawn uniformly from a 62-character alphabet, so a random ID is a uniform position in the collection.
+
+Deliberately **no `random` field on the documents**, which is the textbook approach: the exact-key `hasOnly()` allowlist in `firestore.rules` would have to be widened for it, every existing document would lack it, and no client could backfill one because `custom_questions` is create-only — the same wall attribution (A10) hit. Using the ID space needs no schema change, no migration and no rules change at all. The cost is at most two reads of `n` documents, and usually one: the wrap only runs when the first pass came up short.
 
 ### Rules test suite
 
