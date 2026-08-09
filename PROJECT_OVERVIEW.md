@@ -179,7 +179,7 @@ The same mark is also used in-app as the brand badge — top bar logo, `GameSetu
 
 Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. `FirebaseAppService.getApp()` fetches that config and calls `initializeApp` exactly once, shared by both Firestore and Auth.
 
-All Firestore calls (`getCustomQuestions`, `saveHighScore`, `getTopScores`) are wrapped in a `withTimeout()` helper (10s) — the Firestore SDK's promises never reject on their own if the backend is unreachable (e.g. placeholder/misconfigured credentials), which would otherwise leave the UI stuck in a permanent loading state.
+All Firestore calls (`getCustomQuestions`, `saveHighScore`, `getTopScores`) are wrapped in a `withTimeout()` helper (10s) — the Firestore SDK's promises never reject on their own if the backend is unreachable (e.g. placeholder/misconfigured credentials), which would otherwise leave the UI stuck in a permanent loading state. The helper clears its timer however the race settles: `Promise.race` stops caring about the loser, so the `setTimeout` used to stay armed for its full duration after a call had already succeeded, holding its closure across all twelve call sites.
 
 ### 2.4 Cloud Functions backend (`functions/`)
 
