@@ -9,6 +9,7 @@ import {
 import { getOrCreateStripeCustomerId } from './customers';
 import { isPriceSellableAsPro } from './products';
 import { currentProjectId, getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
+import { sessionExpiryAt } from './session-expiry';
 
 /**
  * Everything a client may say about a checkout it wants to start — and, since
@@ -48,6 +49,14 @@ export const createCheckoutSession = onDocumentCreated(
     const { uid, sessionId } = event.params;
     const request = snapshot.data() as CheckoutSessionRequest;
     logger.info(`createCheckoutSession invoked for uid=${uid} sessionId=${sessionId}`, request);
+
+    // Stamped before anything that can fail, rather than folded into the
+    // write-backs below. Those only happen on paths this handler completes —
+    // so a Stripe call that hangs until the function times out would leave a
+    // document with no expiry at all, and it is exactly when things go wrong
+    // that the cleanup should still apply (finding C2). One extra write on a
+    // path that already does a Stripe round trip.
+    await snapshot.ref.set({ expiresAt: sessionExpiryAt(new Date()) }, { merge: true });
 
     try {
       // Re-validated here even though `firestore.rules` already bounded the

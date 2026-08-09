@@ -253,11 +253,13 @@ customers/{uid}/checkout_sessions/{window}-{slot}
   origin: string         (bare scheme://host[:port], written by the client)
   sessionId, url: string                        (written back by createCheckoutSession)
   error?: { message: string }
+  expiresAt: timestamp                          (written by createCheckoutSession; TTL, see below)
 
 customers/{uid}/portal_sessions/{window}-{slot}
   origin: string         (bare scheme://host[:port], written by the client)
   url: string                                   (written back by createPortalSession)
   error?: { message: string }
+  expiresAt: timestamp                          (written by createPortalSession; TTL, see below)
 
 customers/{uid}/subscriptions/{id}
   status: string      (Stripe subscription status, e.g. 'active' | 'trialing' | 'canceled' | ...)
@@ -276,6 +278,13 @@ customers/{uid}/subscriptions/{id}
 - **`firestore.rules` bounds the shape**: an exact-key `hasOnly()` allowlist (`price` + `origin`, or `origin` alone), a Stripe-price-ID pattern on `price`, and `origin` constrained to a bare `scheme://host[:port]` — no path, query or fragment, so there is nothing to smuggle.
 - **The function checks it again against what only the server knows** (`functions/src/checkout-request.ts`). Rules cannot know which hostnames belong to this deployment, so the origin is matched against an allowlist: `{project}.web.app`, `.firebaseapp.com` and `{project}--{channel}.web.app` preview channels are derived from the project ID; localhost is offered to a `demo-` project only; and the **custom domain** (`trivimind.com` / `www.trivimind.com`) is the one entry that cannot be derived and is therefore a hand-maintained constant, `CUSTOM_APP_ORIGINS`. **Attaching another custom domain in the Firebase console means adding it there in the same change** — checkout is refused on any origin not on the list, so the symptom of forgetting is narrow and easy to miss: the new domain quietly sells nothing while every other one keeps working. Each refusal is logged with the offending origin. Rules cannot look a value up in a catalog either, so `price` is checked against the webhook-mirrored `products`/`prices` collections: it has to be an `active` price on an `active` product carrying `role: 'pro'`. A well-formed price ID for anything else in the same Stripe account is rejected.
 - **The redirect URLs and the mode are no longer client input at all.** `createCheckoutSession` builds `success_url`/`cancel_url` from the validated origin and hardcodes `mode: 'subscription'`, so there is no client-chosen value left for it to pass through.
+
+**Session documents expire on their own.** They are handshake scratch space — the client creates one, the backend writes a URL onto it, the browser redirects, and nothing reads it again — and nothing deleted them, so they accumulated one per checkout attempt for the life of the project. Both collection groups now carry a **Firestore TTL policy** on `expiresAt`, declared in `firestore.indexes.json` (`fieldOverrides` with `ttl: true`) so it deploys through the same `firebase deploy --only firestore:indexes` step as any index rather than being a console setting nobody can see from the repo.
+
+- **The window is 24 hours**, matched to Stripe's own Checkout Session expiry rather than picked freely: the handshake finishes in seconds, so what a longer window buys is a readable record while the session it describes is still live on Stripe's side — exactly when someone would be looking at it to debug a failed payment. Firestore sweeps expired documents on a best-effort basis (typically within 24h of expiry), so this is a floor on retention, never a promise about when a document is gone.
+- **`expiresAt` is stamped by the Cloud Function before anything that can fail**, not folded into the write-backs. Those only happen on paths the handler completes, so a Stripe call that hangs until the function times out would leave a document with no expiry at all — and a cleanup that skips exactly the cases where things went wrong is the wrong cleanup. It costs one extra write on a path that already makes a Stripe round trip.
+- **No rules change was needed.** The allowlist governs the client's `create`; the function writes with the Admin SDK, which bypasses rules entirely, so `expiresAt` never passes through them.
+- **The TTL cannot re-open the volume cap below.** Slot IDs derive from a window of server time that only moves forward, so a deleted document's ID belongs to a window no future request can name.
 
 **The document ID carries a volume cap.** Every create on these paths triggers a Cloud Function that calls Stripe, and rules cannot count a user's documents — so the cap lives in the only server-controlled quantity available for free, `request.time`. An ID must be `{window}-{slot}`: the current 5-minute window of server time (±1 window, for client-clock skew — the same tolerance `isNearRequestTime()` already accepts) and a single digit. Since `create` only ever applies to an ID that doesn't exist yet, that is ten sessions per five minutes per user, against an unbounded `addDoc` loop before. `SubscriptionService.createSessionDoc()` picks a slot at random and moves to the next on a `permission-denied`, so a real user never sees the cap; running out of all ten is it actually biting.
 
