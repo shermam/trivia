@@ -21,8 +21,27 @@ export class GameControllerService {
     () => this.questions()[this.currentIndex()] ?? null,
   );
   readonly isLastQuestion = computed(() => this.currentIndex() >= this.totalQuestions() - 1);
+  /** Accuracy: how many were answered correctly. Shown on the game-over screen. */
   readonly percentage = computed(() =>
     this.totalQuestions() === 0 ? 0 : Math.round((this.score() / this.totalQuestions()) * 100),
+  );
+
+  /**
+   * How far through the quiz the player is — *position*, not accuracy. Drives
+   * the bar under the quiz header, and deliberately agrees with the "Question
+   * N / M" label beside it: on question 1 of 10 both say 1 of 10, and on the
+   * last question the bar is full.
+   *
+   * `currentIndex` is zero-based, so it counts the questions *behind* you. The
+   * bar used it directly and was a question out at every step: 0% while
+   * looking at the first question, and 90% on the last of ten — it could never
+   * fill, because `advanceQuestion()` navigates away instead of incrementing
+   * past the end.
+   */
+  readonly progressPercentage = computed(() =>
+    this.totalQuestions() === 0
+      ? 0
+      : Math.round(((this.currentIndex() + 1) / this.totalQuestions()) * 100),
   );
 
   async startGame(config: GameConfig): Promise<void> {

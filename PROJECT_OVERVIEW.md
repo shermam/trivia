@@ -44,7 +44,7 @@ Any unmatched route redirects back to `/`.
   - An incorrect selection is highlighted red; all other options dim.
   - Score increments only on a correct, non-timed-out answer.
 - After a 2-second delay showing the result, it auto-advances to the next question (or to `/game-over` if it was the last one).
-- Displays running question index, live score, category, and difficulty badges.
+- Displays running question index, live score, category, and difficulty badges. The progress bar under the header reads `GameControllerService.progressPercentage()`, which counts from one so it agrees with the "Question N / M" label beside it — it previously divided the zero-based index directly and was a full question out at every step, showing 0% on question 1 and never filling.
 
 **Game over (`/game-over`)**
 
