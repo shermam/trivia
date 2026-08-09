@@ -1,13 +1,27 @@
-import { ApplicationConfig, isDevMode, provideBrowserGlobalErrorListeners } from '@angular/core';
+import {
+  ApplicationConfig,
+  inject,
+  isDevMode,
+  provideAppInitializer,
+  provideBrowserGlobalErrorListeners,
+} from '@angular/core';
 import { provideHttpClient } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
 import { provideServiceWorker } from '@angular/service-worker';
 
 import { routes } from './app.routes';
+import { GameControllerService } from './services/game-controller.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    // Restores an in-progress game (B8) *before* the first route activates.
+    // `/play` and `/game-over` redirect to `/` the moment they find no question
+    // in memory, and the store is asynchronous, so a restore racing route
+    // activation would bounce the player off the very screen they reloaded.
+    // Bootstrap therefore waits — bounded, and non-throwing, so a browser with
+    // no usable IndexedDB still starts normally (see `restoreSavedGame`).
+    provideAppInitializer(() => inject(GameControllerService).restoreSavedGame()),
     provideRouter(routes),
     provideHttpClient(),
     provideServiceWorker('ngsw-worker.js', {

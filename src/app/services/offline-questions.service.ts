@@ -1,18 +1,8 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { GameConfig, TriviaQuestion } from '../models/question.model';
 import { shuffleArray } from '../utils/shuffle.util';
+import { OfflineDbService, QUESTIONS_STORE as STORE_NAME } from './offline-db.service';
 
-const DB_NAME = 'trivia-offline';
-/**
- * Bumped to 2 when `all_answers` changed from `string[]` to `Answer[]`
- * (finding B1). Cached entries written under v1 hold the old shape, and the
- * quiz would render `undefined` for every option — so the upgrade discards the
- * store rather than trying to migrate it. Costs one refill of a pool that is
- * a cache by definition, which is cheaper than a migration nobody will ever
- * exercise again.
- */
-const DB_VERSION = 2;
-const STORE_NAME = 'questions';
 /** Oldest-first trim ceiling — bounds an IndexedDB pool that's topped up on every reconnect over a long-lived session. */
 const MAX_POOL_SIZE = 200;
 
@@ -34,7 +24,7 @@ export class OfflineQuestionsService {
   /** Best-effort UI signal (e.g. "N questions available offline") — refreshed after every save, not guaranteed to be live. */
   readonly cachedCount = signal(0);
 
-  private dbPromise: Promise<IDBDatabase> | null = null;
+  private readonly db = inject(OfflineDbService);
 
   constructor() {
     // Best-effort: IndexedDB can be unavailable (Safari private mode, older browsers, or a
@@ -45,7 +35,7 @@ export class OfflineQuestionsService {
   }
 
   async getCount(): Promise<number> {
-    const db = await this.openDb();
+    const db = await this.db.open();
     return new Promise<number>((resolve, reject) => {
       const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).count();
       request.onsuccess = () => resolve(request.result);
@@ -59,7 +49,7 @@ export class OfflineQuestionsService {
       return;
     }
 
-    const db = await this.openDb();
+    const db = await this.db.open();
     const cachedAt = Date.now();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -99,7 +89,7 @@ export class OfflineQuestionsService {
   }
 
   private async getAllQuestions(): Promise<TriviaQuestion[]> {
-    const db = await this.openDb();
+    const db = await this.db.open();
     const stored = await new Promise<StoredQuestion[]>((resolve, reject) => {
       const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll();
       request.onsuccess = () => resolve(request.result as StoredQuestion[]);
@@ -110,7 +100,7 @@ export class OfflineQuestionsService {
   }
 
   private async trimToMaxSize(): Promise<void> {
-    const db = await this.openDb();
+    const db = await this.db.open();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
@@ -137,26 +127,5 @@ export class OfflineQuestionsService {
       };
       countRequest.onerror = () => reject(countRequest.error as Error);
     });
-  }
-
-  private openDb(): Promise<IDBDatabase> {
-    if (!this.dbPromise) {
-      this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          // Recreated, not preserved: every stored shape change so far has
-          // been to data this pool can simply re-fetch.
-          if (db.objectStoreNames.contains(STORE_NAME)) {
-            db.deleteObjectStore(STORE_NAME);
-          }
-          const store = db.createObjectStore(STORE_NAME, { keyPath: 'question' });
-          store.createIndex('cachedAt', 'cachedAt');
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error as Error);
-      });
-    }
-    return this.dbPromise;
   }
 }

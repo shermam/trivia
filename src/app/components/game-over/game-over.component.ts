@@ -92,7 +92,11 @@ export class GameOverComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    if (this.gameController.totalQuestions() === 0) {
+    // Requires a *finished* game, not merely a loaded one. Game state now
+    // survives a reload (B8), so a half-played game is restorable at any time —
+    // and this screen offers to publish its score to the leaderboard, which a
+    // game still in progress has no business doing.
+    if (this.gameController.totalQuestions() === 0 || !this.gameController.isComplete()) {
       void this.router.navigateByUrl('/');
       return;
     }

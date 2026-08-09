@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { GameConfig } from '../../models/question.model';
 import { ConnectivityService } from '../../services/connectivity.service';
 import { GameControllerService } from '../../services/game-controller.service';
@@ -20,6 +20,7 @@ import { LogoComponent } from '../logo/logo.component';
 })
 export class GameSetupComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
+  private readonly router = inject(Router);
   private readonly triviaService = inject(TriviaService);
   protected readonly gameController = inject(GameControllerService);
   protected readonly subscriptionService = inject(SubscriptionService);
@@ -43,6 +44,19 @@ export class GameSetupComponent implements OnInit {
   // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
   ngOnInit(): void {
     void this.loadCategories();
+  }
+
+  /**
+   * Returns to a game restored from storage. `GameControllerService` has
+   * already rehydrated it, so this only has to navigate — the player lands back
+   * on the question they were on, with a fresh timer (B8).
+   */
+  protected resumeGame(): void {
+    void this.router.navigateByUrl('/play');
+  }
+
+  protected discardGame(): void {
+    this.gameController.discardSavedGame();
   }
 
   private async loadCategories(): Promise<void> {
