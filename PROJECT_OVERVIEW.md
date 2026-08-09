@@ -310,7 +310,7 @@ createdAt: int         (epoch ms, must be near server time)
 - **Read**: public.
 - **Create / Update**: requires a non-anonymous, (if password-based) email-verified caller writing to their own uid's doc — schema is strictly validated in `firestore.rules` (exact key set, types, bounds) and an update is only accepted if `score` improves on the existing value.
 - **Delete**: disallowed.
-- One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes; a rejected write means "not a new personal best", not necessarily an error.
+- One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes. **A rejection is not self-explanatory**, though: since the bounds above were added, the rules also refuse a clock outside the accepted window, a name over 30 characters, a score inconsistent with the question count, and an unverified account. `GameOverComponent` therefore reads the caller's own entry before claiming "your best score is already higher", and only suppresses retry when that reading confirms it — everything else, including a lookup that itself fails, gets a generic message and keeps the form open. Reporting one cause for every rejection told most of those users something false and left them no way to try again.
 
 **The numeric bounds are anti-cheat, not just shape validation.** Previously the rules checked only that `score >= 0` and `totalQuestions >= score`, which accepted a hand-written `999999` and made rank #1 permanently unassailable (an update requires beating the existing score). Three constraints now tie an entry to something a real game could have produced:
 

@@ -118,6 +118,25 @@ export class FirebaseService {
     );
   }
 
+  /**
+   * The caller's own leaderboard row, or null if they have never saved one.
+   *
+   * Exists so a rejected save can be *explained* rather than guessed at: the
+   * rules refuse a write for several reasons (a score that doesn't improve, a
+   * clock too far off, a name too long, an account that isn't verified), and
+   * only one of them is the friendly "your best is already higher". Reading
+   * the existing row is what tells those apart. A document `get` on a known
+   * path, not a collection scan — see `CLAUDE.md` §4.1.
+   */
+  async getLeaderboardEntry(uid: string): Promise<LeaderboardEntry | null> {
+    const { firestore, firestoreModule } = await this.getFirestore();
+    const snapshot = await withTimeout(
+      firestoreModule.getDoc(firestoreModule.doc(firestore, LEADERBOARD_COLLECTION, uid)),
+      FIRESTORE_TIMEOUT_MS,
+    );
+    return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as LeaderboardEntry) : null;
+  }
+
   getTopScores(topN = 10): Observable<LeaderboardEntry[]> {
     return defer(() =>
       this.getFirestore().then(({ firestore, firestoreModule }) => {
