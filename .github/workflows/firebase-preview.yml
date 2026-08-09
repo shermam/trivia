@@ -162,6 +162,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      # `hosting:channel:delete` refuses to run outside a Firebase app
+      # directory ("could not locate firebase.json") — it resolves the target
+      # site from that file, and `--site`/`--project` do not substitute for it.
+      # Without this the job fails on every merge, which is how it shipped:
+      # nothing else in this job needs the repo, so its absence wasn't obvious.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Delete this PR's preview channel
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
