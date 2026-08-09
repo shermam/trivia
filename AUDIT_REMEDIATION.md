@@ -16,14 +16,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 21       |
-| 🔵 In review        | 2        |
-| ⬜ Not started      | 33       |
+| ✅ Fixed and merged | 23       |
+| 🔵 In review        | 1        |
+| ⬜ Not started      | 32       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#55](https://github.com/shermam/trivia/pull/55) (B1 + B2, answer identity).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#56](https://github.com/shermam/trivia/pull/56) (B3, don't cache a failed category fetch).
 
 > A PR in this series can never mark _itself_ merged — the commit that updates the register is the one being reviewed. So the entry for the most recently merged finding is routinely one PR behind, and the next PR tidies it. If you are reading this between merges, trust the `Status` column over this line.
 
@@ -126,9 +126,9 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 
 | ID      | Finding                                                                                                                                             | Status                                              |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **B1**  | Nothing prevents `correct_answer` also appearing in `incorrect_answers`; the quiz matches answers by string, so a wrong duplicate scores as correct | 🔵 [#55](https://github.com/shermam/trivia/pull/55) |
-| **B2**  | `ANSWER_LABELS` has 4 entries but the rules permit 6 answers                                                                                        | 🔵 [#55](https://github.com/shermam/trivia/pull/55) |
-| **B3**  | A failed `getCategories()` is cached forever — one blip degrades the whole session                                                                  | ⬜                                                  |
+| **B1**  | Nothing prevents `correct_answer` also appearing in `incorrect_answers`; the quiz matches answers by string, so a wrong duplicate scores as correct | ✅ [#55](https://github.com/shermam/trivia/pull/55) |
+| **B2**  | `ANSWER_LABELS` has 4 entries but the rules permit 6 answers                                                                                        | ✅ [#55](https://github.com/shermam/trivia/pull/55) |
+| **B3**  | A failed `getCategories()` is cached forever — one blip degrades the whole session                                                                  | 🔵 [#56](https://github.com/shermam/trivia/pull/56) |
 | **B4**  | Every `permission-denied` is reported as "your best score is already higher", and blocks retry                                                      | ⬜                                                  |
 | **B5**  | `playingOffline` is dead code — the player is never told they're on cached questions                                                                | ⬜                                                  |
 | **B6**  | `withTimeout` never clears its timer                                                                                                                | ⬜                                                  |

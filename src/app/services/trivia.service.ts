@@ -41,6 +41,24 @@ export class TriviaService {
   /** True when the most recent `getQuestions()` call was served from the offline IndexedDB pool instead of the network. */
   readonly playingOffline = signal(false);
 
+  /**
+   * Categories are fetched once and memoized for the session — they change
+   * about never, and both the game-setup form and `resolveCategoryId()` ask
+   * for them.
+   *
+   * The memo is dropped if the fetch fails. Caching a *rejected* promise turns
+   * one bad moment — a flaky connection, Open Trivia DB briefly down — into a
+   * permanently degraded session: every later call returns the same rejection,
+   * so the category picker stays stuck on "Any Category" until a full page
+   * reload, long after the network recovered. Same pattern as
+   * `SubscriptionService.getProPriceId()`.
+   *
+   * Clearing unconditionally is safe here: the field is only reassigned when
+   * it is null, and it is still this promise for as long as this promise is
+   * the rejected one, so there is no newer memo to clobber. Attaching
+   * `.catch()` also means the rejection is handled even if no caller is
+   * listening, while callers that are still get their own rejection.
+   */
   getCategories(): Promise<TriviaCategory[]> {
     if (!this.categoriesPromise) {
       this.categoriesPromise = firstValueFrom(
@@ -48,6 +66,9 @@ export class TriviaService {
           .get<{ trivia_categories: TriviaCategory[] }>(OPEN_TRIVIA_CATEGORIES_URL)
           .pipe(map((res) => res.trivia_categories)),
       );
+      this.categoriesPromise.catch(() => {
+        this.categoriesPromise = null;
+      });
     }
     return this.categoriesPromise;
   }

@@ -31,7 +31,7 @@ Any unmatched route redirects back to `/`.
   - **Category**: "Any Category" or one of the categories fetched live from Open Trivia DB
   - **Difficulty**: Any / Easy / Medium / Hard
   - **Question source**: `open_trivia` (public API), `custom` (Firestore question bank), or `mixed` (roughly half-and-half, shuffled together)
-- Categories are fetched once (cached in-memory) from `GET https://opentdb.com/api_category.php`; a failure degrades gracefully to "Any Category" with an inline warning instead of blocking the form.
+- Categories are fetched once (cached in-memory) from `GET https://opentdb.com/api_category.php`; a failure degrades gracefully to "Any Category" with an inline warning instead of blocking the form. **The memo is dropped if that fetch fails**, so the next attempt goes back to the network — caching a rejected promise turned one flaky moment into a session that stayed stuck on "Any Category" until a full page reload, long after the network recovered. Same pattern as `SubscriptionService.getProPriceId()`.
 - On submit, `GameControllerService.startGame()` fetches questions for the chosen config and navigates to `/play`. Loading and error states (e.g. no questions found for the given filters, network failure) are surfaced inline on the form.
 
 **Quiz loop (`/play`)**
