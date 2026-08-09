@@ -163,6 +163,15 @@ Fires only on a PR **closed and merged** into `main` (not just closed). Checkout
 
 This is a **deploy-on-merge** pipeline: it doesn't re-run e2e itself. That's only safe because of §6.4 gating merges in the first place.
 
+**Never write `__name__` into a composite index definition, even though the API reports it there.** This broke this project's deploy pipeline for four consecutive merges, and the shape of the failure is why it is worth a rule rather than a note:
+
+- The deploy that _introduces_ the index **succeeds** — it creates it. Every deploy afterwards fails, on unrelated PRs, having already shipped Hosting. So the pipeline breaks with a red step on a change that has nothing to do with indexes, and stays broken.
+- The two CLI majors disagree, and only one direction is safe. The version used here to deploy rules/indexes **strips `__name__` from every index it reads back from the project**, then compares field counts against the file verbatim — so a declared `__name__` makes the file describe a _different_ index from the live one, the CLI decides the live one should be deleted, and in non-interactive mode it refuses without `--force`. The newer major instead _appends_ `__name__` to the spec when absent, so it matches either way. **Omitting it is correct under both; declaring it is correct under only one.**
+- `--dry-run` does not catch it. It validates the file and the rules, not the diff against the project.
+- Nothing local catches it either: an emulator does not enforce index configuration at all, so the whole test suite is blind to this class of error by construction.
+
+The durable guard is a test that reads the indexes file and asserts no index declares `__name__` (`firestore-tests/indexes.spec.ts` here). It costs nothing and is the only thing between this mistake and a silently broken deploy pipeline. And the general lesson: **`--force` would have "fixed" this by deleting the production index** — when a deploy tool asks for `--force`, it is describing an intent, and the right response is to find out which intent, not to grant it.
+
 ### 6.4 Preview deploy + real-preview E2E (`firebase-preview.yml`)
 
 Every PR to `main` on open/sync/reopen, with a `concurrency` group keyed on the PR number so a new push cancels a stale in-flight run. Two sequential jobs, plus a third on `closed`:

@@ -4,9 +4,14 @@
       "collectionGroup": "custom_questions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "category", "order": "ASCENDING" },
-        { "fieldPath": "difficulty", "order": "ASCENDING" },
-        { "fieldPath": "__name__", "order": "ASCENDING" }
+        {
+          "fieldPath": "category",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "difficulty",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
