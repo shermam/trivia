@@ -1,5 +1,9 @@
 import './commands';
-import './preview-commands';
+import {
+  installAuthUidTracker,
+  rememberExistingUid,
+  takeTrackedAuthUids,
+} from './auth-uid-tracker';
 
 // Cypress reserves paths starting with `/__` for its own runner/iframe
 // machinery, which collides with Firebase Hosting's own `/__/` reserved
@@ -24,6 +28,9 @@ before(() => {
 });
 
 Cypress.on('window:before:load', (win) => {
+  // Before any app code runs, so no auth write is missed (finding C6).
+  installAuthUidTracker(win);
+
   const originalFetch = win.fetch.bind(win);
   win.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -45,7 +52,13 @@ Cypress.on('window:before:load', (win) => {
 // that once the spec finishes, so a preview run never leaves visible trash
 // behind for a real visitor to see.
 afterEach(() => {
-  cy.trackCurrentSessionUid();
+  // A reload restores a session from storage without writing it again, so the
+  // wrapper alone would not see it.
+  cy.window({ log: false }).then((win) => rememberExistingUid(win));
+  cy.then(() => {
+    const uids = takeTrackedAuthUids();
+    return uids.length > 0 ? cy.task('trackAuthUids', uids, { log: false }) : null;
+  });
 });
 
 after(() => {
