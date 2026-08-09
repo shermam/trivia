@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import type { Auth, User } from 'firebase/auth';
 import { environment } from '../../environments/environment';
 import { isAliasEmail } from '../utils/email-alias.util';
-import { withTimeout } from '../utils/with-timeout.util';
+import { giveUpAfter } from '../utils/give-up-after.util';
 import { FirebaseAppService } from './firebase-app.service';
 
 const ANONYMOUS_SIGN_IN_TIMEOUT_MS = 10_000;
@@ -190,7 +190,7 @@ export class AuthService {
       if (auth.currentUser) {
         return;
       }
-      await withTimeout(authModule.signInAnonymously(auth), ANONYMOUS_SIGN_IN_TIMEOUT_MS);
+      await giveUpAfter(authModule.signInAnonymously(auth), ANONYMOUS_SIGN_IN_TIMEOUT_MS);
     } catch {
       // Offline or otherwise unreachable — the game stays fully playable,
       // just without the ability to save to the leaderboard until this

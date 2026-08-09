@@ -1,6 +1,5 @@
 import { Injectable, inject } from '@angular/core';
 import { environment } from '../../environments/environment';
-import { withTimeout } from '../utils/with-timeout.util';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 
@@ -49,6 +48,12 @@ function accountErrorMessage(error: unknown, action: string): string {
   if (code === 'functions/unauthenticated') {
     return 'Your session expired. Sign in again and retry.';
   }
+  // Raised by the callable's own `timeout` option once it gives up and cancels
+  // the request. The work may still have completed server-side, so the message
+  // deliberately doesn't claim it failed.
+  if (code === 'functions/deadline-exceeded') {
+    return `This is taking longer than expected. Check back in a moment before trying to ${action} again.`;
+  }
   return `Could not ${action}. Please try again.`;
 }
 
@@ -96,18 +101,17 @@ export class AccountService {
    */
   async downloadMyData(): Promise<void> {
     const { functions, functionsModule } = await this.getFunctions();
+    // The SDK's own timeout, which cancels the request rather than merely
+    // abandoning it — see HttpsCallableOptions.timeout.
     const callable = functionsModule.httpsCallable<unknown, unknown>(
       functions,
       'exportAccountData',
+      { timeout: EXPORT_TIMEOUT_MS },
     );
 
     let result: { data: unknown };
     try {
-      result = await withTimeout(
-        callable(),
-        EXPORT_TIMEOUT_MS,
-        'Preparing your data is taking longer than expected.',
-      );
+      result = await callable();
     } catch (error) {
       throw new Error(accountErrorMessage(error, 'prepare your data'), { cause: error });
     }
@@ -138,13 +142,11 @@ export class AccountService {
    */
   async deleteAccount(): Promise<void> {
     const { functions, functionsModule } = await this.getFunctions();
-    const callable = functionsModule.httpsCallable(functions, 'deleteAccount');
+    const callable = functionsModule.httpsCallable(functions, 'deleteAccount', {
+      timeout: DELETE_ACCOUNT_TIMEOUT_MS,
+    });
     try {
-      await withTimeout(
-        callable(),
-        DELETE_ACCOUNT_TIMEOUT_MS,
-        'Deleting your account is taking longer than expected.',
-      );
+      await callable();
     } catch (error) {
       throw new Error(accountErrorMessage(error, 'delete your account'), { cause: error });
     }
