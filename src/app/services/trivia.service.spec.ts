@@ -384,3 +384,84 @@ describe('TriviaService category caching', () => {
     await expect(retried).resolves.toHaveLength(1);
   });
 });
+
+/**
+ * Finding B9. `decodeHtmlEntities` exists because Open Trivia DB returns its
+ * text entity-encoded. It used to run in the shared mapper, so it also
+ * rewrote Firestore-authored questions — which are stored exactly as a
+ * contributor typed them. A question about HTML deliberately reading
+ * `&lt;div&gt;`, or an answer written out as `Tom &amp; Jerry`, silently
+ * became something else, with no way to express the original.
+ */
+describe('TriviaService entity decoding is per source', () => {
+  let httpMock: HttpTestingController;
+
+  const customDoc = {
+    id: 'q1',
+    category: 'Web &amp; HTML',
+    type: 'multiple' as const,
+    difficulty: 'easy' as const,
+    question: 'Which tag is written &lt;div&gt;?',
+    correct_answer: 'Tom &amp; Jerry',
+    incorrect_answers: ['A &quot;quoted&quot; answer', 'Plain', 'Other'],
+  };
+
+  function configure(customQuestions: unknown[]) {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions: () => of(customQuestions) } },
+      ],
+    });
+    httpMock = TestBed.inject(HttpTestingController);
+  }
+
+  it('leaves Firestore-authored text exactly as the contributor wrote it', async () => {
+    configure([customDoc]);
+    const [question] = await TestBed.inject(TriviaService).getQuestions({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+    });
+
+    expect(question.question).toBe('Which tag is written &lt;div&gt;?');
+    expect(question.category).toBe('Web &amp; HTML');
+    expect(question.correct_answer).toBe('Tom &amp; Jerry');
+    expect(question.incorrect_answers).toContain('A &quot;quoted&quot; answer');
+    expect(question.all_answers.map((a) => a.text)).toContain('Tom &amp; Jerry');
+  });
+
+  it('still decodes Open Trivia DB text, which is genuinely encoded', async () => {
+    configure([]);
+    const service = TestBed.inject(TriviaService);
+    const promise = service.getQuestions({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'open_trivia',
+    });
+    httpMock
+      .expectOne((r) => r.url.includes('api.php'))
+      .flush({
+        response_code: 0,
+        results: [
+          {
+            category: 'Science &amp; Nature',
+            type: 'multiple',
+            difficulty: 'easy',
+            question: 'What does &quot;HTTP&quot; stand for?',
+            correct_answer: 'Tom &amp; Jerry',
+            incorrect_answers: ['It&#039;s a protocol', 'B', 'C'],
+          },
+        ],
+      });
+
+    const [question] = await promise;
+    expect(question.question).toBe('What does "HTTP" stand for?');
+    expect(question.category).toBe('Science & Nature');
+    expect(question.correct_answer).toBe('Tom & Jerry');
+    expect(question.incorrect_answers).toContain("It's a protocol");
+  });
+});

@@ -74,7 +74,7 @@ Any unmatched route redirects back to `/`.
 
 Shared normalization for every question:
 
-- HTML entities in question/category/answer text (as returned by Open Trivia DB, e.g. `&quot;`, `&#039;`) are decoded safely via an inert `DOMParser` document (chosen specifically to avoid the classic innerHTML-based decoding XSS footgun).
+- HTML entities in question/category/answer text are decoded safely via an inert `DOMParser` document (chosen specifically to avoid the classic innerHTML-based decoding XSS footgun) — **at the Open Trivia DB adapter only** (`decodeOpenTriviaText`), because that is the source that encodes them. It used to run in the shared mapper, which also rewrote Firestore-authored questions: those are stored exactly as a contributor typed them, so a question about HTML deliberately reading `&lt;div&gt;`, or an answer written out as `Tom &amp; Jerry`, silently became something else with no way to express the original. The transformation belongs to where the text came from, not to text in general (`CLAUDE.md` §4.4).
 - Answers (`correct_answer` + `incorrect_answers`) are merged into a single `all_answers` array and shuffled with a Fisher–Yates shuffle, so the correct answer's position varies per question/render. Each entry is an **`Answer` (`{ id, text, isCorrect }`)**, not a bare string: the id comes from the answer's position in the source arrays, never from its text, and correctness is stated rather than re-derived. Both matter because a question can legitimately carry the same text twice — the quiz used to `track` by the string (duplicate keys) and to score by comparing the clicked string against `correct_answer`, which let the **wrong** option score as correct.
 
 ### 1.3 State management
