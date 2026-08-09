@@ -85,7 +85,7 @@ describe('OfflineQuestionsService', () => {
     expect(result).toHaveLength(3);
   });
 
-  it('dedupes by question text instead of accumulating duplicates', async () => {
+  it('dedupes a re-fetched question instead of accumulating duplicates', async () => {
     const service = TestBed.inject(OfflineQuestionsService);
     const question = makeQuestion({ question: 'Same question text' });
 
@@ -93,6 +93,92 @@ describe('OfflineQuestionsService', () => {
     await service.saveQuestions([{ ...question, correct_answer: 'Updated answer' }]);
 
     expect(await service.getCount()).toBe(1);
+  });
+
+  /**
+   * Finding C4. The store was keyed on the question *text* alone, so anything
+   * sharing wording collided and one row silently replaced the other.
+   *
+   * Across sources that was worse than losing a row. `getOfflineQuestions()`
+   * never crosses `source`, so a custom question overwriting an Open Trivia one
+   * didn't merely evict it — it moved the surviving copy into the other
+   * source's pool, shrinking what an `open_trivia` request could draw from
+   * while `cachedCount` still reported a full pool.
+   */
+  it('keeps identically-worded questions from different sources apart', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    const text = 'Which came first?';
+
+    await service.saveQuestions([
+      makeQuestion({ question: text, source: 'open_trivia' }),
+      makeQuestion({ question: text, source: 'custom', id: 'custom-doc-1' }),
+    ]);
+
+    expect(await service.getCount()).toBe(2);
+
+    // Both pools still hold their own copy — the eviction used to empty one.
+    const fromOpenTrivia = await service.getOfflineQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'open_trivia',
+    });
+    const fromCustom = await service.getOfflineQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+    });
+    expect(fromOpenTrivia.map((q) => q.source)).toEqual(['open_trivia']);
+    expect(fromCustom.map((q) => q.source)).toEqual(['custom']);
+  });
+
+  // Two contributors can submit the same wording; they are still two documents,
+  // and the bank draws them independently.
+  it('keeps two distinct custom questions that share wording', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    const text = 'What is the capital?';
+
+    await service.saveQuestions([
+      makeQuestion({ question: text, source: 'custom', id: 'doc-a' }),
+      makeQuestion({ question: text, source: 'custom', id: 'doc-b' }),
+    ]);
+
+    expect(await service.getCount()).toBe(2);
+  });
+
+  // An Open Trivia question's id is minted at fetch time
+  // (`open-${Date.now()}-${index}`), so keying on it would fill the pool with
+  // copies of the same question on every prefetch.
+  it('still dedupes an Open Trivia question whose id changed between fetches', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    const text = 'How many moons?';
+
+    await service.saveQuestions([
+      makeQuestion({ question: text, source: 'open_trivia', id: 'open-1000-0' }),
+    ]);
+    await service.saveQuestions([
+      makeQuestion({ question: text, source: 'open_trivia', id: 'open-2000-3' }),
+    ]);
+
+    expect(await service.getCount()).toBe(1);
+  });
+
+  // The storage key is an implementation detail of the store, not part of a
+  // question — leaking it would put it into the quiz's `TriviaQuestion` objects.
+  it('does not leak its storage-only fields to callers', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    await service.saveQuestions([makeQuestion()]);
+
+    const [question] = await service.getOfflineQuestions({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'mixed',
+    });
+
+    expect(question).not.toHaveProperty('dedupeKey');
+    expect(question).not.toHaveProperty('cachedAt');
   });
 
   it('getOfflineQuestions() prefers questions matching category/difficulty', async () => {

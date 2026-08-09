@@ -28,21 +28,33 @@ import {
 
 let dbCounter = 0;
 
-/** Builds the pre-B8 (v2) database by hand: `questions` only, holding one row. */
-function seedV2Database(name: string): Promise<void> {
+/**
+ * Builds an older database by hand: `questions` keyed the way that version
+ * keyed it, plus (from v3) a `game-state` row, so a migration can be observed
+ * rather than inferred.
+ */
+function seedOldDatabase(name: string, version: 2 | 3): Promise<void> {
   return new Promise((resolve, reject) => {
-    const open = indexedDB.open(name, 2);
+    const open = indexedDB.open(name, version);
     open.onupgradeneeded = () => {
       const db = open.result;
+      // Pre-v4 stores were keyed on the question text (finding C4).
       const store = db.createObjectStore(QUESTIONS_STORE, { keyPath: 'question' });
       store.createIndex('cachedAt', 'cachedAt');
+      if (version >= 3) {
+        db.createObjectStore(GAME_STATE_STORE, { keyPath: 'id' });
+      }
     };
     open.onsuccess = () => {
       const db = open.result;
-      const tx = db.transaction(QUESTIONS_STORE, 'readwrite');
+      const stores = version >= 3 ? [QUESTIONS_STORE, GAME_STATE_STORE] : [QUESTIONS_STORE];
+      const tx = db.transaction(stores, 'readwrite');
       tx.objectStore(QUESTIONS_STORE).put({ question: 'Cached before the upgrade?', cachedAt: 1 });
+      if (version >= 3) {
+        tx.objectStore(GAME_STATE_STORE).put({ id: 'current', score: 7 });
+      }
       tx.oncomplete = () => {
-        // Must close, or this connection blocks the v3 upgrade below.
+        // Must close, or this connection blocks the upgrade below.
         db.close();
         resolve();
       };
@@ -52,6 +64,17 @@ function seedV2Database(name: string): Promise<void> {
       };
     };
     open.onerror = () => reject(open.error as Error);
+  });
+}
+
+function readGameState(db: IDBDatabase): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const request = db
+      .transaction(GAME_STATE_STORE, 'readonly')
+      .objectStore(GAME_STATE_STORE)
+      .get('current');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error as Error);
   });
 }
 
@@ -93,15 +116,27 @@ describe('OfflineDbService schema (B8)', () => {
     TestBed.resetTestingModule();
   });
 
-  it('upgrading v2 to v3 adds the game store and keeps the cached questions', async () => {
-    await seedV2Database(dbName);
+  // Finding C4 re-keyed `questions`, and a store's keyPath cannot be changed in
+  // place — so unlike the v2→v3 upgrade, this one has to discard the pool. It
+  // must still not touch the in-progress game, which is not refillable.
+  it('upgrading v3 to v4 rebuilds the question store but keeps the saved game', async () => {
+    await seedOldDatabase(dbName, 3);
 
     const db = await openViaService();
 
-    expect(db.version).toBe(3);
+    expect(db.version).toBe(4);
+    expect(await countQuestions(db)).toBe(0);
+    expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
+  });
+
+  it('upgrading from v2 creates both stores', async () => {
+    await seedOldDatabase(dbName, 2);
+
+    const db = await openViaService();
+
+    expect(db.version).toBe(4);
     expect(db.objectStoreNames.contains(GAME_STATE_STORE)).toBe(true);
-    // The whole point: adding a store must not cost the player their pool.
-    expect(await countQuestions(db)).toBe(1);
+    expect(await countQuestions(db)).toBe(0);
   });
 
   it('creates both stores from nothing', async () => {
