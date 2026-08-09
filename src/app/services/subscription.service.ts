@@ -24,6 +24,19 @@ const SESSION_SLOTS_PER_WINDOW = 10;
 const ACTIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
 
 /**
+ * Ceilings on the price lookup, so neither of its queries is unbounded
+ * (`CLAUDE.md` §4.1 — every `getDocs` needs a `where` *and* a `limit`).
+ *
+ * `MAX_PRO_PRODUCTS` matches the server's own cap in
+ * `functions/src/products.ts`, because both are asking the same question of the
+ * same collection and disagreeing about the answer's size would be a bug
+ * neither side could see. There is one Pro product today; the cap only exists
+ * so a Dashboard mistake can't turn this into an unbounded read.
+ */
+const MAX_PRO_PRODUCTS = 5;
+const MAX_PRICES_PER_PRODUCT = 20;
+
+/**
  * Bridges the client to our own Cloud Functions backend (`functions/`,
  * `createCheckoutSession` + `stripeWebhook`) purely through the Firestore
  * collections that backend manages (`customers/{uid}/checkout_sessions`,
@@ -107,39 +120,78 @@ export class SubscriptionService {
    * handler (`functions/src/products.ts`) keeps synced from the Stripe
    * Dashboard, so the price never has to be hardcoded here — changing the
    * price in Stripe doesn't require a frontend deploy.
+   *
+   * **Selects by `role`, matching the server.** `createCheckoutSession` accepts
+   * a price only if it belongs to an active product carrying `role: 'pro'`
+   * (`functions/src/checkout-request.ts`), so picking by "first active product
+   * with a monthly price" — as this used to — is a different question with the
+   * same answer only while exactly one product exists. The day a second one is
+   * added, the client would send a price the server is bound to reject, and the
+   * failure would surface as checkout simply not working.
+   *
+   * **Both queries are bounded and the per-product ones run in parallel.**
+   * Neither carried a `limit` before, and the price lookups ran one after
+   * another (finding C5).
    */
   private getProPriceId(): Promise<string> {
     if (!this.proPricePromise) {
       this.proPricePromise = this.firebaseService
         .getFirestore()
-        .then(async ({ firestore, firestoreModule }) => {
+        .then(async ({ firestore, firestoreModule: fm }) => {
+          // Filters on `role` alone, exactly as the server's own catalog check
+          // does (`functions/src/products.ts`): one equality filter is served
+          // by the automatic single-field index, while `role` + `active`
+          // together would need a composite one. `active` is checked below
+          // instead, which costs nothing extra since the document is already
+          // here.
           const productsSnapshot = await giveUpAfter(
-            firestoreModule.getDocs(
-              firestoreModule.query(
-                firestoreModule.collection(firestore, PRODUCTS_COLLECTION),
-                firestoreModule.where('active', '==', true),
+            fm.getDocs(
+              fm.query(
+                fm.collection(firestore, PRODUCTS_COLLECTION),
+                fm.where('role', '==', 'pro'),
+                fm.limit(MAX_PRO_PRODUCTS),
               ),
             ),
             CHECKOUT_TIMEOUT_MS,
           );
-          for (const productDoc of productsSnapshot.docs) {
-            const pricesSnapshot = await giveUpAfter(
-              firestoreModule.getDocs(
-                firestoreModule.query(
-                  firestoreModule.collection(productDoc.ref, 'prices'),
-                  firestoreModule.where('active', '==', true),
+
+          const activeProducts = productsSnapshot.docs.filter(
+            (productDoc) => productDoc.data()['active'] === true,
+          );
+
+          // Every product's prices are fetched at once. This used to be a
+          // sequential `for` loop that awaited each subcollection in turn
+          // (finding C5), so the wait was the sum of the round trips rather
+          // than the slowest one — and it ran on the click that starts
+          // checkout, where the delay is most visible.
+          const monthlyPriceIds = await Promise.all(
+            activeProducts.map(async (productDoc) => {
+              const pricesSnapshot = await giveUpAfter(
+                fm.getDocs(
+                  fm.query(
+                    fm.collection(productDoc.ref, 'prices'),
+                    fm.where('active', '==', true),
+                    fm.limit(MAX_PRICES_PER_PRODUCT),
+                  ),
                 ),
-              ),
-              CHECKOUT_TIMEOUT_MS,
+                CHECKOUT_TIMEOUT_MS,
+              );
+              return (
+                pricesSnapshot.docs.find((priceDoc) => priceDoc.data()['interval'] === 'month')
+                  ?.id ?? null
+              );
+            }),
+          );
+
+          // First match in catalog order, not first to resolve — parallelism
+          // must not make which price is chosen depend on network timing.
+          const proPriceId = monthlyPriceIds.find((priceId) => priceId !== null);
+          if (!proPriceId) {
+            throw new Error(
+              'No active monthly Pro price found — check the Stripe Dashboard setup.',
             );
-            const monthlyPrice = pricesSnapshot.docs.find(
-              (priceDoc) => priceDoc.data()['interval'] === 'month',
-            );
-            if (monthlyPrice) {
-              return monthlyPrice.id;
-            }
           }
-          throw new Error('No active monthly Pro price found — check the Stripe Dashboard setup.');
+          return proPriceId;
         });
       // Don't cache a failed lookup: a product fixed in the Dashboard after
       // a failed attempt should be picked up on the very next click, not

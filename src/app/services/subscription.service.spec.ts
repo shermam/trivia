@@ -254,3 +254,244 @@ describe('SubscriptionService handshake deadline', () => {
     expect(vi.getTimerCount()).toBe(before);
   });
 });
+
+/**
+ * Finding C5. `getProPriceId()` read the product catalog and then awaited each
+ * product's `prices` subcollection **one at a time**, so the wait was the sum
+ * of the round trips rather than the slowest — on the click that starts
+ * checkout, where a delay is most visible. Neither query carried a `limit`
+ * either, which is the same unbounded-read rule C1 was about (`CLAUDE.md` §4.1).
+ *
+ * It also selected "first active product with a monthly price", while the
+ * server accepts a price only from an active product carrying `role: 'pro'`
+ * (`functions/src/checkout-request.ts`). Those are the same question only while
+ * exactly one product exists; the day a second is added the client would send a
+ * price the server is bound to reject, and checkout would simply stop working.
+ */
+
+interface ProductSeed {
+  id: string;
+  role: string | null;
+  active: boolean;
+  prices: { id: string; active: boolean; interval: string }[];
+  /** Lets a test make the *first* product the slowest to answer. */
+  delayMs?: number;
+}
+
+interface RecordedQuery {
+  target: string;
+  wheres: [string, unknown][];
+  limit?: number;
+}
+
+function fakeCatalog(products: ProductSeed[]) {
+  const queries: RecordedQuery[] = [];
+  const writes: WrittenDoc[] = [];
+  let inFlightPriceQueries = 0;
+  let maxConcurrentPriceQueries = 0;
+
+  const firestoreModule = {
+    doc: (_fs: unknown, ...path: string[]) => ({ path }),
+    collection: (parent: { __productId?: string } | unknown, ...path: string[]) => {
+      const productId = (parent as { __productId?: string } | null)?.__productId;
+      return productId ? { target: 'prices', productId } : { target: 'products', path };
+    },
+    where: (field: string, _op: string, value: unknown) => ({ __where: [field, value] }),
+    limit: (value: number) => ({ __limit: value }),
+    query: (ref: unknown, ...constraints: Record<string, unknown>[]) => ({ ref, constraints }),
+    getDocs: async (q: {
+      ref: { target: string; productId?: string };
+      constraints: Record<string, unknown>[];
+    }) => {
+      const wheres = q.constraints
+        .filter((c) => c['__where'])
+        .map((c) => c['__where'] as [string, unknown]);
+      const limitConstraint = q.constraints.find((c) => c['__limit'] !== undefined);
+      queries.push({
+        target: q.ref.target,
+        wheres,
+        limit: limitConstraint?.['__limit'] as number | undefined,
+      });
+
+      if (q.ref.target === 'products') {
+        let rows = products;
+        for (const [field, value] of wheres) {
+          rows = rows.filter((p) => (p as unknown as Record<string, unknown>)[field] === value);
+        }
+        rows = rows.slice(0, (limitConstraint?.['__limit'] as number) ?? rows.length);
+        return {
+          docs: rows.map((p) => ({
+            id: p.id,
+            ref: { __productId: p.id },
+            data: () => ({ role: p.role, active: p.active }),
+          })),
+        };
+      }
+
+      inFlightPriceQueries++;
+      maxConcurrentPriceQueries = Math.max(maxConcurrentPriceQueries, inFlightPriceQueries);
+      const product = products.find((p) => p.id === q.ref.productId)!;
+      if (product.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, product.delayMs));
+      }
+      inFlightPriceQueries--;
+
+      let prices = product.prices;
+      for (const [field, value] of wheres) {
+        prices = prices.filter((p) => (p as unknown as Record<string, unknown>)[field] === value);
+      }
+      prices = prices.slice(0, (limitConstraint?.['__limit'] as number) ?? prices.length);
+      return { docs: prices.map((p) => ({ id: p.id, data: () => ({ interval: p.interval }) })) };
+    },
+    setDoc: (ref: { path: string[] }, data: Record<string, unknown>) => {
+      writes.push({ path: ref.path, data });
+      return Promise.resolve();
+    },
+    onSnapshot: (_ref: unknown, next: (snap: { data: () => unknown }) => void) => {
+      queueMicrotask(() => next({ data: () => ({ url: 'https://stripe.test/s' }) }));
+      return vi.fn();
+    },
+  };
+
+  return {
+    firestoreModule,
+    queries,
+    writes,
+    priceQueries: () => queries.filter((q) => q.target === 'prices'),
+    maxConcurrentPriceQueries: () => maxConcurrentPriceQueries,
+  };
+}
+
+function configureCatalog(fake: ReturnType<typeof fakeCatalog>) {
+  TestBed.configureTestingModule({
+    providers: [
+      {
+        provide: FirebaseService,
+        useValue: {
+          getFirestore: () =>
+            Promise.resolve({ firestore: {}, firestoreModule: fake.firestoreModule }),
+        },
+      },
+      {
+        provide: AuthService,
+        useValue: {
+          user: signal({ uid: 'user-1', isAnonymous: false }),
+          isProUser: signal(false),
+          refreshIdToken: () => Promise.resolve(),
+        },
+      },
+    ],
+  });
+  return TestBed.inject(SubscriptionService);
+}
+
+/** The price the service settled on, read off the checkout-session doc it wrote. */
+function writtenPrice(fake: ReturnType<typeof fakeCatalog>): unknown {
+  return fake.writes.at(-1)?.data['price'];
+}
+
+const monthly = (id: string) => ({ id, active: true, interval: 'month' });
+
+describe('SubscriptionService Pro price lookup (C5)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    TestBed.resetTestingModule();
+  });
+
+  it('fetches every product’s prices at once instead of one after another', async () => {
+    const fake = fakeCatalog([
+      { id: 'prod_a', role: 'pro', active: true, prices: [], delayMs: 20 },
+      { id: 'prod_b', role: 'pro', active: true, prices: [], delayMs: 20 },
+      { id: 'prod_c', role: 'pro', active: true, prices: [monthly('price_c')], delayMs: 20 },
+    ]);
+
+    await configureCatalog(fake).startProCheckout();
+
+    expect(fake.priceQueries()).toHaveLength(3);
+    // The finding itself: sequentially, this would never exceed 1.
+    expect(fake.maxConcurrentPriceQueries()).toBe(3);
+  });
+
+  it('bounds both queries with a limit', async () => {
+    const fake = fakeCatalog([
+      { id: 'prod_a', role: 'pro', active: true, prices: [monthly('price_a')] },
+    ]);
+
+    await configureCatalog(fake).startProCheckout();
+
+    expect(fake.queries.every((q) => q.limit !== undefined)).toBe(true);
+  });
+
+  it('selects on role, the same predicate the server enforces', async () => {
+    const fake = fakeCatalog([
+      { id: 'prod_other', role: 'team', active: true, prices: [monthly('price_team')] },
+      { id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_pro')] },
+    ]);
+
+    await configureCatalog(fake).startProCheckout();
+
+    expect(fake.queries[0].wheres).toContainEqual(['role', 'pro']);
+    expect(writtenPrice(fake)).toBe('price_pro');
+  });
+
+  it('ignores a Pro product that is no longer active', async () => {
+    const fake = fakeCatalog([
+      { id: 'prod_old', role: 'pro', active: false, prices: [monthly('price_old')] },
+      { id: 'prod_new', role: 'pro', active: true, prices: [monthly('price_new')] },
+    ]);
+
+    await configureCatalog(fake).startProCheckout();
+
+    expect(fake.priceQueries()).toHaveLength(1);
+    expect(writtenPrice(fake)).toBe('price_new');
+  });
+
+  // Parallelism must not make the answer depend on which request came back
+  // first — the catalog's own order decides.
+  it('picks the first product in catalog order even when it answers last', async () => {
+    const fake = fakeCatalog([
+      {
+        id: 'prod_first',
+        role: 'pro',
+        active: true,
+        prices: [monthly('price_first')],
+        delayMs: 30,
+      },
+      { id: 'prod_second', role: 'pro', active: true, prices: [monthly('price_second')] },
+    ]);
+
+    await configureCatalog(fake).startProCheckout();
+
+    expect(writtenPrice(fake)).toBe('price_first');
+  });
+
+  it('only considers monthly prices', async () => {
+    const fake = fakeCatalog([
+      {
+        id: 'prod_pro',
+        role: 'pro',
+        active: true,
+        prices: [
+          { id: 'price_yearly', active: true, interval: 'year' },
+          { id: 'price_monthly', active: true, interval: 'month' },
+        ],
+      },
+    ]);
+
+    await configureCatalog(fake).startProCheckout();
+
+    expect(writtenPrice(fake)).toBe('price_monthly');
+  });
+
+  it('reports an actionable error when the catalog has no Pro price', async () => {
+    const fake = fakeCatalog([{ id: 'prod_pro', role: 'pro', active: true, prices: [] }]);
+
+    await expect(configureCatalog(fake).startProCheckout()).rejects.toThrow(
+      /check the Stripe Dashboard/i,
+    );
+  });
+});
