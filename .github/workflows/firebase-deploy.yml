@@ -47,14 +47,18 @@ jobs:
       - name: Build production app
         run: npm run build:prod
 
-      - name: Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}'
-          projectId: intellectura-3b26a
-          channelId: live
-
+      # Backend first, client last (finding D2). Hosting used to go first,
+      # which put a new client live against an old backend for the length of
+      # the remaining steps — a window that only ever bites on the release
+      # where it matters, because that is the release that changed both.
+      #
+      # The reverse exposure (an old client against a new backend) is not
+      # avoidable by ordering at all: a visitor with the app open across a
+      # deploy, or one served the precached shell by the service worker, is
+      # running an old client whichever order these steps take. So a backend
+      # change has to stay compatible with the deployed client *regardless* —
+      # and once that is true, backend-first strictly dominates, because it is
+      # the only order that also closes the new-client window.
       - name: Deploy Firestore rules and indexes
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
@@ -80,9 +84,22 @@ jobs:
           # detects v7+ and skips that legacy path.
           npx firebase-tools@14 deploy --only functions --project intellectura-3b26a
 
+      # Immediately after its last user rather than at the end of the job: the
+      # Hosting step below authenticates from the secret directly and never
+      # reads this file, so keeping it on disk any longer buys nothing.
       - name: Clean up service account credentials
         if: always()
         run: rm -f "${{ runner.temp }}/firebase-service-account.json"
+
+      # Last, so the client only goes live once the rules, indexes and
+      # functions it depends on are already there.
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}'
+          projectId: intellectura-3b26a
+          channelId: live
 
       # Asks the deployed site whether it actually works, rather than trusting
       # that a green deploy step means a working production (finding D3). The
