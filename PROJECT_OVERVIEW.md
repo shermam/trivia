@@ -38,7 +38,7 @@ Any unmatched route redirects back to `/`.
 
 - Guards against direct navigation: if there's no active question in memory, it redirects back to `/`.
 - Answer option letters (A, B, C…) are computed from the index rather than read from a fixed four-entry array, so they cannot run out if the answer count ever changes.
-- Each question has a **15-second countdown timer** (visual ring + shrinking progress bar that turns red in the last 5 seconds).
+- Each question has a **15-second countdown timer** (visual ring that turns red in the last 5 seconds). It derives the seconds remaining from the **wall clock** — a deadline captured when the question loads, re-read on a sub-second interval — rather than decrementing a counter on each `setInterval` tick. A tick-counted countdown drifts against real time and, worse, stalls entirely in a backgrounded tab (browsers throttle `setInterval` there to as little as once a minute), so the question would silently never time out until the tab was refocused and would then resume from where it "paused" (finding B10). A `visibilitychange` listener re-syncs the moment the tab becomes visible again so expiry is immediate rather than waiting on the throttled interval; it's torn down in `ngOnDestroy` alongside the interval.
 - Selecting an answer (or the timer hitting 0, which auto-submits a "no answer") locks the question:
   - Correct answer is highlighted green.
   - An incorrect selection is highlighted red; all other options dim.

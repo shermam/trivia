@@ -15,6 +15,14 @@ import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 
 const QUESTION_DURATION_SECONDS = 15;
+const QUESTION_DURATION_MS = QUESTION_DURATION_SECONDS * 1000;
+/**
+ * The countdown ticks several times a second rather than once, so expiry is
+ * caught promptly (within a tick of the true deadline) instead of up to a full
+ * second late. It's cheap because each tick only reads the clock and sets a
+ * signal — the displayed value still changes at most once a second.
+ */
+const TIMER_TICK_MS = 250;
 const ANSWER_DELAY_MS = 2000;
 /**
  * Option labels are derived from the index rather than read out of a fixed
@@ -69,12 +77,31 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
   private timerHandle: ReturnType<typeof setInterval> | null = null;
   private advanceTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  /** Wall-clock instant (ms since epoch) the current question's countdown expires. */
+  private deadline = 0;
+
+  /**
+   * A hidden tab has its `setInterval` throttled to as little as one tick a
+   * minute, so a tick-counting countdown effectively pauses while backgrounded
+   * — the deadline it's meant to enforce silently stops advancing. Because the
+   * timer reads the wall clock instead, the next tick after the tab wakes
+   * recovers the true elapsed time on its own; re-syncing the moment we become
+   * visible again just makes that recovery immediate rather than waiting on the
+   * throttled interval to fire. Guarded on `timerHandle` so it's inert between
+   * questions (during the result delay) when no countdown is running.
+   */
+  private readonly onVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible' && this.timerHandle !== null) {
+      this.tickTimer();
+    }
+  };
 
   ngOnInit(): void {
     if (!this.gameController.currentQuestion()) {
       void this.router.navigateByUrl('/');
       return;
     }
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.startTimer();
   }
 
@@ -127,15 +154,24 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   }
 
   private startTimer(): void {
+    this.deadline = Date.now() + QUESTION_DURATION_MS;
     this.timeLeft.set(QUESTION_DURATION_SECONDS);
-    this.timerHandle = setInterval(() => {
-      const next = Math.max(0, this.timeLeft() - 1);
-      this.timeLeft.set(next);
-      if (next <= 0) {
-        this.stopTimer();
-        this.commitAnswer(null);
-      }
-    }, 1000);
+    this.timerHandle = setInterval(() => this.tickTimer(), TIMER_TICK_MS);
+  }
+
+  /**
+   * Derives the seconds remaining from the wall clock rather than by decrementing
+   * a counter each tick. An accumulated count drifts against real time, and — the
+   * reason this is finding B10 — a backgrounded tab throttles the interval, so a
+   * counted-down timer stalls exactly when the deadline should still be running.
+   */
+  private tickTimer(): void {
+    const remainingMs = this.deadline - Date.now();
+    this.timeLeft.set(Math.max(0, Math.ceil(remainingMs / 1000)));
+    if (remainingMs <= 0) {
+      this.stopTimer();
+      this.commitAnswer(null);
+    }
   }
 
   private stopTimer(): void {
@@ -177,5 +213,6 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
       clearTimeout(this.advanceTimeoutHandle);
       this.advanceTimeoutHandle = null;
     }
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }
 }
