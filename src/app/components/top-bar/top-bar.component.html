@@ -30,9 +30,13 @@
 
       <div class="relative">
         <button
+          #menuTrigger
           type="button"
           data-cy="auth-menu-trigger"
           (click)="toggleMenu()"
+          [attr.aria-expanded]="isMenuOpen()"
+          aria-haspopup="dialog"
+          [attr.aria-controls]="isMenuOpen() ? panelId : null"
           class="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 border border-slate-900/10 dark:border-white/10 transition-colors"
           [ngClass]="isMenuOpen() ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'"
           [class.shadow-[0_0_0_3px_rgba(5,150,105,0.12)]]="isMenuOpen()"
@@ -79,7 +83,24 @@
         </button>
 
         @if (isMenuOpen()) {
-          <div class="absolute right-0 mt-2">
+          <!--
+            `dialog`, not `menu`. An ARIA menu promises `menuitem` children and
+            arrow-key navigation; this panel holds a sign-in form, text inputs
+            and links, which a screen reader would then announce as menu items.
+            A non-modal dialog describes what it actually is — hence the
+            matching `aria-haspopup="dialog"` on the trigger, and no
+            `aria-modal`, since the page behind stays usable.
+            `tabindex="-1"` exists so focus can be moved here on open (G2)
+            without adding the panel to the tab order.
+          -->
+          <div
+            #menuPanel
+            [id]="panelId"
+            role="dialog"
+            aria-label="Account menu"
+            tabindex="-1"
+            class="absolute right-0 mt-2 focus:outline-none"
+          >
             <app-auth-menu (closeRequested)="closeMenu()" />
           </div>
         }
