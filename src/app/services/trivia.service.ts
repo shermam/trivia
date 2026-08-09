@@ -29,6 +29,29 @@ const OFFLINE_POOL_TARGET = 100;
 /** Open Trivia DB rejects `amount` values much above this, so a single refill run never asks for more. */
 const MAX_PREFETCH_BATCH = 50;
 
+/**
+ * Decodes the HTML entities Open Trivia DB encodes its text with (`&quot;`,
+ * `&#039;`, `&amp;`).
+ *
+ * Applied here, at that one source's adapter, rather than in the shared
+ * mapper. Running it over everything also rewrote Firestore-authored
+ * questions, which are stored exactly as a contributor typed them — so a
+ * question about HTML that deliberately reads `&amp;lt;div&amp;gt;`, or an
+ * answer of `Tom &amp; Jerry` written out longhand, silently became something
+ * the author did not write, with no way to express the original. The
+ * transformation is a property of where the text came from, not of text in
+ * general.
+ */
+function decodeOpenTriviaText(raw: OpenTriviaApiQuestion): OpenTriviaApiQuestion {
+  return {
+    ...raw,
+    category: decodeHtmlEntities(raw.category),
+    question: decodeHtmlEntities(raw.question),
+    correct_answer: decodeHtmlEntities(raw.correct_answer),
+    incorrect_answers: raw.incorrect_answers.map(decodeHtmlEntities),
+  };
+}
+
 @Injectable({ providedIn: 'root' })
 export class TriviaService {
   private readonly http = inject(HttpClient);
@@ -214,7 +237,11 @@ export class TriviaService {
     }
 
     return response.results.map((raw, index) =>
-      this.mapToTriviaQuestion(raw, 'open_trivia', `open-${Date.now()}-${index}`),
+      this.mapToTriviaQuestion(
+        decodeOpenTriviaText(raw),
+        'open_trivia',
+        `open-${Date.now()}-${index}`,
+      ),
     );
   }
 
@@ -245,18 +272,21 @@ export class TriviaService {
     return categories.find((c) => c.name === categoryName)?.id;
   }
 
+  /**
+   * Shapes an already-normalized question. Deliberately performs no text
+   * transformation of its own — see `decodeOpenTriviaText`, and `CLAUDE.md`
+   * §4.4 on normalizing per source rather than in shared code.
+   */
   private mapToTriviaQuestion(
     raw: OpenTriviaApiQuestion | (CustomQuestionDoc & { id: string }),
     source: 'open_trivia' | 'custom',
     id: string,
   ): TriviaQuestion {
-    const question = decodeHtmlEntities(raw.question);
-    const correct_answer = decodeHtmlEntities(raw.correct_answer);
-    const incorrect_answers = raw.incorrect_answers.map(decodeHtmlEntities);
+    const { question, correct_answer, incorrect_answers } = raw;
 
     return {
       id,
-      category: decodeHtmlEntities(raw.category),
+      category: raw.category,
       type: raw.type,
       difficulty: raw.difficulty,
       question,
