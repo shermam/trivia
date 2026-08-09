@@ -16,14 +16,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 18       |
-| 🔵 In review        | 3        |
-| ⬜ Not started      | 35       |
+| ✅ Fixed and merged | 20       |
+| 🔵 In review        | 2        |
+| ⬜ Not started      | 34       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#53](https://github.com/shermam/trivia/pull/53) (A8 + A9, CSP and security headers).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#54](https://github.com/shermam/trivia/pull/54) (D6, Lighthouse median aggregation).
 
 > A PR in this series can never mark _itself_ merged — the commit that updates the register is the one being reviewed. So the entry for the most recently merged finding is routinely one PR behind, and the next PR tidies it. If you are reading this between merges, trust the `Status` column over this line.
 
@@ -114,8 +114,8 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **A5**  | No token revocation on subscription downgrade — Pro access persists up to ~1hr                                                                                                                                                         | ✅ [#48](https://github.com/shermam/trivia/pull/48) — _narrowed, not closed; see A13_           |
 | **A6**  | Webhook has no event ordering guard, no idempotency record, no `livemode` assertion                                                                                                                                                    | ✅ [#49](https://github.com/shermam/trivia/pull/49)                                             |
 | **A7**  | `STRIPE_MOCK_CHECKOUT` gated on an env var alone, not a `demo-` project ID                                                                                                                                                             | ✅ [#47](https://github.com/shermam/trivia/pull/47)                                             |
-| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                                                                                                                     | 🔵 [#53](https://github.com/shermam/trivia/pull/53)                                             |
-| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                                                                                                                                   | 🔵 [#53](https://github.com/shermam/trivia/pull/53)                                             |
+| **A8**  | No CSP and no security headers (`X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`)                                                                                                                                     | ✅ [#53](https://github.com/shermam/trivia/pull/53)                                             |
+| **A9**  | Embed mode allows framing by anyone — no `frame-ancestors` allowlist                                                                                                                                                                   | ✅ [#53](https://github.com/shermam/trivia/pull/53)                                             |
 | **A10** | `custom_questions` had no author attribution, and `hasOnly()` prevented adding it later                                                                                                                                                | ✅ [#41](https://github.com/shermam/trivia/pull/41) — _rate limit deferred, see §4_             |
 | **A11** | Service-account secret interpolated directly into shell `run:` blocks                                                                                                                                                                  | ⬜                                                                                              |
 | **A12** | `npm audit`: 7 moderate findings in `functions/` are **production runtime**, distinct from the documented devDependency ones                                                                                                           | ⬜                                                                                              |
@@ -155,7 +155,7 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **D3** | No post-deploy smoke test or rollback path                                                                                                                                              | ⬜                                                                                       |
 | **D4** | Root `postinstall` ran `npm install` in `functions/`; 3 of 5 workflows had incomplete cache keys                                                                                        | ✅ [#39](https://github.com/shermam/trivia/pull/39)                                      |
 | **D5** | Committed `functions/.secret.local` placeholder — decision to re-confirm                                                                                                                | ⬜                                                                                       |
-| **D6** | **Lighthouse asserts the best of 3 runs, not the median** — `aggregationMethod` defaults to `optimistic`. Observed 0.84/0.66/0.62 against a 0.75 threshold, passing. Docs claim median. | ⬜ _(found during the work)_                                                             |
+| **D6** | **Lighthouse asserts the best of 3 runs, not the median** — `aggregationMethod` defaults to `optimistic`. Observed 0.84/0.66/0.62 against a 0.75 threshold, passing. Docs claim median. | 🔵 [#54](https://github.com/shermam/trivia/pull/54)                                      |
 
 ### E — Testing
 
@@ -210,7 +210,7 @@ None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `tem
 3. ~~**A6**~~ — webhook ordering and `livemode`. [#49](https://github.com/shermam/trivia/pull/49).
 4. ~~**H5**~~ — self-host Inter. [#51](https://github.com/shermam/trivia/pull/51).
 5. ~~**A8 + A9**~~ — CSP and security headers. [#53](https://github.com/shermam/trivia/pull/53).
-6. **D6** — Lighthouse median aggregation, with a threshold re-baseline.
+6. ~~**D6**~~ — Lighthouse median aggregation and threshold re-baseline. [#54](https://github.com/shermam/trivia/pull/54).
 7. Then B (correctness), C (cost), G (accessibility), and the rest.
 
 ### What A2 + A3 + A7 actually shipped
@@ -231,6 +231,14 @@ The residual is now **A13**. It is closable: `request.auth.token.iat`, `auth_tim
 
 - **Compare `iat` against a server-written "entitlement changed at" timestamp.** Exact, but costs a `get()` — one billed read on every privileged write.
 - **Require a freshly-issued token for privileged writes** (`iat` within N minutes). Costs nothing, and `AddQuestionComponent` already force-refreshes immediately before its write, so the client satisfies it today. But it couples the rules to that client behaviour, and a failed refresh becomes a rejected write.
+
+### What D6 actually shipped
+
+**The default really is `optimistic`, and it was verified rather than inferred.** Replaying one real CI batch (0.68/0.92/0.91) through `lhci assert` at `minScore: 0.92` passes under the default and fails under `median` with `found: 0.91`. Same three reports, same threshold, opposite verdicts.
+
+**`pessimistic` looked like the obviously stricter choice and would have been wrong.** Downloading the reports from three real CI runs — the workflow has been uploading them as artefacts all along — showed the _first_ run of every batch is a cold-start outlier: 0.90, 0.68, 0.52, against a steady 0.91–0.92 for runs 2 and 3. Asserting the worst run would have failed constantly for reasons unrelated to the code. Median over three discards exactly one outlier, which is the shape of the noise; two bad runs still fail.
+
+**The threshold had to move in the same change.** 0.75 was chosen to survive optimistic aggregation, so leaving it under median would have quietly kept the gate slack. Raised to 0.85 against observed CI medians of 0.92/0.91/0.92 — about 0.06 of headroom, enough to absorb runner variance and still catch a real regression. The other three categories stay at 0.95: each has few enough audits that one failure drops it to roughly 0.93, so 0.95 already catches anything 1.0 would.
 
 ### What A8 + A9 actually shipped
 
