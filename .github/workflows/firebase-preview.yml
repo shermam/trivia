@@ -9,9 +9,15 @@ name: Deploy Preview Channel
 # The `E2E (preview)` job is meant to be a required status check on `main`
 # (branch protection), so a PR can't be merged — and therefore can't trigger
 # firebase-deploy.yml — unless the real preview build actually passed e2e.
+# `closed` is here for the cleanup job at the bottom, not for deploying. A
+# preview channel is created per PR but nothing used to delete one, and the 7-day
+# TTL expires them more slowly than this repo merges PRs — so they accumulated to
+# Firebase's 50-channel-per-site cap, at which point *every* new PR failed to
+# deploy with `429 channel quota reached`. Deleting the channel when its PR
+# closes keeps the count proportional to open PRs rather than to time.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, closed]
     branches: [main]
 
 concurrency:
@@ -37,7 +43,10 @@ jobs:
     # The checks that would actually catch a bad bump — test, e2e, lint,
     # rules-tests, lighthouse — all still run, because none of them needs a
     # credential.
-    if: github.actor != 'dependabot[bot]'
+    # The `closed` half of the condition exists because this workflow also
+    # handles cleanup (see `on:` above) — there is nothing to deploy to a PR
+    # that has just been closed or merged.
+    if: github.actor != 'dependabot[bot]' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -91,7 +100,7 @@ jobs:
     # deliberately stated anyway. This job also reads the service account (for
     # the preview-cleanup tasks), so the guard should not depend on a cascade
     # that an `if: always()` or a dropped `needs:` would quietly remove.
-    if: github.actor != 'dependabot[bot]'
+    if: github.actor != 'dependabot[bot]' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -142,3 +151,41 @@ jobs:
           name: cypress-preview-screenshots
           path: cypress/screenshots
           if-no-files-found: ignore
+
+  cleanup-preview:
+    name: Delete preview channel
+    # Runs only on close (merged or not) — the counterpart to `deploy-preview`.
+    # Dependabot never gets a channel deployed (see that job's comment), so
+    # there is never one of its own to delete.
+    if: github.event.action == 'closed' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Delete this PR's preview channel
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          CHANNEL: pr-${{ github.event.pull_request.number }}
+        # A missing channel is a success, not a failure: the deploy may have been
+        # skipped or may itself have failed (which is exactly what happened while
+        # the quota was full). Anything else is a real error and fails the job —
+        # deliberately not `continue-on-error`, which would also swallow a
+        # credential or permission problem and let the channels silently pile up
+        # again, which is the very failure this job exists to prevent.
+        run: |
+          set -euo pipefail
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          if npx --yes firebase-tools@14 hosting:channel:delete "$CHANNEL" \
+              --project intellectura-3b26a --force 2>&1 | tee /tmp/channel-delete.log; then
+            echo "Deleted preview channel $CHANNEL."
+          elif grep -qiE 'not found|does not exist' /tmp/channel-delete.log; then
+            echo "No preview channel $CHANNEL to delete — nothing to do."
+          else
+            echo "Failed to delete preview channel $CHANNEL." >&2
+            exit 1
+          fi
+
+      - name: Clean up service account credentials
+        if: always()
+        run: rm -f "${{ runner.temp }}/firebase-service-account.json"

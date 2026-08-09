@@ -165,10 +165,11 @@ This is a **deploy-on-merge** pipeline: it doesn't re-run e2e itself. That's onl
 
 ### 6.4 Preview deploy + real-preview E2E (`firebase-preview.yml`)
 
-Every PR to `main` on open/sync/reopen, with a `concurrency` group keyed on the PR number so a new push cancels a stale in-flight run. Two sequential jobs:
+Every PR to `main` on open/sync/reopen, with a `concurrency` group keyed on the PR number so a new push cancels a stale in-flight run. Two sequential jobs, plus a third on `closed`:
 
 1. Deploy to an ephemeral preview channel (not `live`) named after the PR (short expiry, e.g. 7 days). Parse the deploy action's URL output for the next job.
 2. Run a **scoped** slice of the e2e suite against that real, live preview URL — the parts that are safe to run against a real, shared, persistent backing project (see the caveats below).
+3. **Delete the channel when the PR closes** — see the quota note below. The deploy jobs are guarded with `github.event.action != 'closed'` so adding that trigger doesn't make them redeploy a PR that just merged.
 
 Then make that preview-e2e job a **required status check** in branch protection on `main`, so nothing merges (and therefore nothing reaches §6.3) without a real deployed preview actually passing e2e. This is what makes it safe for §6.3 to not re-run e2e on its own.
 
@@ -178,6 +179,8 @@ Caveats worth carrying into a new project:
 - Exclude specs that exercise serverless functions if those functions aren't preview-channel-scoped either (commonly true) — a preview build shares the _already-deployed_ production functions, so running a real side-effecting flow (e.g. a real payment checkout) against them from every preview is the wrong tradeoff. Keep a mock-mode escape hatch (§5) for exactly this.
 - Give any preview-created test data unique-per-run identifiers (e.g. timestamp-suffixed) so two previews running concurrently against the same real backend never collide.
 - Track and sweep up anything a preview-e2e run creates in the real backend (an `after`/teardown hook + a real-project-flavored variant of your task/seed helpers) — there's no throwaway emulator to just tear down here.
+- **Delete the preview channel when its PR closes, rather than relying on the expiry you set.** Firebase Hosting caps preview channels at **50 per site**, and the cap is a hard failure, not a warning: once it's reached, every new PR's deploy dies with `429 … channel quota reached` and there is nothing in the PR's own diff to explain it. A TTL only bounds a channel's age, not the count — so any repo merging PRs faster than the TTL expires them accumulates toward the cap, and the ceiling arrives on whichever unlucky PR happens to be next. This one hit at 50 channels of which **49 were for already-merged or closed PRs**, i.e. the cap was entirely consumed by garbage. The fix is a one-line trigger (`closed`) and a job that deletes `pr-<number>`, which keeps the count proportional to _open_ PRs instead of to time.
+- **In that cleanup job, treat "channel not found" as success but nothing else.** It legitimately won't exist when the deploy was skipped (e.g. Dependabot) or when the deploy itself failed — which is exactly the state the quota outage leaves behind. Distinguishing that from a real error matters: blanket `continue-on-error` here would also swallow a credential or permission failure, letting channels silently accumulate again, which is precisely the failure the job exists to prevent.
 
 **Preview channels cover hosting, not compute.** A preview deploys the PR's static build against the project's _already-deployed_ serverless functions, so a PR that adds a new function shows a broken feature on its own preview until it merges — the client calls something that isn't there. Worth knowing before debugging a phantom bug, and worth handling in the client: map the platform's "no such function" error to a message saying so, because the default advice to retry is wrong in a way the user cannot discover. Verify these features against the local emulator instead, and re-check on the live site after merge.
 
