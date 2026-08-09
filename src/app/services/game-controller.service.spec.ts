@@ -1,8 +1,21 @@
+import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { Answer, TriviaQuestion } from '../models/question.model';
 import { GameControllerService } from './game-controller.service';
+import { GamePersistenceService } from './game-persistence.service';
+import { OfflineDbService } from './offline-db.service';
 import { TriviaService } from './trivia.service';
+
+/** Wipes the persisted game between tests, via the service that owns the format. */
+async function clearSavedGame(): Promise<void> {
+  TestBed.configureTestingModule({});
+  await TestBed.inject(GamePersistenceService).clear();
+  // Closing matters as much as clearing: a connection left open blocks the
+  // schema-migration spec from deleting the database to start clean.
+  await TestBed.inject(OfflineDbService).close();
+  TestBed.resetTestingModule();
+}
 
 /**
  * Finding B7. The quiz progress bar divided the zero-based `currentIndex` by
@@ -47,9 +60,12 @@ function setup(questionCount: number) {
 }
 
 describe('GameControllerService progress', () => {
-  // The service rehydrates a saved game in its constructor (B8), so each test
-  // has to start from empty storage or it inherits the previous one's game.
-  beforeEach(() => localStorage.clear());
+  // These build the service directly and never call `restoreSavedGame()`, so a
+  // stray persisted game can't leak in — but the store is cleared anyway so
+  // ordering against the persistence suite below can never matter.
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
   afterEach(() => TestBed.resetTestingModule());
 
   it('shows one question of ten as 10%, not 0%', () => {
@@ -111,34 +127,46 @@ describe('GameControllerService progress', () => {
 /**
  * Finding B8. In-flight game state was memory-only, so a refresh lost it. These
  * exercise the controller half: that a game is written as it is played, read
- * back on construction (which is what a reload amounts to), and cleared when
+ * back on a fresh service (which is what a reload amounts to), and cleared when
  * the player is done with it.
  *
  * `TestBed.resetTestingModule()` between tests builds a fresh service against
- * the same `localStorage`, which is exactly the reload being modelled.
+ * the same IndexedDB database, which is exactly the reload being modelled — and
+ * the restore is awaited explicitly here, standing in for the app initializer
+ * that awaits it during real bootstrap.
  */
 describe('GameControllerService persistence (B8)', () => {
-  beforeEach(() => localStorage.clear());
-  afterEach(() => {
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(async () => {
     TestBed.resetTestingModule();
-    localStorage.clear();
+    await clearSavedGame();
   });
 
   /** Plays a game far enough to have something worth saving, then flushes the persisting effect. */
-  function playAndPersist(questionCount: number, index: number, score: number) {
+  async function playAndPersist(questionCount: number, index: number, score: number) {
     const service = setup(questionCount);
     service.config.set({ amount: questionCount, category: '', difficulty: '', source: 'custom' });
     service.currentIndex.set(index);
     service.score.set(score);
     TestBed.tick(); // effects are flushed by change detection, not synchronously
+    await service.flushPendingWrites();
     return service;
   }
 
-  it('restores an in-progress game into a freshly constructed service', () => {
-    playAndPersist(10, 3, 2);
-
+  /** A fresh service that has completed its restore — i.e. the app after a reload. */
+  async function reload() {
     TestBed.resetTestingModule();
-    const reloaded = setupWithoutQuestions();
+    const service = setupWithoutQuestions();
+    await service.restoreSavedGame();
+    return service;
+  }
+
+  it('restores an in-progress game into a freshly constructed service', async () => {
+    await playAndPersist(10, 3, 2);
+
+    const reloaded = await reload();
 
     expect(reloaded.totalQuestions()).toBe(10);
     expect(reloaded.currentIndex()).toBe(3);
@@ -147,8 +175,8 @@ describe('GameControllerService persistence (B8)', () => {
     expect(reloaded.config()?.source).toBe('custom');
   });
 
-  it('offers a resumable game only while it is unfinished', () => {
-    const service = playAndPersist(10, 3, 2);
+  it('offers a resumable game only while it is unfinished', async () => {
+    const service = await playAndPersist(10, 3, 2);
     expect(service.hasResumableGame()).toBe(true);
 
     service.isComplete.set(true);
@@ -158,21 +186,21 @@ describe('GameControllerService persistence (B8)', () => {
   // A completed game is still persisted — refreshing /game-over must not lose
   // the score about to be submitted — but it is not offered as "resume", which
   // would replay and re-score the final question.
-  it('still restores a completed game, without offering to resume it', () => {
-    const service = playAndPersist(5, 4, 3);
+  it('still restores a completed game, without offering to resume it', async () => {
+    const service = await playAndPersist(5, 4, 3);
     service.isComplete.set(true);
     TestBed.tick();
+    await service.flushPendingWrites();
 
-    TestBed.resetTestingModule();
-    const reloaded = setupWithoutQuestions();
+    const reloaded = await reload();
 
     expect(reloaded.totalQuestions()).toBe(5);
     expect(reloaded.isComplete()).toBe(true);
     expect(reloaded.hasResumableGame()).toBe(false);
   });
 
-  it('marks the game complete when advancing past the last question', () => {
-    const service = playAndPersist(3, 2, 3);
+  it('marks the game complete when advancing past the last question', async () => {
+    const service = await playAndPersist(3, 2, 3);
     expect(service.isComplete()).toBe(false);
 
     service.advanceQuestion();
@@ -181,35 +209,52 @@ describe('GameControllerService persistence (B8)', () => {
     expect(service.currentIndex()).toBe(2); // did not run past the end
   });
 
-  it('discarding clears both the state and the saved game', () => {
-    const service = playAndPersist(10, 3, 2);
+  // Writes are queued, so a save already in flight must not land after the
+  // delete and resurrect the game the player just threw away.
+  it('discarding clears both the state and the saved game', async () => {
+    const service = await playAndPersist(10, 3, 2);
 
     service.discardSavedGame();
     TestBed.tick();
+    await service.flushPendingWrites();
 
     expect(service.totalQuestions()).toBe(0);
     expect(service.hasResumableGame()).toBe(false);
 
-    TestBed.resetTestingModule();
-    expect(setupWithoutQuestions().totalQuestions()).toBe(0);
+    expect((await reload()).totalQuestions()).toBe(0);
   });
 
-  it('resetGame clears the saved game, so Play Again does not resurrect it', () => {
-    const service = playAndPersist(10, 3, 2);
+  it('resetGame clears the saved game, so Play Again does not resurrect it', async () => {
+    const service = await playAndPersist(10, 3, 2);
 
     service.resetGame();
     TestBed.tick();
+    await service.flushPendingWrites();
 
-    TestBed.resetTestingModule();
-    expect(setupWithoutQuestions().totalQuestions()).toBe(0);
+    expect((await reload()).totalQuestions()).toBe(0);
   });
 
-  it('saves nothing for a game that was never started', () => {
-    setupWithoutQuestions();
+  it('saves nothing for a game that was never started', async () => {
+    const service = setupWithoutQuestions();
     TestBed.tick();
+    await service.flushPendingWrites();
 
-    TestBed.resetTestingModule();
-    expect(setupWithoutQuestions().totalQuestions()).toBe(0);
+    expect((await reload()).totalQuestions()).toBe(0);
+  });
+
+  // The restore is what bootstrap blocks on, so it must resolve even when the
+  // store cannot be opened at all — otherwise an unusable IndexedDB (Safari
+  // private mode) would hang the whole app rather than one feature.
+  it('restores to an empty game, without throwing, when storage is unavailable', async () => {
+    vi.spyOn(indexedDB, 'open').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+
+    const service = setupWithoutQuestions();
+    await expect(service.restoreSavedGame()).resolves.toBeUndefined();
+    expect(service.totalQuestions()).toBe(0);
+
+    vi.restoreAllMocks();
   });
 });
 

@@ -1,8 +1,17 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { GameConfig, TriviaQuestion } from '../models/question.model';
+import { giveUpAfter } from '../utils/give-up-after.util';
 import { GamePersistenceService } from './game-persistence.service';
 import { TriviaService } from './trivia.service';
+
+/**
+ * Upper bound on how long bootstrap waits for the saved game to load. Generous
+ * for an IndexedDB read of one record (typically single-digit milliseconds),
+ * and short enough that a wedged store costs a barely-perceptible pause rather
+ * than a blank page.
+ */
+const RESTORE_TIMEOUT_MS = 2000;
 
 /**
  * Holds all in-progress game state so it survives navigation between the setup,
@@ -11,7 +20,8 @@ import { TriviaService } from './trivia.service';
  * The state used to live only in these signals, so a refresh, a tab crash or a
  * PWA relaunch dropped a game mid-way with no way back. That is worst for
  * precisely the players offline support exists for. It is now mirrored into
- * `localStorage` (`GamePersistenceService`) and read back in the constructor.
+ * IndexedDB (`GamePersistenceService`) and read back by `restoreSavedGame()`,
+ * which an app initializer awaits before the first route activates.
  */
 @Injectable({ providedIn: 'root' })
 export class GameControllerService {
@@ -27,6 +37,9 @@ export class GameControllerService {
   readonly loadError = signal<string | null>(null);
   /** True once the final question has been answered — i.e. the player belongs on `/game-over`. */
   readonly isComplete = signal(false);
+
+  /** Tail of the serialized persistence chain — see `enqueueWrite`. */
+  private writeQueue: Promise<void> = Promise.resolve();
 
   readonly totalQuestions = computed(() => this.questions().length);
   readonly currentQuestion = computed<TriviaQuestion | null>(
@@ -70,8 +83,6 @@ export class GameControllerService {
   readonly hasResumableGame = computed(() => this.totalQuestions() > 0 && !this.isComplete());
 
   constructor() {
-    this.restoreSavedGame();
-
     // Mirrors the game into storage on every change. An effect rather than a
     // write at each mutation site: there are five of them across three
     // screens, and the one that gets forgotten is the one that loses the game.
@@ -83,24 +94,35 @@ export class GameControllerService {
         return;
       }
 
-      this.persistence.save({
+      const snapshot = {
         config,
         questions,
         currentIndex: this.currentIndex(),
         score: this.score(),
         isComplete: this.isComplete(),
-      });
+      };
+      this.enqueueWrite(() => this.persistence.save(snapshot));
     });
   }
 
   /**
-   * Reads a saved game back at construction — synchronously, before any route
-   * guard runs. `/play` and `/game-over` both redirect to `/` when they find no
-   * question in memory, so restoring later than this would race the guard and
-   * bounce the player off the screen they were trying to return to.
+   * Reads a saved game back into the signals.
+   *
+   * Awaited by an app initializer (`app.config.ts`) rather than called from the
+   * constructor, because the store is asynchronous while the thing that depends
+   * on it is not: `/play` and `/game-over` both redirect to `/` the moment they
+   * find no question in memory, so a restore that resolved after the route
+   * activated would bounce the player off the screen they were returning to.
+   * Blocking bootstrap makes the guards correct without them having to know
+   * anything about storage.
+   *
+   * Never rejects, and never waits indefinitely. Bootstrap is the one place
+   * where a hung read would cost the whole app rather than one feature, and a
+   * browser that cannot open IndexedDB at all (Safari private mode) must still
+   * get a working game — just one that won't survive a reload.
    */
-  private restoreSavedGame(): void {
-    const saved = this.persistence.load();
+  async restoreSavedGame(): Promise<void> {
+    const saved = await giveUpAfter(this.persistence.load(), RESTORE_TIMEOUT_MS).catch(() => null);
     if (!saved) {
       return;
     }
@@ -115,7 +137,30 @@ export class GameControllerService {
   /** Throws away a saved game the player has said they don't want to resume. */
   discardSavedGame(): void {
     this.clearGameState();
-    this.persistence.clear();
+    this.enqueueWrite(() => this.persistence.clear());
+  }
+
+  /**
+   * Serializes writes. Each one persists a whole snapshot rather than a delta,
+   * so ordering is the only thing that matters — and unordered async writes
+   * could land a stale snapshot on top of a fresh one, leaving a resumed game a
+   * question behind. Chaining also means a failure never rejects into an
+   * effect, where nothing is listening.
+   */
+  private enqueueWrite(write: () => Promise<void>): void {
+    this.writeQueue = this.writeQueue.then(write).catch(() => undefined);
+  }
+
+  /**
+   * Resolves once every queued write has been applied.
+   *
+   * Nothing in the app awaits this — persistence is deliberately fire-and-forget
+   * so playing never waits on a disk write. It exists so tests can assert on
+   * what actually reached the store rather than on what was asked for, which is
+   * the difference between testing the persistence and testing the queue.
+   */
+  flushPendingWrites(): Promise<void> {
+    return this.writeQueue;
   }
 
   async startGame(config: GameConfig): Promise<void> {
