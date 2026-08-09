@@ -66,6 +66,15 @@
         ></div>
       </div>
 
+      @if (playingOffline()) {
+        <p
+          class="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/20 px-6 py-2.5"
+        >
+          <app-icon name="wifi-off" [size]="16" class="shrink-0" />
+          You're offline — these questions are from your saved offline pool.
+        </p>
+      }
+
       <div class="p-6">
         <div class="flex flex-wrap items-center gap-2 mb-5">
           <span

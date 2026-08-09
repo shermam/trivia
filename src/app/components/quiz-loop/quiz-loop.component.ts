@@ -11,6 +11,8 @@ import { NgClass } from '@angular/common';
 import { Router } from '@angular/router';
 import { Answer } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
+import { TriviaService } from '../../services/trivia.service';
+import { IconComponent } from '../icon/icon.component';
 
 const QUESTION_DURATION_SECONDS = 15;
 const ANSWER_DELAY_MS = 2000;
@@ -32,7 +34,7 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 @Component({
   selector: 'app-quiz-loop',
   standalone: true,
-  imports: [NgClass],
+  imports: [NgClass, IconComponent],
   templateUrl: './quiz-loop.component.html',
   styleUrl: './quiz-loop.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -40,6 +42,16 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly gameController = inject(GameControllerService);
   private readonly router = inject(Router);
+
+  /**
+   * True when this game's questions came from the offline pool instead of the
+   * network (`TriviaService.getQuestions()` fell back after the fetch threw).
+   * Surfaced as a banner so the player knows they're on cached questions —
+   * previously this signal was set but never read anywhere in the UI (B5).
+   * It's set once at game start and doesn't change mid-game, so a plain banner
+   * is right; there's no live status change to announce.
+   */
+  protected readonly playingOffline = inject(TriviaService).playingOffline;
 
   protected readonly answerLabel = answerLabel;
   protected readonly timerRingRadius = TIMER_RING_RADIUS;
