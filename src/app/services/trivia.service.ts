@@ -254,17 +254,17 @@ export class TriviaService {
       return [];
     }
 
-    const docs = await firstValueFrom(this.firebaseService.getCustomQuestions());
+    // Filtering and the ceiling are both the query's job now. This used to pull
+    // the whole collection and filter here, which billed for every document
+    // anyone had ever contributed on every custom or mixed game (finding C1).
+    const docs = await firstValueFrom(
+      this.firebaseService.getCustomQuestions({ category, difficulty, limit: amount }),
+    );
 
-    const filtered = docs.filter((doc) => {
-      const matchesCategory = !category || doc.category === category;
-      const matchesDifficulty = !difficulty || doc.difficulty === difficulty;
-      return matchesCategory && matchesDifficulty;
-    });
-
-    return shuffleArray(filtered)
-      .slice(0, amount)
-      .map((doc) => this.mapToTriviaQuestion(doc, 'custom', doc.id));
+    // Still shuffled: the query returns document-ID order, which is stable
+    // within a batch, and the correct answer's position shouldn't be
+    // predictable from the order questions arrive in.
+    return shuffleArray(docs).map((doc) => this.mapToTriviaQuestion(doc, 'custom', doc.id));
   }
 
   private async resolveCategoryId(categoryName: string): Promise<number | undefined> {
