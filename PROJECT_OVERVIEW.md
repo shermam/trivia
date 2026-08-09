@@ -393,6 +393,9 @@ Steps:
 6. Deploy **Firestore rules + indexes** separately via `npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes`, using the same service account written to a temp `GOOGLE_APPLICATION_CREDENTIALS` file.
 7. `npm ci --prefix functions`, then deploy **Cloud Functions** (§2.4) via `npx firebase-tools@14 deploy --only functions` (`@14`, not `@13` — see §2.2) — a separate step from #6 on purpose, so a functions-only failure is easy to spot on its own.
 8. Always clean up the temp service-account credentials file, even on failure.
+9. **Smoke-test production** (`node scripts/smoke-test.mjs https://trivimind.com`): app shell served, CSP/`X-Content-Type-Options`/`Referrer-Policy` intact, `/__/firebase/init.json` resolving to this project, `theme-init.js` reachable, and the callables deployed and still rejecting an unauthenticated caller with 401. It runs last and cannot undo anything — by the time it fails the deploy has shipped — but it is what turns a broken production into something someone is told about.
+
+A separate **`report-failure` job opens a GitHub issue** (labelled `deploy-failure`, de-duplicated to one open issue) whenever the deploy job fails. This exists because the pipeline once failed on **four consecutive merges** while Hosting kept shipping and nothing surfaced it — see `INFRASTRUCTURE.md` §6.3a, which also holds the rollback procedure. Note the steps are ordered Hosting → rules/indexes → functions, so a mid-way failure leaves a **newer client against an older backend** rather than nothing deployed.
 
 Job permissions are scoped to `contents: read`, `checks: write`, `pull-requests: write` — the minimum needed for the hosting-deploy action to post a check/PR comment (this was tightened in a dedicated fix after the action initially hit a 403).
 

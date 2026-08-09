@@ -18,13 +18,13 @@ Related documents:
 |                     | Findings |
 | ------------------- | -------- |
 | ✅ Fixed and merged | 35       |
-| 🔵 In review        | 1        |
-| ⬜ Not started      | 21       |
+| 🔵 In review        | 2        |
+| ⬜ Not started      | 20       |
 | **Total**           | **57**   |
 
 Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71), [#72](https://github.com/shermam/trivia/pull/72), [#73](https://github.com/shermam/trivia/pull/73), [#74](https://github.com/shermam/trivia/pull/74).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#76](https://github.com/shermam/trivia/pull/76) (D3, post-deploy smoke test + deploy-failure reporting).
 
 > **The C group is complete.** C3's console step was applied on 2026-08-09 and verified against the Identity Platform API, so the finding is closed rather than merely decided.
 
@@ -162,7 +162,7 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | **D1** | Branch protection not enabled                                                                                                                                                           | ✅ [#36](https://github.com/shermam/trivia/pull/36) — enabled; all 7 checks now required |
 | **D2** | Deploy order is hosting → rules → functions, putting the new client live before its backend                                                                                             | ⬜                                                                                       |
-| **D3** | No post-deploy smoke test or rollback path                                                                                                                                              | ⬜                                                                                       |
+| **D3** | No post-deploy smoke test or rollback path                                                                                                                                              | 🔵 [#76](https://github.com/shermam/trivia/pull/76)                                      |
 | **D4** | Root `postinstall` ran `npm install` in `functions/`; 3 of 5 workflows had incomplete cache keys                                                                                        | ✅ [#39](https://github.com/shermam/trivia/pull/39)                                      |
 | **D5** | Committed `functions/.secret.local` placeholder — decision to re-confirm                                                                                                                | ⬜                                                                                       |
 | **D6** | **Lighthouse asserts the best of 3 runs, not the median** — `aggregationMethod` defaults to `optimistic`. Observed 0.84/0.66/0.62 against a 0.75 threshold, passing. Docs claim median. | ✅ [#54](https://github.com/shermam/trivia/pull/54)                                      |

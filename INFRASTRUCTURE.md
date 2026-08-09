@@ -172,6 +172,25 @@ This is a **deploy-on-merge** pipeline: it doesn't re-run e2e itself. That's onl
 
 The durable guard is a test that reads the indexes file and asserts no index declares `__name__` (`firestore-tests/indexes.spec.ts` here). It costs nothing and is the only thing between this mistake and a silently broken deploy pipeline. And the general lesson: **`--force` would have "fixed" this by deleting the production index** — when a deploy tool asks for `--force`, it is describing an intent, and the right response is to find out which intent, not to grant it.
 
+### 6.3a Knowing a deploy broke, and undoing it
+
+A deploy-on-merge pipeline has two failure modes that nothing else in CI covers, and this project hit both.
+
+**A deploy can fail silently.** Ours went red on four consecutive merges while Hosting kept shipping, and nobody noticed — the run is not attached to a PR anyone is still looking at, and a failure email is easy to miss. Two cheap mechanisms close it:
+
+- **A post-deploy smoke test** that asks the deployed site whether it works — app shell served, security headers intact, runtime config resolving, static `public/` assets reachable, callables deployed and still rejecting unauthenticated callers. Put the checks in a **script**, not in workflow steps: a script can be run against production from a laptop, while a workflow step can only be tested by merging it. Ours is `scripts/smoke-test.mjs`, runnable as `node scripts/smoke-test.mjs https://<host>`.
+- **A failure that opens an issue.** An issue stays open until someone closes it, which a red run and an email do not. De-duplicate on a label so a pipeline that is broken for every merge produces one issue with comments rather than twenty issues.
+
+**Deploys are not atomic across layers.** Hosting ships first, then rules/indexes, then functions — so a failure part-way through leaves a _newer client against an older backend_. Whatever reports the failure should say so, because "the deploy failed" invites the wrong assumption that nothing shipped.
+
+**Rollback, in order of speed.** Verify which commands actually exist in the CLI major you run — several plausible ones do not:
+
+1. **Fastest, Hosting only** — the Console's Hosting → Release history → Rollback, or `firebase hosting:clone <site>:<channel> <site>:live` to re-point live at a known-good version. Seconds, no CI cycle, but it moves _only_ Hosting: rules and functions stay where they are, which widens the very client/backend split above if they were the problem.
+2. **The coherent one** — `git revert` the offending merge and merge the revert. The pipeline redeploys all three layers from one commit, so they end up consistent with each other, and the revert is reviewable. Costs a full CI cycle.
+3. **Emergency stop** — `firebase hosting:disable` stops serving the site entirely. Reach for it only when serving nothing beats serving what is live.
+
+There is **no `hosting:rollback` command** and no rollback command for Cloud Functions at all; functions are restored by deploying an earlier commit. Confirm this against `firebase --help` for your pinned major rather than trusting a plausible-sounding command name.
+
 ### 6.4 Preview deploy + real-preview E2E (`firebase-preview.yml`)
 
 Every PR to `main` on open/sync/reopen, with a `concurrency` group keyed on the PR number so a new push cancels a stale in-flight run. Two sequential jobs, plus a third on `closed`:
