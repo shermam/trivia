@@ -329,3 +329,58 @@ describe('TriviaService answer identity', () => {
     ]);
   });
 });
+
+/**
+ * Finding B3. `getCategories()` memoizes its promise, and used to keep that
+ * memo even when the fetch rejected — so a single flaky moment left the
+ * category picker stuck on "Any Category" for the rest of the session, long
+ * after the network came back, with a full page reload the only way out.
+ */
+describe('TriviaService category caching', () => {
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions: () => of([]) } },
+      ],
+    });
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  const flushCategories = () =>
+    httpMock
+      .expectOne((r) => r.url.includes('api_category.php'))
+      .flush({ trivia_categories: [{ id: 9, name: 'General Knowledge' }] });
+
+  it('fetches once and reuses the result', async () => {
+    const service = TestBed.inject(TriviaService);
+    const first = service.getCategories();
+    flushCategories();
+    await first;
+
+    const second = await service.getCategories();
+    expect(second).toHaveLength(1);
+    // No second request to flush — a pending one would fail verify().
+    httpMock.verify();
+  });
+
+  it('retries after a failure instead of replaying the rejection forever', async () => {
+    const service = TestBed.inject(TriviaService);
+
+    const failing = service.getCategories();
+    httpMock
+      .expectOne((r) => r.url.includes('api_category.php'))
+      .error(new ProgressEvent('network error'));
+    await expect(failing).rejects.toBeTruthy();
+
+    // The retry has to reach the network again. Before the fix this threw
+    // "expected one matching request, found none" — the service handed back
+    // the cached rejection without asking.
+    const retried = service.getCategories();
+    flushCategories();
+    await expect(retried).resolves.toHaveLength(1);
+  });
+});
