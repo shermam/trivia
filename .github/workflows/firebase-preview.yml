@@ -21,6 +21,23 @@ concurrency:
 jobs:
   deploy-preview:
     name: Deploy preview channel
+    # Not for Dependabot. This job runs `npm ci` and `npm run build:prod` —
+    # executing the install scripts and build-time code of the very dependency
+    # version under review — and only then hands a Firebase *deploy* service
+    # account to the deploy step. Granting Dependabot that credential would put
+    # untrusted package code in a job that holds it, which is the exact shape of
+    # a supply-chain attack, on a PR whose entire purpose is changing a
+    # dependency.
+    #
+    # Skipping is safe for merge gating: this is a required check, and a job
+    # skipped by a *job-level* `if` reports a "skipped" conclusion, which branch
+    # protection treats as success. (A job that never appears at all would block
+    # forever instead — so the condition has to live here, not on the steps.)
+    #
+    # The checks that would actually catch a bad bump — test, e2e, lint,
+    # rules-tests, lighthouse — all still run, because none of them needs a
+    # credential.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -70,6 +87,11 @@ jobs:
   e2e-preview:
     name: E2E (preview)
     needs: deploy-preview
+    # Redundant today — `needs` on a skipped job skips this one too — and
+    # deliberately stated anyway. This job also reads the service account (for
+    # the preview-cleanup tasks), so the guard should not depend on a cascade
+    # that an `if: always()` or a dropped `needs:` would quietly remove.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
