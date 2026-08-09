@@ -9,11 +9,23 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { Router } from '@angular/router';
+import { Answer } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 
 const QUESTION_DURATION_SECONDS = 15;
 const ANSWER_DELAY_MS = 2000;
-const ANSWER_LABELS = ['A', 'B', 'C', 'D'];
+/**
+ * Option labels are derived from the index rather than read out of a fixed
+ * array. The array had four entries while `firestore.rules` permitted up to
+ * six answers, so a five-answer question rendered a blank badge — finding B2.
+ * Deriving makes the mismatch impossible rather than merely fixed: the rules
+ * are tightened to what the form can produce in the same change, and this
+ * still holds if that ever moves again, or for a legacy document written
+ * under the older bound.
+ */
+function answerLabel(index: number): string {
+  return String.fromCharCode(65 + index);
+}
 const TIMER_RING_RADIUS = 18;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 
@@ -29,12 +41,12 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly gameController = inject(GameControllerService);
   private readonly router = inject(Router);
 
-  protected readonly answerLabels = ANSWER_LABELS;
+  protected readonly answerLabel = answerLabel;
   protected readonly timerRingRadius = TIMER_RING_RADIUS;
   protected readonly timerRingCircumference = TIMER_RING_CIRCUMFERENCE;
 
   protected readonly timeLeft = signal(QUESTION_DURATION_SECONDS);
-  protected readonly selectedAnswer = signal<string | null>(null);
+  protected readonly selectedAnswer = signal<Answer | null>(null);
   protected readonly isAnswered = signal(false);
 
   protected readonly timerRingOffset = computed(
@@ -58,7 +70,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     this.clearTimers();
   }
 
-  protected selectAnswer(answer: string): void {
+  protected selectAnswer(answer: Answer): void {
     if (this.isAnswered()) {
       return;
     }
@@ -66,14 +78,14 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     this.commitAnswer(answer);
   }
 
-  protected answerClass(answer: string): string {
+  protected answerClass(answer: Answer): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
       return 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-emerald-600 hover:shadow-[0_0_0_3px_rgba(5,150,105,0.08)] border-slate-900/15 dark:border-white/15 text-slate-900 dark:text-slate-50';
     }
 
-    const isCorrectAnswer = answer === question.correct_answer;
-    const isSelected = answer === this.selectedAnswer();
+    const isCorrectAnswer = answer.isCorrect;
+    const isSelected = answer.id === this.selectedAnswer()?.id;
 
     if (isCorrectAnswer) {
       return 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-700 dark:border-emerald-400 text-emerald-900 dark:text-emerald-200';
@@ -84,14 +96,14 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     return 'bg-white dark:bg-slate-800 border-slate-900/8 dark:border-white/10 text-slate-400 dark:text-slate-500 opacity-60';
   }
 
-  protected answerBadgeClass(answer: string): string {
+  protected answerBadgeClass(answer: Answer): string {
     const question = this.gameController.currentQuestion();
     if (!this.isAnswered() || !question) {
       return 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300';
     }
 
-    const isCorrectAnswer = answer === question.correct_answer;
-    const isSelected = answer === this.selectedAnswer();
+    const isCorrectAnswer = answer.isCorrect;
+    const isSelected = answer.id === this.selectedAnswer()?.id;
 
     if (isCorrectAnswer) {
       return 'bg-emerald-700 text-white';
@@ -121,7 +133,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     }
   }
 
-  private commitAnswer(answer: string | null): void {
+  private commitAnswer(answer: Answer | null): void {
     const question = this.gameController.currentQuestion();
     if (!question) {
       return;
@@ -129,7 +141,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
     this.selectedAnswer.set(answer);
     this.isAnswered.set(true);
-    this.gameController.registerAnswer(answer === question.correct_answer);
+    this.gameController.registerAnswer(answer?.isCorrect === true);
 
     this.advanceTimeoutHandle = setTimeout(() => this.goToNextQuestion(), ANSWER_DELAY_MS);
   }

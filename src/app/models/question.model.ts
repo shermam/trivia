@@ -2,6 +2,28 @@ export type QuestionType = 'multiple' | 'boolean';
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type QuestionSource = 'open_trivia' | 'custom' | 'mixed';
 
+/**
+ * One option as presented to the player.
+ *
+ * Answers used to be plain strings, and the whole option list was a
+ * `string[]`. That made the *text* the identity, which broke in two places at
+ * once when a question carried the same text twice: `@for`'s `track` saw
+ * duplicate keys, and — because scoring compared the clicked string against
+ * `correct_answer` — clicking the **wrong** option scored as correct. Both
+ * follow from asking a display value to also be an identifier and a truth
+ * flag.
+ *
+ * So each answer now carries its own `id`, unique within the question and
+ * derived from its position in the source data rather than its text, and
+ * states `isCorrect` outright instead of leaving it to be re-derived by string
+ * comparison at three separate call sites.
+ */
+export interface Answer {
+  id: string;
+  text: string;
+  isCorrect: boolean;
+}
+
 export interface TriviaQuestion {
   id: string;
   category: string;
@@ -10,7 +32,7 @@ export interface TriviaQuestion {
   question: string;
   correct_answer: string;
   incorrect_answers: string[];
-  all_answers: string[];
+  all_answers: Answer[];
   source: 'open_trivia' | 'custom';
 }
 

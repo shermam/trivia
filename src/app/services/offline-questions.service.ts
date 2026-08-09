@@ -3,7 +3,15 @@ import { GameConfig, TriviaQuestion } from '../models/question.model';
 import { shuffleArray } from '../utils/shuffle.util';
 
 const DB_NAME = 'trivia-offline';
-const DB_VERSION = 1;
+/**
+ * Bumped to 2 when `all_answers` changed from `string[]` to `Answer[]`
+ * (finding B1). Cached entries written under v1 hold the old shape, and the
+ * quiz would render `undefined` for every option — so the upgrade discards the
+ * store rather than trying to migrate it. Costs one refill of a pool that is
+ * a cache by definition, which is cheaper than a migration nobody will ever
+ * exercise again.
+ */
+const DB_VERSION = 2;
 const STORE_NAME = 'questions';
 /** Oldest-first trim ceiling — bounds an IndexedDB pool that's topped up on every reconnect over a long-lived session. */
 const MAX_POOL_SIZE = 200;
@@ -137,10 +145,13 @@ export class OfflineQuestionsService {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
           const db = request.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            const store = db.createObjectStore(STORE_NAME, { keyPath: 'question' });
-            store.createIndex('cachedAt', 'cachedAt');
+          // Recreated, not preserved: every stored shape change so far has
+          // been to data this pool can simply re-fetch.
+          if (db.objectStoreNames.contains(STORE_NAME)) {
+            db.deleteObjectStore(STORE_NAME);
           }
+          const store = db.createObjectStore(STORE_NAME, { keyPath: 'question' });
+          store.createIndex('cachedAt', 'cachedAt');
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error as Error);

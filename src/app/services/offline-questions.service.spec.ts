@@ -6,7 +6,10 @@ import { OfflineQuestionsService } from './offline-questions.service';
 /** Opens its own short-lived connection so it can `close()` afterward instead of leaving one dangling. */
 function clearOfflineDb(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const openRequest = indexedDB.open('trivia-offline', 1);
+    const openRequest =
+      indexedDB.open(
+        'trivia-offline',
+      ); /* no version: open whatever the service created, so a schema bump here doesn't VersionError the tests */
     openRequest.onsuccess = () => {
       const db = openRequest.result;
       if (!db.objectStoreNames.contains('questions')) {
@@ -38,7 +41,12 @@ function makeQuestion(overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
     question: overrides.question ?? `Question ${crypto.randomUUID()}`,
     correct_answer: 'A',
     incorrect_answers: ['B', 'C', 'D'],
-    all_answers: ['A', 'B', 'C', 'D'],
+    all_answers: [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B', isCorrect: false },
+      { id: 'c', text: 'C', isCorrect: false },
+      { id: 'd', text: 'D', isCorrect: false },
+    ],
     source: 'open_trivia',
     ...overrides,
   };

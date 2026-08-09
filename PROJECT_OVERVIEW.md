@@ -37,6 +37,7 @@ Any unmatched route redirects back to `/`.
 **Quiz loop (`/play`)**
 
 - Guards against direct navigation: if there's no active question in memory, it redirects back to `/`.
+- Answer option letters (A, B, C…) are computed from the index rather than read from a fixed four-entry array, so they cannot run out if the answer count ever changes.
 - Each question has a **15-second countdown timer** (visual ring + shrinking progress bar that turns red in the last 5 seconds).
 - Selecting an answer (or the timer hitting 0, which auto-submits a "no answer") locks the question:
   - Correct answer is highlighted green.
@@ -74,7 +75,7 @@ Any unmatched route redirects back to `/`.
 Shared normalization for every question:
 
 - HTML entities in question/category/answer text (as returned by Open Trivia DB, e.g. `&quot;`, `&#039;`) are decoded safely via an inert `DOMParser` document (chosen specifically to avoid the classic innerHTML-based decoding XSS footgun).
-- Answers (`correct_answer` + `incorrect_answers`) are merged into a single `all_answers` array and shuffled with a Fisher–Yates shuffle, so the correct answer's position varies per question/render.
+- Answers (`correct_answer` + `incorrect_answers`) are merged into a single `all_answers` array and shuffled with a Fisher–Yates shuffle, so the correct answer's position varies per question/render. Each entry is an **`Answer` (`{ id, text, isCorrect }`)**, not a bare string: the id comes from the answer's position in the source arrays, never from its text, and correctness is stated rather than re-derived. Both matter because a question can legitimately carry the same text twice — the quiz used to `track` by the string (duplicate keys) and to score by comparing the clicked string against `correct_answer`, which let the **wrong** option score as correct.
 
 ### 1.3 State management
 
@@ -210,13 +211,13 @@ type: 'multiple' | 'boolean'
 difficulty: 'easy' | 'medium' | 'hard'
 question: string
 correct_answer: string
-incorrect_answers: string[]
+incorrect_answers: string[]   (1–3, all distinct, none equal to correct_answer)
 createdBy: string      (Firebase uid of the submitter)
 createdAt: int         (epoch ms, must be near server time)
 ```
 
 - **Read**: public (`allow read: if true`)
-- **Create**: requires a "real" account — same `isRealAuthedUser()` gate as the leaderboard (non-anonymous, and email-verified if it's a password account) — **plus an active Pro subscription** (`isProUser()`: `request.auth.token.stripeRole == 'pro'`, §1.6) — plus schema validation (`isValidCustomQuestion()`: exact key set, `type` in `['multiple','boolean']`, `difficulty` in `['easy','medium','hard']`, string length bounds, `incorrect_answers` a list of 1–5 entries). Written from the client via the `/add-question` screen (§1.1, §1.4).
+- **Create**: requires a "real" account — same `isRealAuthedUser()` gate as the leaderboard (non-anonymous, and email-verified if it's a password account) — **plus an active Pro subscription** (`isProUser()`: `request.auth.token.stripeRole == 'pro'`, §1.6) — plus schema validation (`isValidCustomQuestion()`: exact key set, `type` in `['multiple','boolean']`, `difficulty` in `['easy','medium','hard']`, string length bounds, `incorrect_answers` a list of 1–3 entries with **no duplicates and none equal to `correct_answer`** — a question with two identical options has no single right answer, whatever the reader makes of it). Written from the client via the `/add-question` screen (§1.1, §1.4).
 - **Update / Delete**: none from the client (`allow update, delete: if false`) — console-only for now.
 
 `createdBy` may also hold the literal `[deleted-user]` sentinel, written by `deleteAccount` (§2.4) when the author erases their account. It is deliberately distinct from _absent_: a missing `createdBy` means the question predates attribution and was never recorded, whereas the sentinel means an author existed and was deliberately erased. Those are different facts and the schema keeps them distinguishable.

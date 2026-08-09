@@ -3,6 +3,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { firstValueFrom, map } from 'rxjs';
 import { environment } from '../../environments/environment';
 import {
+  Answer,
   CustomQuestionDoc,
   Difficulty,
   GameConfig,
@@ -240,7 +241,18 @@ export class TriviaService {
       question,
       correct_answer,
       incorrect_answers,
-      all_answers: shuffleArray([correct_answer, ...incorrect_answers]),
+      // Ids come from each answer's position in the source arrays, never from
+      // its text — that is the whole point. Two answers with identical text
+      // still get distinct ids, so `@for` tracks them apart and a click
+      // identifies exactly the option that was clicked.
+      all_answers: shuffleArray<Answer>([
+        { id: `${id}:correct`, text: correct_answer, isCorrect: true },
+        ...incorrect_answers.map((text, index) => ({
+          id: `${id}:incorrect-${index}`,
+          text,
+          isCorrect: false,
+        })),
+      ]),
       source,
     };
   }

@@ -87,7 +87,7 @@
         </h2>
 
         <div class="grid gap-2.5 sm:grid-cols-2">
-          @for (answer of question.all_answers; track answer; let i = $index) {
+          @for (answer of question.all_answers; track answer.id; let i = $index) {
             <button
               type="button"
               (click)="selectAnswer(answer)"
@@ -98,15 +98,15 @@
               <span
                 class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors"
                 [ngClass]="answerBadgeClass(answer)"
-                >{{ answerLabels[i] }}</span
+                >{{ answerLabel(i) }}</span
               >
-              <span>{{ answer }}</span>
+              <span>{{ answer.text }}</span>
             </button>
           }
         </div>
 
         @if (isAnswered()) {
-          @if (selectedAnswer() === question.correct_answer) {
+          @if (selectedAnswer()?.isCorrect) {
             <div
               class="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3"
             >
