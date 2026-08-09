@@ -1,7 +1,6 @@
 import { Injectable } from '@angular/core';
 import type { FirebaseApp, FirebaseOptions } from 'firebase/app';
 import { environment } from '../../environments/environment';
-import { withTimeout } from '../utils/with-timeout.util';
 
 /**
  * Reserved Firebase Hosting endpoint that returns the web app config for
@@ -14,12 +13,15 @@ import { withTimeout } from '../utils/with-timeout.util';
 const RUNTIME_CONFIG_URL = '/__/firebase/init.json';
 
 /**
- * Every other network call in the app (Firestore reads, anonymous sign-in)
- * is wrapped in `withTimeout` for exactly this reason, but this fetch — the
- * one thing everything else depends on via the shared `appPromise` below —
- * originally wasn't: a stalled connection here (no HTTP error, just a
- * request that never settles) silently hung the entire app forever, with no
- * timeout anywhere in the chain to ever surface it as a real error state.
+ * Every network call in the app carries a deadline for this reason, but this
+ * fetch — the one thing everything else depends on via the shared
+ * `appPromise` below — originally didn't: a stalled connection here (no HTTP
+ * error, just a request that never settles) silently hung the entire app
+ * forever, with nothing in the chain to ever surface it as a real error state.
+ *
+ * Unlike the Firestore calls, `fetch` can actually be cancelled, so this one
+ * uses `AbortSignal.timeout` and the connection is torn down rather than left
+ * running for a caller that has stopped listening.
  */
 const RUNTIME_CONFIG_TIMEOUT_MS = 10_000;
 
@@ -51,7 +53,13 @@ export class FirebaseAppService {
     if (environment.useEmulators) {
       return EMULATOR_CONFIG;
     }
-    const response = await withTimeout(fetch(RUNTIME_CONFIG_URL), RUNTIME_CONFIG_TIMEOUT_MS);
+    // `AbortSignal.timeout` genuinely aborts the request. Racing a promise
+    // against a timer only stops *waiting* — the connection stays open and the
+    // response is still downloaded and parsed for a caller that has already
+    // given up.
+    const response = await fetch(RUNTIME_CONFIG_URL, {
+      signal: AbortSignal.timeout(RUNTIME_CONFIG_TIMEOUT_MS),
+    });
     if (!response.ok) {
       throw new Error(`Failed to load Firebase config from ${RUNTIME_CONFIG_URL}`);
     }

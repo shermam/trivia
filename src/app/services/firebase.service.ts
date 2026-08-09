@@ -7,7 +7,7 @@ import {
   LeaderboardEntry,
   NewCustomQuestionDoc,
 } from '../models/question.model';
-import { withTimeout } from '../utils/with-timeout.util';
+import { giveUpAfter } from '../utils/give-up-after.util';
 import { FirebaseAppService } from './firebase-app.service';
 
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
@@ -61,7 +61,7 @@ export class FirebaseService {
   getCustomQuestions(): Observable<(CustomQuestionDoc & { id: string })[]> {
     return defer(() =>
       this.getFirestore().then(({ firestore, firestoreModule }) =>
-        withTimeout(
+        giveUpAfter(
           firestoreModule.getDocs(
             firestoreModule.collection(firestore, CUSTOM_QUESTIONS_COLLECTION),
           ),
@@ -91,7 +91,7 @@ export class FirebaseService {
    */
   async addCustomQuestion(question: NewCustomQuestionDoc): Promise<void> {
     const { firestore, firestoreModule } = await this.getFirestore();
-    await withTimeout(
+    await giveUpAfter(
       firestoreModule.addDoc(
         firestoreModule.collection(firestore, CUSTOM_QUESTIONS_COLLECTION),
         question,
@@ -109,7 +109,7 @@ export class FirebaseService {
    */
   async saveHighScore(entry: LeaderboardEntry): Promise<void> {
     const { firestore, firestoreModule } = await this.getFirestore();
-    await withTimeout(
+    await giveUpAfter(
       firestoreModule.setDoc(
         firestoreModule.doc(firestore, LEADERBOARD_COLLECTION, entry.uid),
         entry,
@@ -130,7 +130,7 @@ export class FirebaseService {
    */
   async getLeaderboardEntry(uid: string): Promise<LeaderboardEntry | null> {
     const { firestore, firestoreModule } = await this.getFirestore();
-    const snapshot = await withTimeout(
+    const snapshot = await giveUpAfter(
       firestoreModule.getDoc(firestoreModule.doc(firestore, LEADERBOARD_COLLECTION, uid)),
       FIRESTORE_TIMEOUT_MS,
     );
@@ -145,7 +145,7 @@ export class FirebaseService {
           firestoreModule.orderBy('score', 'desc'),
           firestoreModule.limit(topN),
         );
-        return withTimeout(firestoreModule.getDocs(leaderboardQuery), FIRESTORE_TIMEOUT_MS);
+        return giveUpAfter(firestoreModule.getDocs(leaderboardQuery), FIRESTORE_TIMEOUT_MS);
       }),
     ).pipe(
       map((snapshot) =>

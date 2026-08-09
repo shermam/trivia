@@ -16,14 +16,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 25       |
+| ✅ Fixed and merged | 26       |
 | 🔵 In review        | 2        |
-| ⬜ Not started      | 29       |
+| ⬜ Not started      | 28       |
 | **Total**           | **56**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#58](https://github.com/shermam/trivia/pull/58) (B9, per-source entity decoding).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#60](https://github.com/shermam/trivia/pull/60) (B6, real cancellation per call site).
 
 > A PR in this series can never mark _itself_ merged — the commit that updates the register is the one being reviewed. So the entry for the most recently merged finding is routinely one PR behind, and the next PR tidies it. If you are reading this between merges, trust the `Status` column over this line.
 
@@ -131,10 +131,10 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 | **B3**  | A failed `getCategories()` is cached forever — one blip degrades the whole session                                                                  | ✅ [#56](https://github.com/shermam/trivia/pull/56) |
 | **B4**  | Every `permission-denied` is reported as "your best score is already higher", and blocks retry                                                      | ✅ [#57](https://github.com/shermam/trivia/pull/57) |
 | **B5**  | `playingOffline` is dead code — the player is never told they're on cached questions                                                                | ⬜                                                  |
-| **B6**  | `withTimeout` never clears its timer                                                                                                                | ⬜                                                  |
+| **B6**  | `withTimeout` never clears its timer                                                                                                                | 🔵 [#60](https://github.com/shermam/trivia/pull/60) |
 | **B7**  | Quiz progress bar is off by one — 0% on Q1, never reaches 100%                                                                                      | ⬜                                                  |
 | **B8**  | In-flight game state is memory-only; a refresh loses it                                                                                             | ⬜                                                  |
-| **B9**  | `decodeHtmlEntities` runs over Firestore questions, silently rewriting user text                                                                    | 🔵 [#58](https://github.com/shermam/trivia/pull/58) |
+| **B9**  | `decodeHtmlEntities` runs over Firestore questions, silently rewriting user text                                                                    | ✅ [#58](https://github.com/shermam/trivia/pull/58) |
 | **B10** | The 15s countdown uses `setInterval`, which browsers throttle in hidden tabs                                                                        | ⬜                                                  |
 
 ### C — Data model, scalability, cost

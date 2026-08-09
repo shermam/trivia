@@ -27,10 +27,16 @@ interface WrittenDoc {
 
 /** Fails `setDoc` for any doc ID in `deniedIds`, the way the rules would. */
 function fakeFirestore(
-  options: { deniedIds?: string[]; writeBack?: Record<string, unknown> } = {},
+  options: {
+    deniedIds?: string[];
+    writeBack?: Record<string, unknown>;
+    /** Never call back, so the handshake reaches its deadline instead. */
+    neverRespond?: boolean;
+  } = {},
 ) {
   const writes: WrittenDoc[] = [];
   const denied = new Set(options.deniedIds ?? []);
+  const unsubscribe = vi.fn();
 
   const firestoreModule = {
     doc: (_firestore: unknown, ...path: string[]) => ({ path }),
@@ -53,14 +59,16 @@ function fakeFirestore(
     onSnapshot: (_ref: unknown, next: (snap: { data: () => unknown }) => void) => {
       // Stand in for the Cloud Function's write-back, which is what the
       // service is waiting on.
-      queueMicrotask(() =>
-        next({ data: () => options.writeBack ?? { url: 'https://stripe.test/s' } }),
-      );
-      return () => undefined;
+      if (!options.neverRespond) {
+        queueMicrotask(() =>
+          next({ data: () => options.writeBack ?? { url: 'https://stripe.test/s' } }),
+        );
+      }
+      return unsubscribe;
     },
   };
 
-  return { writes, firestoreModule };
+  return { writes, firestoreModule, unsubscribe };
 }
 
 function configure(fake: ReturnType<typeof fakeFirestore>, user: unknown) {
@@ -195,5 +203,54 @@ describe('SubscriptionService session handshake', () => {
       configure(fake, { uid: 'anon-1', isAnonymous: true }).startProCheckout(),
     ).rejects.toThrow();
     expect(priceLookups).toBe(0);
+  });
+});
+
+/**
+ * Part of finding B6. The handshake's deadline used to be a `Promise.race`
+ * around the listener, and `Promise.race` settles without telling the loser —
+ * so a timed-out checkout left its `onSnapshot` subscription attached for the
+ * rest of the session, still receiving writes, and still billed for them, for
+ * a checkout nobody was waiting on any more.
+ */
+describe('SubscriptionService handshake deadline', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    TestBed.resetTestingModule();
+  });
+
+  it('detaches the listener when the function never writes back', async () => {
+    const fake = fakeFirestore({ neverRespond: true });
+    const service = configure(fake, { uid: 'user-1', isAnonymous: false });
+
+    const pending = service.openBillingPortal();
+    const assertion = expect(pending).rejects.toThrow(/Timed out/);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+
+    expect(fake.unsubscribe).toHaveBeenCalledTimes(1);
+    // And nothing is left ticking for a handshake that is over.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('detaches the listener on the success path too', async () => {
+    const fake = fakeFirestore();
+    const service = configure(fake, { uid: 'user-1', isAnonymous: false });
+
+    // A delta, not an absolute count: TestBed and Angular's effect scheduling
+    // have timers of their own, and this test is only about whether the
+    // handshake leaves its own deadline behind.
+    const before = vi.getTimerCount();
+    await service.openBillingPortal();
+
+    expect(fake.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(before);
   });
 });

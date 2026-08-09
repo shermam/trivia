@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import type { DocumentReference, Firestore } from 'firebase/firestore';
-import { withTimeout } from '../utils/with-timeout.util';
+import { giveUpAfter } from '../utils/give-up-after.util';
 import { AuthService } from './auth.service';
 import { FirebaseService } from './firebase.service';
 
@@ -113,7 +113,7 @@ export class SubscriptionService {
       this.proPricePromise = this.firebaseService
         .getFirestore()
         .then(async ({ firestore, firestoreModule }) => {
-          const productsSnapshot = await withTimeout(
+          const productsSnapshot = await giveUpAfter(
             firestoreModule.getDocs(
               firestoreModule.query(
                 firestoreModule.collection(firestore, PRODUCTS_COLLECTION),
@@ -123,7 +123,7 @@ export class SubscriptionService {
             CHECKOUT_TIMEOUT_MS,
           );
           for (const productDoc of productsSnapshot.docs) {
-            const pricesSnapshot = await withTimeout(
+            const pricesSnapshot = await giveUpAfter(
               firestoreModule.getDocs(
                 firestoreModule.query(
                   firestoreModule.collection(productDoc.ref, 'prices'),
@@ -230,30 +230,54 @@ export class SubscriptionService {
       payload,
     );
 
-    return withTimeout(
-      new Promise<string>((resolve, reject) => {
-        const unsubscribe = firestoreModule.onSnapshot(
-          sessionRef,
-          (snapshot) => {
-            const data = snapshot.data() as
-              { url?: string; error?: { message?: string } } | undefined;
-            if (data?.error) {
-              unsubscribe();
-              reject(new Error(data.error.message ?? options.failureMessage));
-            } else if (data?.url) {
-              unsubscribe();
-              resolve(data.url);
-            }
-          },
-          (error) => {
-            unsubscribe();
-            reject(error);
-          },
-        );
-      }),
-      CHECKOUT_TIMEOUT_MS,
-      options.timeoutMessage,
-    );
+    // The deadline lives inside the promise rather than racing it from
+    // outside, because giving up on this handshake has to mean detaching the
+    // listener. Racing left the `onSnapshot` subscription attached for the rest
+    // of the session — still receiving writes, and still billed for them, for a
+    // checkout nobody was waiting on any more.
+    return new Promise<string>((resolve, reject) => {
+      let unsubscribe: (() => void) | null = null;
+      let settled = false;
+
+      const finish = (outcome: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        unsubscribe?.();
+        outcome();
+      };
+
+      const timeoutHandle = setTimeout(
+        () => finish(() => reject(new Error(options.timeoutMessage))),
+        CHECKOUT_TIMEOUT_MS,
+      );
+
+      unsubscribe = firestoreModule.onSnapshot(
+        sessionRef,
+        (snapshot) => {
+          const data = snapshot.data() as
+            { url?: string; error?: { message?: string } } | undefined;
+          if (data?.error) {
+            const message = data.error.message ?? options.failureMessage;
+            finish(() => reject(new Error(message)));
+          } else if (data?.url) {
+            const url = data.url;
+            finish(() => resolve(url));
+          }
+        },
+        (error) => finish(() => reject(error)),
+      );
+
+      // `onSnapshot` returns before it calls back, so `unsubscribe` is assigned
+      // in time for every path above. If that ever stopped being true, the
+      // listener would already have been detached-and-forgotten here rather
+      // than leaked.
+      if (settled) {
+        unsubscribe();
+      }
+    });
   }
 
   /**
