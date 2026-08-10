@@ -50,9 +50,9 @@ jobs:
       - name: Install Cloud Functions dependencies
         run: npm ci --prefix functions
 
-      - name: Run Cloud Functions unit tests
-        run: npm run functions:test
-
+      # The Cloud Functions unit tests used to run here too; they now have
+      # their own workflow (functions-tests.yml) so a functions-test failure
+      # reports under its own name instead of as "e2e failed".
       - name: Run Cypress e2e suite (unauthenticated + authenticated flows)
         run: npm run e2e
 

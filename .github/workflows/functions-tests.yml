@@ -1,0 +1,45 @@
+name: Cloud Functions Tests
+
+# Runs the Cloud Functions unit suite (node --test against functions/lib) on
+# every PR targeting main, plus main itself as a safety net.
+#
+# Its own workflow rather than a step inside e2e.yml, where it used to run
+# (§8's one-workflow-per-concern rule in INFRASTRUCTURE.md): bundled there, a
+# functions-test failure reported as "e2e failed" and arrived only after the
+# emulator suite booted — minutes of Java/emulator setup for a check that
+# needs none of it and finishes in seconds. These tests are what make
+# CLAUDE.md §4's [functions tests] guardrail tags a mechanism rather than a
+# promise, so their verdict deserves its own name.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # NOTE: this job id is the status-check context (`functions-tests`). It has
+  # to be added to main's ruleset by a repo admin before it gates a merge — a
+  # workflow cannot require itself. Don't add a `name:` here either: that
+  # would replace the context and silently detach it from the ruleset.
+  functions-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      # Root `npm ci` reaches functions/ too: the repo-root postinstall runs
+      # `npm ci --prefix functions` (see PROJECT_OVERVIEW.md §4.5).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Cloud Functions unit tests
+        run: npm run functions:test

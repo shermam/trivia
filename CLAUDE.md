@@ -70,9 +70,9 @@ Each guardrail is tagged with the mechanism that catches a violation:
 - **[review-only]** — nothing automated will ever catch this. It depends on you actually checking.
 - **[lint]** — `npm run lint` fails. **Live now**, reported by the `lint` CI check.
 - **[rules tests]** — `npm run rules:test` fails (`firestore-tests/`). **Live now**, reported by the `rules-tests` CI check.
-- **[functions tests]** — a machine check catches it, _once that check exists_. This one arrives later in the audit-remediation PR series; until then, treat the guardrail as review-only. The tag describes what will catch it, not proof that something already does.
+- **[functions tests]** — `npm run functions:test` fails. **Live now**, reported by the `functions-tests` CI check.
 
-**Reporting is not the same as gating.** `lint` and `rules-tests` run on every PR, but a workflow cannot add itself to a branch ruleset — until a repo admin adds each one under Settings → Rules, a red check reports the failure without blocking the merge. Check which are actually required before treating a green PR as proof; see `PROJECT_OVERVIEW.md` §4.2a for the current list.
+**Reporting is not the same as gating.** Every suite above runs on each PR, but a workflow cannot add itself to a branch ruleset — a new check reports without blocking until a repo admin adds it under Settings → Rules (`functions-tests` is currently in that state; `lint` and `rules-tests` went through the same lifecycle and are required today). Check which are actually required before treating a green PR as proof; see `PROJECT_OVERVIEW.md` §4.2a for the current list.
 
 **A note on what lint turned out not to be able to do.** When these tags were first written, five guardrails were optimistically marked `[lint]`. Wiring ESLint up showed that no rule exists — in `angular-eslint`, `typescript-eslint` or core ESLint — for any of them:
 
