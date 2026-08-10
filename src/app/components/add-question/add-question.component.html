@@ -147,10 +147,16 @@
         </div>
 
         <div>
-          <span class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+          <span
+            id="question-type-label"
+            class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
             >Question Type</span
           >
-          <div class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+          <div
+            role="radiogroup"
+            aria-labelledby="question-type-label"
+            class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+          >
             <label
               class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
               [class.bg-emerald-100]="form.value.type === 'multiple'"
@@ -195,10 +201,16 @@
 
         @if (form.value.type === 'boolean') {
           <div>
-            <span class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+            <span
+              id="correct-answer-label"
+              class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
               >Correct Answer</span
             >
-            <div class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+            <div
+              role="radiogroup"
+              aria-labelledby="correct-answer-label"
+              class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+            >
               <label
                 class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
                 [class.bg-emerald-100]="form.value.correctAnswer === 'True'"
