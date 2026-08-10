@@ -20,12 +20,12 @@ Related documents:
 | ✅ Fixed and merged   | 47       |
 | ☑️ Closed by decision | 1        |
 | 🔵 In review          | 2        |
-| ⬜ Not started        | 8        |
+| ⬜ Not started        | 7        |
 | **Total**             | **58**   |
 
 Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71), [#72](https://github.com/shermam/trivia/pull/72), [#73](https://github.com/shermam/trivia/pull/73), [#74](https://github.com/shermam/trivia/pull/74), [#75](https://github.com/shermam/trivia/pull/75), [#76](https://github.com/shermam/trivia/pull/76), [#77](https://github.com/shermam/trivia/pull/77), [#78](https://github.com/shermam/trivia/pull/78), [#79](https://github.com/shermam/trivia/pull/79), [#80](https://github.com/shermam/trivia/pull/80), [#81](https://github.com/shermam/trivia/pull/81), [#82](https://github.com/shermam/trivia/pull/82), [#83](https://github.com/shermam/trivia/pull/83), [#84](https://github.com/shermam/trivia/pull/84), [#85](https://github.com/shermam/trivia/pull/85), [#86](https://github.com/shermam/trivia/pull/86), [#88](https://github.com/shermam/trivia/pull/88).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#91](https://github.com/shermam/trivia/pull/91) (E2, AuthService spec) — plus [#90](https://github.com/shermam/trivia/pull/90), a smoke-test tooling follow-up outside this register.
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#91](https://github.com/shermam/trivia/pull/91) (E2, AuthService spec), [#92](https://github.com/shermam/trivia/pull/92) (E5, coverage floors — stacked on #91).
 
 > **The C group is complete.** C3's console step was applied on 2026-08-09 and verified against the Identity Platform API, so the finding is closed rather than merely decided.
 
@@ -192,7 +192,7 @@ Legend: ✅ merged · ☑️ closed by decision · 🔵 in review · ⬜ not sta
 | **E2** | No coverage of `AuthService`, `SubscriptionService`, `FirebaseService`, `GameControllerService` | 🔵 [#91](https://github.com/shermam/trivia/pull/91) — _three of the four gained per-finding specs along the way; AuthService was the real gap, see §6_ |
 | **E3** | `functions/` tests only `deriveClaimRole`; webhook and claim logic uncovered                    | ✅ [#86](https://github.com/shermam/trivia/pull/86) — _finding text was stale; see §6_                                                                 |
 | **E4** | `stripeWebhook` never exercised against a real Stripe delivery                                  | ✅ [#36](https://github.com/shermam/trivia/pull/36) — manually verified                                                                                |
-| **E5** | No coverage reporting or thresholds                                                             | ⬜                                                                                                                                                     |
+| **E5** | No coverage reporting or thresholds                                                             | 🔵 [#92](https://github.com/shermam/trivia/pull/92) — _measured-baseline ratchet floors on both unit suites; gates mutation-tested_                    |
 
 ### F — Tooling & code quality
 
