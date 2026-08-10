@@ -69,6 +69,37 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly selectedAnswer = signal<Answer | null>(null);
   protected readonly isAnswered = signal(false);
 
+  /**
+   * What a screen reader is told the moment a question is answered (G3).
+   *
+   * The coloured banner below the options conveys the result visually and was
+   * announced to nobody: it appears without focus moving, and the quiz
+   * auto-advances two seconds later, so a screen reader user got the next
+   * question with no idea whether the last one was right.
+   *
+   * The text is duplicated rather than shared with the banner because the two
+   * have different jobs — the banner is glanceable ("Correct! Well done."),
+   * this has to stand alone without the colour or the icon that give the visual
+   * version half its meaning.
+   */
+  protected readonly resultAnnouncement = computed(() => {
+    if (!this.isAnswered()) {
+      return '';
+    }
+    const question = this.gameController.currentQuestion();
+    if (!question) {
+      return '';
+    }
+    const selected = this.selectedAnswer();
+    if (selected?.isCorrect) {
+      return 'Correct.';
+    }
+    if (selected === null) {
+      return `Time's up. The correct answer was ${question.correct_answer}.`;
+    }
+    return `Incorrect. The correct answer is ${question.correct_answer}.`;
+  });
+
   protected readonly timerRingOffset = computed(
     () =>
       TIMER_RING_CIRCUMFERENCE -

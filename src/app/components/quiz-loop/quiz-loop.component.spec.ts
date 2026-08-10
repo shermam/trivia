@@ -166,3 +166,80 @@ describe('QuizLoopComponent — wall-clock countdown (B10)', () => {
     expect(registerAnswer).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Finding G3. The coloured banner under the options is the only thing that says
+ * whether an answer was right, and it was announced to nobody: it appears
+ * without focus moving, and the quiz auto-advances two seconds later — so a
+ * screen reader user was handed the next question having never learned the
+ * result of the last one.
+ */
+describe('QuizLoopComponent — result announcement (G3)', () => {
+  const liveRegion = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector('[role="status"]');
+
+  it('keeps the live region in the DOM before there is anything to announce', () => {
+    const { fixture } = setup();
+
+    // A region inserted already carrying its message is routinely missed by
+    // screen readers; it has to be present and then change.
+    expect(liveRegion(fixture)).not.toBeNull();
+    expect(liveRegion(fixture)?.textContent?.trim()).toBe('');
+    expect(liveRegion(fixture)?.getAttribute('aria-live')).toBe('polite');
+
+    fixture.destroy();
+  });
+
+  it('announces a correct answer', () => {
+    const { fixture } = setup();
+    const question = TestBed.inject(GameControllerService).currentQuestion()!;
+
+    clickAnswer(fixture, question.all_answers.find((a) => a.isCorrect)!.text);
+
+    expect(liveRegion(fixture)?.textContent?.trim()).toBe('Correct.');
+    fixture.destroy();
+  });
+
+  // The wrong answer is the case where the banner's colour carries the meaning,
+  // so the text has to say what the right answer was rather than just "wrong".
+  it('announces an incorrect answer along with the correct one', () => {
+    const { fixture } = setup();
+    const question = TestBed.inject(GameControllerService).currentQuestion()!;
+
+    clickAnswer(fixture, question.all_answers.find((a) => !a.isCorrect)!.text);
+
+    expect(liveRegion(fixture)?.textContent?.trim()).toBe(
+      `Incorrect. The correct answer is ${question.correct_answer}.`,
+    );
+    fixture.destroy();
+  });
+
+  it('announces a timeout, which no click ever reports', () => {
+    let now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { fixture } = setup();
+    const question = TestBed.inject(GameControllerService).currentQuestion()!;
+
+    now += 16_000;
+    vi.advanceTimersByTime(250);
+    fixture.detectChanges();
+
+    expect(liveRegion(fixture)?.textContent?.trim()).toBe(
+      `Time's up. The correct answer was ${question.correct_answer}.`,
+    );
+    fixture.destroy();
+  });
+});
+
+/** Clicks the option whose visible text matches, the way a player would. */
+function clickAnswer(fixture: ReturnType<typeof setup>['fixture'], text: string): void {
+  const buttons = Array.from(
+    (fixture.nativeElement as HTMLElement).querySelectorAll('button'),
+  ) as HTMLButtonElement[];
+  const target = buttons.find((button) => button.textContent?.includes(text));
+  if (!target) {
+    throw new Error(`No answer button with text "${text}"`);
+  }
+  target.click();
+  fixture.detectChanges();
+}

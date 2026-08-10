@@ -1,6 +1,6 @@
 # Audit Remediation Plan
 
-A full audit of this repo (security, correctness, data model, CI/CD, testing, accessibility, product/compliance) produced **55 findings**, and fixing them has since surfaced two more — **57** in the register today. They are being fixed as a series of small, individually-reviewable pull requests.
+A full audit of this repo (security, correctness, data model, CI/CD, testing, accessibility, product/compliance) produced **55 findings**, and fixing them has since surfaced two more, and one turned out to be two — **58** in the register today. They are being fixed as a series of small, individually-reviewable pull requests.
 
 This file is the **shared source of truth** for that work: what was found, what is done, what is next, and the decisions taken along the way. It is deliberately in the repo rather than in any assistant's private memory, so progress is reviewable and the work can be picked up in a new session — or by a different person — without reconstructing context.
 
@@ -17,14 +17,14 @@ Related documents:
 
 |                     | Findings |
 | ------------------- | -------- |
-| ✅ Fixed and merged | 40       |
+| ✅ Fixed and merged | 41       |
 | 🔵 In review        | 2        |
 | ⬜ Not started      | 15       |
-| **Total**           | **57**   |
+| **Total**           | **58**   |
 
-Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71), [#72](https://github.com/shermam/trivia/pull/72), [#73](https://github.com/shermam/trivia/pull/73), [#74](https://github.com/shermam/trivia/pull/74), [#75](https://github.com/shermam/trivia/pull/75), [#76](https://github.com/shermam/trivia/pull/76), [#77](https://github.com/shermam/trivia/pull/77), [#78](https://github.com/shermam/trivia/pull/78), [#79](https://github.com/shermam/trivia/pull/79).
+Merged so far: [#43](https://github.com/shermam/trivia/pull/43), [#42](https://github.com/shermam/trivia/pull/42), [#34](https://github.com/shermam/trivia/pull/34), [#35](https://github.com/shermam/trivia/pull/35), [#36](https://github.com/shermam/trivia/pull/36), [#38](https://github.com/shermam/trivia/pull/38), [#39](https://github.com/shermam/trivia/pull/39), [#40](https://github.com/shermam/trivia/pull/40), [#41](https://github.com/shermam/trivia/pull/41), [#44](https://github.com/shermam/trivia/pull/44), [#45](https://github.com/shermam/trivia/pull/45), [#47](https://github.com/shermam/trivia/pull/47), [#48](https://github.com/shermam/trivia/pull/48), [#49](https://github.com/shermam/trivia/pull/49), [#51](https://github.com/shermam/trivia/pull/51), [#53](https://github.com/shermam/trivia/pull/53), [#54](https://github.com/shermam/trivia/pull/54), [#55](https://github.com/shermam/trivia/pull/55), [#56](https://github.com/shermam/trivia/pull/56), [#57](https://github.com/shermam/trivia/pull/57), [#58](https://github.com/shermam/trivia/pull/58), [#60](https://github.com/shermam/trivia/pull/60), [#62](https://github.com/shermam/trivia/pull/62), [#64](https://github.com/shermam/trivia/pull/64), [#66](https://github.com/shermam/trivia/pull/66), [#67](https://github.com/shermam/trivia/pull/67), [#70](https://github.com/shermam/trivia/pull/70), [#71](https://github.com/shermam/trivia/pull/71), [#72](https://github.com/shermam/trivia/pull/72), [#73](https://github.com/shermam/trivia/pull/73), [#74](https://github.com/shermam/trivia/pull/74), [#75](https://github.com/shermam/trivia/pull/75), [#76](https://github.com/shermam/trivia/pull/76), [#77](https://github.com/shermam/trivia/pull/77), [#78](https://github.com/shermam/trivia/pull/78), [#79](https://github.com/shermam/trivia/pull/79), [#80](https://github.com/shermam/trivia/pull/80).
 
-Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#80](https://github.com/shermam/trivia/pull/80) (G4, labelled radio groups).
+Open: [#37](https://github.com/shermam/trivia/pull/37) (legal pages — awaiting legal review), [#81](https://github.com/shermam/trivia/pull/81) (G3, quiz result announcement).
 
 > **The C group is complete.** C3's console step was applied on 2026-08-09 and verified against the Identity Platform API, so the finding is closed rather than merely decided.
 
@@ -192,14 +192,15 @@ Legend: ✅ merged · 🔵 in review · ⬜ not started
 
 None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `templateAccessibility` set reports zero errors, while every item below is still present — confirmed empirically in #38.
 
-| ID     | Finding                                                                                         | Status                                              |
-| ------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | ✅ [#79](https://github.com/shermam/trivia/pull/79) |
-| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | ✅ [#79](https://github.com/shermam/trivia/pull/79) |
-| **G3** | Quiz result banner has no `aria-live`; the 15s limit can't be extended (WCAG 2.2.1)             | ⬜                                                  |
-| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | 🔵 [#80](https://github.com/shermam/trivia/pull/80) |
-| **G5** | No skip link, no route-change announcement                                                      | ⬜                                                  |
-| **G6** | Auth form `autocomplete` attributes need confirming                                             | ⬜                                                  |
+| ID     | Finding                                                                                         | Status                                                     |
+| ------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | ✅ [#79](https://github.com/shermam/trivia/pull/79)        |
+| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | ✅ [#79](https://github.com/shermam/trivia/pull/79)        |
+| **G3** | Quiz result banner has no `aria-live`, so the outcome of an answer is announced to nobody       | 🔵 [#81](https://github.com/shermam/trivia/pull/81)        |
+| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | ✅ [#80](https://github.com/shermam/trivia/pull/80)        |
+| **G5** | No skip link, no route-change announcement                                                      | ⬜                                                         |
+| **G6** | Auth form `autocomplete` attributes need confirming                                             | ⬜                                                         |
+| **G7** | **The 15s question limit cannot be adjusted, extended or turned off** (WCAG 2.2.1)              | ⬜ _(split from G3 — needs a product decision, see below)_ |
 
 ### H — Product & compliance
 
@@ -302,6 +303,22 @@ The expectation now comes from the deployed secret key's own `_live_`/`_test_` i
 **The `livemode` check acknowledges rather than rejects.** Returning 4xx would make Stripe retry and eventually disable the endpoint, and there is nothing to retry — the delivery is simply for the other mode. It returns 200 and writes nothing, which is the actual security property.
 
 **`math.floor()` in the rules language returns a float.** `string(math.floor(x))` renders `"5954006.0"`, so every legitimate checkout was rejected and every hostile one was too — a rule that looks like it works and fails 100% closed. Plain integer division is correct. Caught only because the suite asserts the _accept_ cases as well as the reject ones; a suite of nothing but `assertFails` would have passed against it happily. Worth remembering next to the `math.round()` check A1 did: the rules language is close enough to JavaScript to be trusted by reflex, and isn't.
+
+### What G3 turned out to be, and the decision it leaves open
+
+**G3 was two findings sharing a row**, and only one of them is an implementation detail.
+
+The announcement half is done: the result banner now has a permanent `role="status"` live region. The container is rendered **always** and only its text changes, because a live region inserted into the DOM already carrying its message is routinely missed — a mutation that wraps it in `@if (isAnswered())` looks correct and fails the suite.
+
+The timing half is **G7**, and it is a product decision rather than a coding one. WCAG 2.2.1 accepts a timed limit only if the user can turn it off, adjust it to at least ten times the default, or extend it on warning — and the honest starting point is that this app offers none of those. Three routes, none free:
+
+| Option                                                                                                            | What it costs                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A timer setting on the setup screen** (e.g. 15s / 30s / 60s / off), chosen before the limit is ever encountered | Satisfies "turn off" and "adjust" cleanly, and is discoverable. But the leaderboard then mixes runs played under different rules — a 25/25 with no timer is not the same achievement as a 25/25 at 15s, and `firestore.rules` currently validates only the score, not the conditions it was won under. Either the entry records the setting, or untimed games stop being publishable.                         |
+| **Extend on request** — warn near expiry and offer more time                                                      | Closest to how the guideline is written, and the most intrusive: a warning on every question of every game, for a limit most players never come near.                                                                                                                                                                                                                                                         |
+| **Claim the "Essential" exception** — argue the countdown _is_ the activity                                       | Defensible on paper (WCAG allows it where extending would invalidate the activity) and costs nothing. It is also the option that leaves the barrier exactly where it is, having written a paragraph about why that is acceptable. The audit already called a hard 15-second limit with no alternative a real barrier, so taking this route now would be reversing a stated position rather than answering it. |
+
+Worth noting the leaderboard interaction is the actual hard part, not the timer UI. That is why this is not being decided in passing.
 
 ### What C3 actually found, and the finding it produced
 

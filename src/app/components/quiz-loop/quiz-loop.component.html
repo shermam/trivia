@@ -114,6 +114,15 @@
           }
         </div>
 
+        <!--
+          Rendered always, empty until there is a result, rather than appearing
+          alongside the banner below. A live region has to exist *before* its
+          content changes for the change to be announced — a region inserted
+          into the DOM already carrying its message is routinely missed. So the
+          container is permanent and only its text changes (G3).
+        -->
+        <p role="status" aria-live="polite" class="sr-only">{{ resultAnnouncement() }}</p>
+
         @if (isAnswered()) {
           @if (selectedAnswer()?.isCorrect) {
             <div
