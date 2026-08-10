@@ -132,12 +132,14 @@ jobs:
       # (patched around at the browser level, see cypress/support/e2e.preview.ts
       # — Cypress's own reserved-path handling collides with Firebase Hosting's
       # `/__/` namespace), same as a real visitor otherwise.
+      # `env`, not `${{ }}` inside `run:` — see firebase-deploy.yml (A11).
       - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           npm run e2e:preview
 
       - name: Clean up service account credentials
