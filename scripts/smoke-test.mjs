@@ -25,6 +25,7 @@ const DEFAULT_ORIGIN = 'https://trivimind.com';
 const PROJECT_ID = 'intellectura-3b26a';
 const FUNCTIONS_ORIGIN = `https://us-central1-${PROJECT_ID}.cloudfunctions.net`;
 const TIMEOUT_MS = 20_000;
+const RETRY_DELAY_MS = 5_000;
 
 const origin = (process.argv[2] ?? DEFAULT_ORIGIN).replace(/\/$/, '');
 
@@ -125,13 +126,39 @@ async function post(url, body) {
   });
 }
 
+/**
+ * One bounded retry, and only for a *timed-out* attempt (issue #87): a fresh
+ * Hosting deploy can leave a cold CDN edge that hangs the first fetch of a
+ * path while the site is perfectly healthy, and a smoke test that files a
+ * deploy-failure issue over warmup teaches people to ignore the real one.
+ * Everything else stays exactly as loud as before — assertion failures happen
+ * in the checks and never reach this path, an HTTP error status is a
+ * *response* (never retried), and a second timeout fails the check.
+ */
 async function request(url, init) {
+  try {
+    return await attempt(url, init);
+  } catch (error) {
+    if (!isTimeout(error)) {
+      throw error;
+    }
+    console.log(`        (request timed out, retrying once in ${RETRY_DELAY_MS / 1000}s)`);
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return attempt(url, init);
+  }
+}
+
+async function attempt(url, init) {
   const response = await fetch(url, {
     ...init,
     signal: AbortSignal.timeout(TIMEOUT_MS),
     redirect: 'follow',
   });
   return { status: response.status, headers: response.headers, body: await response.text() };
+}
+
+function isTimeout(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
 }
 
 const failures = [];
