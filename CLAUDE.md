@@ -130,6 +130,7 @@ Any new interactive UI is checked by hand against these before the PR:
 - **Grouped form controls** (segmented pickers, custom radios) carry `role="radiogroup"` and `aria-labelledby`, or the group's label is never conveyed. **[review-only]**
 - **Timing limits** are adjustable, extendable, or can be turned off (WCAG 2.2.1). A hard 15-second countdown with no alternative is a real barrier. **[review-only]**
 - **Route changes** are announced, and there's a skip link. SPA navigation is otherwise silent to assistive tech. **[review-only]**
+- **Inputs collecting data about the user carry the matching `autocomplete` token** (WCAG 1.3.5): `email`, `current-password`/`new-password` switched by sign-in/sign-up mode, `nickname` for display-name fields. Content fields (quiz questions, answers, categories) take none — the tokens describe the user, not the app. Nothing audits a _missing_ token, same as the aria rules in the table above, so the values are pinned in the e2e suite instead. **[review-only]**
 
 ### 4.6 Test coverage obligations
 

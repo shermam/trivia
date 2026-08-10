@@ -38,6 +38,9 @@ describe('verified user saves a score to the leaderboard', () => {
     cy.contains('Sign in to save this score to the leaderboard.');
     cy.signInFromGameOver(email, password);
 
+    // G6: the leaderboard name is data about the user (the `nickname`
+    // purpose), so a browser can prefill it from the profile it knows.
+    cy.get('input[name=playerName]').should('have.attr', 'autocomplete', 'nickname');
     cy.get('input[name=playerName]').clear().type('Test Player');
     cy.contains('button', 'Save Score').click();
 
