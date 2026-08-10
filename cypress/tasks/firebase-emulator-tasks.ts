@@ -144,6 +144,17 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
       return fetchVerificationLink(email);
     },
 
+    /** Whether the Auth emulator holds a pending PASSWORD_RESET code for this
+     * address — the proof a reset request actually reached Auth (H1), and its
+     * absence the proof the unknown-address path sent nothing. */
+    async hasPendingPasswordReset(email: string) {
+      const response = await fetch(
+        `http://${AUTH_EMULATOR_HOST}/emulator/v1/projects/${E2E_PROJECT_ID}/oobCodes`,
+      );
+      const { oobCodes } = (await response.json()) as { oobCodes: OobCode[] };
+      return oobCodes.some((code) => code.email === email && code.requestType === 'PASSWORD_RESET');
+    },
+
     /**
      * Simulates what our Stripe webhook handler
      * (functions/src/subscriptions.ts) does after a real checkout completes

@@ -99,6 +99,37 @@ export class AuthMenuComponent {
     }
   }
 
+  /**
+   * The confirmation is deliberately neutral — "if an account exists" — and
+   * identical whether or not one does (`AuthService.sendPasswordReset`
+   * swallows `user-not-found`): a reset form that answers differently for
+   * known and unknown addresses is an account-enumeration oracle (H1).
+   */
+  protected async requestPasswordReset(): Promise<void> {
+    if (this.isSubmitting()) {
+      return;
+    }
+    const email = this.email.trim();
+    if (!email) {
+      this.infoMessage.set(null);
+      this.errorMessage.set('Enter your email above first, then use "Forgot password?".');
+      return;
+    }
+    this.isSubmitting.set(true);
+    this.errorMessage.set(null);
+    this.infoMessage.set(null);
+    try {
+      await this.authService.sendPasswordReset(email);
+      this.infoMessage.set(
+        'If an account exists for that email, a password-reset link is on its way.',
+      );
+    } catch (error) {
+      this.errorMessage.set(error instanceof Error ? error.message : 'Something went wrong.');
+    } finally {
+      this.isSubmitting.set(false);
+    }
+  }
+
   protected async continueWithProvider(providerId: OAuthProviderId): Promise<void> {
     if (this.isSubmitting()) {
       return;
