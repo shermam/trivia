@@ -59,11 +59,16 @@ jobs:
       # change has to stay compatible with the deployed client *regardless* —
       # and once that is true, backend-first strictly dominates, because it is
       # the only order that also closes the new-client window.
+      # The secret reaches the shell through `env`, never `${{ }}` inside
+      # `run:` — template expansion pastes the value into the script text
+      # itself, where its characters are parsed as shell (A11). Same idiom
+      # as firebase-preview.yml's cleanup job, which always had it right.
       - name: Deploy Firestore rules and indexes
         env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project intellectura-3b26a
 
       - name: Install Cloud Functions dependencies
@@ -74,9 +79,10 @@ jobs:
       # from the Hosting/Firestore rules deploys above.
       - name: Deploy Cloud Functions
         env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           # @14, not @13 like the Firestore rules/indexes step above: @13's
           # bundled Functions support predates firebase-functions v7's
           # removal of `functions.config()` and unconditionally probes for
