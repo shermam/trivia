@@ -1,3 +1,5 @@
+import { assertRadiosAreGrouped } from '../../support/a11y-assertions';
+
 describe('add-question Pro gating', () => {
   const password = 'correct horse battery staple';
   let email: string;
@@ -31,6 +33,12 @@ describe('add-question Pro gating', () => {
 
     cy.contains('a', '+ Create custom question').click();
     cy.location('pathname').should('eq', '/add-question');
+
+    // This screen carries the other two segmented pickers (Question Type and,
+    // once a boolean question is chosen, Correct Answer), and it is only
+    // reachable as Pro — so G4's sweep runs here rather than in the
+    // unauthenticated spec.
+    assertRadiosAreGrouped();
 
     // Retries until the reactive Pro-gated form actually renders — i.e.
     // until the real-time subscription listener + token refresh have

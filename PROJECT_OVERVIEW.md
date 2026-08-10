@@ -31,6 +31,9 @@ Any unmatched route redirects back to `/`.
   - **Category**: "Any Category" or one of the categories fetched live from Open Trivia DB
   - **Difficulty**: Any / Easy / Medium / Hard
   - **Question source**: `open_trivia` (public API), `custom` (Firestore question bank), or `mixed` (roughly half-and-half, shuffled together)
+
+  The segmented pickers here and on `/add-question` (Question Source, Question Type, Correct Answer) are real `<input type="radio">` elements hidden with `sr-only`, so each option is natively announced — but the caption above each box is a plain `<span>`, which labels nothing. Each box therefore carries `role="radiogroup"` + `aria-labelledby` pointing at that caption (finding G4); without it a screen reader said "Open Trivia, radio button, 1 of 3" and never mentioned **Question Source**. `cypress/support/a11y-assertions.ts` sweeps _every_ radio on the page rather than checking the three known ids, so a picker added later is covered too.
+
 - Categories are fetched once (cached in-memory) from `GET https://opentdb.com/api_category.php`; a failure degrades gracefully to "Any Category" with an inline warning instead of blocking the form. **The memo is dropped if that fetch fails**, so the next attempt goes back to the network — caching a rejected promise turned one flaky moment into a session that stayed stuck on "Any Category" until a full page reload, long after the network recovered. Same pattern as `SubscriptionService.getProPriceId()`.
 - On submit, `GameControllerService.startGame()` fetches questions for the chosen config and navigates to `/play`. Loading and error states (e.g. no questions found for the given filters, network failure) are surfaced inline on the form.
 
