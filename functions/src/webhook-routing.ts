@@ -7,12 +7,7 @@
  * quietly stop syncing with nothing red anywhere.
  */
 export type WebhookRoute =
-  | 'subscription'
-  | 'product-sync'
-  | 'product-delete'
-  | 'price-sync'
-  | 'price-delete'
-  | 'ignore';
+  'subscription' | 'product-sync' | 'product-delete' | 'price-sync' | 'price-delete' | 'ignore';
 
 export function webhookRouteFor(eventType: string): WebhookRoute {
   switch (eventType) {
