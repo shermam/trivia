@@ -4,7 +4,8 @@ import * as logger from 'firebase-functions/logger';
 import type Stripe from 'stripe';
 import { isPrivilegeDowngrade, readStripeRole, withStripeRoleClaim } from './claims';
 import { setIfNotStale } from './event-order';
-import { deriveClaimRole } from './role';
+import { chooseStripeRole } from './role';
+import { subscriptionMirrorFrom } from './subscription-mirror';
 
 /**
  * Mirrors a Stripe Subscription into `customers/{uid}/subscriptions/{id}` —
@@ -18,34 +19,19 @@ export async function syncSubscriptionToFirestore(
   subscription: Stripe.Subscription,
   eventCreated: number,
 ): Promise<void> {
-  const uid = subscription.metadata?.['firebaseUID'];
-  if (!uid) {
+  const mirror = subscriptionMirrorFrom(subscription);
+  if (!mirror) {
     logger.warn(`Stripe subscription ${subscription.id} has no firebaseUID metadata — skipping.`);
     return;
   }
 
-  const item = subscription.items.data[0];
-  const price = item?.price;
-  const priceRole = (price?.metadata?.['firebaseRole'] as string | undefined) ?? null;
-  const productId = price?.product
-    ? typeof price.product === 'string'
-      ? price.product
-      : price.product.id
-    : null;
-
   const written = await setIfNotStale(
     getFirestore()
       .collection('customers')
-      .doc(uid)
+      .doc(mirror.uid)
       .collection('subscriptions')
       .doc(subscription.id),
-    {
-      status: subscription.status,
-      role: priceRole,
-      price: price?.id ?? null,
-      product: productId,
-      cancel_at_period_end: subscription.cancel_at_period_end,
-    },
+    mirror.doc,
     eventCreated,
   );
   if (!written) {
@@ -61,7 +47,7 @@ export async function syncSubscriptionToFirestore(
   // document write already succeeded. Skipping it here would leave that
   // failure with nothing to retry it. It is cheap to repeat: the claim write
   // itself no-ops when nothing changed.
-  await recomputeStripeRoleClaim(uid);
+  await recomputeStripeRoleClaim(mirror.uid);
 }
 
 async function recomputeStripeRoleClaim(uid: string): Promise<void> {
@@ -71,15 +57,7 @@ async function recomputeStripeRoleClaim(uid: string): Promise<void> {
     .collection('subscriptions')
     .get();
 
-  let role: string | null = null;
-  for (const doc of subscriptionsSnapshot.docs) {
-    const data = doc.data();
-    const candidate = deriveClaimRole(data['status'], data['role'] ?? null);
-    if (candidate) {
-      role = candidate;
-      break;
-    }
-  }
+  const role = chooseStripeRole(subscriptionsSnapshot.docs.map((doc) => doc.data()));
 
   const auth = getAuth();
   const user = await auth.getUser(uid).catch(() => null);

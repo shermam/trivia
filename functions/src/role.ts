@@ -15,3 +15,25 @@ export function deriveClaimRole(
   }
   return status === 'active' || status === 'trialing' ? priceRole : null;
 }
+
+/**
+ * The claim role derived from *all* of a user's subscription documents — the
+ * first one whose status grants its role wins, so an unrelated subscription
+ * cancelling can never clobber a still-active one. Takes raw Firestore
+ * document data (fields `unknown`-typed on purpose: the docs were written by
+ * the webhook, but nothing here should have to assume that).
+ */
+export function chooseStripeRole(
+  subscriptionDocs: ReadonlyArray<Record<string, unknown>>,
+): string | null {
+  for (const data of subscriptionDocs) {
+    const candidate = deriveClaimRole(
+      data['status'] as Stripe.Subscription.Status,
+      (data['role'] as string | null | undefined) ?? null,
+    );
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return null;
+}

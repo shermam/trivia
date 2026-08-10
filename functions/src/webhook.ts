@@ -15,6 +15,7 @@ import {
   stripeWebhookSecret,
 } from './stripe-client';
 import { syncSubscriptionToFirestore } from './subscriptions';
+import { webhookRouteFor } from './webhook-routing';
 
 /**
  * Single Stripe webhook endpoint. Configure this URL (printed after deploy,
@@ -71,32 +72,29 @@ export const stripeWebhook = onRequest(
     }
 
     try {
-      switch (event.type) {
-        case 'customer.subscription.created':
-        case 'customer.subscription.updated':
-        case 'customer.subscription.deleted':
+      // The event-type → handler map lives in webhook-routing.ts, where it is
+      // directly unit-tested — a mistyped case here would drop deliveries
+      // silently, since the 200 below tells Stripe never to retry.
+      switch (webhookRouteFor(event.type)) {
+        case 'subscription':
           await syncSubscriptionToFirestore(
             event.data.object as Stripe.Subscription,
             event.created,
           );
           break;
-        case 'product.created':
-        case 'product.updated':
+        case 'product-sync':
           await syncProductToFirestore(event.data.object as Stripe.Product, event.created);
           break;
-        case 'product.deleted':
+        case 'product-delete':
           await deleteProductFromFirestore((event.data.object as Stripe.Product).id, event.created);
           break;
-        case 'price.created':
-        case 'price.updated':
+        case 'price-sync':
           await syncPriceToFirestore(event.data.object as Stripe.Price, event.created);
           break;
-        case 'price.deleted':
+        case 'price-delete':
           await deletePriceFromFirestore(event.data.object as Stripe.Price, event.created);
           break;
-        default:
-          // Not every Stripe event type is relevant to us — silently
-          // ignoring unhandled ones is expected, not an error.
+        case 'ignore':
           break;
       }
       res.json({ received: true });
