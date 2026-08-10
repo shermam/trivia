@@ -6,9 +6,10 @@ import {
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
 import { provideHttpClient } from '@angular/common/http';
-import { provideRouter } from '@angular/router';
+import { TitleStrategy, provideRouter } from '@angular/router';
 import { provideServiceWorker } from '@angular/service-worker';
 
+import { AppTitleStrategy } from './app-title.strategy';
 import { routes } from './app.routes';
 import { GameControllerService } from './services/game-controller.service';
 
@@ -23,6 +24,9 @@ export const appConfig: ApplicationConfig = {
     // no usable IndexedDB still starts normally (see `restoreSavedGame`).
     provideAppInitializer(() => inject(GameControllerService).restoreSavedGame()),
     provideRouter(routes),
+    // Sets the document title on navigation and announces the new screen to
+    // assistive tech, which client-side routing otherwise does silently (G5).
+    { provide: TitleStrategy, useClass: AppTitleStrategy },
     provideHttpClient(),
     provideServiceWorker('ngsw-worker.js', {
       // Also off under navigator.webdriver (true for Cypress/Selenium/Playwright, never for a

@@ -1,6 +1,28 @@
 @if (!embedMode.isEmbedded()) {
+  <!--
+    First thing in the tab order, invisible until focused. Without it, reaching
+    the game means tabbing past the whole top bar on every screen (G5). Gated
+    with the top bar it exists to skip — in embed mode there is no nav, so the
+    link would be a control that skips nothing.
+  -->
+  <a
+    href="#main-content"
+    class="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:top-3 focus:left-3 focus:rounded-xl focus:bg-white dark:focus:bg-slate-900 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-emerald-700 dark:focus:text-emerald-400 focus:shadow-card-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+  >
+    Skip to main content
+  </a>
   <app-top-bar />
 }
-<main>
+
+<!--
+  Permanently present and empty until there is something to say. A live region
+  inserted into the DOM already carrying its message is routinely missed by
+  screen readers — the same reason the quiz result region (G3) is rendered
+  unconditionally.
+-->
+<p role="status" aria-live="polite" class="sr-only">{{ routeAnnouncer.message() }}</p>
+
+<!-- `tabindex="-1"` is what lets the skip link actually move focus here; without it the browser jumps the scroll position and leaves focus behind. -->
+<main id="main-content" tabindex="-1" class="focus:outline-none">
   <router-outlet />
 </main>
