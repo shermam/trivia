@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { LeaderboardEntry } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
@@ -48,7 +47,6 @@ export class GameOverComponent implements OnInit {
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly embedMode = inject(EmbedModeService);
   private readonly firebaseService = inject(FirebaseService);
-  private readonly router = inject(Router);
 
   protected readonly initialsFor = initialsFor;
 
@@ -92,14 +90,8 @@ export class GameOverComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    // Requires a *finished* game, not merely a loaded one. Game state now
-    // survives a reload (B8), so a half-played game is restorable at any time —
-    // and this screen offers to publish its score to the leaderboard, which a
-    // game still in progress has no business doing.
-    if (this.gameController.totalQuestions() === 0 || !this.gameController.isComplete()) {
-      void this.router.navigateByUrl('/');
-      return;
-    }
+    // Reaching here means hasCompletedGameGuard passed — a finished game is in
+    // memory (finding F4; the completeness check lives on the route, not here).
     this.playerName = this.authService.user()?.displayName ?? '';
     void this.loadLeaderboard();
   }

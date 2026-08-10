@@ -8,7 +8,6 @@ import {
   signal,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { Router } from '@angular/router';
 import { Answer } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
@@ -49,7 +48,6 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 })
 export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly gameController = inject(GameControllerService);
-  private readonly router = inject(Router);
 
   /**
    * True when this game's questions came from the offline pool instead of the
@@ -128,10 +126,8 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
-    if (!this.gameController.currentQuestion()) {
-      void this.router.navigateByUrl('/');
-      return;
-    }
+    // Reaching here means hasActiveGameGuard passed — a question is in memory
+    // (finding F4; the no-game redirect lives on the route, not here).
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     this.startTimer();
   }

@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { hasActiveGameGuard, hasCompletedGameGuard } from './guards/game-state.guards';
 
 /**
  * Every route carries a `title`. It sets the browser tab, and `AppTitleStrategy`
@@ -17,12 +18,14 @@ export const routes: Routes = [
   {
     path: 'play',
     title: 'Play',
+    canActivate: [hasActiveGameGuard],
     loadComponent: () =>
       import('./components/quiz-loop/quiz-loop.component').then((m) => m.QuizLoopComponent),
   },
   {
     path: 'game-over',
     title: 'Game over',
+    canActivate: [hasCompletedGameGuard],
     loadComponent: () =>
       import('./components/game-over/game-over.component').then((m) => m.GameOverComponent),
   },
