@@ -16,6 +16,8 @@ describe('authenticated profile management', () => {
   it('updates the display name and reflects it in the top bar', () => {
     cy.openAuthMenu();
     cy.contains('Your profile');
+    // G6: the display name is data about the user, so it declares its purpose.
+    cy.get('#displayName').should('have.attr', 'autocomplete', 'nickname');
     cy.get('#displayName').clear().type('Ada Lovelace');
     cy.contains('button', 'Save').click();
 
