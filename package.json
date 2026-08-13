@@ -8,7 +8,7 @@
     "build:prod": "ng build --configuration production",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "postinstall": "npm run functions:install",
+    "postinstall": "node scripts/ensure-functions-secret-local.mjs && npm run functions:install",
     "functions:install": "npm --prefix functions ci",
     "functions:install:update": "npm --prefix functions install",
     "functions:build": "npm --prefix functions run build",
