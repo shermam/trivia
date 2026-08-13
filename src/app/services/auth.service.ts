@@ -235,6 +235,27 @@ export class AuthService {
     }
   }
 
+  /**
+   * Sends the password-reset email (finding H1 — without it, an
+   * email/password user who forgets is locked out of a paid subscription).
+   * `auth/user-not-found` deliberately resolves as if it succeeded: whether
+   * an address has an account is not something this form should disclose (an
+   * enumeration oracle), and the caller's neutral "if an account exists…"
+   * message is truthful either way. Real transport failures still throw,
+   * mapped to friendly text.
+   */
+  async sendPasswordReset(email: string): Promise<void> {
+    const { auth, authModule } = await this.getAuth();
+    try {
+      await authModule.sendPasswordResetEmail(auth, email);
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'auth/user-not-found') {
+        return;
+      }
+      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
+    }
+  }
+
   async resendVerificationEmail(): Promise<void> {
     const { auth, authModule } = await this.getAuth();
     if (auth.currentUser) {

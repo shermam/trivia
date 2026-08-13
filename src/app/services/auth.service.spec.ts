@@ -44,6 +44,8 @@ const h = vi.hoisted(() => {
     signInError: unknown;
     createUserError: unknown;
     popupError: unknown;
+    resetError: unknown;
+    lastResetEmail: string | null;
     errorCredential: unknown;
     lastCredential: unknown;
     calls: string[];
@@ -61,6 +63,8 @@ const h = vi.hoisted(() => {
     signInError: null,
     createUserError: null,
     popupError: null,
+    resetError: null,
+    lastResetEmail: null,
     errorCredential: null,
     lastCredential: null,
     calls: [],
@@ -76,6 +80,8 @@ const h = vi.hoisted(() => {
     state.signInError = null;
     state.createUserError = null;
     state.popupError = null;
+    state.resetError = null;
+    state.lastResetEmail = null;
     state.errorCredential = null;
     state.lastCredential = null;
     state.calls = [];
@@ -151,6 +157,13 @@ vi.mock('firebase/auth', () => {
     },
     sendEmailVerification: async () => {
       s.calls.push('sendEmailVerification');
+    },
+    sendPasswordResetEmail: async (_auth: unknown, email: string) => {
+      s.calls.push('sendPasswordResetEmail');
+      if (s.resetError) {
+        throw s.resetError;
+      }
+      s.lastResetEmail = email;
     },
     signInWithEmailAndPassword: async () => {
       s.calls.push('signInWithEmailAndPassword');
@@ -453,5 +466,32 @@ describe('AuthService OAuth upgrade fallbacks', () => {
     expect(h.state.calls).toContain('signInWithCredential');
     expect(h.state.lastCredential).toBe(credential);
     expect(h.state.calls.filter((c) => c === 'signInWithPopup')).toEqual([]);
+  });
+});
+
+describe('AuthService password reset (H1)', () => {
+  it('sends the reset email for the address it was given', async () => {
+    const service = setup();
+
+    await service.sendPasswordReset('player@example.com');
+
+    expect(h.state.calls).toContain('sendPasswordResetEmail');
+    expect(h.state.lastResetEmail).toBe('player@example.com');
+  });
+
+  it('treats an unknown address as success — the form must not disclose account existence', async () => {
+    const service = setup();
+    h.state.resetError = Object.assign(new Error('no user'), { code: 'auth/user-not-found' });
+
+    await expect(service.sendPasswordReset('nobody@example.com')).resolves.toBeUndefined();
+  });
+
+  it('still surfaces real transport failures, in friendly words', async () => {
+    const service = setup();
+    h.state.resetError = Object.assign(new Error('offline'), {
+      code: 'auth/network-request-failed',
+    });
+
+    await expect(service.sendPasswordReset('player@example.com')).rejects.toThrow(/network error/i);
   });
 });

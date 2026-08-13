@@ -10,6 +10,13 @@
     <app-icon name="x" [size]="14" />
   </button>
 
+  <!-- Announces the panel's async outcomes (sent, failed, saved). Permanent
+       and only its text changes: a live region inserted into the DOM already
+       carrying its message is routinely missed — the same reason the quiz
+       result region works this way (G3). The visual banners below stay purely
+       visual. -->
+  <p class="sr-only" role="status">{{ errorMessage() ?? infoMessage() ?? '' }}</p>
+
   @if (!authService.authReady()) {
     <p class="text-sm text-slate-500 dark:text-slate-400">Loading&hellip;</p>
   } @else if (authService.isAnonymous()) {
@@ -66,6 +73,17 @@
         }
       </button>
     </form>
+
+    @if (emailFormMode() === 'signin') {
+      <button
+        type="button"
+        (click)="requestPasswordReset()"
+        [disabled]="isSubmitting()"
+        class="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 disabled:opacity-60 mt-2"
+      >
+        Forgot password?
+      </button>
+    }
 
     <button
       type="button"
