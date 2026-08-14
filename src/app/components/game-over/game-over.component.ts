@@ -8,6 +8,7 @@ import {
   inject,
   signal,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -97,6 +98,12 @@ export class GameOverComponent implements OnInit {
    * to at most one element even though the trigger list is a loop.
    */
   private readonly reportPanel = viewChild<ElementRef<HTMLElement>>('reportPanel');
+  /**
+   * The "Reported" badges — the focus target after a successful submit
+   * removes the trigger. Queried rather than looked up by id so the read
+   * cannot pick up a stale node from a previous render.
+   */
+  private readonly reportBadges = viewChildren<ElementRef<HTMLElement>>('reportBadge');
   private previouslyFocusedBeforeReport: HTMLElement | null = null;
   private wasReportOpen = false;
   private lastOpenReportId: string | null = null;
@@ -126,19 +133,31 @@ export class GameOverComponent implements OnInit {
 
       if (!isOpen && this.wasReportOpen) {
         const restoreTo = this.previouslyFocusedBeforeReport;
+        const badgeId = `report-badge-${this.lastOpenReportId}`;
         this.previouslyFocusedBeforeReport = null;
-        if (restoreTo?.isConnected) {
-          restoreTo.focus();
-        } else {
-          // A successful submit replaces the trigger with the "Reported"
-          // badge in the same change-detection pass, so the captured
-          // element is already detached — focusing it would silently drop
-          // focus to <body>, stranding a keyboard user at the top of the
-          // document on the flow's *happy* path. The badge carries
-          // tabindex="-1" precisely so it can catch focus here, which also
-          // puts "Reported" in the screen reader's path.
-          document.getElementById(`report-badge-${this.lastOpenReportId}`)?.focus();
-        }
+
+        // The whole decision is deferred by a microtask, not just the badge
+        // half, because this effect runs *inside* the change-detection pass
+        // that rearranges the list — and at that instant the DOM still shows
+        // the previous arrangement. Deciding here reads a stale document
+        // twice over: after a successful submit the trigger is still
+        // connected (so it gets focused, and is then destroyed by the very
+        // same pass, dropping focus to `<body>`), while the badge that
+        // replaces it is not yet attached (so focusing it is a silent
+        // no-op). Both were observed; both look correct in any test that
+        // does not render. One microtask later the pass has committed and
+        // `isConnected` finally means what it says. No teardown needed — a
+        // microtask cannot outlive the frame (cf. §4.4).
+        queueMicrotask(() => {
+          if (restoreTo?.isConnected) {
+            restoreTo.focus();
+            return;
+          }
+          const badge = this.reportBadges().find((ref) => ref.nativeElement.id === badgeId);
+          if (badge?.nativeElement.isConnected) {
+            badge.nativeElement.focus();
+          }
+        });
       }
 
       this.wasReportOpen = isOpen;

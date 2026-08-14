@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { ApplicationRef, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { of } from 'rxjs';
 import { LeaderboardEntry, TriviaQuestion } from '../../models/question.model';
@@ -211,7 +211,13 @@ interface ReportingComponent {
   submitReport: (question: TriviaQuestion) => Promise<void>;
 }
 
-function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+/**
+ * Providers only — no `createComponent`, so the rendered tests below can
+ * create exactly one instance and drive the same one they query. (An earlier
+ * version created a second instance here and asserted against the first,
+ * which fails for a reason that has nothing to do with the code.)
+ */
+function configureReporting(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
   const reportQuestion = options.reportError
     ? vi.fn().mockRejectedValue(options.reportError)
     : vi.fn().mockResolvedValue(undefined);
@@ -232,6 +238,9 @@ function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: un
         provide: AuthService,
         useValue: {
           user: signal({ uid: 'anon-1', displayName: null }),
+          // An anonymous session, the population this flow is for — and the
+          // rendered tests below need every signal the template reads.
+          isAnonymous: signal(true),
           isFullyAuthenticated: signal(false),
           resendVerificationEmail: () => Promise.resolve(),
         },
@@ -250,6 +259,11 @@ function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: un
     ],
   });
 
+  return { reportQuestion };
+}
+
+function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+  const { reportQuestion } = configureReporting(options);
   const fixture = TestBed.createComponent(GameOverComponent);
   const component = fixture.componentInstance as unknown as ReportingComponent;
   return { component, reportQuestion };
@@ -372,6 +386,80 @@ describe('GameOverComponent question reporting (H4)', () => {
     resolveWrite();
     await secondSubmit;
     expect(component.reportStatus()).toMatch(/Report sent/);
+  });
+
+  /**
+   * Rendered, not instance-level, because the defect this pins is only
+   * visible in the DOM: the first fix read the badge with
+   * `getElementById` inside the closing effect, found nothing (it hadn't
+   * rendered yet) and left focus on `<body>` — green in every
+   * instance-level test and red in CI's real browser. The control below
+   * (cancel path) proves the probe can see focus move at all, so a `body`
+   * result here means the bug, not a jsdom artifact.
+   */
+  describe('focus after the panel closes (G2, rendered)', () => {
+    async function render(reportError?: unknown) {
+      configureReporting({ questions: [custom], reportError });
+      const fixture = TestBed.createComponent(GameOverComponent);
+      const component = fixture.componentInstance as unknown as ReportingComponent;
+      const host = fixture.nativeElement as HTMLElement;
+      // `ApplicationRef.tick()`, not just `detectChanges()`: the badge focus
+      // runs in an after-render hook, and those flush on the application
+      // tick — which is what happens in a real browser, and what a bare
+      // fixture-level change detection pass skips.
+      const appRef = TestBed.inject(ApplicationRef);
+      const settle = async () => {
+        appRef.tick();
+        await fixture.whenStable();
+        appRef.tick();
+      };
+      const query = <T extends HTMLElement>(selector: string) =>
+        host.querySelector<T>(selector) ?? undefined;
+      await settle();
+
+      // Focus the trigger the way a real click does, so the effect captures
+      // it rather than <body>.
+      const openForm = async () => {
+        const trigger = query<HTMLButtonElement>(`[data-cy="report-question-${custom.id}"]`)!;
+        trigger.focus();
+        trigger.click();
+        await settle();
+      };
+      return { component, fixture, query, settle, openForm };
+    }
+
+    it('moves focus to the Reported badge when the trigger it would restore is gone', async () => {
+      const { component, query, settle, openForm } = await render();
+      await openForm();
+
+      component.reportReason = 'incorrect';
+      await settle();
+      // Awaited rather than clicked: the app is zoneless, so `whenStable()`
+      // does not track the handler's promise and the assertions would race
+      // the write. Opening above still goes through a real click, which is
+      // what makes the focus capture realistic.
+      await component.submitReport(custom);
+      await settle();
+
+      const active = document.activeElement as HTMLElement | null;
+      expect(query(`[data-cy="report-question-${custom.id}"]`), 'trigger is gone').toBeUndefined();
+      expect(active?.id, `focus landed on <${active?.tagName.toLowerCase()}>`).toBe(
+        `report-badge-${custom.id}`,
+      );
+    });
+
+    // Control: the trigger survives a cancel, so focus must return to it —
+    // proof the probe above can detect focus moving at all.
+    it('returns focus to the trigger when the form is cancelled', async () => {
+      const { component, settle, openForm } = await render();
+      await openForm();
+
+      component.closeReportForm();
+      await settle();
+
+      const active = document.activeElement as HTMLElement | null;
+      expect(active?.getAttribute('data-cy')).toBe(`report-question-${custom.id}`);
+    });
   });
 
   it('clears the previous attempt when the form reopens', () => {

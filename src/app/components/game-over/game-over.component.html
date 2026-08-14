@@ -264,6 +264,7 @@
                        successful submit removes both the panel and the
                        trigger — without it focus would drop to <body>. -->
                   <span
+                    #reportBadge
                     [id]="'report-badge-' + question.id"
                     [attr.data-cy]="'reported-badge-' + question.id"
                     tabindex="-1"
