@@ -17,6 +17,11 @@
 # .gitignore's blanket `.env.*` rule would otherwise catch this file too.
 !.env.demo-trivia-app-e2e
 
-# `.secret.local` IS also committed on purpose, despite the name — see the
-# comment inside that file for why it holds no real secret.
-!.secret.local
+# `.secret.local` used to be committed (as the emulator's placeholder
+# fallback for `defineSecret()` values) and no longer is — a tracked file
+# whose name promises "personal, gitignored" is one careless `git commit -am`
+# away from publishing a real Stripe key. The committed placeholders now live
+# in `.secret.local.example`, and the root `postinstall`
+# (scripts/ensure-functions-secret-local.mjs) copies them into place when
+# `.secret.local` is missing. Real test-mode keys go in `.secret.local`
+# itself, where this file guarantees they can't be committed.
