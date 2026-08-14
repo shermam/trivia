@@ -22,6 +22,17 @@ export default defineConfig({
       'cypress/e2e/authenticated/sign-in-save-score.cy.ts',
       'cypress/e2e/authenticated/profile.cy.ts',
     ],
+    // `question-reporting.cy.ts` is emulator-only, for the same
+    // shared-real-backend reason `pricing.cy.ts` is left out of the list
+    // above — and one more. It asserts the written report through
+    // `getQuestionReports`, an Admin-SDK read of a collection **no client
+    // may read by rule**; the preview task file deliberately doesn't
+    // implement it, since handing the preview suite console-level read
+    // access to real users' reports is a bigger grant than a spec the
+    // emulator already covers is worth. Its writes would also survive the
+    // run: `finalCleanup` sweeps uids and seeded docs, not reports, so each
+    // preview would leave real rows in the owner's review queue.
+    excludeSpecPattern: ['cypress/e2e/unauthenticated/question-reporting.cy.ts'],
     fixturesFolder: 'cypress/fixtures',
     video: false,
     // Real network hops (Hosting CDN + production Auth/Firestore) instead of

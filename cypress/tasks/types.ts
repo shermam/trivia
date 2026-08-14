@@ -40,6 +40,20 @@ export interface ProSubscriptionSeed {
   uid: string;
 }
 
+/**
+ * A `question_reports` document as read back by the `getQuestionReports`
+ * task, ID included — the ID carries the `{window}-{slot}-{uid}` volume cap,
+ * so specs assert on its shape as well as the payload (finding H4).
+ */
+export interface QuestionReportRecord {
+  id: string;
+  questionId: string;
+  reason: 'incorrect' | 'inappropriate' | 'spam' | 'other';
+  detail?: string;
+  reportedBy: string;
+  createdAt: number;
+}
+
 /** Which uid (and optionally which contributed question) to inspect after an account deletion. */
 export interface AccountStateQuery {
   uid: string;

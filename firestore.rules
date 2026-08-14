@@ -193,6 +193,56 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // A player's report about a community question (finding H4).
+    function isValidQuestionReport() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['questionId', 'reason', 'detail', 'reportedBy', 'createdAt'])
+            && data.questionId is string
+            && data.questionId.size() > 0
+            && data.questionId.size() <= 128
+            // A report about a question that doesn't exist is pure noise in
+            // the review queue. One billed read per create is a fair price on
+            // a path this rare and this capped — contrast the checkout price
+            // lookup, which rules *can't* do and the function must.
+            && exists(/databases/$(database)/documents/custom_questions/$(data.questionId))
+            && data.reason in ['incorrect', 'inappropriate', 'spam', 'other']
+            && (!('detail' in data)
+                || (data.detail is string && data.detail.size() > 0 && data.detail.size() <= 500))
+            && data.reportedBy is string
+            && data.reportedBy == request.auth.uid
+            && isNearRequestTime(data.createdAt);
+    }
+
+    // Reports are deliberately open to ANY signed-in caller, anonymous
+    // included: most players never sign in, and an abuse channel most of the
+    // audience can't use is half a channel. What makes that safe is that a
+    // report is inert — nothing reads it but the owner in the console, and
+    // nothing triggers on it — and the document ID carries the same
+    // {window}-{slot} volume cap as the session documents (A3), suffixed
+    // with the caller's own uid so one user's slots can't occupy another's
+    // in this shared top-level collection. The uid lands in the regex as a
+    // literal: Firebase-minted uids are alphanumeric, and this app never
+    // uses custom tokens, so there are no regex metacharacters to worry
+    // about — and ownership doesn't ride on the ID anyway, `reportedBy` is
+    // bound to the caller separately above.
+    //
+    // Review is console-only (the Admin SDK bypasses these rules), so every
+    // client verb except create is denied — including read: a report may
+    // quote another user's content and name its author, and no client has
+    // any business enumerating those.
+    match /question_reports/{reportId} {
+      allow read: if false;
+      allow create: if request.auth != null
+                    && isValidQuestionReport()
+                    && reportId.matches(
+                         '^(' + sessionWindow(-300000)
+                         + '|' + sessionWindow(0)
+                         + '|' + sessionWindow(300000) + ')-[0-9]-'
+                         + request.auth.uid + '$'
+                       );
+      allow update, delete: if false;
+    }
+
     // Collections managed by our own Cloud Functions backend (`functions/`)
     // — this used to be the "Run Subscriptions with Stripe" Firebase
     // Extension, migrated off ahead of that product line's March 2027

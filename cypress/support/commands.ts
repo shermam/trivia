@@ -4,6 +4,7 @@ import type {
   CustomQuestionSeed,
   LeaderboardSeed,
   ProSubscriptionSeed,
+  QuestionReportRecord,
   VerifiedUserSeed,
 } from '../tasks/types';
 
@@ -51,6 +52,8 @@ declare global {
       seedProProduct(): Chainable<null>;
       /** Reads back Auth/leaderboard/customer/question state after an account deletion. */
       inspectAccountState(query: AccountStateQuery): Chainable<AccountState>;
+      /** Reads every `question_reports` doc via the Admin SDK — clients are forbidden from reading them. */
+      getQuestionReports(): Chainable<QuestionReportRecord[]>;
     }
   }
 }
@@ -160,4 +163,8 @@ Cypress.Commands.add('seedProProduct', () => {
 
 Cypress.Commands.add('inspectAccountState', (query: AccountStateQuery) => {
   cy.task('inspectAccountState', query);
+});
+
+Cypress.Commands.add('getQuestionReports', () => {
+  cy.task('getQuestionReports');
 });

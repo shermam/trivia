@@ -1,12 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { ApplicationRef, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { of } from 'rxjs';
-import { LeaderboardEntry } from '../../models/question.model';
+import { LeaderboardEntry, TriviaQuestion } from '../../models/question.model';
 import { AuthService } from '../../services/auth.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
-import { FirebaseService } from '../../services/firebase.service';
+import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { GameOverComponent } from './game-over.component';
 
@@ -59,6 +59,7 @@ function setup(options: {
           score: signal(options.score ?? 7),
           totalQuestions: signal(10),
           percentage: signal(70),
+          questions: signal([]),
           resetGame: () => undefined,
         },
       },
@@ -171,5 +172,307 @@ describe('GameOverComponent save failures', () => {
     expect(getLeaderboardEntry).not.toHaveBeenCalled();
     expect(component.saveError()).toMatch(/Please try again/);
     expect(component.hasSaved()).toBe(false);
+  });
+});
+
+/**
+ * Finding H4 — the game-over reporting flow. The rules and the write
+ * mechanics have their own suites (`firestore-tests/`,
+ * `firebase.service.spec.ts`); what belongs to the component is which
+ * questions are offered, what payload leaves it, and what each outcome does
+ * to the UI state.
+ */
+
+function makeTriviaQuestion(overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
+  return {
+    id: 'q-custom-1',
+    category: 'Science',
+    type: 'multiple',
+    difficulty: 'easy',
+    question: 'Q?',
+    correct_answer: 'A',
+    incorrect_answers: ['B'],
+    all_answers: [],
+    source: 'custom',
+    ...overrides,
+  };
+}
+
+interface ReportingComponent {
+  reportableQuestions: () => TriviaQuestion[];
+  openReportQuestionId: () => string | null;
+  reportedQuestionIds: () => ReadonlySet<string>;
+  reportError: () => string | null;
+  reportStatus: () => string;
+  reportReason: string;
+  reportDetail: string;
+  toggleReportForm: (question: TriviaQuestion) => void;
+  closeReportForm: () => void;
+  submitReport: (question: TriviaQuestion) => Promise<void>;
+}
+
+/**
+ * Providers only — no `createComponent`, so the rendered tests below can
+ * create exactly one instance and drive the same one they query. (An earlier
+ * version created a second instance here and asserted against the first,
+ * which fails for a reason that has nothing to do with the code.)
+ */
+function configureReporting(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+  const reportQuestion = options.reportError
+    ? vi.fn().mockRejectedValue(options.reportError)
+    : vi.fn().mockResolvedValue(undefined);
+
+  TestBed.configureTestingModule({
+    providers: [
+      {
+        provide: GameControllerService,
+        useValue: {
+          score: signal(7),
+          totalQuestions: signal(10),
+          percentage: signal(70),
+          questions: signal(options.questions),
+          resetGame: () => undefined,
+        },
+      },
+      {
+        provide: AuthService,
+        useValue: {
+          user: signal({ uid: 'anon-1', displayName: null }),
+          // An anonymous session, the population this flow is for — and the
+          // rendered tests below need every signal the template reads.
+          isAnonymous: signal(true),
+          isFullyAuthenticated: signal(false),
+          resendVerificationEmail: () => Promise.resolve(),
+        },
+      },
+      { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+      { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+      {
+        provide: FirebaseService,
+        useValue: {
+          reportQuestion,
+          getLeaderboardEntry: () => Promise.resolve(null),
+          getTopScores: () => of([]),
+        },
+      },
+      { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+    ],
+  });
+
+  return { reportQuestion };
+}
+
+function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+  const { reportQuestion } = configureReporting(options);
+  const fixture = TestBed.createComponent(GameOverComponent);
+  const component = fixture.componentInstance as unknown as ReportingComponent;
+  return { component, reportQuestion };
+}
+
+describe('GameOverComponent question reporting (H4)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const custom = makeTriviaQuestion({ id: 'q-custom-1' });
+  const openTrivia = makeTriviaQuestion({ id: 'open-123', source: 'open_trivia' });
+
+  it('offers only custom-source questions — Open Trivia DB content is not ours to moderate', () => {
+    const { component } = reportingSetup({ questions: [openTrivia, custom] });
+
+    expect(component.reportableQuestions().map((q) => q.id)).toEqual(['q-custom-1']);
+  });
+
+  it('sends the chosen reason attributed to the caller, omitting a blank detail', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'incorrect';
+    component.reportDetail = '   ';
+
+    await component.submitReport(custom);
+
+    expect(reportQuestion).toHaveBeenCalledTimes(1);
+    const payload = reportQuestion.mock.calls[0][0];
+    expect(payload.questionId).toBe('q-custom-1');
+    expect(payload.reason).toBe('incorrect');
+    expect(payload.reportedBy).toBe('anon-1');
+    expect(Math.abs(payload.createdAt - Date.now())).toBeLessThan(5_000);
+    // Omitted, not undefined: Firestore rejects undefined field values, and
+    // the rules only allow `detail` with content.
+    expect('detail' in payload).toBe(false);
+  });
+
+  it('includes a trimmed detail when one was written', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'other';
+    component.reportDetail = '  The year is off by a decade.  ';
+
+    await component.submitReport(custom);
+
+    expect(reportQuestion.mock.calls[0][0].detail).toBe('The year is off by a decade.');
+  });
+
+  it('does nothing until a reason is chosen', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+
+    await component.submitReport(custom);
+
+    expect(reportQuestion).not.toHaveBeenCalled();
+  });
+
+  it('marks the question reported, closes the form, and announces on success', async () => {
+    const { component } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'spam';
+
+    await component.submitReport(custom);
+
+    expect(component.reportedQuestionIds().has('q-custom-1')).toBe(true);
+    expect(component.openReportQuestionId()).toBeNull();
+    expect(component.reportStatus()).toMatch(/Report sent/);
+    expect(component.reportError()).toBeNull();
+  });
+
+  it("surfaces the service's own advice when every slot was refused, and keeps the form open", async () => {
+    const { component } = reportingSetup({
+      questions: [custom],
+      reportError: new QuestionReportRejectedError(),
+    });
+    component.toggleReportForm(custom);
+    component.reportReason = 'incorrect';
+
+    await component.submitReport(custom);
+
+    expect(component.reportError()).toMatch(/try again in a few minutes/);
+    // Announced too — the visible paragraph alone is silent to a screen
+    // reader mid-flow (G3 pattern).
+    expect(component.reportStatus()).toMatch(/try again in a few minutes/);
+    expect(component.openReportQuestionId()).toBe('q-custom-1');
+    expect(component.reportedQuestionIds().has('q-custom-1')).toBe(false);
+  });
+
+  it('stays generic for an ordinary failure', async () => {
+    const { component } = reportingSetup({
+      questions: [custom],
+      reportError: new Error('network down'),
+    });
+    component.toggleReportForm(custom);
+    component.reportReason = 'incorrect';
+
+    await component.submitReport(custom);
+
+    expect(component.reportError()).toBe('Could not send the report. Please try again.');
+    expect(component.openReportQuestionId()).toBe('q-custom-1');
+  });
+
+  // A live region only announces on mutation, and signals drop same-value
+  // sets — so the region must pass through '' while a write is in flight,
+  // or a second identical outcome ("Report sent" for another question, the
+  // same failure on a retry) would be silent to a screen reader. Found by
+  // review, not by this suite's first version.
+  it('empties the status region while a submit is in flight (G3)', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'spam';
+    await component.submitReport(custom);
+    expect(component.reportStatus()).toMatch(/Report sent/);
+
+    let resolveWrite!: () => void;
+    reportQuestion.mockReturnValue(new Promise<void>((resolve) => (resolveWrite = resolve)));
+    const secondSubmit = component.submitReport(custom);
+
+    expect(component.reportStatus()).toBe('');
+
+    resolveWrite();
+    await secondSubmit;
+    expect(component.reportStatus()).toMatch(/Report sent/);
+  });
+
+  /**
+   * Rendered, not instance-level, because the defect this pins is only
+   * visible in the DOM: the first fix read the badge with
+   * `getElementById` inside the closing effect, found nothing (it hadn't
+   * rendered yet) and left focus on `<body>` — green in every
+   * instance-level test and red in CI's real browser. The control below
+   * (cancel path) proves the probe can see focus move at all, so a `body`
+   * result here means the bug, not a jsdom artifact.
+   */
+  describe('focus after the panel closes (G2, rendered)', () => {
+    async function render(reportError?: unknown) {
+      configureReporting({ questions: [custom], reportError });
+      const fixture = TestBed.createComponent(GameOverComponent);
+      const component = fixture.componentInstance as unknown as ReportingComponent;
+      const host = fixture.nativeElement as HTMLElement;
+      // `ApplicationRef.tick()`, not just `detectChanges()`: the badge focus
+      // runs in an after-render hook, and those flush on the application
+      // tick — which is what happens in a real browser, and what a bare
+      // fixture-level change detection pass skips.
+      const appRef = TestBed.inject(ApplicationRef);
+      const settle = async () => {
+        appRef.tick();
+        await fixture.whenStable();
+        appRef.tick();
+      };
+      const query = <T extends HTMLElement>(selector: string) =>
+        host.querySelector<T>(selector) ?? undefined;
+      await settle();
+
+      // Focus the trigger the way a real click does, so the effect captures
+      // it rather than <body>.
+      const openForm = async () => {
+        const trigger = query<HTMLButtonElement>(`[data-cy="report-question-${custom.id}"]`)!;
+        trigger.focus();
+        trigger.click();
+        await settle();
+      };
+      return { component, fixture, query, settle, openForm };
+    }
+
+    it('moves focus to the Reported badge when the trigger it would restore is gone', async () => {
+      const { component, query, settle, openForm } = await render();
+      await openForm();
+
+      component.reportReason = 'incorrect';
+      await settle();
+      // Awaited rather than clicked: the app is zoneless, so `whenStable()`
+      // does not track the handler's promise and the assertions would race
+      // the write. Opening above still goes through a real click, which is
+      // what makes the focus capture realistic.
+      await component.submitReport(custom);
+      await settle();
+
+      const active = document.activeElement as HTMLElement | null;
+      expect(query(`[data-cy="report-question-${custom.id}"]`), 'trigger is gone').toBeUndefined();
+      expect(active?.id, `focus landed on <${active?.tagName.toLowerCase()}>`).toBe(
+        `report-badge-${custom.id}`,
+      );
+    });
+
+    // Control: the trigger survives a cancel, so focus must return to it —
+    // proof the probe above can detect focus moving at all.
+    it('returns focus to the trigger when the form is cancelled', async () => {
+      const { component, settle, openForm } = await render();
+      await openForm();
+
+      component.closeReportForm();
+      await settle();
+
+      const active = document.activeElement as HTMLElement | null;
+      expect(active?.getAttribute('data-cy')).toBe(`report-question-${custom.id}`);
+    });
+  });
+
+  it('clears the previous attempt when the form reopens', () => {
+    const { component } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'spam';
+    component.reportDetail = 'left over';
+    component.closeReportForm();
+
+    component.toggleReportForm(custom);
+
+    expect(component.reportReason).toBe('');
+    expect(component.reportDetail).toBe('');
+    expect(component.openReportQuestionId()).toBe('q-custom-1');
   });
 });
