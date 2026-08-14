@@ -366,8 +366,25 @@ function fakeCatalog(products: ProductSeed[]) {
       writes.push({ path: ref.path, data });
       return Promise.resolve();
     },
-    onSnapshot: (_ref: unknown, next: (snap: { data: () => unknown }) => void) => {
-      queueMicrotask(() => next({ data: () => ({ url: 'https://stripe.test/s' }) }));
+    // Same two-shapes problem as the fake above: the subscriptions listener
+    // is attached for every signed-in user, catalog test or not, and it reads
+    // `.docs`. Emitting the session-document shape for it threw inside a
+    // microtask — which Vitest reports as an *unhandled error* while every
+    // test still passes, so the suite summary says 189 passed and the run
+    // exits non-zero.
+    onSnapshot: (
+      target: { path?: string[]; ref?: { path?: string[] } },
+      next: (snap: never) => void,
+    ) => {
+      // `query()` in this fake wraps the ref as `{ref, constraints}`, while a
+      // plain document ref is passed through as-is — so the path has to be
+      // read from either shape.
+      const path = target.path ?? target.ref?.path ?? [];
+      if (path[path.length - 1] === 'subscriptions') {
+        queueMicrotask(() => next({ docs: [] } as never));
+        return vi.fn();
+      }
+      queueMicrotask(() => next({ data: () => ({ url: 'https://stripe.test/s' }) } as never));
       return vi.fn();
     },
   };

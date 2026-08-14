@@ -99,6 +99,7 @@
           @for (answer of question.all_answers; track answer.id; let i = $index) {
             <button
               type="button"
+              data-cy="answer-option"
               (click)="selectAnswer(answer)"
               [disabled]="isAnswered()"
               class="flex items-center gap-3 text-left rounded-xl border-[1.5px] px-4 py-3.5 font-medium transition-colors disabled:cursor-not-allowed"

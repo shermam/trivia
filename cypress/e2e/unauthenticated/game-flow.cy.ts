@@ -81,16 +81,30 @@ describe('anonymous game flow (custom source)', () => {
     cy.contains('button', 'Start Game').click();
 
     cy.location('pathname').should('eq', '/play');
-    // fetchCustomQuestions() shuffles question order, so don't assume which
-    // of the two seeded questions renders first. Both correct answers are
-    // distinct, so matching either via one regex — using Cypress's own
-    // retry-and-click instead of manually reading the question text first —
-    // always hits whichever question is currently showing.
-    const correctAnswerPattern = new RegExp(customQuestions.map((q) => q.correct_answer).join('|'));
-    customQuestions.forEach(() => {
-      cy.contains('button', correctAnswerPattern).click();
-    });
-    cy.location('pathname').should('eq', '/game-over');
-    cy.contains('2 / 2');
+
+    // How many questions the game *actually* drew, rather than assuming it is
+    // the two seeded above. Against the emulator it is exactly those two, but
+    // this spec also runs against the real project on the preview job, where
+    // the bank holds every other custom question that exists — including any
+    // a previous preview run seeded and failed to sweep, because
+    // `finalCleanup` only runs from an `after()` hook and an aborted run
+    // never reaches it. Hard-coding 2 made this test fail the moment that
+    // count drifted, for reasons no PR's diff could explain.
+    cy.contains(/Question 1 \/ \d+/)
+      .invoke('text')
+      .then((label) => {
+        const total = Number(/\/\s*(\d+)/.exec(label)?.[1]);
+        expect(total, 'questions drawn from the custom bank').to.be.greaterThan(0);
+
+        // Whichever option is on screen — the point here is that a custom
+        // game sources real questions and completes, not what it scores
+        // (the open_trivia specs above own scoring).
+        for (let i = 0; i < total; i++) {
+          cy.get('[data-cy=answer-option]').first().click();
+        }
+
+        cy.location('pathname').should('eq', '/game-over');
+        cy.contains(`/ ${total}`);
+      });
   });
 });
