@@ -332,8 +332,7 @@ export class SubscriptionService {
         sessionRef,
         (snapshot) => {
           const data = snapshot.data() as
-            | { url?: string; error?: { message?: string } }
-            | undefined;
+            { url?: string; error?: { message?: string } } | undefined;
           if (data?.error) {
             const message = data.error.message ?? options.failureMessage;
             finish(() => reject(new Error(message)));
