@@ -99,6 +99,7 @@ export class GameOverComponent implements OnInit {
   private readonly reportPanel = viewChild<ElementRef<HTMLElement>>('reportPanel');
   private previouslyFocusedBeforeReport: HTMLElement | null = null;
   private wasReportOpen = false;
+  private lastOpenReportId: string | null = null;
 
   constructor() {
     // Focus follows the report form: into the panel when it opens, back to
@@ -111,7 +112,11 @@ export class GameOverComponent implements OnInit {
       const panel = this.reportPanel();
       const isOpen = openId !== null;
 
-      if (isOpen && !this.wasReportOpen) {
+      // Re-captured on every change of panel, not just closed→open:
+      // switching straight from question A's form to question B's must
+      // record B's trigger, or closing B would send focus back to A's —
+      // the disclosure the user wasn't interacting with.
+      if (isOpen && (!this.wasReportOpen || openId !== this.lastOpenReportId)) {
         this.previouslyFocusedBeforeReport = document.activeElement as HTMLElement | null;
       }
 
@@ -122,15 +127,24 @@ export class GameOverComponent implements OnInit {
       if (!isOpen && this.wasReportOpen) {
         const restoreTo = this.previouslyFocusedBeforeReport;
         this.previouslyFocusedBeforeReport = null;
-        // Only if still in the document: submitting swaps the trigger for a
-        // "Reported" badge, and focusing a detached node silently drops
-        // focus to <body>.
         if (restoreTo?.isConnected) {
           restoreTo.focus();
+        } else {
+          // A successful submit replaces the trigger with the "Reported"
+          // badge in the same change-detection pass, so the captured
+          // element is already detached — focusing it would silently drop
+          // focus to <body>, stranding a keyboard user at the top of the
+          // document on the flow's *happy* path. The badge carries
+          // tabindex="-1" precisely so it can catch focus here, which also
+          // puts "Reported" in the screen reader's path.
+          document.getElementById(`report-badge-${this.lastOpenReportId}`)?.focus();
         }
       }
 
       this.wasReportOpen = isOpen;
+      if (openId !== null) {
+        this.lastOpenReportId = openId;
+      }
     });
   }
 
@@ -243,6 +257,14 @@ export class GameOverComponent implements OnInit {
 
     this.isSubmittingReport.set(true);
     this.reportError.set(null);
+    // Cleared before the round trip, not as decoration: signals compare with
+    // Object.is, so setting the same outcome text twice ("Report sent…" for
+    // a second question, or the same failure on a retry) would never mutate
+    // the DOM — and a live region only announces on mutation. Passing
+    // through '' while the write is in flight guarantees the next outcome
+    // is a fresh mutation, the same reason the quiz result region empties
+    // between questions (G3).
+    this.reportStatus.set('');
 
     const detail = this.reportDetail.trim();
     const report: NewQuestionReportDoc = {

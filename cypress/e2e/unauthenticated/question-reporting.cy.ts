@@ -81,6 +81,11 @@ describe('reporting a community question from game-over', () => {
     cy.contains('Reported');
     cy.get(`[data-cy="report-question-${customQuestions[0].id}"]`).should('not.exist');
     cy.get('[role="status"]').should('contain.text', 'Report sent');
+    // The trigger focus would normally be restored is gone (the badge
+    // replaced it), so the badge itself must catch focus — otherwise the
+    // happy path strands a keyboard user at <body> (G2 contract; found by
+    // review, not by the original suite).
+    cy.focused().should('have.attr', 'data-cy', `reported-badge-${customQuestions[0].id}`);
 
     cy.getQuestionReports().then((reports) => {
       expect(reports).to.have.length(1);
@@ -105,6 +110,11 @@ describe('reporting a community question from game-over', () => {
     const trigger = () => cy.get(`[data-cy="report-question-${customQuestions[0].id}"]`);
 
     trigger().click();
+    // Wait for the focus-move effect before typing: right after the click,
+    // focus is still on the trigger (which has no Escape handler), and
+    // Angular's effect only moves it into the panel after render. Typing
+    // into cy.focused() without this retriable assertion races that effect.
+    cy.focused().should('have.id', `report-panel-${customQuestions[0].id}`);
     cy.focused().type('{esc}');
     trigger().should('have.attr', 'aria-expanded', 'false');
     // Focus returns to what opened the panel (G2) — losing it to <body>

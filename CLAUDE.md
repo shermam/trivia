@@ -125,7 +125,7 @@ All five are now correctly marked `[review-only]`. This is worth remembering as 
 
 Any new interactive UI is checked by hand against these before the PR:
 
-- **Disclosure/menu widgets**: trigger has `aria-expanded` + `aria-haspopup` + `aria-controls`; panel has a role; Escape closes it; focus moves in on open and returns to the trigger on close. **[review-only]**
+- **Disclosure/menu widgets**: trigger has `aria-expanded` + `aria-haspopup` + `aria-controls`; panel has a role; Escape closes it; focus moves in on open and returns to the trigger on close. One scoped exception: `aria-haspopup` belongs only on a trigger whose panel is a genuine popup with a matching role (`dialog` like the auth menu, `menu`, `listbox`) — its ARIA values enumerate exactly those. A panel that expands **in place** (game-over's report form, `role="group"`) is the WAI-ARIA _disclosure_ pattern, which takes `aria-expanded` + `aria-controls` and deliberately no `aria-haspopup`; announcing a popup that isn't one misleads the same way omitting one that is would. **[review-only]**
 - **Async status** (saved, failed, correct, incorrect) is announced via `role="status"` or `aria-live` — otherwise a screen reader user gets nothing, which matters most when the UI auto-advances on a timer. **[review-only]**
 - **Grouped form controls** (segmented pickers, custom radios) carry `role="radiogroup"` and `aria-labelledby`, or the group's label is never conveyed. **[review-only]**
 - **Timing limits** are adjustable, extendable, or can be turned off (WCAG 2.2.1). A hard 15-second countdown with no alternative is a real barrier. **[review-only]**

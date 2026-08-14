@@ -351,6 +351,29 @@ describe('GameOverComponent question reporting (H4)', () => {
     expect(component.openReportQuestionId()).toBe('q-custom-1');
   });
 
+  // A live region only announces on mutation, and signals drop same-value
+  // sets — so the region must pass through '' while a write is in flight,
+  // or a second identical outcome ("Report sent" for another question, the
+  // same failure on a retry) would be silent to a screen reader. Found by
+  // review, not by this suite's first version.
+  it('empties the status region while a submit is in flight (G3)', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'spam';
+    await component.submitReport(custom);
+    expect(component.reportStatus()).toMatch(/Report sent/);
+
+    let resolveWrite!: () => void;
+    reportQuestion.mockReturnValue(new Promise<void>((resolve) => (resolveWrite = resolve)));
+    const secondSubmit = component.submitReport(custom);
+
+    expect(component.reportStatus()).toBe('');
+
+    resolveWrite();
+    await secondSubmit;
+    expect(component.reportStatus()).toMatch(/Report sent/);
+  });
+
   it('clears the previous attempt when the form reopens', () => {
     const { component } = reportingSetup({ questions: [custom] });
     component.toggleReportForm(custom);

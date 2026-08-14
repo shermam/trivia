@@ -260,7 +260,13 @@
                   {{ question.question }}
                 </p>
                 @if (reportedQuestionIds().has(question.id)) {
+                  <!-- tabindex="-1": this badge is the focus target after a
+                       successful submit removes both the panel and the
+                       trigger — without it focus would drop to <body>. -->
                   <span
+                    [id]="'report-badge-' + question.id"
+                    [attr.data-cy]="'reported-badge-' + question.id"
+                    tabindex="-1"
                     class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-1"
                   >
                     Reported
