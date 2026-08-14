@@ -7,6 +7,7 @@ import {
   CustomQuestionSeed,
   LeaderboardSeed,
   ProSubscriptionSeed,
+  QuestionReportRecord,
   VerifiedUserSeed,
 } from './types';
 
@@ -76,6 +77,7 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         users.length ? auth.deleteUsers(users.map((u) => u.uid)) : Promise.resolve(),
         deleteCollection(firestore.collection('leaderboard')),
         deleteCollection(firestore.collection('custom_questions')),
+        deleteCollection(firestore.collection('question_reports')),
         // `recursiveDelete` (not the plain `deleteCollection` helper above)
         // because each `customers/{uid}` doc owns subcollections
         // (`subscriptions`, `checkout_sessions`, `payments`) that a
@@ -130,6 +132,18 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         questionExists: questionDoc?.exists ?? false,
         questionCreatedBy: (questionDoc?.data()?.['createdBy'] as string | undefined) ?? null,
       };
+    },
+
+    /**
+     * Everything currently in `question_reports`, IDs included. Clients are
+     * forbidden from reading the collection (a report can quote another
+     * user's content), so the Admin SDK is the only way a spec can prove a
+     * report actually landed — asserting on the UI alone would pass against
+     * a submit handler that writes nothing.
+     */
+    async getQuestionReports(): Promise<QuestionReportRecord[]> {
+      const snapshot = await firestore.collection('question_reports').get();
+      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as QuestionReportRecord);
     },
 
     async seedLeaderboardEntry(entry: LeaderboardSeed) {

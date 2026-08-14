@@ -102,6 +102,33 @@ export function sessionDocId(slot: number | string = 0, windowOffset = 0): strin
   return `${Math.floor(Date.now() / SESSION_WINDOW_MS) + windowOffset}-${slot}`;
 }
 
+/**
+ * A document ID the question-report volume cap accepts:
+ * `{window}-{slot}-{uid}` — the session-document ID shape with the caller's
+ * uid appended, because `question_reports` is a flat top-level collection and
+ * the suffix is what stops one user's slots occupying another's. Mirrors
+ * `FirebaseService.reportQuestion`, deliberately — see `sessionDocId` above.
+ */
+export function reportDocId(uid: string, slot: number | string = 0, windowOffset = 0): string {
+  return `${sessionDocId(slot, windowOffset)}-${uid}`;
+}
+
+/**
+ * A schema-valid `question_reports` document; spread over it for invalid
+ * variants. `reportedBy` must match the uid of whichever context writes it,
+ * and the default `questionId` must be seeded into `custom_questions` first —
+ * the rules check it exists.
+ */
+export function validReport(reportedBy: string, overrides: Record<string, unknown> = {}) {
+  return {
+    questionId: 'reported-question',
+    reason: 'incorrect',
+    reportedBy,
+    createdAt: Date.now(),
+    ...overrides,
+  };
+}
+
 /** A schema-valid `checkout_sessions` document; spread over it for invalid variants. */
 export function validCheckoutSession(overrides: Record<string, unknown> = {}) {
   return { price: 'price_test_pro', origin: 'https://example.web.app', ...overrides };

@@ -92,6 +92,24 @@ export interface NewCustomQuestionDoc extends CustomQuestionContent {
   createdAt: number;
 }
 
+export type QuestionReportReason = 'incorrect' | 'inappropriate' | 'spam' | 'other';
+
+/**
+ * What the client writes to `question_reports` (finding H4). `firestore.rules`
+ * requires `reportedBy` to equal the caller's own uid and `createdAt` to sit
+ * near server time — same self-asserting attribution as `custom_questions` —
+ * and requires `questionId` to name a document that actually exists in the
+ * bank. `detail` is optional and must be **omitted**, not `undefined`, when
+ * empty: Firestore rejects `undefined` field values outright.
+ */
+export interface NewQuestionReportDoc {
+  questionId: string;
+  reason: QuestionReportReason;
+  detail?: string;
+  reportedBy: string;
+  createdAt: number;
+}
+
 /** Raw shape of a question as returned by the Open Trivia DB API. */
 export interface OpenTriviaApiQuestion {
   category: string;

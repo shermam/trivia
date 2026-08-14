@@ -1,19 +1,27 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { LeaderboardEntry } from '../../models/question.model';
+import {
+  LeaderboardEntry,
+  NewQuestionReportDoc,
+  QuestionReportReason,
+  TriviaQuestion,
+} from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
-import { FirebaseService } from '../../services/firebase.service';
+import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { IconComponent } from '../icon/icon.component';
 
@@ -57,6 +65,74 @@ export class GameOverComponent implements OnInit {
   protected readonly leaderboard = signal<LeaderboardEntry[]>([]);
   protected readonly isLoadingLeaderboard = signal(true);
   protected readonly leaderboardError = signal<string | null>(null);
+
+  /**
+   * The community questions this game actually served — the only ones a
+   * player can report (finding H4). Open Trivia DB questions aren't ours to
+   * moderate, so they get no report affordance and the whole section
+   * disappears for a game without custom questions.
+   */
+  protected readonly reportableQuestions = computed(() =>
+    this.gameController.questions().filter((question) => question.source === 'custom'),
+  );
+
+  protected readonly openReportQuestionId = signal<string | null>(null);
+  protected readonly reportedQuestionIds = signal<ReadonlySet<string>>(new Set());
+  protected readonly isSubmittingReport = signal(false);
+  protected readonly reportError = signal<string | null>(null);
+  /** Text of the permanent `role="status"` region — set on every report outcome (G3 pattern). */
+  protected readonly reportStatus = signal('');
+  protected reportReason: QuestionReportReason | '' = '';
+  protected reportDetail = '';
+
+  protected readonly reportReasonOptions: { value: QuestionReportReason; label: string }[] = [
+    { value: 'incorrect', label: 'The answer is wrong' },
+    { value: 'inappropriate', label: 'Inappropriate or offensive' },
+    { value: 'spam', label: 'Spam or nonsense' },
+    { value: 'other', label: 'Something else' },
+  ];
+
+  /**
+   * Only the open panel is rendered (`@if` in the template), so this resolves
+   * to at most one element even though the trigger list is a loop.
+   */
+  private readonly reportPanel = viewChild<ElementRef<HTMLElement>>('reportPanel');
+  private previouslyFocusedBeforeReport: HTMLElement | null = null;
+  private wasReportOpen = false;
+
+  constructor() {
+    // Focus follows the report form: into the panel when it opens, back to
+    // whatever opened it when it closes — same contract as the auth menu
+    // (G2), for the same reason: without it a keyboard user tabs through the
+    // whole page to reach a form that is already on screen, and closing it
+    // drops them at <body>.
+    effect(() => {
+      const openId = this.openReportQuestionId();
+      const panel = this.reportPanel();
+      const isOpen = openId !== null;
+
+      if (isOpen && !this.wasReportOpen) {
+        this.previouslyFocusedBeforeReport = document.activeElement as HTMLElement | null;
+      }
+
+      if (isOpen && panel) {
+        panel.nativeElement.focus();
+      }
+
+      if (!isOpen && this.wasReportOpen) {
+        const restoreTo = this.previouslyFocusedBeforeReport;
+        this.previouslyFocusedBeforeReport = null;
+        // Only if still in the document: submitting swaps the trigger for a
+        // "Reported" badge, and focusing a detached node silently drops
+        // focus to <body>.
+        if (restoreTo?.isConnected) {
+          restoreTo.focus();
+        }
+      }
+
+      this.wasReportOpen = isOpen;
+    });
+  }
 
   protected readonly performanceLabel = computed(() => {
     const percentage = this.gameController.percentage();
@@ -135,6 +211,77 @@ export class GameOverComponent implements OnInit {
     } finally {
       this.isSaving.set(false);
     }
+  }
+
+  protected toggleReportForm(question: TriviaQuestion): void {
+    if (this.openReportQuestionId() === question.id) {
+      this.closeReportForm();
+      return;
+    }
+    this.reportReason = '';
+    this.reportDetail = '';
+    this.reportError.set(null);
+    this.openReportQuestionId.set(question.id);
+  }
+
+  protected closeReportForm(): void {
+    this.openReportQuestionId.set(null);
+  }
+
+  protected async submitReport(question: TriviaQuestion): Promise<void> {
+    const reason = this.reportReason;
+    if (!reason || this.isSubmittingReport()) {
+      return;
+    }
+    const uid = this.authService.user()?.uid;
+    if (!uid) {
+      // Every visitor gets an anonymous session on load, so this only happens
+      // if that bootstrap failed — nothing to do but say so generically.
+      this.setReportFailure('Could not send the report. Please try again.');
+      return;
+    }
+
+    this.isSubmittingReport.set(true);
+    this.reportError.set(null);
+
+    const detail = this.reportDetail.trim();
+    const report: NewQuestionReportDoc = {
+      questionId: question.id,
+      reason,
+      // Omitted rather than undefined when blank — Firestore rejects
+      // `undefined` values, and the rules only allow `detail` with content.
+      ...(detail ? { detail } : {}),
+      reportedBy: uid,
+      createdAt: Date.now(),
+    };
+
+    try {
+      await this.firebaseService.reportQuestion(report);
+      this.reportedQuestionIds.update((ids) => new Set(ids).add(question.id));
+      this.closeReportForm();
+      this.reportStatus.set('Report sent. Thank you for helping keep the question bank in shape.');
+    } catch (error) {
+      // The rejection message deliberately doesn't pick a cause: exhausting
+      // every ID slot usually means the volume cap, but an invalid payload is
+      // refused identically (`permission-denied` either way), and clients
+      // can't read reports back to tell the two apart. Claiming "too many
+      // reports" when the real cause was, say, a skewed clock would be the
+      // exact mistake B4 was (CLAUDE.md §4.4) — so both messages stay causal
+      // only about what to *do*.
+      this.setReportFailure(
+        error instanceof QuestionReportRejectedError
+          ? error.message
+          : 'Could not send the report. Please try again.',
+      );
+    } finally {
+      this.isSubmittingReport.set(false);
+    }
+  }
+
+  /** Failure shows inline *and* announces via the status region (G3). */
+  private setReportFailure(message: string): void {
+    this.reportError.set(message);
+    this.reportStatus.set(message);
   }
 
   /**

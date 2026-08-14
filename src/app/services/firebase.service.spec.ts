@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
-import { CustomQuestionDoc } from '../models/question.model';
-import { FirebaseService } from './firebase.service';
+import { CustomQuestionDoc, NewQuestionReportDoc } from '../models/question.model';
+import { FirebaseService, QuestionReportRejectedError } from './firebase.service';
 
 /**
  * Finding C1. `getCustomQuestions()` was `getDocs(collection(...))` — no
@@ -229,5 +229,111 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
     await firstValueFrom(service.getCustomQuestions({ limit: 1 }));
 
     expect(queries[0].startAt).not.toEqual(queries[1].startAt);
+  });
+});
+
+/**
+ * Finding H4. The write is a `setDoc` against a `{window}-{slot}-{uid}`
+ * document ID — the A3 volume-cap mechanism — so the interesting behaviour is
+ * all in how slots are chosen and retried, not in the payload.
+ */
+describe('FirebaseService.reportQuestion (H4)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  const REPORT: NewQuestionReportDoc = {
+    questionId: 'q1',
+    reason: 'incorrect',
+    reportedBy: 'uid-123',
+    createdAt: Date.now(),
+  };
+
+  function reportSetup(rejectWith: (id: string, attempt: number) => unknown | null) {
+    TestBed.configureTestingModule({});
+    const service = TestBed.inject(FirebaseService);
+    const writes: { id: string; data: unknown }[] = [];
+    let attempt = 0;
+
+    const firestoreModule = {
+      doc: (_firestore: unknown, _collection: string, id: string) => ({ id }),
+      setDoc: (ref: { id: string }, data: unknown) => {
+        const rejection = rejectWith(ref.id, attempt++);
+        if (rejection) {
+          return Promise.reject(rejection);
+        }
+        writes.push({ id: ref.id, data });
+        return Promise.resolve();
+      },
+    };
+    vi.spyOn(service, 'getFirestore').mockResolvedValue({
+      firestore: {},
+      firestoreModule,
+    } as unknown as Awaited<ReturnType<FirebaseService['getFirestore']>>);
+    return { service, writes };
+  }
+
+  const ID_SHAPE = /^(\d+)-(\d)-uid-123$/;
+
+  it('writes the report to a {window}-{slot}-{uid} document, payload untouched', async () => {
+    const { service, writes } = reportSetup(() => null);
+
+    await service.reportQuestion(REPORT);
+
+    expect(writes).toHaveLength(1);
+    const match = writes[0].id.match(ID_SHAPE);
+    expect(match, `id "${writes[0].id}" has the {window}-{slot}-{uid} shape`).not.toBeNull();
+    // The window must be the same 5-minute bucket the rules derive from
+    // request.time — allow ±1 in case this test straddles a boundary.
+    const window = Number(match![1]);
+    expect(Math.abs(window - Math.floor(Date.now() / 300_000))).toBeLessThanOrEqual(1);
+    expect(writes[0].data).toEqual(REPORT);
+  });
+
+  it('moves to the next slot when one is refused with permission-denied', async () => {
+    let denials = 0;
+    const { service, writes } = reportSetup((_id, attempt) => {
+      if (attempt < 3) {
+        denials++;
+        return { code: 'permission-denied' };
+      }
+      return null;
+    });
+
+    await service.reportQuestion(REPORT);
+
+    expect(denials).toBe(3);
+    expect(writes).toHaveLength(1);
+  });
+
+  it('tries all ten slots, each exactly once, before giving up', async () => {
+    const attemptedIds: string[] = [];
+    const { service } = reportSetup((id) => {
+      attemptedIds.push(id);
+      return { code: 'permission-denied' };
+    });
+
+    await expect(service.reportQuestion(REPORT)).rejects.toBeInstanceOf(
+      QuestionReportRejectedError,
+    );
+    expect(attemptedIds).toHaveLength(10);
+    expect(new Set(attemptedIds).size).toBe(10);
+    const slots = attemptedIds.map((id) => Number(id.match(ID_SHAPE)![2])).sort((a, b) => a - b);
+    expect(slots).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
+  // A network failure is not a taken slot — retrying nine more times would
+  // just fail nine more times, slower.
+  it('rethrows a non-permission failure immediately', async () => {
+    const failure = new Error('network down');
+    let attempts = 0;
+    const { service } = reportSetup(() => {
+      attempts++;
+      return failure;
+    });
+
+    await expect(service.reportQuestion(REPORT)).rejects.toBe(failure);
+    expect(attempts).toBe(1);
   });
 });

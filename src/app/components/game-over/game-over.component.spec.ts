@@ -2,11 +2,11 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { of } from 'rxjs';
-import { LeaderboardEntry } from '../../models/question.model';
+import { LeaderboardEntry, TriviaQuestion } from '../../models/question.model';
 import { AuthService } from '../../services/auth.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
-import { FirebaseService } from '../../services/firebase.service';
+import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { GameOverComponent } from './game-over.component';
 
@@ -59,6 +59,7 @@ function setup(options: {
           score: signal(options.score ?? 7),
           totalQuestions: signal(10),
           percentage: signal(70),
+          questions: signal([]),
           resetGame: () => undefined,
         },
       },
@@ -171,5 +172,196 @@ describe('GameOverComponent save failures', () => {
     expect(getLeaderboardEntry).not.toHaveBeenCalled();
     expect(component.saveError()).toMatch(/Please try again/);
     expect(component.hasSaved()).toBe(false);
+  });
+});
+
+/**
+ * Finding H4 — the game-over reporting flow. The rules and the write
+ * mechanics have their own suites (`firestore-tests/`,
+ * `firebase.service.spec.ts`); what belongs to the component is which
+ * questions are offered, what payload leaves it, and what each outcome does
+ * to the UI state.
+ */
+
+function makeTriviaQuestion(overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
+  return {
+    id: 'q-custom-1',
+    category: 'Science',
+    type: 'multiple',
+    difficulty: 'easy',
+    question: 'Q?',
+    correct_answer: 'A',
+    incorrect_answers: ['B'],
+    all_answers: [],
+    source: 'custom',
+    ...overrides,
+  };
+}
+
+interface ReportingComponent {
+  reportableQuestions: () => TriviaQuestion[];
+  openReportQuestionId: () => string | null;
+  reportedQuestionIds: () => ReadonlySet<string>;
+  reportError: () => string | null;
+  reportStatus: () => string;
+  reportReason: string;
+  reportDetail: string;
+  toggleReportForm: (question: TriviaQuestion) => void;
+  closeReportForm: () => void;
+  submitReport: (question: TriviaQuestion) => Promise<void>;
+}
+
+function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+  const reportQuestion = options.reportError
+    ? vi.fn().mockRejectedValue(options.reportError)
+    : vi.fn().mockResolvedValue(undefined);
+
+  TestBed.configureTestingModule({
+    providers: [
+      {
+        provide: GameControllerService,
+        useValue: {
+          score: signal(7),
+          totalQuestions: signal(10),
+          percentage: signal(70),
+          questions: signal(options.questions),
+          resetGame: () => undefined,
+        },
+      },
+      {
+        provide: AuthService,
+        useValue: {
+          user: signal({ uid: 'anon-1', displayName: null }),
+          isFullyAuthenticated: signal(false),
+          resendVerificationEmail: () => Promise.resolve(),
+        },
+      },
+      { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+      { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+      {
+        provide: FirebaseService,
+        useValue: {
+          reportQuestion,
+          getLeaderboardEntry: () => Promise.resolve(null),
+          getTopScores: () => of([]),
+        },
+      },
+      { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+    ],
+  });
+
+  const fixture = TestBed.createComponent(GameOverComponent);
+  const component = fixture.componentInstance as unknown as ReportingComponent;
+  return { component, reportQuestion };
+}
+
+describe('GameOverComponent question reporting (H4)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const custom = makeTriviaQuestion({ id: 'q-custom-1' });
+  const openTrivia = makeTriviaQuestion({ id: 'open-123', source: 'open_trivia' });
+
+  it('offers only custom-source questions — Open Trivia DB content is not ours to moderate', () => {
+    const { component } = reportingSetup({ questions: [openTrivia, custom] });
+
+    expect(component.reportableQuestions().map((q) => q.id)).toEqual(['q-custom-1']);
+  });
+
+  it('sends the chosen reason attributed to the caller, omitting a blank detail', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'incorrect';
+    component.reportDetail = '   ';
+
+    await component.submitReport(custom);
+
+    expect(reportQuestion).toHaveBeenCalledTimes(1);
+    const payload = reportQuestion.mock.calls[0][0];
+    expect(payload.questionId).toBe('q-custom-1');
+    expect(payload.reason).toBe('incorrect');
+    expect(payload.reportedBy).toBe('anon-1');
+    expect(Math.abs(payload.createdAt - Date.now())).toBeLessThan(5_000);
+    // Omitted, not undefined: Firestore rejects undefined field values, and
+    // the rules only allow `detail` with content.
+    expect('detail' in payload).toBe(false);
+  });
+
+  it('includes a trimmed detail when one was written', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'other';
+    component.reportDetail = '  The year is off by a decade.  ';
+
+    await component.submitReport(custom);
+
+    expect(reportQuestion.mock.calls[0][0].detail).toBe('The year is off by a decade.');
+  });
+
+  it('does nothing until a reason is chosen', async () => {
+    const { component, reportQuestion } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+
+    await component.submitReport(custom);
+
+    expect(reportQuestion).not.toHaveBeenCalled();
+  });
+
+  it('marks the question reported, closes the form, and announces on success', async () => {
+    const { component } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'spam';
+
+    await component.submitReport(custom);
+
+    expect(component.reportedQuestionIds().has('q-custom-1')).toBe(true);
+    expect(component.openReportQuestionId()).toBeNull();
+    expect(component.reportStatus()).toMatch(/Report sent/);
+    expect(component.reportError()).toBeNull();
+  });
+
+  it("surfaces the service's own advice when every slot was refused, and keeps the form open", async () => {
+    const { component } = reportingSetup({
+      questions: [custom],
+      reportError: new QuestionReportRejectedError(),
+    });
+    component.toggleReportForm(custom);
+    component.reportReason = 'incorrect';
+
+    await component.submitReport(custom);
+
+    expect(component.reportError()).toMatch(/try again in a few minutes/);
+    // Announced too — the visible paragraph alone is silent to a screen
+    // reader mid-flow (G3 pattern).
+    expect(component.reportStatus()).toMatch(/try again in a few minutes/);
+    expect(component.openReportQuestionId()).toBe('q-custom-1');
+    expect(component.reportedQuestionIds().has('q-custom-1')).toBe(false);
+  });
+
+  it('stays generic for an ordinary failure', async () => {
+    const { component } = reportingSetup({
+      questions: [custom],
+      reportError: new Error('network down'),
+    });
+    component.toggleReportForm(custom);
+    component.reportReason = 'incorrect';
+
+    await component.submitReport(custom);
+
+    expect(component.reportError()).toBe('Could not send the report. Please try again.');
+    expect(component.openReportQuestionId()).toBe('q-custom-1');
+  });
+
+  it('clears the previous attempt when the form reopens', () => {
+    const { component } = reportingSetup({ questions: [custom] });
+    component.toggleReportForm(custom);
+    component.reportReason = 'spam';
+    component.reportDetail = 'left over';
+    component.closeReportForm();
+
+    component.toggleReportForm(custom);
+
+    expect(component.reportReason).toBe('');
+    expect(component.reportDetail).toBe('');
+    expect(component.openReportQuestionId()).toBe('q-custom-1');
   });
 });

@@ -7,12 +7,20 @@ import {
   Difficulty,
   LeaderboardEntry,
   NewCustomQuestionDoc,
+  NewQuestionReportDoc,
 } from '../models/question.model';
 import { giveUpAfter } from '../utils/give-up-after.util';
 import { FirebaseAppService } from './firebase-app.service';
 
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
 const LEADERBOARD_COLLECTION = 'leaderboard';
+const QUESTION_REPORTS_COLLECTION = 'question_reports';
+// Must agree with the {window}-{slot} arithmetic in firestore.rules'
+// sessionWindow()/the question_reports ID pattern — same contract as
+// SubscriptionService's session documents (finding A3): if the two disagree,
+// every report is refused, and the rules tests fail loudly.
+const REPORT_WINDOW_MS = 300_000;
+const REPORT_SLOTS_PER_WINDOW = 10;
 const FIRESTORE_TIMEOUT_MS = 10_000;
 const FIRESTORE_EMULATOR_HOST = '127.0.0.1';
 const FIRESTORE_EMULATOR_PORT = 8080;
@@ -23,6 +31,20 @@ const FIRESTORE_EMULATOR_PORT = 8080;
  * and Tauri shells without pulling in Angular-specific DI wiring.
  */
 type FirestoreModule = typeof import('firebase/firestore');
+
+/**
+ * Every `{window}-{slot}` document ID was refused. Usually that means the
+ * volume cap — ten reports per five-minute window per user — but an invalid
+ * payload is refused with the same `permission-denied` on every slot, and
+ * clients can't read reports back to tell the two apart. The message
+ * therefore advises without diagnosing (`CLAUDE.md` §4.4): "try again in a
+ * few minutes" is the right move for the cap, and harmless for the rest.
+ */
+export class QuestionReportRejectedError extends Error {
+  constructor() {
+    super('Could not send the report just now. Please try again in a few minutes.');
+  }
+}
 
 /** What to draw from the shared question bank. `limit` is mandatory on purpose — see `getCustomQuestions`. */
 export interface CustomQuestionsQuery {
@@ -191,6 +213,43 @@ export class FirebaseService {
       ),
       FIRESTORE_TIMEOUT_MS,
     );
+  }
+
+  /**
+   * Files a player's report about a community question (finding H4).
+   *
+   * The document ID is `{window}-{slot}-{uid}` — the same document-ID volume
+   * cap as the checkout/portal session documents (`CLAUDE.md` §4.1, finding
+   * A3): `create` refuses an ID that already exists, so ten slots per
+   * five-minute window per uid *is* the rate limit, with no counter document
+   * for a client to decline to update. A `permission-denied` therefore means
+   * "this slot is taken" as often as it means anything else, so the loop
+   * moves to the next slot rather than giving up; only running out of all
+   * ten is worth surfacing, and the thrown message says what to do about it.
+   */
+  async reportQuestion(report: NewQuestionReportDoc): Promise<void> {
+    const { firestore, firestoreModule } = await this.getFirestore();
+    const currentWindow = Math.floor(Date.now() / REPORT_WINDOW_MS);
+    const firstSlot = Math.floor(Math.random() * REPORT_SLOTS_PER_WINDOW);
+
+    for (let attempt = 0; attempt < REPORT_SLOTS_PER_WINDOW; attempt++) {
+      const slot = (firstSlot + attempt) % REPORT_SLOTS_PER_WINDOW;
+      const reportRef = firestoreModule.doc(
+        firestore,
+        QUESTION_REPORTS_COLLECTION,
+        `${currentWindow}-${slot}-${report.reportedBy}`,
+      );
+      try {
+        await giveUpAfter(firestoreModule.setDoc(reportRef, report), FIRESTORE_TIMEOUT_MS);
+        return;
+      } catch (error) {
+        if ((error as { code?: string })?.code !== 'permission-denied') {
+          throw error;
+        }
+      }
+    }
+
+    throw new QuestionReportRejectedError();
   }
 
   /**
