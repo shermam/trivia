@@ -159,12 +159,21 @@ describe('reporting a community question', () => {
     cy.get('[data-cy="flag-question"]').click();
     cy.get('[data-cy="flag-question"]').should('have.attr', 'aria-pressed', 'true');
     cy.get('[data-cy="flag-notice"]').should('contain.text', 'end of the game');
-    cy.get('[data-cy="flag-status"]').should('contain.text', 'Flagged');
+    // The announcement names the question's position, and that is the point of
+    // it: two flags in one game must produce two *different* strings, or the
+    // second is a no-op set on a signal and the live region never announces
+    // it. Asserted verbatim rather than by keyword for the same reason.
+    cy.get('[data-cy="flag-status"]').should('contain.text', 'Question 1 flagged');
 
-    // Un-flagging is the same control, and clears the promise with it.
+    // Un-flagging is the same control, and clears the promise with it —
+    // including the announcement, which must empty rather than linger.
     cy.get('[data-cy="flag-question"]').click();
     cy.get('[data-cy="flag-question"]').should('have.attr', 'aria-pressed', 'false');
     cy.get('[data-cy="flag-notice"]').should('not.exist');
+    // Matched against whitespace rather than compared to '': the region is a
+    // permanent element (G3) whose interpolation sits on its own line, so its
+    // textContent is never the empty string even when it says nothing.
+    cy.get('[data-cy="flag-status"]').invoke('text').should('match', /^\s*$/);
 
     // ...and game-over honours that: nothing flagged, nothing led with.
     playRemainingQuestions();

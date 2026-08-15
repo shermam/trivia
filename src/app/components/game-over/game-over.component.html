@@ -356,7 +356,16 @@
       }
     </ng-template>
 
-    @if (flaggedQuestions().length > 0) {
+    <!-- Hidden while the dialog is open, and not merely for tidiness: the
+         dialog lists *every* community question, so a flagged one would
+         otherwise be rendered twice at once through the same `questionRow`
+         template. That duplicates `report-panel-{id}` and `report-badge-{id}`
+         in the document (making `aria-controls` ambiguous), and — worse —
+         `viewChild('reportPanel')` returns the *first* match in view order,
+         which is this card, declared above the dialog. Opening a report form
+         from inside the modal would then send focus to the copy behind the
+         backdrop, outside the trap. One row per question, always. -->
+    @if (flaggedQuestions().length > 0 && !isReportDialogOpen()) {
       <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
         <div
           class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
@@ -397,9 +406,12 @@
     }
 
     @if (isReportDialogOpen()) {
-      <!-- Backdrop. `aria-hidden` on it rather than on the page behind:
-           marking the rest of the document hidden would also hide the dialog's
-           own live region, which is inside it. -->
+      <!-- `aria-hidden` marks the backdrop itself as decoration — it is a
+           tint with a click handler, and announcing it would be noise. It is
+           deliberately not a claim about the page behind, which stays in the
+           accessibility tree: `aria-modal="true"` on the dialog is what asks
+           assistive tech to ignore that, and the Tab trap is what enforces the
+           same for everyone else. -->
       <div
         class="fixed inset-0 z-40 bg-slate-900/50"
         aria-hidden="true"

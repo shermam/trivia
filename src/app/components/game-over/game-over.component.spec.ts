@@ -641,4 +641,85 @@ describe('GameOverComponent flagged questions and the report dialog', () => {
     expect(shiftTab.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(focusable[focusable.length - 1]);
   });
+
+  // The dialog element is only `activeElement` for the very first keystroke
+  // after opening. Every Shift+Tab after that starts from the *first control*,
+  // which is a different branch of the same condition — and it was the
+  // untested one, so `active === first ||` could be deleted with the suite
+  // still green.
+  it('wraps Shift+Tab from the first control back to the last', async () => {
+    const { fixture, query, host } = render({ questions: [custom1] });
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+
+    const focusable = Array.from(
+      host.querySelectorAll<HTMLElement>('[data-cy="report-dialog"] button'),
+    );
+    focusable[0].focus();
+
+    const shiftTab = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    query('[data-cy="report-dialog"]')?.dispatchEvent(shiftTab);
+
+    expect(shiftTab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(focusable[focusable.length - 1]);
+  });
+
+  /**
+   * A flagged question is offered in two places — the card that leads the
+   * screen and the dialog that lists everything — and both render through the
+   * same `questionRow` template against the same `openReportQuestionId`
+   * signal. Rendering both at once duplicates `report-panel-{id}` and
+   * `report-badge-{id}` in the document, and `viewChild('reportPanel')`
+   * returns the first match in view order: the card, which is declared above
+   * the dialog. Opening a report form from inside the modal would then move
+   * focus to the copy behind the backdrop, outside the trap that is the whole
+   * point of the modal.
+   */
+  it('renders each question once, never in the card and the dialog at the same time', () => {
+    const { fixture, query, queryAll } = render({
+      questions: [custom1, custom2],
+      flaggedIds: ['q-custom-1'],
+    });
+
+    expect(queryAll('[data-cy="report-question-q-custom-1"]')).toHaveLength(1);
+
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+
+    // Still exactly one, and it is the copy inside the dialog.
+    const triggers = queryAll('[data-cy="report-question-q-custom-1"]');
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].closest('[data-cy="report-dialog"]')).not.toBeNull();
+
+    // Closing brings the card back, so nothing is lost by hiding it.
+    query('[data-cy="close-report-dialog"]')?.click();
+    fixture.detectChanges();
+    expect(queryAll('[data-cy="report-question-q-custom-1"]')).toHaveLength(1);
+  });
+
+  // The consequence of the above, asserted directly: the panel focused when a
+  // form opens inside the dialog must be inside the dialog.
+  it('keeps focus inside the dialog when a report form is opened from it', async () => {
+    const { fixture, query } = render({
+      questions: [custom1, custom2],
+      flaggedIds: ['q-custom-1'],
+    });
+
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    query('[data-cy="report-question-q-custom-1"]')?.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    const focused = document.activeElement as HTMLElement | null;
+    expect(focused?.id).toBe('report-panel-q-custom-1');
+    expect(focused?.closest('[data-cy="report-dialog"]')).not.toBeNull();
+  });
 });

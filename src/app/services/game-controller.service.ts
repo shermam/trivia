@@ -209,6 +209,17 @@ export class GameControllerService {
       this.currentIndex.set(0);
       this.score.set(0);
       this.isComplete.set(false);
+      // Cleared here as well as in `clearGameState()`, because not every route
+      // into a new game goes through one. "Play Again" does (`resetGame`), and
+      // so does the resume banner's Discard — but the top bar's logo is a plain
+      // `routerLink="/"`, so a player can abandon a game and start another
+      // without either, and `restoreSavedGame()` puts the old flags back into
+      // the signal on the way. Custom question ids are stable Firestore
+      // document ids, so a leaked flag is not a harmless stale byte: draw the
+      // same question again and it renders pre-flagged, and game-over leads
+      // with "Questions you flagged" for a question the player never flagged
+      // in this game.
+      this.flaggedQuestionIds.set(new Set());
       await this.router.navigateByUrl('/play');
     } catch {
       this.loadError.set('Failed to load questions. Please check your connection and try again.');

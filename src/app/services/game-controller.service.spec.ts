@@ -240,6 +240,32 @@ describe('GameControllerService persistence (B8)', () => {
     expect([...service.flaggedQuestionIds()]).toEqual([]);
   });
 
+  /**
+   * ...and `startGame()` has to clear them too, because not every route into a
+   * new game passes through `resetGame()`. The top bar's logo is a plain
+   * `routerLink="/"`, so a player can abandon a flagged game and start another
+   * without "Play Again" or the resume banner's Discard ever running — and a
+   * restore on the way (`restoreSavedGame`) puts the old flags back in the
+   * signal first. Custom question ids are stable Firestore document ids, so
+   * drawing the same question again would render it pre-flagged.
+   */
+  it('clears flags when a new game starts, not only on Play Again', async () => {
+    const abandoned = await playAndPersist(10, 3, 2);
+    abandoned.toggleQuestionFlag('q1');
+    TestBed.tick();
+    await abandoned.flushPendingWrites();
+
+    TestBed.resetTestingModule();
+    const fresh = setupWithQuestionSource(3);
+    await fresh.restoreSavedGame();
+    expect(fresh.flaggedQuestionIds().size).toBeGreaterThan(0); // the leak this guards
+
+    await fresh.startGame({ amount: 3, category: '', difficulty: '', source: 'custom' });
+
+    expect([...fresh.flaggedQuestionIds()]).toEqual([]);
+    expect(fresh.totalQuestions()).toBe(3);
+  });
+
   it('marks the game complete when advancing past the last question', async () => {
     const service = await playAndPersist(3, 2, 3);
     expect(service.isComplete()).toBe(false);
@@ -304,6 +330,23 @@ function setupWithoutQuestions() {
   TestBed.configureTestingModule({
     providers: [
       { provide: TriviaService, useValue: { getQuestions: () => Promise.resolve([]) } },
+      { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+    ],
+  });
+  return TestBed.inject(GameControllerService);
+}
+
+/** As above, but `startGame()` actually finds questions, so it runs to completion. */
+function setupWithQuestionSource(questionCount: number) {
+  TestBed.configureTestingModule({
+    providers: [
+      {
+        provide: TriviaService,
+        useValue: {
+          getQuestions: () =>
+            Promise.resolve(Array.from({ length: questionCount }, (_, i) => makeQuestion(`n${i}`))),
+        },
+      },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
     ],
   });
