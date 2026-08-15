@@ -113,6 +113,8 @@
             formControlName="category"
             list="category-suggestions"
             placeholder="e.g. Science"
+            [attr.aria-invalid]="showsError(form.controls.category)"
+            [attr.aria-describedby]="showsError(form.controls.category) ? 'category-error' : null"
             class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           />
           <datalist id="category-suggestions">
@@ -120,6 +122,15 @@
               <option [value]="category.name"></option>
             }
           </datalist>
+          @if (showsError(form.controls.category)) {
+            <p
+              id="category-error"
+              data-cy="category-error"
+              class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+            >
+              {{ errorFor(form.controls.category, 'Category', 100) }}
+            </p>
+          }
         </div>
 
         <div>
@@ -195,8 +206,19 @@
             formControlName="question"
             rows="3"
             placeholder="What is the question?"
+            [attr.aria-invalid]="showsError(form.controls.question)"
+            [attr.aria-describedby]="showsError(form.controls.question) ? 'question-error' : null"
             class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           ></textarea>
+          @if (showsError(form.controls.question)) {
+            <p
+              id="question-error"
+              data-cy="question-error"
+              class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+            >
+              {{ errorFor(form.controls.question, 'Question', 500) }}
+            </p>
+          }
         </div>
 
         @if (form.value.type === 'boolean') {
@@ -248,8 +270,21 @@
               id="correctAnswer"
               type="text"
               formControlName="correctAnswer"
+              [attr.aria-invalid]="showsError(form.controls.correctAnswer)"
+              [attr.aria-describedby]="
+                showsError(form.controls.correctAnswer) ? 'correct-answer-error' : null
+              "
               class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
             />
+            @if (showsError(form.controls.correctAnswer)) {
+              <p
+                id="correct-answer-error"
+                data-cy="correct-answer-error"
+                class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+              >
+                {{ errorFor(form.controls.correctAnswer, 'Correct answer', 200) }}
+              </p>
+            }
           </div>
 
           <div formArrayName="incorrectAnswers">
@@ -258,15 +293,48 @@
             >
             <div class="space-y-2">
               @for (control of form.controls.incorrectAnswers.controls; track $index) {
-                <input
-                  type="text"
-                  [formControlName]="$index"
-                  [placeholder]="'Incorrect answer ' + ($index + 1)"
-                  class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
-                />
+                <div>
+                  <input
+                    [id]="'incorrect-answer-' + $index"
+                    type="text"
+                    [formControlName]="$index"
+                    [placeholder]="'Incorrect answer ' + ($index + 1)"
+                    [attr.aria-invalid]="showsError(control)"
+                    [attr.aria-describedby]="
+                      showsError(control) ? 'incorrect-answer-error-' + $index : null
+                    "
+                    class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+                  />
+                  @if (showsError(control)) {
+                    <p
+                      [id]="'incorrect-answer-error-' + $index"
+                      [attr.data-cy]="'incorrect-answer-error-' + $index"
+                      class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+                    >
+                      {{ errorFor(control, 'Incorrect answer ' + ($index + 1), 200) }}
+                    </p>
+                  }
+                </div>
               }
             </div>
           </div>
+        }
+
+        <!-- Rendered always, text swapped in — a live region inserted while
+             already carrying its message is routinely missed (finding G3).
+             This is what tells a screen-reader user that Save did something,
+             which is precisely what a silently-rejected submit did not. -->
+        <p role="status" data-cy="validation-summary" class="sr-only">
+          {{ validationSummary() }}
+        </p>
+        @if (validationSummary()) {
+          <p
+            data-cy="validation-summary-visible"
+            class="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-3 py-2"
+          >
+            <app-icon name="triangle-alert" [size]="16" class="shrink-0 mt-0.5" />
+            {{ validationSummary() }}
+          </p>
         }
 
         @if (submitError()) {

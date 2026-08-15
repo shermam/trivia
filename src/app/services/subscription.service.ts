@@ -24,6 +24,21 @@ const SESSION_SLOTS_PER_WINDOW = 10;
 const ACTIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
 
 /**
+ * The role a subscription must carry to mean *Pro*, mirroring the server.
+ *
+ * A status alone is not entitlement. `stripeWebhook` derives the `stripeRole`
+ * claim from `deriveClaimRole(status, priceRole)` (`functions/src/role.ts`),
+ * which returns `null` when the price carries no `firebaseRole` metadata — so
+ * an active subscription on an unlabelled price grants **nothing**, and
+ * `firestore.rules` refuses every privileged write from that account. A UI
+ * signal that looked only at `status` therefore unlocked a form the server was
+ * always going to reject, with no way for the user to tell why. Same
+ * correction as `getProPriceId()` below, which already selects by role
+ * "matching the server" — this half was simply missed.
+ */
+const PRO_ROLE = 'pro';
+
+/**
  * Ceilings on the price lookup, so neither of its queries is unbounded
  * (`CLAUDE.md` §4.1 — every `getDocs` needs a `where` *and* a `limit`).
  *
@@ -103,7 +118,14 @@ export class SubscriptionService {
       this.unsubscribeFromSubscriptions = firestoreModule.onSnapshot(
         subscriptionsQuery,
         (snapshot) => {
-          const isActive = !snapshot.empty;
+          // `role` is filtered here rather than in the query on purpose:
+          // `where('status','in',…)` plus `where('role','==',…)` needs a
+          // composite index, and index configuration is the one thing the
+          // emulator cannot verify (finding D3 took the deploy pipeline down
+          // for four merges). This subcollection holds a handful of documents
+          // for one user and is already bounded by the status filter, so the
+          // check costs nothing to do in memory.
+          const isActive = snapshot.docs.some((doc) => doc.data()['role'] === PRO_ROLE);
           const justActivated = isActive && !this.hasActiveSubscriptionDocSignal();
           this.hasActiveSubscriptionDocSignal.set(isActive);
           if (justActivated) {

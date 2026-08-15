@@ -32,6 +32,12 @@ function fakeFirestore(
     writeBack?: Record<string, unknown>;
     /** Never call back, so the handshake reaches its deadline instead. */
     neverRespond?: boolean;
+    /**
+     * Documents the `customers/{uid}/subscriptions` listener should see. The
+     * service filters these by `role` in memory (a composite index is not
+     * worth one boolean), so what they carry is the whole point.
+     */
+    subscriptionDocs?: Record<string, unknown>[];
   } = {},
 ) {
   const writes: WrittenDoc[] = [];
@@ -56,12 +62,25 @@ function fakeFirestore(
       writes.push({ path: ref.path, data });
       return Promise.resolve();
     },
-    onSnapshot: (_ref: unknown, next: (snap: { data: () => unknown }) => void) => {
+    // Two different listeners run through here — the subscriptions *query*
+    // and the session *document* handshake — and they take different
+    // snapshot shapes. Emitting one shape for both would let a `.docs` read
+    // pass against a fake that never produces documents.
+    onSnapshot: (ref: { path: string[] }, next: (snap: never) => void) => {
+      const isSubscriptionsQuery = ref.path[ref.path.length - 1] === 'subscriptions';
+      if (isSubscriptionsQuery) {
+        queueMicrotask(() =>
+          next({
+            docs: (options.subscriptionDocs ?? []).map((data) => ({ data: () => data })),
+          } as never),
+        );
+        return unsubscribe;
+      }
       // Stand in for the Cloud Function's write-back, which is what the
       // service is waiting on.
       if (!options.neverRespond) {
         queueMicrotask(() =>
-          next({ data: () => options.writeBack ?? { url: 'https://stripe.test/s' } }),
+          next({ data: () => options.writeBack ?? { url: 'https://stripe.test/s' } } as never),
         );
       }
       return unsubscribe;
@@ -71,7 +90,7 @@ function fakeFirestore(
   return { writes, firestoreModule, unsubscribe };
 }
 
-function configure(fake: ReturnType<typeof fakeFirestore>, user: unknown) {
+function configure(fake: ReturnType<typeof fakeFirestore>, user: unknown, hasProClaim = false) {
   TestBed.configureTestingModule({
     providers: [
       {
@@ -85,7 +104,7 @@ function configure(fake: ReturnType<typeof fakeFirestore>, user: unknown) {
         provide: AuthService,
         useValue: {
           user: signal(user),
-          isProUser: signal(false),
+          isProUser: signal(hasProClaim),
           refreshIdToken: () => Promise.resolve(),
         },
       },
@@ -347,8 +366,25 @@ function fakeCatalog(products: ProductSeed[]) {
       writes.push({ path: ref.path, data });
       return Promise.resolve();
     },
-    onSnapshot: (_ref: unknown, next: (snap: { data: () => unknown }) => void) => {
-      queueMicrotask(() => next({ data: () => ({ url: 'https://stripe.test/s' }) }));
+    // Same two-shapes problem as the fake above: the subscriptions listener
+    // is attached for every signed-in user, catalog test or not, and it reads
+    // `.docs`. Emitting the session-document shape for it threw inside a
+    // microtask — which Vitest reports as an *unhandled error* while every
+    // test still passes, so the suite summary says 189 passed and the run
+    // exits non-zero.
+    onSnapshot: (
+      target: { path?: string[]; ref?: { path?: string[] } },
+      next: (snap: never) => void,
+    ) => {
+      // `query()` in this fake wraps the ref as `{ref, constraints}`, while a
+      // plain document ref is passed through as-is — so the path has to be
+      // read from either shape.
+      const path = target.path ?? target.ref?.path ?? [];
+      if (path[path.length - 1] === 'subscriptions') {
+        queueMicrotask(() => next({ docs: [] } as never));
+        return vi.fn();
+      }
+      queueMicrotask(() => next({ data: () => ({ url: 'https://stripe.test/s' }) } as never));
       return vi.fn();
     },
   };
@@ -493,5 +529,86 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
     await expect(configureCatalog(fake).startProCheckout()).rejects.toThrow(
       /check the Stripe Dashboard/i,
     );
+  });
+});
+
+/**
+ * The entitlement signal, and the reason it isn't just "has an active
+ * subscription".
+ *
+ * `stripeWebhook` derives the `stripeRole` claim from
+ * `deriveClaimRole(status, priceRole)` — no `firebaseRole` metadata on the
+ * price means no claim, whatever the subscription's status. `firestore.rules`
+ * gates every privileged write on that claim, so a UI signal that stops at
+ * `status` is strictly *broader* than the server's, and the gap is a form the
+ * user can fill in and can never submit. That was a real production report,
+ * not a hypothetical: an active subscription mirrored with `role: null`.
+ */
+describe('SubscriptionService entitlement signal', () => {
+  const user = { uid: 'user-1', isAnonymous: false };
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  /** Lets the listener's queued microtask deliver before asserting. */
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('grants Pro for an active subscription carrying the pro role', async () => {
+    const service = configure(
+      fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] }),
+      user,
+    );
+    await flush();
+    expect(service.isProUser()).toBe(true);
+  });
+
+  // The regression test. This exact document — active, but on a price with no
+  // firebaseRole metadata — unlocked the add-question form while the rules
+  // refused every write it produced.
+  it('does NOT grant Pro for an active subscription whose role is null', async () => {
+    const service = configure(
+      fakeFirestore({ subscriptionDocs: [{ status: 'active', role: null }] }),
+      user,
+    );
+    await flush();
+    expect(service.isProUser()).toBe(false);
+  });
+
+  it('does not grant Pro for a role that is not pro', async () => {
+    const service = configure(
+      fakeFirestore({ subscriptionDocs: [{ status: 'trialing', role: 'basic' }] }),
+      user,
+    );
+    await flush();
+    expect(service.isProUser()).toBe(false);
+  });
+
+  it('grants Pro from a role-carrying doc even alongside a role-less one', async () => {
+    const service = configure(
+      fakeFirestore({
+        subscriptionDocs: [
+          { status: 'active', role: null },
+          { status: 'active', role: 'pro' },
+        ],
+      }),
+      user,
+    );
+    await flush();
+    expect(service.isProUser()).toBe(true);
+  });
+
+  // The claim is the authority; the doc signal only ever front-runs it.
+  it('still grants Pro from the claim alone when no document has arrived', async () => {
+    const service = configure(fakeFirestore(), user, /* hasProClaim */ true);
+    await flush();
+    expect(service.isProUser()).toBe(true);
+  });
+
+  it('grants nothing to an anonymous session', async () => {
+    const service = configure(
+      fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] }),
+      { uid: 'anon-1', isAnonymous: true },
+    );
+    await flush();
+    expect(service.isProUser()).toBe(false);
   });
 });
