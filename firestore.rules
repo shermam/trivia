@@ -70,6 +70,47 @@ service cloud.firestore {
             && isNearRequestTime(data.createdAt);
     }
 
+    // The timing constraints a game can be played under, and therefore the
+    // set of leaderboards that exist (finding G7). A score won with no time
+    // limit is not comparable to one won in 15 seconds, so each constraint
+    // gets its own board rather than one board recording the conditions.
+    //
+    // This list is the schema. Adding an option to GameSetupComponent without
+    // adding it here produces a game whose score can never be saved, and the
+    // rules tests enumerate the same three values so the two cannot silently
+    // drift.
+    function isValidBoard(limit) {
+      return limit in ['15', '30', 'unlimited'];
+    }
+
+    // As isValidLeaderboardEntry, plus the board the entry is being written
+    // to. `timeLimit` is redundant with the path and is required anyway: an
+    // exact-key hasOnly() allowlist cannot be widened after the fact without
+    // rejecting every existing document (the A10 wall), and an export or an
+    // admin listing across boards should not have to parse document paths to
+    // know what it is looking at. Requiring it to equal the path segment is
+    // what keeps the redundancy honest.
+    function isValidBoardEntry(uid, limit) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+                ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt', 'timeLimit']
+              )
+            && data.timeLimit == limit
+            && data.uid == uid
+            && data.name is string
+            && data.name.size() > 0
+            && data.name.size() <= 30
+            && data.score is int
+            && data.score >= 0
+            && data.totalQuestions is int
+            && data.totalQuestions >= 1
+            && data.totalQuestions <= 25
+            && data.totalQuestions >= data.score
+            && data.percentage is int
+            && data.percentage == math.round(data.score * 100.0 / data.totalQuestions)
+            && isNearRequestTime(data.createdAt);
+    }
+
     // A bare `scheme://host[:port]` — no path, no query, no fragment, so
     // there is nothing to smuggle into the redirect URL the Cloud Function
     // builds from it. Which origins are actually *ours* deliberately isn't
@@ -296,6 +337,14 @@ service cloud.firestore {
     // Leaderboard: readable by anyone; one document per user (doc ID == uid),
     // append-only in the sense that a write only succeeds if it beats that
     // user's existing best score.
+    //
+    // This is the pre-G7 board, and it is being retired. Every entry in it was
+    // won under the fixed 15-second limit, so `scripts/migrate-leaderboard-to-boards.mjs`
+    // copies it into `leaderboards/15/entries`. It stays writable until the
+    // client is switched over to the per-board paths below, because the
+    // rules deploy before the client that matches them (`ci-cd.md` §4.2) —
+    // denying writes here first would break saving for every player still
+    // running the previous build.
     match /leaderboard/{uid} {
       allow read: if true;
       allow create: if isRealAuthedUser()
@@ -304,6 +353,35 @@ service cloud.firestore {
       allow update: if isRealAuthedUser()
                     && request.auth.uid == uid
                     && isValidLeaderboardEntry(uid)
+                    && request.resource.data.score > resource.data.score;
+      allow delete: if false;
+    }
+
+    // One board per timing constraint (finding G7). Same contract as above —
+    // public read, own-uid write, only an improving score — with the board in
+    // the path.
+    //
+    // A subcollection rather than a `timeLimit` field on a flat collection,
+    // deliberately: `where('timeLimit','==',x).orderBy('score','desc')` needs
+    // a composite index, and index configuration is the one thing the
+    // emulator cannot verify — a mistake in it took the deploy pipeline down
+    // for four consecutive merges (D3, `data-model.md` §3). Per-board
+    // `orderBy('score','desc').limit(10)` needs only the automatic
+    // single-field index, so that whole class of risk does not arise.
+    //
+    // Note the read rule checks the board name too. Firestore would happily
+    // serve a query against `leaderboards/anything/entries`, and an unchecked
+    // path segment is a public collection whose name an attacker chooses.
+    match /leaderboards/{limit}/entries/{uid} {
+      allow read: if isValidBoard(limit);
+      allow create: if isRealAuthedUser()
+                    && request.auth.uid == uid
+                    && isValidBoard(limit)
+                    && isValidBoardEntry(uid, limit);
+      allow update: if isRealAuthedUser()
+                    && request.auth.uid == uid
+                    && isValidBoard(limit)
+                    && isValidBoardEntry(uid, limit)
                     && request.resource.data.score > resource.data.score;
       allow delete: if false;
     }

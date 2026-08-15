@@ -146,6 +146,7 @@ createdAt: int         (epoch ms, must be near server time)
 - **Read**: public.
 - **Create / Update**: requires a non-anonymous, (if password-based) email-verified caller writing to their own uid's doc — schema is strictly validated in `firestore.rules` (exact key set, types, bounds) and an update is only accepted if `score` improves on the existing value.
 - **Delete**: disallowed.
+- **Being retired** in favour of the per-board collection below (finding G7); still writable until the client moves, still the collection the app reads today.
 - One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes. **A rejection is not self-explanatory**, though: since the bounds above were added, the rules also refuse a clock outside the accepted window, a name over 30 characters, a score inconsistent with the question count, and an unverified account. `GameOverComponent` therefore reads the caller's own entry before claiming "your best score is already higher", and only suppresses retry when that reading confirms it — everything else, including a lookup that itself fails, gets a generic message and keeps the form open. Reporting one cause for every rejection told most of those users something false and left them no way to try again.
 
 **The numeric bounds are anti-cheat, not just shape validation.** Previously the rules checked only that `score >= 0` and `totalQuestions >= score`, which accepted a hand-written `999999` and made rank #1 permanently unassailable (an update requires beating the existing score). Three constraints now tie an entry to something a real game could have produced:
@@ -159,6 +160,44 @@ createdAt: int         (epoch ms, must be near server time)
 **One composite index is defined** (`firestore.indexes.json`): `custom_questions` on `(category ASC, difficulty ASC)`, for the bounded question query described below. The index Firestore actually builds ends with `__name__`, but that **must not be written in the file** — declaring it breaks every deploy after the first (`INFRASTRUCTURE.md` §6.3), and `firestore-tests/indexes.spec.ts` fails if it reappears. The leaderboard's `orderBy('score', 'desc').limit(10)` needs only the automatic single-field index, and so does a question query filtering on category **or** difficulty alone — Firestore's automatic single-field indexes are already `(field, __name__)`, so they serve one equality filter ordered by document ID. Only the two-filter case needs a composite.
 
 > **The emulator cannot verify this.** It answers queries whether or not a matching index is declared, so a missing index passes every local check and `npm run e2e`, then fails in production with `FAILED_PRECONDITION` and a console link. Index requirements have to be reasoned about and declared, not discovered by running the suite. One thing ordering cannot fix: a newly declared index takes time to **build** after it is created, so a brand-new query can briefly fail against production even though indexes now deploy before the client that needs them (`ci-cd.md` §4.2).
+
+### `leaderboards/{limit}/entries` — one board per timing constraint
+
+```
+leaderboards/{limit}/entries/{uid}
+
+uid: string            (doc ID; must equal request.auth.uid)
+name: string           (1–30 chars)
+score: int             (0 .. totalQuestions)
+totalQuestions: int    (1–25)
+percentage: int        (must equal round(score * 100 / totalQuestions))
+createdAt: int         (epoch ms, must be near server time)
+timeLimit: string      (must equal the {limit} path segment)
+```
+
+`{limit}` is one of **`15`**, **`30`** or **`unlimited`** — the three timing constraints a game can be played under (finding G7). A score won with no time limit is not comparable to one won in 15 seconds, so each constraint gets its own board rather than one board recording the conditions and ranking across them.
+
+- **Read**: public, but only for a declared board. The board name is a path segment the caller chooses, so an unchecked read rule would serve `leaderboards/anything/entries` — a public collection named by whoever asks.
+- **Create / Update**: identical contract to the collection above — a non-anonymous, (if password-based) email-verified caller writing to their own uid, exact-key schema validation, and an update only if `score` improves. The improving-score check reads `resource.data` **at that path**, so it is naturally scoped per board: a player's 15-second best cannot block their first unlimited entry, which is the whole point of separating them.
+- **Delete**: disallowed.
+
+**A subcollection rather than a `timeLimit` field on one flat collection.** The flat version needs `where('timeLimit','==',x).orderBy('score','desc')`, which requires a **composite index** — and index configuration is the one thing the emulator cannot verify, the same gap that took the deploy pipeline down for four consecutive merges (D3, above). Per-board `orderBy('score','desc').limit(10)` needs only the automatic single-field index, so that class of risk does not arise at all. `firestore.indexes.json` is untouched by this feature.
+
+**`timeLimit` is redundant with the path and is stored anyway.** An exact-key `hasOnly()` allowlist cannot be widened later without rejecting every existing document — the A10 wall — so a field that might be wanted has to be in the schema from the start, and an admin export across boards should not have to parse document paths to know what it is looking at. The rules require it to equal the path segment, which is what keeps the redundancy from drifting into a second, disagreeing source of truth.
+
+**The board list is schema, not configuration.** Adding an option to the setup screen without adding it to `isValidBoard` produces a game whose score can never be saved. `firestore-tests/leaderboards.rules.spec.ts` enumerates the same three values, and its accept cases fail if the rules list shrinks — verified by mutation, since a suite of nothing but rejections passes against a rule that denies everything.
+
+#### Migrating off the flat `leaderboard` collection
+
+The pre-G7 collection is being retired. Every entry in it was won under the fixed 15-second limit — it was the only limit the game had — so `scripts/migrate-leaderboard-to-boards.mjs` copies it into `leaderboards/15/entries`, adding the `timeLimit` field the old documents do not have. It runs through the Admin SDK because no client may write another user's entry, and it is tracked as a manual step in `AUDIT_REMEDIATION.md` §7.
+
+Three properties of that script are deliberate, and were exercised against the emulator rather than assumed:
+
+- **It never deletes.** The old collection is left exactly as it is, so a mistake costs nothing and the script can be re-run.
+- **It is idempotent**, and re-running is part of the plan rather than a recovery step: run it once after the rules ship, and again after the client switches over, to sweep up any score saved into the old collection in between. A re-run writes only when the old score actually beats what is already on the board — the same rule the client plays by.
+- **It refuses to guess which project it is talking to.** Both `--project` and a `GOOGLE_APPLICATION_CREDENTIALS` service-account key are required, and the script exits if the key's `project_id` disagrees with the flag. The credential is what actually decides the destination, so deriving the check from it rather than from an ambient default is the same reasoning as deriving Stripe's live/test mode from the key (`CLAUDE.md` §4.3).
+
+Until the client is switched over, **the old collection stays writable**. Rules deploy before the client that matches them (`ci-cd.md` §4.2), so denying writes there in the same change that adds the boards would break saving for every player still running the previous build. A rules test pins that, and is expected to be deleted in the PR that moves the client.
 
 ### How `custom_questions` is sampled
 
