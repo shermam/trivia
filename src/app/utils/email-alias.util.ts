@@ -7,8 +7,8 @@
  *
  * This is a client-side-only guard (checked on sign-up, not sign-in): it
  * stops the UI from creating alias accounts but doesn't stop a determined
- * user from calling the Auth API directly. See PROJECT_OVERVIEW.md for why
- * server-side enforcement (an Auth blocking function) was scoped out.
+ * user from calling the Auth API directly. See `docs/known-gaps.md` §6 for
+ * why server-side enforcement (an Auth blocking function) was scoped out.
  */
 export function isAliasEmail(email: string): boolean {
   const [localPart] = email.split('@');

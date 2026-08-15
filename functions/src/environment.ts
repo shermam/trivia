@@ -104,7 +104,7 @@ export function stripeModeOfKey(secretKey: string | undefined): 'live' | 'test' 
  * The expectation comes from **the deployed secret key**, not from the project.
  * An earlier version of this derived it from the project ID — a real project
  * must mean live mode — which is wrong, and expensively so: this project runs
- * deliberately in Stripe test mode before launch (`PROJECT_OVERVIEW.md` §6), so
+ * deliberately in Stripe test mode before launch (`docs/known-gaps.md` §6), so
  * that rule rejected every genuine delivery and would have stopped checkout
  * granting anyone Pro. The key is the right authority because it *defines*
  * which Stripe the deployment talks to, so this check can never contradict

@@ -14,13 +14,13 @@ These apply to every session in this repository. Follow them without being asked
 
 ## 1. Before starting any task
 
-- **Read `PROJECT_OVERVIEW.md` in full first.** It is the source of truth for what this app does, how it's built, its Firestore data model, its Firebase/Stripe integration, and its CI/CD setup. Don't assume — confirm against it before touching code.
+- **Read `PROJECT_OVERVIEW.md` first — it is now an index, and it is short.** It maps five documents under `docs/`, each with a "read it when" line: `app.md` (§1, everything under `src/app/`), `stack.md` (§2, dependencies, Firebase wiring, `functions/`), `data-model.md` (§3, collections and `firestore.rules`), `ci-cd.md` (§4, workflows, e2e, Lighthouse, npm scripts), `known-gaps.md` (§5–§6, history and what is deliberately missing). **Then read the one your task touches, in full** — and `known-gaps.md` too if you are planning rather than implementing. Together these are the source of truth for what this app does and how it is built; don't assume, confirm against them before touching code. This used to be one 148 KB file read in full every session, which is what finding F5 was about; the section numbers did not change in the split, so an old `§4.2a` reference still resolves — it just lives in `ci-cd.md` now.
 - **Read `INFRASTRUCTURE.md`** whenever the task touches build tooling, hosting, CI/CD, or any other infra-layer decision rather than app/game functionality. It documents this project's stack choices (Angular, Firebase, Stripe, Cypress, GitHub Actions, Lighthouse CI, etc.) independently of the trivia app itself, and is the reference to follow if scaffolding a new project on the same infra.
 - **Read `AUDIT_REMEDIATION.md`** — an audit produced 55 findings that are being fixed as a long series of small PRs, spanning many sessions. It records what is done, what is next, the working rules for the series, and the decisions already taken (so they aren't silently revisited). If the task is "continue the audit work", that file _is_ the brief. If the task is an unrelated feature, still skim §5 — you may be about to touch something with a known open finding against it, and §4 may already record why it looks the way it does.
 
 ## 2. After making any change
 
-- **Update `PROJECT_OVERVIEW.md`** so it stays accurate: new/changed routes, services, Firestore collections/rules, CI steps, config, or closed items in "Known Gaps." A stale overview is a bug — treat it as part of the change, not an afterthought.
+- **Update the relevant document under `docs/`** so it stays accurate: new/changed routes or services in `app.md`, dependencies or `functions/` changes in `stack.md`, Firestore collections/rules in `data-model.md`, CI steps and config in `ci-cd.md`, closed items in `known-gaps.md`. A stale overview is a bug — treat it as part of the change, not an afterthought. Update `PROJECT_OVERVIEW.md` itself only when the _map_ changes (a document added, removed or repurposed).
 - If the change is to tooling/CI/hosting rather than app functionality, update `INFRASTRUCTURE.md` instead (or in addition).
 - **If the change closes an audit finding, update `AUDIT_REMEDIATION.md`** — mark the finding in §5 with its PR link and refresh the counts in §1, in the same PR. It's the only thing tracking that series across sessions; a stale plan is worse than none.
 
@@ -72,7 +72,7 @@ Each guardrail is tagged with the mechanism that catches a violation:
 - **[rules tests]** — `npm run rules:test` fails (`firestore-tests/`). **Live now**, reported by the `rules-tests` CI check.
 - **[functions tests]** — `npm run functions:test` fails. **Live now**, reported by the `functions-tests` CI check.
 
-**Reporting is not the same as gating.** Every suite above runs on each PR, but a workflow cannot add itself to a branch ruleset — a new check reports without blocking until a repo admin adds it under Settings → Rules (`functions-tests` is currently in that state; `lint` and `rules-tests` went through the same lifecycle and are required today). Check which are actually required before treating a green PR as proof; see `PROJECT_OVERVIEW.md` §4.2a for the current list.
+**Reporting is not the same as gating.** Every suite above runs on each PR, but a workflow cannot add itself to a branch ruleset — a new check reports without blocking until a repo admin adds it under Settings → Rules (`functions-tests` is currently in that state; `lint` and `rules-tests` went through the same lifecycle and are required today). Check which are actually required before treating a green PR as proof; see `docs/ci-cd.md` §4.2a for the current list.
 
 **A note on what lint turned out not to be able to do.** When these tags were first written, five guardrails were optimistically marked `[lint]`. Wiring ESLint up showed that no rule exists — in `angular-eslint`, `typescript-eslint` or core ESLint — for any of them:
 

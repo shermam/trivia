@@ -37,7 +37,7 @@ jobs:
             functions/package-lock.json
 
       # Root `npm ci` reaches functions/ too: the repo-root postinstall runs
-      # `npm ci --prefix functions` (see PROJECT_OVERVIEW.md §4.5).
+      # `npm ci --prefix functions` (see `docs/ci-cd.md` §4.5).
       - name: Install dependencies
         run: npm ci
 

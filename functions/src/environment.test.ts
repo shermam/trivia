@@ -132,7 +132,7 @@ describe('isEventForThisEnvironment', () => {
   /*
    * The regression this replaced. The check used to derive the expected mode
    * from the project ID — a real project must mean live — which is false here:
-   * production deliberately runs a test key before launch (PROJECT_OVERVIEW §6).
+   * production deliberately runs a test key before launch (`docs/known-gaps.md` §6).
    * That rule refused every genuine delivery, so a completed checkout would
    * never have granted anyone Pro. The key is the right authority because it
    * *defines* which Stripe the deployment talks to.
