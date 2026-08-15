@@ -235,140 +235,239 @@
       }
     </div>
 
-    @if (reportableQuestions().length > 0) {
+    <!-- Rendered always and outside every conditional section: a report can
+         be sent from the dialog when no question is flagged, so a live region
+         living inside the flagged-questions card would not exist at the moment
+         it has something to say (finding G3). -->
+    <p role="status" data-cy="report-status" class="sr-only">{{ reportStatus() }}</p>
+
+    <!-- One row, used by both the flagged list and the dialog. Keeping a
+         single copy is what stops the two drifting into different
+         accessibility contracts. -->
+    <ng-template #questionRow let-question>
+      <div class="flex items-start justify-between gap-3">
+        <p class="text-sm text-slate-700 dark:text-slate-300 min-w-0">
+          {{ question.question }}
+        </p>
+        @if (reportedQuestionIds().has(question.id)) {
+          <!-- tabindex="-1": this badge is the focus target after a
+                     successful submit removes both the panel and the
+                     trigger — without it focus would drop to <body>. -->
+          <span
+            #reportBadge
+            [id]="'report-badge-' + question.id"
+            [attr.data-cy]="'reported-badge-' + question.id"
+            tabindex="-1"
+            class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-1"
+          >
+            Reported
+          </span>
+        } @else {
+          <button
+            type="button"
+            [attr.data-cy]="'report-question-' + question.id"
+            [attr.aria-expanded]="openReportQuestionId() === question.id"
+            [attr.aria-controls]="'report-panel-' + question.id"
+            (click)="toggleReportForm(question)"
+            class="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold px-2.5 py-1.5 transition-colors"
+          >
+            Report
+          </button>
+        }
+      </div>
+      @if (openReportQuestionId() === question.id) {
+        <div
+          #reportPanel
+          [id]="'report-panel-' + question.id"
+          role="group"
+          aria-label="Report this question"
+          tabindex="-1"
+          (keydown.escape)="closeReportForm()"
+          class="mt-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-4 py-4 focus:outline-none"
+        >
+          <p
+            [id]="'report-reason-label-' + question.id"
+            class="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-2"
+          >
+            What's wrong with this question?
+          </p>
+          <div
+            role="radiogroup"
+            [attr.aria-labelledby]="'report-reason-label-' + question.id"
+            class="flex flex-col gap-1.5 mb-3"
+          >
+            @for (option of reportReasonOptions; track option.value) {
+              <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                <input
+                  type="radio"
+                  name="report-reason"
+                  [value]="option.value"
+                  [(ngModel)]="reportReason"
+                  class="h-4 w-4 accent-emerald-600"
+                />
+                {{ option.label }}
+              </label>
+            }
+          </div>
+          <!-- Content about the question, not data about the user, so
+                     no autocomplete token (WCAG 1.3.5 tokens describe the
+                     user — see CLAUDE.md §4.5). -->
+          <textarea
+            name="report-detail"
+            [(ngModel)]="reportDetail"
+            maxlength="500"
+            rows="2"
+            placeholder="Anything else we should know? (optional)"
+            aria-label="More detail about the problem (optional)"
+            class="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors mb-3"
+          ></textarea>
+          @if (reportError()) {
+            <p
+              class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 mb-3"
+              [attr.data-cy]="'report-error-' + question.id"
+            >
+              <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+              {{ reportError() }}
+            </p>
+          }
+          <div class="flex justify-end gap-2">
+            <button
+              type="button"
+              (click)="closeReportForm()"
+              class="rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-semibold px-4 py-2 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              [attr.data-cy]="'send-report-' + question.id"
+              [disabled]="!reportReason || isSubmittingReport()"
+              (click)="submitReport(question)"
+              class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm font-bold px-4 py-2 transition-colors"
+            >
+              @if (isSubmittingReport()) {
+                Sending&hellip;
+              } @else {
+                Send report
+              }
+            </button>
+          </div>
+        </div>
+      }
+    </ng-template>
+
+    <!-- Hidden while the dialog is open, and not merely for tidiness: the
+         dialog lists *every* community question, so a flagged one would
+         otherwise be rendered twice at once through the same `questionRow`
+         template. That duplicates `report-panel-{id}` and `report-badge-{id}`
+         in the document (making `aria-controls` ambiguous), and — worse —
+         `viewChild('reportPanel')` returns the *first* match in view order,
+         which is this card, declared above the dialog. Opening a report form
+         from inside the modal would then send focus to the copy behind the
+         backdrop, outside the trap. One row per question, always. -->
+    @if (flaggedQuestions().length > 0 && !isReportDialogOpen()) {
       <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
         <div
           class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
         >
-          <app-icon name="flag" [size]="18" class="text-slate-500 dark:text-slate-400" />
+          <app-icon name="flag-filled" [size]="18" class="text-red-600 dark:text-red-400" />
           <h2 class="text-base font-bold text-slate-900 dark:text-slate-50">
-            Community questions from this game
+            Questions you flagged
           </h2>
         </div>
         <p class="px-6 pt-3 text-sm text-slate-500 dark:text-slate-400">
-          Spotted a problem with one of them? Report it and we'll take a look.
+          Tell us what was wrong and we'll take a look.
         </p>
-        <!-- Rendered always; only its text changes. A live region inserted
-             into the DOM already carrying its message is routinely missed by
-             screen readers (finding G3). -->
-        <p role="status" class="sr-only">{{ reportStatus() }}</p>
         <ul class="py-2">
-          @for (question of reportableQuestions(); track question.id) {
+          @for (question of flaggedQuestions(); track question.id) {
             <li class="px-6 py-2.5 border-b border-slate-900/5 dark:border-white/5 last:border-b-0">
-              <div class="flex items-start justify-between gap-3">
-                <p class="text-sm text-slate-700 dark:text-slate-300 min-w-0">
-                  {{ question.question }}
-                </p>
-                @if (reportedQuestionIds().has(question.id)) {
-                  <!-- tabindex="-1": this badge is the focus target after a
-                       successful submit removes both the panel and the
-                       trigger — without it focus would drop to <body>. -->
-                  <span
-                    #reportBadge
-                    [id]="'report-badge-' + question.id"
-                    [attr.data-cy]="'reported-badge-' + question.id"
-                    tabindex="-1"
-                    class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-1"
-                  >
-                    Reported
-                  </span>
-                } @else {
-                  <button
-                    type="button"
-                    [attr.data-cy]="'report-question-' + question.id"
-                    [attr.aria-expanded]="openReportQuestionId() === question.id"
-                    [attr.aria-controls]="'report-panel-' + question.id"
-                    (click)="toggleReportForm(question)"
-                    class="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold px-2.5 py-1.5 transition-colors"
-                  >
-                    Report
-                  </button>
-                }
-              </div>
-              @if (openReportQuestionId() === question.id) {
-                <div
-                  #reportPanel
-                  [id]="'report-panel-' + question.id"
-                  role="group"
-                  aria-label="Report this question"
-                  tabindex="-1"
-                  (keydown.escape)="closeReportForm()"
-                  class="mt-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-4 py-4 focus:outline-none"
-                >
-                  <p
-                    [id]="'report-reason-label-' + question.id"
-                    class="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-2"
-                  >
-                    What's wrong with this question?
-                  </p>
-                  <div
-                    role="radiogroup"
-                    [attr.aria-labelledby]="'report-reason-label-' + question.id"
-                    class="flex flex-col gap-1.5 mb-3"
-                  >
-                    @for (option of reportReasonOptions; track option.value) {
-                      <label
-                        class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"
-                      >
-                        <input
-                          type="radio"
-                          name="report-reason"
-                          [value]="option.value"
-                          [(ngModel)]="reportReason"
-                          class="h-4 w-4 accent-emerald-600"
-                        />
-                        {{ option.label }}
-                      </label>
-                    }
-                  </div>
-                  <!-- Content about the question, not data about the user, so
-                       no autocomplete token (WCAG 1.3.5 tokens describe the
-                       user — see CLAUDE.md §4.5). -->
-                  <textarea
-                    name="report-detail"
-                    [(ngModel)]="reportDetail"
-                    maxlength="500"
-                    rows="2"
-                    placeholder="Anything else we should know? (optional)"
-                    aria-label="More detail about the problem (optional)"
-                    class="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors mb-3"
-                  ></textarea>
-                  @if (reportError()) {
-                    <p
-                      class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 mb-3"
-                      [attr.data-cy]="'report-error-' + question.id"
-                    >
-                      <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-                      {{ reportError() }}
-                    </p>
-                  }
-                  <div class="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      (click)="closeReportForm()"
-                      class="rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-semibold px-4 py-2 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      [attr.data-cy]="'send-report-' + question.id"
-                      [disabled]="!reportReason || isSubmittingReport()"
-                      (click)="submitReport(question)"
-                      class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm font-bold px-4 py-2 transition-colors"
-                    >
-                      @if (isSubmittingReport()) {
-                        Sending&hellip;
-                      } @else {
-                        Send report
-                      }
-                    </button>
-                  </div>
-                </div>
-              }
+              <ng-container
+                [ngTemplateOutlet]="questionRow"
+                [ngTemplateOutletContext]="{ $implicit: question }"
+              />
             </li>
           }
         </ul>
+      </div>
+    }
+
+    @if (reportableQuestions().length > 0) {
+      <button
+        #reportDialogTrigger
+        type="button"
+        data-cy="open-report-dialog"
+        aria-haspopup="dialog"
+        [attr.aria-expanded]="isReportDialogOpen()"
+        (click)="openReportDialog()"
+        class="w-full rounded-2xl border border-slate-900/10 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 px-5 py-3.5 text-sm font-semibold text-slate-600 dark:text-slate-300 transition-colors"
+      >
+        Found something wrong in this game? Report it here.
+      </button>
+    }
+
+    @if (isReportDialogOpen()) {
+      <!-- `aria-hidden` marks the backdrop itself as decoration — it is a
+           tint with a click handler, and announcing it would be noise. It is
+           deliberately not a claim about the page behind, which stays in the
+           accessibility tree: `aria-modal="true"` on the dialog is what asks
+           assistive tech to ignore that, and the Tab trap is what enforces the
+           same for everyone else. -->
+      <div
+        class="fixed inset-0 z-40 bg-slate-900/50"
+        aria-hidden="true"
+        (click)="closeReportDialog()"
+      ></div>
+
+      <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+        <div
+          #reportDialog
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="report-dialog-title"
+          tabindex="-1"
+          data-cy="report-dialog"
+          (keydown.escape)="closeReportDialog()"
+          (keydown)="keepFocusInDialog($event)"
+          class="w-full max-w-xl rounded-3xl bg-white dark:bg-slate-900 shadow-card-lg focus:outline-none"
+        >
+          <div
+            class="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
+          >
+            <h2
+              id="report-dialog-title"
+              class="text-base font-bold text-slate-900 dark:text-slate-50"
+            >
+              Report a question from this game
+            </h2>
+            <button
+              type="button"
+              data-cy="close-report-dialog"
+              aria-label="Close"
+              (click)="closeReportDialog()"
+              class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
+            >
+              <app-icon name="x" [size]="18" />
+            </button>
+          </div>
+
+          <p class="px-6 pt-3 text-sm text-slate-500 dark:text-slate-400">
+            Only community-contributed questions can be reported — questions from Open Trivia DB
+            aren't ours to change.
+          </p>
+
+          <ul class="py-2 max-h-[60vh] overflow-y-auto">
+            @for (question of reportableQuestions(); track question.id) {
+              <li
+                class="px-6 py-2.5 border-b border-slate-900/5 dark:border-white/5 last:border-b-0"
+              >
+                <ng-container
+                  [ngTemplateOutlet]="questionRow"
+                  [ngTemplateOutletContext]="{ $implicit: question }"
+                />
+              </li>
+            }
+          </ul>
+        </div>
       </div>
     }
 

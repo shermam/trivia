@@ -6,7 +6,7 @@ import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { QuizLoopComponent } from './quiz-loop.component';
 
-function makeQuestion(): TriviaQuestion {
+function makeQuestion(overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
   const all_answers: Answer[] = [
     { id: 'q1:correct', text: 'Paris', isCorrect: true },
     { id: 'q1:incorrect-0', text: 'London', isCorrect: false },
@@ -21,27 +21,31 @@ function makeQuestion(): TriviaQuestion {
     incorrect_answers: ['London'],
     all_answers,
     source: 'open_trivia',
+    ...overrides,
   };
 }
 
-function setup(options: { playingOffline?: boolean } = {}) {
+function setup(options: { playingOffline?: boolean; question?: TriviaQuestion } = {}) {
   const registerAnswer = vi.fn();
   const advanceQuestion = vi.fn();
+  const gameController = {
+    currentQuestion: signal<TriviaQuestion | null>(options.question ?? makeQuestion()),
+    currentIndex: signal(0),
+    totalQuestions: signal(1),
+    score: signal(0),
+    progressPercentage: signal(100),
+    isLastQuestion: signal(false),
+    flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+    toggleQuestionFlag: vi.fn(),
+    registerAnswer,
+    advanceQuestion,
+  };
 
   TestBed.configureTestingModule({
     providers: [
       {
         provide: GameControllerService,
-        useValue: {
-          currentQuestion: signal<TriviaQuestion | null>(makeQuestion()),
-          currentIndex: signal(0),
-          totalQuestions: signal(1),
-          score: signal(0),
-          progressPercentage: signal(100),
-          isLastQuestion: signal(false),
-          registerAnswer,
-          advanceQuestion,
-        },
+        useValue: gameController,
       },
       {
         provide: TriviaService,
@@ -53,7 +57,7 @@ function setup(options: { playingOffline?: boolean } = {}) {
 
   const fixture = TestBed.createComponent(QuizLoopComponent);
   fixture.detectChanges();
-  return { fixture, registerAnswer, advanceQuestion };
+  return { fixture, registerAnswer, advanceQuestion, gameController };
 }
 
 // The countdown reads the wall clock, so tests fake only the timer functions and
@@ -176,7 +180,10 @@ describe('QuizLoopComponent — wall-clock countdown (B10)', () => {
  */
 describe('QuizLoopComponent — result announcement (G3)', () => {
   const liveRegion = (fixture: ReturnType<typeof setup>['fixture']) =>
-    (fixture.nativeElement as HTMLElement).querySelector('[role="status"]');
+    // Addressed by data-cy, not by being the only [role=status] on the
+    // screen: flagging added a second one, and a positional selector would
+    // silently start asserting against the wrong region.
+    (fixture.nativeElement as HTMLElement).querySelector('[data-cy="result-status"]');
 
   it('keeps the live region in the DOM before there is anything to announce', () => {
     const { fixture } = setup();
@@ -243,3 +250,95 @@ function clickAnswer(fixture: ReturnType<typeof setup>['fixture'], text: string)
   target.click();
   fixture.detectChanges();
 }
+
+/**
+ * In-quiz flagging. The point of doing it here rather than only on
+ * `/game-over` is that this is where the player is actually looking at the
+ * question — so the interaction has to be cheap enough to survive a running
+ * countdown: one click, no dialog, reversible.
+ */
+describe('QuizLoopComponent — flagging a question', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    TestBed.resetTestingModule();
+  });
+
+  const flagButton = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      '[data-cy="flag-question"]',
+    );
+
+  it('offers the flag on a community question', () => {
+    const { fixture } = setup({ question: makeQuestion({ source: 'custom' }) });
+    fixture.detectChanges();
+
+    expect(flagButton(fixture)).not.toBeNull();
+    expect(flagButton(fixture)?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  // Open Trivia DB content is not ours to moderate and its ids are minted per
+  // fetch, so a report about one could never be acted on.
+  it('offers no flag on an Open Trivia DB question', () => {
+    const { fixture } = setup({ question: makeQuestion({ source: 'open_trivia' }) });
+    fixture.detectChanges();
+
+    expect(flagButton(fixture)).toBeNull();
+  });
+
+  it('toggles the flag through the game controller, both ways', () => {
+    const { fixture, gameController } = setup({ question: makeQuestion({ source: 'custom' }) });
+    fixture.detectChanges();
+
+    flagButton(fixture)?.click();
+    expect(gameController.toggleQuestionFlag).toHaveBeenCalledWith('q1');
+  });
+
+  it('shows the flag as pressed, filled and explained once set', () => {
+    const question = makeQuestion({ source: 'custom' });
+    const { fixture, gameController } = setup({ question });
+    gameController.flaggedQuestionIds.set(new Set([question.id]));
+    fixture.detectChanges();
+
+    const button = flagButton(fixture);
+    // Not colour alone (WCAG 1.4.1): the pressed state, the accessible name
+    // and the icon all change.
+    expect(button?.getAttribute('aria-pressed')).toBe('true');
+    expect(button?.getAttribute('aria-label')).toMatch(/Flagged/i);
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-cy="flag-notice"]'),
+    ).not.toBeNull();
+  });
+
+  it('announces the flag, and says the details come later', () => {
+    const question = makeQuestion({ source: 'custom' });
+    const { fixture, gameController } = setup({ question });
+    gameController.flaggedQuestionIds.set(new Set([question.id]));
+    fixture.detectChanges();
+
+    const status = (fixture.nativeElement as HTMLElement).querySelector('[data-cy="flag-status"]');
+    expect(status?.textContent).toMatch(/flagged/i);
+    expect(status?.textContent).toMatch(/end of the game/i);
+  });
+
+  // Identical announcement text set twice is a signal no-op, and a live
+  // region only announces on mutation — so the position has to be in it, or
+  // flagging a second question says nothing at all (the H4 review's finding,
+  // in the same shape).
+  it('announces a different question distinctly', () => {
+    const question = makeQuestion({ source: 'custom' });
+    const { fixture, gameController } = setup({ question });
+    gameController.flaggedQuestionIds.set(new Set([question.id]));
+    fixture.detectChanges();
+    const first = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-cy="flag-status"]',
+    )?.textContent;
+
+    gameController.currentIndex.set(1);
+    fixture.detectChanges();
+    const second = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-cy="flag-status"]',
+    )?.textContent;
+
+    expect(first).not.toEqual(second);
+  });
+});

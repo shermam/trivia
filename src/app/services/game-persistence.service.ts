@@ -22,6 +22,19 @@ export interface PersistedGame {
   score: number;
   /** True once the last question was answered — the player is on `/game-over`, not mid-game. */
   isComplete: boolean;
+  /**
+   * Ids of questions the player flagged while playing, to be reported on the
+   * game-over screen.
+   *
+   * **Deliberately additive rather than a `SCHEMA_VERSION` bump.** A version
+   * mismatch discards the save, and this field is optional in both directions:
+   * a save written before it restores with no flags, and a save written with
+   * it is ignored harmlessly by an older build. Bumping would throw away every
+   * in-flight game at deploy time to gain nothing — the flags are the *least*
+   * important thing in the snapshot, and losing the game to protect them would
+   * be exactly backwards.
+   */
+  flaggedQuestionIds: string[];
 }
 
 /** As written to the object store: the same record plus the keyPath field. */
@@ -91,7 +104,8 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     return null;
   }
 
-  const { savedAt, config, questions, currentIndex, score, isComplete } = parsed;
+  const { savedAt, config, questions, currentIndex, score, isComplete, flaggedQuestionIds } =
+    parsed;
 
   if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) {
     return null;
@@ -133,6 +147,17 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     currentIndex,
     score,
     isComplete: isComplete === true,
+    // Anything unrecognised is dropped rather than rejecting the whole save:
+    // a flag is a hint about a question, and losing one is not worth losing
+    // the game it belongs to. Ids that no longer match a question in this
+    // save are filtered out, so a truncated or edited record can't produce a
+    // flag pointing at nothing.
+    flaggedQuestionIds: Array.isArray(flaggedQuestionIds)
+      ? flaggedQuestionIds.filter(
+          (id): id is string =>
+            typeof id === 'string' && questions.some((question) => question.id === id),
+        )
+      : [],
   };
 }
 

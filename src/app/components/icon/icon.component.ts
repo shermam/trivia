@@ -20,7 +20,8 @@ export type IconName =
   | 'sun'
   | 'moon'
   | 'wifi-off'
-  | 'flag';
+  | 'flag'
+  | 'flag-filled';
 
 /**
  * Inline brand/UI icon set, sourced from lucide-static (ISC license) — kept
@@ -60,6 +61,13 @@ export type IconName =
         }
         @case ('flag') {
           <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+          <line x1="4" x2="4" y1="22" y2="15" />
+        }
+        <!-- The same mark, filled — a flagged question has to differ by more
+             than colour (WCAG 1.4.1). This is a presentation attribute, not
+             an inline style, so the CSP (PROJECT_OVERVIEW 4.1) permits it. -->
+        @case ('flag-filled') {
+          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" fill="currentColor" />
           <line x1="4" x2="4" y1="22" y2="15" />
         }
         @case ('plus-circle') {

@@ -104,6 +104,45 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
       (this.timeLeft() / QUESTION_DURATION_SECONDS) * TIMER_RING_CIRCUMFERENCE,
   );
 
+  /**
+   * Whether the question on screen is flagged, and what to announce about it.
+   *
+   * Flagging is deliberately the cheapest interaction this screen has — one
+   * click, no dialog, nothing to confirm — because a countdown is running and
+   * anything heavier would make reporting compete with answering. The detail
+   * (why it's wrong) is asked for on `/game-over`, where there is no clock.
+   */
+  protected isFlagged(questionId: string): boolean {
+    return this.gameController.flaggedQuestionIds().has(questionId);
+  }
+
+  protected readonly flagNotice = computed(() => {
+    const question = this.gameController.currentQuestion();
+    return question !== null && this.gameController.flaggedQuestionIds().has(question.id);
+  });
+
+  /**
+   * Announced text for the live region. Includes the question's position so
+   * flagging a second question announces something *different* from the
+   * first: identical text set twice is a no-op for a signal, and a live
+   * region only announces on mutation — the bug the H4 review found on the
+   * game-over screen, in the same shape.
+   */
+  protected readonly flagAnnouncement = computed(() => {
+    const question = this.gameController.currentQuestion();
+    if (!question) {
+      return '';
+    }
+    const position = this.gameController.currentIndex() + 1;
+    return this.gameController.flaggedQuestionIds().has(question.id)
+      ? `Question ${position} flagged. You'll be asked for details at the end of the game.`
+      : '';
+  });
+
+  protected toggleFlag(questionId: string): void {
+    this.gameController.toggleQuestionFlag(questionId);
+  }
+
   private timerHandle: ReturnType<typeof setInterval> | null = null;
   private advanceTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   /** Wall-clock instant (ms since epoch) the current question's countdown expires. */
