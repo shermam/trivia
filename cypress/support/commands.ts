@@ -15,7 +15,11 @@ declare global {
       resetBackend(): Chainable<null>;
       /** Intercepts the Open Trivia DB endpoints with deterministic fixtures. */
       stubOpenTrivia(): Chainable<null>;
-      /** Visits `/`, waits for the stubbed categories to load, selects `amount`, and starts the game. */
+      /**
+       * Visits `/`, waits for the stubbed categories to load, selects
+       * `amount`, starts the game, and waits until `/play` is actually the
+       * active route.
+       */
       startGame(amount?: 5 | 10 | 15 | 20 | 25): Chainable<null>;
       /**
        * Starts another game without revisiting the page — for replaying via
@@ -78,6 +82,7 @@ Cypress.Commands.add('startGame', (amount = 5) => {
   cy.get('#amount').select(String(amount));
   cy.contains('button', 'Start Game').click();
   cy.wait('@questions');
+  waitForPlayRoute();
 });
 
 Cypress.Commands.add('startNewGame', (amount = 5) => {
@@ -85,7 +90,31 @@ Cypress.Commands.add('startNewGame', (amount = 5) => {
   cy.get('#amount').select(String(amount));
   cy.contains('button', 'Start Game').click();
   cy.wait('@questions');
+  waitForPlayRoute();
 });
+
+/**
+ * Waits until the quiz loop is genuinely on screen.
+ *
+ * Both commands above used to end at `cy.wait('@questions')`, which is not the
+ * same thing and is a quiet trap for the caller. That wait resolves the moment
+ * Cypress forwards the intercepted response — and the questions response is
+ * what `GameControllerService.startGame()` awaits *before* it navigates, so at
+ * that instant the app is still on the setup screen, with the lazy `/play`
+ * chunk not yet fetched. Any caller whose next command was a negative
+ * assertion (`should('not.exist')`) therefore passed against `/`, testing
+ * nothing — which is exactly what happened to the "no flag on an Open Trivia
+ * question" test. Callers that go straight to a positive, retrying query were
+ * always fine; this makes both cases safe.
+ *
+ * The heading assertion is the load-bearing half: the URL can commit a tick
+ * before the outlet paints, but the question text cannot appear until the
+ * component has rendered.
+ */
+function waitForPlayRoute(): void {
+  cy.location('pathname').should('eq', '/play');
+  cy.get('[data-cy="question-text"]').should('be.visible');
+}
 
 Cypress.Commands.add('answerQuestion', (answerText: string) => {
   cy.contains('button', answerText).click();

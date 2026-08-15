@@ -56,19 +56,34 @@ describe('reporting a community question', () => {
    * question is identified from the DOM rather than by position — flagging by
    * index would flag whichever question happened to come up, and pass anyway.
    *
-   * The `should` is what makes reading the heading safe. The quiz holds the
-   * answered question on screen for two seconds before advancing, so a bare
-   * `.then()` can resolve against the question just answered and then sit
-   * waiting for its now-disabled options. Asserting the heading has moved on
-   * is retriable; reading it is not.
+   * Two things here are load-bearing:
+   *
+   * - The heading is read through `[data-cy=question-text]`, not `h2`. That is
+   *   what makes an overrun legible: if a question auto-answers on timeout,
+   *   the loop runs one iteration more than there are questions left, and this
+   *   selector simply does not exist on `/game-over` — so it fails saying so.
+   *   `h2` matches three elements there (the leaderboard, the flagged card,
+   *   the dialog) and jQuery's `.text()` silently *concatenates* a
+   *   multi-element match, which produced "Top 10 Leaderboard is not one of
+   *   the seeded ones" and sent the reader to the seeding task.
+   * - The `should` retries until the heading has moved on from the question
+   *   just answered. The quiz holds an answered question on screen for two
+   *   seconds before advancing, so a bare `.then()` can resolve against it and
+   *   then sit waiting for options that are already disabled. Asserting is
+   *   retriable; reading is not.
    */
   function playRemainingQuestions(flagIds: string[] = []): void {
     const flagged = new Set(flagIds);
     const answered = new Set<string>();
 
     customQuestions.forEach(() => {
-      cy.get('h2')
-        .should((heading) => expect(answered.has(heading.text().trim())).to.equal(false))
+      cy.get('[data-cy="question-text"]')
+        .should((heading) =>
+          expect(
+            answered.has(heading.text().trim()),
+            `a question other than the ${answered.size} already answered is on screen`,
+          ).to.equal(false),
+        )
         .invoke('text')
         .then((text) => {
           const served = text.trim();
@@ -85,11 +100,42 @@ describe('reporting a community question', () => {
     });
 
     cy.location('pathname').should('eq', '/game-over');
+    // Anchored on something that only exists once the component has rendered.
+    // Every `should('not.exist')` after this would otherwise be free to pass
+    // against the empty `<app-game-over>` that exists between the router
+    // committing the URL and the next change-detection tick — this app is
+    // zoneless, so that tick is a scheduled callback, not a synchronous one.
+    cy.contains('Game Over!');
   }
 
   function finishCustomGame(flagIds: string[] = []): void {
     startCustomGame();
     playRemainingQuestions(flagIds);
+  }
+
+  /**
+   * Dispatches a Tab (or Shift+Tab) keydown from whatever currently has focus,
+   * and asserts the dialog's handler cancelled it.
+   *
+   * Fired from the focused element rather than from the dialog, because the
+   * handler branches on `document.activeElement` — and asserting
+   * `defaultPrevented` is the half that a focus assertion cannot cover, since
+   * a synthetic key event performs no native focus move of its own.
+   */
+  function pressTabInDialog({ shift }: { shift: boolean }): void {
+    cy.focused().then(($el) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey: shift,
+        bubbles: true,
+        cancelable: true,
+      });
+      $el[0].dispatchEvent(event);
+      expect(
+        event.defaultPrevented,
+        `${shift ? 'Shift+' : ''}Tab was cancelled by the trap`,
+      ).to.equal(true);
+    });
   }
 
   it('flags a question mid-game and files the report the emulator holds', () => {
@@ -201,28 +247,37 @@ describe('reporting a community question', () => {
     // `aria-modal="true"` is a promise; the trap is what keeps it true for
     // sighted keyboard users, who are not covered by that attribute at all.
     //
-    // Driven with synthetic keydowns rather than `cy.press`, which has no
-    // modifier option and so cannot express Shift+Tab — the direction that
-    // matters most here, since it is the one that escapes backwards past the
-    // dialog's first control. The handler is what implements the wrap either
-    // way: if it did nothing, focus would simply stay put and these fail.
+    // Driven with hand-built keydowns rather than `cy.press`, for two reasons.
+    // `cy.press` takes no modifier option, so it cannot express Shift+Tab —
+    // the direction that matters most, since it is the one that escapes
+    // backwards past the dialog's first control. And dispatching the event
+    // ourselves is the only way to read `defaultPrevented` afterwards: a
+    // synthetic keydown performs no native focus move, so a handler that
+    // called `.focus()` but dropped `preventDefault()` would land focus in
+    // exactly the right place here while a *real* Tab escaped the dialog on
+    // top of it. Asserting where focus went is not enough on its own.
     //
-    // The last control is read from the DOM, not assumed to be
+    // The last control is read from the DOM rather than assumed to be
     // `customQuestions[1]`: the bank is served in an order this test does not
-    // control, so the dialog lists the two questions in either order.
+    // control. It is the last focusable only because no report form is open
+    // and nothing is reported yet — opening a form would append its radios,
+    // textarea and buttons after it.
     cy.get('[data-cy="report-dialog"] [data-cy^="report-question-"]')
       .last()
       .invoke('attr', 'data-cy')
       .then((lastTrigger) => {
-        cy.get('[data-cy="report-dialog"]').trigger('keydown', {
-          key: 'Tab',
-          shiftKey: true,
-          cancelable: true,
-        });
+        pressTabInDialog({ shift: true });
         cy.focused().should('have.attr', 'data-cy', lastTrigger);
 
-        cy.focused().trigger('keydown', { key: 'Tab', cancelable: true, bubbles: true });
+        pressTabInDialog({ shift: false });
         cy.focused().should('have.attr', 'data-cy', 'close-report-dialog');
+
+        // ...and Shift+Tab again, this time from the dialog's *first* control
+        // rather than from the dialog element. That is the branch real use
+        // hits on every keystroke after the first, and it is a different arm
+        // of the same condition.
+        pressTabInDialog({ shift: true });
+        cy.focused().should('have.attr', 'data-cy', lastTrigger);
       });
 
     // From the control that has focus, not the dialog element — Escape has to
@@ -265,7 +320,14 @@ describe('reporting a community question', () => {
   });
 
   it('offers no reporting at all for a game without community questions', () => {
+    // `cy.startGame` now waits for the quiz loop to be *rendered*, not merely
+    // for the questions response. That matters here more than anywhere else in
+    // the suite: this test's assertions are all negative, and before that
+    // change `should('not.exist')` passed on its first poll against the setup
+    // screen — staying green even with the `source === 'custom'` guard deleted
+    // and a flag rendered on every question.
     cy.startGame(5);
+
     // An Open Trivia DB question is not ours to moderate, so it gets no flag
     // either — the affordance is absent from the quiz loop, not just disabled.
     cy.get('[data-cy="flag-question"]').should('not.exist');
