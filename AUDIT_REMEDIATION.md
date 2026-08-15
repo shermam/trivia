@@ -212,15 +212,15 @@ Legend: ✅ merged · ☑️ closed by decision · 🔵 in review · ⬜ not sta
 
 None of these are detectable by tooling. Lighthouse scores 1.0 and ESLint's `templateAccessibility` set reports zero errors, while every item below is still present — confirmed empirically in #38.
 
-| ID     | Finding                                                                                         | Status                                                                                                                 |
-| ------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | ✅ [#79](https://github.com/shermam/trivia/pull/79)                                                                    |
-| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | ✅ [#79](https://github.com/shermam/trivia/pull/79)                                                                    |
-| **G3** | Quiz result banner has no `aria-live`, so the outcome of an answer is announced to nobody       | ✅ [#81](https://github.com/shermam/trivia/pull/81)                                                                    |
-| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | ✅ [#80](https://github.com/shermam/trivia/pull/80)                                                                    |
-| **G5** | No skip link, no route-change announcement                                                      | ✅ [#82](https://github.com/shermam/trivia/pull/82)                                                                    |
-| **G6** | Auth form `autocomplete` attributes need confirming                                             | ✅ [#83](https://github.com/shermam/trivia/pull/83) — _email/password were already right; the two name fields weren't_ |
-| **G7** | **The 15s question limit cannot be adjusted, extended or turned off** (WCAG 2.2.1)              | 🔵 G7PRA — _boards + rules + migration; the client switch is a second PR, see §6_                                      |
+| ID     | Finding                                                                                         | Status                                                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **G1** | Auth menu trigger has no `aria-expanded` / `aria-haspopup` / `aria-controls`; panel has no role | ✅ [#79](https://github.com/shermam/trivia/pull/79)                                                                            |
+| **G2** | No Escape-to-close, no focus move-in on open, no focus restore on close                         | ✅ [#79](https://github.com/shermam/trivia/pull/79)                                                                            |
+| **G3** | Quiz result banner has no `aria-live`, so the outcome of an answer is announced to nobody       | ✅ [#81](https://github.com/shermam/trivia/pull/81)                                                                            |
+| **G4** | Segmented radio groups lack `role="radiogroup"` / `aria-labelledby`                             | ✅ [#80](https://github.com/shermam/trivia/pull/80)                                                                            |
+| **G5** | No skip link, no route-change announcement                                                      | ✅ [#82](https://github.com/shermam/trivia/pull/82)                                                                            |
+| **G6** | Auth form `autocomplete` attributes need confirming                                             | ✅ [#83](https://github.com/shermam/trivia/pull/83) — _email/password were already right; the two name fields weren't_         |
+| **G7** | **The 15s question limit cannot be adjusted, extended or turned off** (WCAG 2.2.1)              | 🔵 [#101](https://github.com/shermam/trivia/pull/101) — _boards + rules + migration; the client switch is a second PR, see §6_ |
 
 ### H — Product & compliance
 
