@@ -7,7 +7,7 @@ export interface CustomQuestionSeed {
   correct_answer: string;
   incorrect_answers: string[];
   /**
-   * Attribution (see PROJECT_OVERVIEW.md §3). Optional here even though
+   * Attribution (see `docs/data-model.md` §3). Optional here even though
    * `firestore.rules` requires it on a client create, because these seeds go
    * in via the Admin SDK and bypass rules — which lets a spec deliberately
    * seed an unattributed question to stand in for one predating attribution.

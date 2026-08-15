@@ -267,7 +267,7 @@ Rough order, each step independently verifiable before moving to the next:
 12. Only once all of the above are wired and green should any payment/serverless-backend integration (§5) be added — it depends on Cloud Functions + secrets + webhooks all already working.
 13. `npx ng add @angular/pwa` (§2a) for installability — check the version-pinning caveats there first if the Angular major is recent. Rasterize real icons before shipping; don't leave the schematic's placeholders in.
 
-Write (or update) this same file, and the app-functionality-focused `PROJECT_OVERVIEW.md` counterpart, as the new project's infra takes shape — don't backfill either from memory after the fact.
+Write (or update) this same file, and the app-functionality-focused `PROJECT_OVERVIEW.md` counterpart (an index over `docs/`), as the new project's infra takes shape — don't backfill either from memory after the fact.
 
 ---
 

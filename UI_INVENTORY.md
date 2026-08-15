@@ -6,7 +6,7 @@ Source of truth: `src/app/**` (Angular 22, standalone components, Tailwind CSS 4
 
 **Brand name shown in the UI: "Trivimind"** (top bar logo, game-setup title).
 
-The visual design system (colors, typography, shadows, radii) follows `BRAND_DESIGN_SYSTEM.md`. Icons are lucide-derived inline SVG via a shared `IconComponent` (`app-icon`) — see `PROJECT_OVERVIEW.md` §2.1.
+The visual design system (colors, typography, shadows, radii) follows `BRAND_DESIGN_SYSTEM.md`. Icons are lucide-derived inline SVG via a shared `IconComponent` (`app-icon`) — see `docs/stack.md` §2.1.
 
 ---
 
@@ -292,7 +292,7 @@ A "← Back to game" link (→ `/`) sits above the header.
 - Gradient top accent bar; corner badge "PRO" (indigo pill, top-right)
 - Icon badge (indigo→violet gradient, sparkles glyph)
 - Heading: "Pro", subtitle "Contribute questions and shape the game."
-- Price: "$0.99" + "/month" (static display text — the actual Stripe price _ID_ used at checkout is resolved dynamically, never hardcoded; see `PROJECT_OVERVIEW.md` §1.6)
+- Price: "$0.99" + "/month" (static display text — the actual Stripe price _ID_ used at checkout is resolved dynamically, never hardcoded; see `docs/app.md` §1.6)
 - Feature list (green check-circle icons, last item styled as "coming soon" with a muted icon instead of a check):
   - "Everything in Starter"
   - "Create and add custom questions to the global question bank"
