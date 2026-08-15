@@ -65,6 +65,7 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     currentIndex: 1,
     score: 1,
     isComplete: false,
+    flaggedQuestionIds: [],
     ...overrides,
   };
 }
@@ -122,6 +123,41 @@ describe('GamePersistenceService (B8)', () => {
 
   it('returns null when nothing is stored', async () => {
     expect(await service.load()).toBeNull();
+  });
+
+  // The flag is a promise — "you'll be asked for details at the end of the
+  // game" — so a reload that dropped it would break that promise with nothing
+  // on screen to say so. It rides the same record as the score.
+  it('round-trips which questions were flagged for reporting', async () => {
+    await service.save(makeGame({ flaggedQuestionIds: ['q1'] }));
+
+    expect((await service.load())?.flaggedQuestionIds).toEqual(['q1']);
+  });
+
+  // `flaggedQuestionIds` was added *without* bumping SCHEMA_VERSION, on the
+  // grounds that the addition is purely additive — so a record written by the
+  // previous build has to keep restoring, or that reasoning was wrong and
+  // every in-progress game is discarded on deploy instead.
+  it('restores a record written before the field existed', async () => {
+    await putRaw(validRecord()); // validRecord() deliberately omits the field
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.flaggedQuestionIds).toEqual([]);
+  });
+
+  // Dropped, not fatal: a flag is a hint about a question, and losing one is
+  // not worth losing the game it belongs to.
+  it.each([
+    ['ids with no matching question', ['q0', 'nope'], ['q0']],
+    ['non-string entries', ['q0', 42, null], ['q0']],
+    ['a non-array value', 'q0', []],
+  ])('discards %s without rejecting the save', async (_label, stored, expected) => {
+    await putRaw(validRecord({ flaggedQuestionIds: stored }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.flaggedQuestionIds).toEqual(expected);
   });
 
   it('overwrites rather than accumulating — there is only ever one game', async () => {

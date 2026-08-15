@@ -38,6 +38,16 @@ export class GameControllerService {
   /** True once the final question has been answered — i.e. the player belongs on `/game-over`. */
   readonly isComplete = signal(false);
 
+  /**
+   * Questions the player flagged while playing, to be reported once the game
+   * is over. Held here rather than in the quiz component because it has to
+   * outlive that component — the whole point is that the flag survives the
+   * question auto-advancing and turns up again on `/game-over` — and because
+   * it belongs in the persisted snapshot, so a reload mid-game doesn't
+   * silently drop it.
+   */
+  readonly flaggedQuestionIds = signal<ReadonlySet<string>>(new Set());
+
   /** Tail of the serialized persistence chain — see `enqueueWrite`. */
   private writeQueue: Promise<void> = Promise.resolve();
 
@@ -100,6 +110,7 @@ export class GameControllerService {
         currentIndex: this.currentIndex(),
         score: this.score(),
         isComplete: this.isComplete(),
+        flaggedQuestionIds: [...this.flaggedQuestionIds()],
       };
       this.enqueueWrite(() => this.persistence.save(snapshot));
     });
@@ -132,6 +143,22 @@ export class GameControllerService {
     this.currentIndex.set(saved.currentIndex);
     this.score.set(saved.score);
     this.isComplete.set(saved.isComplete);
+    this.flaggedQuestionIds.set(new Set(saved.flaggedQuestionIds));
+  }
+
+  /**
+   * Flags or unflags a question mid-game. A toggle, not a one-way action:
+   * this is a single click next to the answers while a countdown runs, so
+   * undoing a misclick has to be as cheap as making it.
+   */
+  toggleQuestionFlag(questionId: string): void {
+    this.flaggedQuestionIds.update((flagged) => {
+      const next = new Set(flagged);
+      if (!next.delete(questionId)) {
+        next.add(questionId);
+      }
+      return next;
+    });
   }
 
   /** Throws away a saved game the player has said they don't want to resume. */
@@ -217,5 +244,6 @@ export class GameControllerService {
     this.score.set(0);
     this.isComplete.set(false);
     this.loadError.set(null);
+    this.flaggedQuestionIds.set(new Set());
   }
 }

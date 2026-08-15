@@ -60,6 +60,7 @@ function setup(options: {
           totalQuestions: signal(10),
           percentage: signal(70),
           questions: signal([]),
+          flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
           resetGame: () => undefined,
         },
       },
@@ -217,7 +218,11 @@ interface ReportingComponent {
  * version created a second instance here and asserted against the first,
  * which fails for a reason that has nothing to do with the code.)
  */
-function configureReporting(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+function configureReporting(options: {
+  questions: TriviaQuestion[];
+  reportError?: unknown;
+  flaggedIds?: string[];
+}) {
   const reportQuestion = options.reportError
     ? vi.fn().mockRejectedValue(options.reportError)
     : vi.fn().mockResolvedValue(undefined);
@@ -231,6 +236,12 @@ function configureReporting(options: { questions: TriviaQuestion[]; reportError?
           totalQuestions: signal(10),
           percentage: signal(70),
           questions: signal(options.questions),
+          // The flagged set drives which questions the screen leads with;
+          // default to "all of them flagged" so the existing reporting tests
+          // keep exercising the visible list rather than the dialog.
+          flaggedQuestionIds: signal<ReadonlySet<string>>(
+            new Set(options.flaggedIds ?? options.questions.map((q) => q.id)),
+          ),
           resetGame: () => undefined,
         },
       },
@@ -262,7 +273,11 @@ function configureReporting(options: { questions: TriviaQuestion[]; reportError?
   return { reportQuestion };
 }
 
-function reportingSetup(options: { questions: TriviaQuestion[]; reportError?: unknown }) {
+function reportingSetup(options: {
+  questions: TriviaQuestion[];
+  reportError?: unknown;
+  flaggedIds?: string[];
+}) {
   const { reportQuestion } = configureReporting(options);
   const fixture = TestBed.createComponent(GameOverComponent);
   const component = fixture.componentInstance as unknown as ReportingComponent;
@@ -474,5 +489,156 @@ describe('GameOverComponent question reporting (H4)', () => {
     expect(component.reportReason).toBe('');
     expect(component.reportDetail).toBe('');
     expect(component.openReportQuestionId()).toBe('q-custom-1');
+  });
+});
+
+/**
+ * The redesign: game-over leads with what the player flagged mid-game, and
+ * everything else is behind a dialog. Rendered throughout — the modal's whole
+ * contract (focus in, trap, Escape, focus back) is invisible to a test that
+ * only reads signals, which is the lesson the H4 review left behind.
+ */
+describe('GameOverComponent flagged questions and the report dialog', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const custom1 = makeTriviaQuestion({ id: 'q-custom-1', question: 'First community question?' });
+  const custom2 = makeTriviaQuestion({ id: 'q-custom-2', question: 'Second community question?' });
+  const openTrivia = makeTriviaQuestion({ id: 'open-1', source: 'open_trivia' });
+
+  function render(options: { questions: TriviaQuestion[]; flaggedIds?: string[] }) {
+    const { reportQuestion } = configureReporting({
+      questions: options.questions,
+      flaggedIds: options.flaggedIds ?? [],
+    });
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    return {
+      fixture,
+      host,
+      reportQuestion,
+      query: (selector: string) => host.querySelector<HTMLElement>(selector),
+      queryAll: (selector: string) => Array.from(host.querySelectorAll<HTMLElement>(selector)),
+    };
+  }
+
+  it('leads with the flagged question only, not every community question', () => {
+    const { host, query } = render({
+      questions: [custom1, custom2, openTrivia],
+      flaggedIds: ['q-custom-1'],
+    });
+
+    expect(host.textContent).toContain('Questions you flagged');
+    expect(query('[data-cy="report-question-q-custom-1"]')).not.toBeNull();
+    expect(query('[data-cy="report-question-q-custom-2"]')).toBeNull();
+  });
+
+  it('shows no flagged section when nothing was flagged', () => {
+    const { host } = render({ questions: [custom1, custom2] });
+
+    expect(host.textContent).not.toContain('Questions you flagged');
+  });
+
+  // The escape hatch for "I noticed but didn't flag it".
+  it('still offers the dialog when nothing was flagged', () => {
+    const { query } = render({ questions: [custom1, custom2] });
+
+    expect(query('[data-cy="open-report-dialog"]')).not.toBeNull();
+  });
+
+  it('offers nothing at all for a game with no community questions', () => {
+    const { query, host } = render({ questions: [openTrivia] });
+
+    expect(query('[data-cy="open-report-dialog"]')).toBeNull();
+    expect(host.textContent).not.toContain('Questions you flagged');
+  });
+
+  it('opens a labelled modal listing every community question', async () => {
+    const { fixture, query, queryAll } = render({
+      questions: [custom1, custom2, openTrivia],
+      flaggedIds: ['q-custom-1'],
+    });
+
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+
+    const dialog = query('[data-cy="report-dialog"]');
+    expect(dialog?.getAttribute('role')).toBe('dialog');
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    expect(dialog?.getAttribute('aria-labelledby')).toBe('report-dialog-title');
+    // Both community questions, including the one that was never flagged —
+    // and still not the Open Trivia DB one.
+    expect(queryAll('[data-cy="report-dialog"] [data-cy^="report-question-"]')).toHaveLength(2);
+    expect(query('[data-cy="report-dialog"] [data-cy="report-question-open-1"]')).toBeNull();
+  });
+
+  it('moves focus into the dialog and back to the trigger on close', async () => {
+    const { fixture, query } = render({ questions: [custom1] });
+
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(query('[data-cy="report-dialog"]'));
+
+    query('[data-cy="close-report-dialog"]')?.click();
+    fixture.detectChanges();
+    // The restore is deferred by a microtask so it runs after the pass that
+    // removes the dialog has committed — see the comment in the component.
+    await Promise.resolve();
+    expect(document.activeElement).toBe(query('[data-cy="open-report-dialog"]'));
+  });
+
+  it('closes on Escape', async () => {
+    const { fixture, query } = render({ questions: [custom1] });
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+
+    query('[data-cy="report-dialog"]')?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    fixture.detectChanges();
+
+    expect(query('[data-cy="report-dialog"]')).toBeNull();
+  });
+
+  // `aria-modal="true"` is a promise to assistive tech; the trap is what
+  // makes it true for everyone else.
+  it('wraps Tab from the last control back to the first', async () => {
+    const { fixture, query, host } = render({ questions: [custom1] });
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+
+    const focusable = Array.from(
+      host.querySelectorAll<HTMLElement>('[data-cy="report-dialog"] button'),
+    );
+    const last = focusable[focusable.length - 1];
+    last.focus();
+
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    query('[data-cy="report-dialog"]')?.dispatchEvent(tab);
+
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(focusable[0]);
+  });
+
+  it('wraps Shift+Tab from the dialog itself back to the last control', async () => {
+    const { fixture, query, host } = render({ questions: [custom1] });
+    query('[data-cy="open-report-dialog"]')?.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    const focusable = Array.from(
+      host.querySelectorAll<HTMLElement>('[data-cy="report-dialog"] button'),
+    );
+    const shiftTab = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    query('[data-cy="report-dialog"]')?.dispatchEvent(shiftTab);
+
+    expect(shiftTab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(focusable[focusable.length - 1]);
   });
 });

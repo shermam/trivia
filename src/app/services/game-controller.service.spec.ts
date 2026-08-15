@@ -199,6 +199,47 @@ describe('GameControllerService persistence (B8)', () => {
     expect(reloaded.hasResumableGame()).toBe(false);
   });
 
+  // Flags ride the same record as the score (H4 follow-up). The controller
+  // half of that: toggling mutates the signal, the persisting effect picks it
+  // up, and a reload gets it back — otherwise game-over would ask for detail
+  // about nothing after a refresh, having promised to ask.
+  it('carries flagged questions through a reload', async () => {
+    const service = await playAndPersist(10, 3, 2);
+
+    service.toggleQuestionFlag('q1');
+    service.toggleQuestionFlag('q3');
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    expect([...(await reload()).flaggedQuestionIds()]).toEqual(['q1', 'q3']);
+  });
+
+  it('toggles a flag off again, and forgets it on reload', async () => {
+    const service = await playAndPersist(10, 3, 2);
+
+    service.toggleQuestionFlag('q1');
+    expect(service.flaggedQuestionIds().has('q1')).toBe(true);
+    service.toggleQuestionFlag('q1');
+    expect(service.flaggedQuestionIds().has('q1')).toBe(false);
+
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    expect([...(await reload()).flaggedQuestionIds()]).toEqual([]);
+  });
+
+  // Play Again must not carry a previous game's flags into the next one — the
+  // ids would be stale, and on a repeat of the same question bank they would
+  // not even be obviously stale.
+  it('clears flags when the game is reset', async () => {
+    const service = await playAndPersist(10, 3, 2);
+    service.toggleQuestionFlag('q1');
+
+    service.resetGame();
+
+    expect([...service.flaggedQuestionIds()]).toEqual([]);
+  });
+
   it('marks the game complete when advancing past the last question', async () => {
     const service = await playAndPersist(3, 2, 3);
     expect(service.isComplete()).toBe(false);

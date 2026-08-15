@@ -10,7 +10,7 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { NgClass } from '@angular/common';
+import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import {
@@ -45,7 +45,7 @@ function initialsFor(name: string): string {
 @Component({
   selector: 'app-game-over',
   standalone: true,
-  imports: [FormsModule, IconComponent, NgClass],
+  imports: [FormsModule, IconComponent, NgClass, NgTemplateOutlet],
   templateUrl: './game-over.component.html',
   styleUrl: './game-over.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -77,6 +77,17 @@ export class GameOverComponent implements OnInit {
     this.gameController.questions().filter((question) => question.source === 'custom'),
   );
 
+  /**
+   * The questions the player flagged mid-game — the ones this screen leads
+   * with, because they are the ones the player has already said something is
+   * wrong with. Everything else is behind the dialog.
+   */
+  protected readonly flaggedQuestions = computed(() => {
+    const flagged = this.gameController.flaggedQuestionIds();
+    return this.reportableQuestions().filter((question) => flagged.has(question.id));
+  });
+
+  protected readonly isReportDialogOpen = signal(false);
   protected readonly openReportQuestionId = signal<string | null>(null);
   protected readonly reportedQuestionIds = signal<ReadonlySet<string>>(new Set());
   protected readonly isSubmittingReport = signal(false);
@@ -104,6 +115,9 @@ export class GameOverComponent implements OnInit {
    * cannot pick up a stale node from a previous render.
    */
   private readonly reportBadges = viewChildren<ElementRef<HTMLElement>>('reportBadge');
+  private readonly reportDialog = viewChild<ElementRef<HTMLElement>>('reportDialog');
+  private readonly reportDialogTrigger = viewChild<ElementRef<HTMLElement>>('reportDialogTrigger');
+  private wasDialogOpen = false;
   private previouslyFocusedBeforeReport: HTMLElement | null = null;
   private wasReportOpen = false;
   private lastOpenReportId: string | null = null;
@@ -165,6 +179,102 @@ export class GameOverComponent implements OnInit {
         this.lastOpenReportId = openId;
       }
     });
+
+    // The dialog's own focus contract. Same microtask deferral as above and
+    // for the same reason: the dialog element does not exist yet on the pass
+    // that opens it, and still exists on the pass that closes it.
+    effect(() => {
+      const isOpen = this.isReportDialogOpen();
+      const dialog = this.reportDialog();
+
+      if (isOpen && dialog) {
+        // The dialog itself, not its first control — so it is announced with
+        // its title, and Tab then reaches the close button first.
+        dialog.nativeElement.focus();
+      }
+
+      if (!isOpen && this.wasDialogOpen) {
+        // Restored to the trigger element itself, unlike the disclosure above
+        // and unlike the auth menu — deliberately, because this dialog has
+        // exactly one opener, so there is no ambiguity to resolve. Reading
+        // `document.activeElement` at open time would actually be *worse*
+        // here: a click does not focus a `<button>` on Safari/macOS, so the
+        // capture reads `<body>`, which is connected, so the restore
+        // "succeeds" into nothing and the keyboard user loses their place.
+        // Deferred for the same reason as the disclosure's restore: the
+        // trigger is re-rendered by the pass this effect runs inside.
+        const trigger = this.reportDialogTrigger();
+        queueMicrotask(() => {
+          if (trigger?.nativeElement.isConnected) {
+            trigger.nativeElement.focus();
+          }
+        });
+      }
+
+      this.wasDialogOpen = isOpen;
+    });
+  }
+
+  protected openReportDialog(): void {
+    this.isReportDialogOpen.set(true);
+  }
+
+  protected closeReportDialog(): void {
+    // Close any form open inside it too: leaving one open would reopen the
+    // dialog mid-form with a reason the user chose minutes ago.
+    this.closeReportForm();
+    this.isReportDialogOpen.set(false);
+  }
+
+  /**
+   * Keeps Tab inside the dialog while it is open (`aria-modal="true"` is a
+   * promise to assistive tech, not an implementation) — without this, Tab
+   * walks straight out into the page behind, which is still fully rendered.
+   *
+   * Handled on a plain `keydown` rather than Angular's `keydown.tab`, because
+   * that binding does not fire for Shift+Tab — the half that matters most,
+   * since it is the direction that escapes backwards past the dialog's first
+   * control.
+   */
+  protected keepFocusInDialog(event: KeyboardEvent): void {
+    if (event.key !== 'Tab') {
+      return;
+    }
+    const dialog = this.reportDialog()?.nativeElement;
+    if (!dialog) {
+      return;
+    }
+
+    // No visibility filter on top of the selector. The obvious one —
+    // `offsetParent !== null` — is wrong twice over: it reports null for any
+    // `position: fixed` element (which this dialog is), and jsdom does not
+    // implement it at all, so it silently empties the list and the trap
+    // degrades to "always bounce back to the dialog". Nothing here needs it
+    // anyway: the template removes controls with `@if` rather than hiding
+    // them, and `:not([disabled])` covers the rest.
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (event.shiftKey && (active === first || active === dialog)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   protected readonly performanceLabel = computed(() => {
