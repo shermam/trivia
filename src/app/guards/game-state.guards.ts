@@ -11,18 +11,23 @@ import { GameControllerService } from '../services/game-controller.service';
  * reaches. Returning a `UrlTree` from a guard cancels the navigation *before*
  * activation: no chunk flash, no history entry, one announcement.
  *
- * Both guards **await** the B8 restore before deciding (finding B11). They
- * used to read `GameControllerService` synchronously, which was correct only
- * while the app initializer was guaranteed to have finished first — and it
- * wasn't. That initializer gives up after a bounded wait, and on a slow device
- * the expiry is indistinguishable from "there is no saved game", so a reload
- * mid-game bounced the player to `/` while the game sat intact in IndexedDB.
- * Reproduced on a throttled connection: intermittent, which is what marked it
- * a race rather than a rejected record.
+ * Both guards **await** the B8 restore before deciding. This is *not* what
+ * finding B11 turned out to be — that was a string reaching a field declared
+ * `number`, fixed in `game-setup.component.html` — but chasing B11 exposed
+ * this as a real hole next door, so it was closed in the same PR.
+ *
+ * The guards used to read `GameControllerService` synchronously, which is
+ * correct only while the app initializer is guaranteed to have finished first,
+ * and it isn't: the initializer gives up after a bounded wait, and that expiry
+ * is indistinguishable from "there is no saved game". A read slower than
+ * `RESTORE_TIMEOUT_MS` would therefore bounce the player to `/` with their
+ * game sitting intact in IndexedDB. Not a failure anyone has observed — the
+ * one that *was* observed had a different cause entirely — but it costs a game
+ * whenever it does happen, and awaiting is free.
  *
  * `giveUpAfter` stops waiting without stopping the work, so the read is still
  * in flight when bootstrap moves on — awaiting it here costs nothing in the
- * common case and is the whole fix in the slow one.
+ * common case and is the whole difference in the slow one.
  *
  * Note both services are injected *before* the first `await`. A guard runs in
  * an injection context that does not survive suspension, so moving either

@@ -98,11 +98,20 @@
             formControlName="amount"
             class="w-full appearance-none rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 pr-10 text-slate-900 dark:text-slate-50 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
           >
-            <option [value]="5">5</option>
-            <option [value]="10">10</option>
-            <option [value]="15">15</option>
-            <option [value]="20">20</option>
-            <option [value]="25">25</option>
+            <!--
+              `[ngValue]`, not `[value]` — the control is typed
+              `FormControl<number>` and only `ngValue` keeps it one (B11).
+              `[value]` sets the option's DOM value, so the accessor writes the
+              *string* "5" back into a control TypeScript still believes holds a
+              number. Every consumer coerced it silently except the one that
+              type-checks — `parseSavedGame` — which rejected the save and threw
+              away the game on reload.
+            -->
+            <option [ngValue]="5">5</option>
+            <option [ngValue]="10">10</option>
+            <option [ngValue]="15">15</option>
+            <option [ngValue]="20">20</option>
+            <option [ngValue]="25">25</option>
           </select>
           <app-icon
             name="chevron-down"

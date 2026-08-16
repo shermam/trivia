@@ -13,10 +13,17 @@
  *   3. quiz rendered                → bootstrap actually restored it
  *
  * (1) and (2) passed and (3) failed, which located the bug between storage and
- * the route guard: the bounded wait in `restoreSavedGame()` was expiring, and
- * its expiry was indistinguishable from "there is no saved game", so the guard
- * redirected while the game sat intact in IndexedDB. The guards now await the
- * restore rather than racing it.
+ * the signals: the record was there and the app would not take it. It was
+ * being *rejected* on read — `GameConfig.amount` is declared `number`, the
+ * setup form's `<select>` was writing the string `"5"` into it, and
+ * `parseSavedGame` type-checks that field. The reader was right; the writer
+ * was wrong. See `game-setup.component.spec.ts`.
+ *
+ * **`cy.startGame(5)` is load-bearing, not incidental.** It picks a question
+ * count through the real `<select>`, which is what produced the bad value; the
+ * form's *default* stayed a genuine number, so a version of this test that
+ * never touched that control would have passed against the bug. Whatever else
+ * changes here, keep something that chooses a non-default amount.
  *
  * Kept staged rather than collapsed into one assertion, because the next
  * regression here will not necessarily be the same one.
@@ -79,26 +86,12 @@ describe('resuming a game after a reload (B8)', () => {
         expect(saved, 'the persisted game survives the page load').to.not.equal(null);
       });
 
-    /*
-     * Captures the post-fix state before the real assertion, because the
-     * previous rounds showed how easily this fails ambiguously. Both are
-     * unconditional and retrying — a `cy.location` branch is useless here,
-     * since right after a reload the URL is still /play whatever happens next.
-     *
-     *   banner present → restored, but the guard let the redirect happen anyway
-     *   banner absent  → still nothing restored, so `load()` is returning null
-     *                    and the bounded wait was not the whole story
-     */
-    cy.get('body').then(($body) => {
-      const banner = $body.text().includes('You have a game in progress');
-      cy.log(`B11 post-fix: resume banner ${banner ? 'PRESENT' : 'ABSENT'}`);
-    });
-    cy.location('pathname').should('be.oneOf', ['/play', '/']);
-
     // Anchored on the quiz itself, not on the URL: after a reload the URL is
     // already /play, so a pathname assertion passes before Angular boots and
     // keeps passing if the guard then redirects to /.
     cy.get('[data-cy="question-text"]').should('be.visible');
+    // The count as well as the screen. It is the field that was corrupted, so
+    // a restore that came back with the wrong one would still be a failure.
     cy.contains('Question 1 / 5');
   });
 });

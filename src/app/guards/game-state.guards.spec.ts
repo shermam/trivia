@@ -77,18 +77,22 @@ describe('hasCompletedGameGuard (/game-over)', () => {
 });
 
 /**
- * Finding B11. The guards used to read the controller synchronously, which was
- * correct only while the app initializer was guaranteed to have finished
- * restoring first — and it was not. That wait is bounded, and its expiry is
- * indistinguishable from "there is no saved game", so on a slow device a
- * reload mid-game bounced the player to `/` while the game sat intact in
- * IndexedDB. Reproduced live on a throttled connection: intermittent, which is
- * what marked it a race rather than a rejected record.
+ * The guards used to read the controller synchronously, which is correct only
+ * while the app initializer is guaranteed to have finished restoring first —
+ * and it is not. That wait is bounded, and its expiry is indistinguishable
+ * from "there is no saved game", so a read slower than the bound bounces the
+ * player to `/` with their game intact in IndexedDB.
  *
- * These model the restore landing *after* the guard has been entered. A
+ * Written while chasing B11 and kept after B11 turned out to be something else
+ * (see `game-setup.component.spec.ts`). This window has never been observed in
+ * the wild, so these are the only thing standing between it and a silent
+ * reintroduction — which is the reason they are here rather than deleted with
+ * the wrong diagnosis that prompted them.
+ *
+ * They model the restore landing *after* the guard has been entered. A
  * synchronous guard cannot pass them.
  */
-describe('the guards await the restore (B11)', () => {
+describe('the guards await the restore', () => {
   /**
    * The fake registered by `runGuard`, typed by what it actually is: writable
    * signals. `TestBed.inject(GameControllerService)` returns it typed as the

@@ -157,18 +157,20 @@ export class GameControllerService {
 
   /**
    * Resolves once the restore has actually settled — what the route guards
-   * await before deciding whether a game exists (finding B11).
+   * await before deciding whether a game exists.
    *
    * They used to read `currentQuestion()` synchronously, correct only while
-   * the app initializer was guaranteed to have finished first. It wasn't: the
-   * initializer gives up after {@link RESTORE_TIMEOUT_MS}, and on a slow
-   * device that expiry is indistinguishable from "there is no saved game", so
-   * the guard bounced the player home while their game sat intact in
-   * IndexedDB. Reproduced live on a throttled connection — intermittently,
-   * which is what identified it as a race rather than a rejected record.
+   * the app initializer is guaranteed to have finished first. It isn't: the
+   * initializer gives up after {@link RESTORE_TIMEOUT_MS}, and that expiry is
+   * indistinguishable from "there is no saved game", so a read slower than the
+   * bound would bounce the player home with their game intact in IndexedDB.
    *
-   * Awaiting the read instead of racing it removes the coin flip: the guard
-   * now decides on the same information the store actually holds.
+   * Written while chasing finding B11, which turned out to be something else
+   * (a string reaching `GameConfig.amount`, declared `number` — see
+   * `game-setup.component.html`). This window was never the observed failure
+   * and has not been seen in the wild; it is closed anyway because awaiting a
+   * promise that has almost always already settled costs nothing, and the
+   * alternative costs a game.
    */
   whenRestoreSettled(): Promise<void> {
     return giveUpAfter(this.restorePromise ?? Promise.resolve(), GUARD_RESTORE_TIMEOUT_MS).catch(
