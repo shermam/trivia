@@ -32,6 +32,7 @@ This document is the index. The overview itself lives in `docs/`, split by subje
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `CLAUDE.md`              | Standing instructions for every session: branching, the verification suite, and §4's contract of invariants that must not regress |
 | `INFRASTRUCTURE.md`      | The stack choices as infrastructure, independent of this app — the reference if scaffolding a new project on the same foundations |
-| `AUDIT_REMEDIATION.md`   | The 59-finding audit and the PR series that closed it: status, decisions taken, and a narrative per finding                       |
+| `BACKLOG.md`             | The queue of work after the audit: what is next, in what order, and why — plus what was considered and deliberately not queued    |
+| `AUDIT_REMEDIATION.md`   | The 60-finding audit and the PR series that closed it: status, decisions taken, and a narrative per finding                       |
 | `UI_INVENTORY.md`        | Every screen, element, state and piece of user-facing copy as implemented — raw material for design work                          |
 | `BRAND_DESIGN_SYSTEM.md` | Colors, typography, shadows, radii — the visual system `UI_INVENTORY.md` refers to                                                |
