@@ -24,7 +24,7 @@ describe('anonymous game flow (open_trivia source)', () => {
     // instead of getting a save-score form.
     cy.contains('Sign in to save this score to the leaderboard.');
     cy.contains('form', 'Save Score').should('not.exist');
-    cy.contains('Top 10 Leaderboard');
+    cy.contains('Top 10 — 15-second games');
 
     cy.contains('button', 'Play Again').click();
     cy.location('pathname').should('eq', '/');

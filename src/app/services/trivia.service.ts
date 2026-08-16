@@ -5,6 +5,7 @@ import { environment } from '../../environments/environment';
 import {
   Answer,
   CustomQuestionDoc,
+  DEFAULT_TIME_LIMIT,
   Difficulty,
   GameConfig,
   OpenTriviaApiQuestion,
@@ -177,6 +178,10 @@ export class TriviaService {
         category: '',
         difficulty: '',
         source: 'mixed',
+        // Irrelevant here — this is the background prefetch topping up the
+        // offline pool, not a game. Fetching does not read the limit; the
+        // player picks one when they actually start playing.
+        timeLimit: DEFAULT_TIME_LIMIT,
       });
       await this.offlineQuestionsService.saveQuestions(questions);
     } catch {

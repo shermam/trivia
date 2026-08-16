@@ -88,6 +88,7 @@ describe('TriviaService offline fallback', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
 
     httpMock
@@ -122,6 +123,7 @@ describe('TriviaService offline fallback', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
 
     httpMock
@@ -149,7 +151,13 @@ describe('TriviaService offline fallback', () => {
 
     // No opentdb.com request expected — "custom" source never calls it.
     await expect(
-      triviaService.getQuestions({ amount: 5, category: '', difficulty: '', source: 'custom' }),
+      triviaService.getQuestions({
+        amount: 5,
+        category: '',
+        difficulty: '',
+        source: 'custom',
+        timeLimit: 15,
+      }),
     ).rejects.toBeTruthy();
     httpMock.expectNone(() => true);
   });
@@ -161,6 +169,7 @@ describe('TriviaService offline fallback', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
 
     httpMock
@@ -213,6 +222,7 @@ describe('TriviaService offline fallback', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
 
     httpMock
@@ -269,6 +279,7 @@ describe('TriviaService answer identity', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
     httpMock
       .expectOne((r) => r.url.includes('opentdb.com'))
@@ -424,6 +435,7 @@ describe('TriviaService entity decoding is per source', () => {
       category: '',
       difficulty: '',
       source: 'custom',
+      timeLimit: 15,
     });
 
     expect(question.question).toBe('Which tag is written &lt;div&gt;?');
@@ -441,6 +453,7 @@ describe('TriviaService entity decoding is per source', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
     httpMock
       .expectOne((r) => r.url.includes('api.php'))
@@ -496,6 +509,7 @@ describe('TriviaService custom-question queries (C1)', () => {
       category: 'History',
       difficulty: 'hard',
       source: 'custom',
+      timeLimit: 15,
     });
 
     expect(getCustomQuestions).toHaveBeenCalledWith({
@@ -514,6 +528,7 @@ describe('TriviaService custom-question queries (C1)', () => {
       category: '',
       difficulty: '',
       source: 'mixed',
+      timeLimit: 15,
     });
     httpMock.expectOne((r) => r.url.includes('api.php')).flush({ response_code: 0, results: [] });
     await promise;

@@ -19,44 +19,57 @@
           >Score: {{ gameController.score() }}</span
         >
 
-        <div class="relative flex h-12 w-12 items-center justify-center">
-          <svg class="absolute inset-0 -rotate-90" viewBox="0 0 44 44" width="48" height="48">
-            <circle
-              cx="22"
-              cy="22"
-              [attr.r]="timerRingRadius"
-              fill="none"
-              [class.stroke-emerald-100]="timeLeft() > 5"
-              [class.dark:stroke-emerald-900]="timeLeft() > 5"
-              [class.stroke-red-100]="timeLeft() <= 5"
-              [class.dark:stroke-red-900]="timeLeft() <= 5"
-              stroke-width="3"
-            />
-            <circle
-              cx="22"
-              cy="22"
-              [attr.r]="timerRingRadius"
-              fill="none"
-              [class.stroke-emerald-600]="timeLeft() > 5"
-              [class.dark:stroke-emerald-400]="timeLeft() > 5"
-              [class.stroke-red-700]="timeLeft() <= 5"
-              [class.dark:stroke-red-400]="timeLeft() <= 5"
-              stroke-width="3"
-              stroke-linecap="round"
-              [attr.stroke-dasharray]="timerRingCircumference"
-              [attr.stroke-dashoffset]="timerRingOffset()"
-              class="transition-[stroke-dashoffset] duration-1000 ease-linear"
-            />
-          </svg>
+        <!--
+          No ring for an unlimited game (G7): there is no deadline to draw, and
+          an empty or full ring sitting there would suggest one. The badge that
+          replaces it states the mode instead of leaving a hole in the header.
+        -->
+        @if (isTimed()) {
+          <div class="relative flex h-12 w-12 items-center justify-center" data-cy="question-timer">
+            <svg class="absolute inset-0 -rotate-90" viewBox="0 0 44 44" width="48" height="48">
+              <circle
+                cx="22"
+                cy="22"
+                [attr.r]="timerRingRadius"
+                fill="none"
+                [class.stroke-emerald-100]="timeLeft() > 5"
+                [class.dark:stroke-emerald-900]="timeLeft() > 5"
+                [class.stroke-red-100]="timeLeft() <= 5"
+                [class.dark:stroke-red-900]="timeLeft() <= 5"
+                stroke-width="3"
+              />
+              <circle
+                cx="22"
+                cy="22"
+                [attr.r]="timerRingRadius"
+                fill="none"
+                [class.stroke-emerald-600]="timeLeft() > 5"
+                [class.dark:stroke-emerald-400]="timeLeft() > 5"
+                [class.stroke-red-700]="timeLeft() <= 5"
+                [class.dark:stroke-red-400]="timeLeft() <= 5"
+                stroke-width="3"
+                stroke-linecap="round"
+                [attr.stroke-dasharray]="timerRingCircumference"
+                [attr.stroke-dashoffset]="timerRingOffset()"
+                class="transition-[stroke-dashoffset] duration-1000 ease-linear"
+              />
+            </svg>
+            <span
+              class="relative text-xs font-bold"
+              [class.text-emerald-600]="timeLeft() > 5"
+              [class.dark:text-emerald-400]="timeLeft() > 5"
+              [class.text-red-700]="timeLeft() <= 5"
+              [class.dark:text-red-400]="timeLeft() <= 5"
+              >{{ timeLeft() }}s</span
+            >
+          </div>
+        } @else {
           <span
-            class="relative text-xs font-bold"
-            [class.text-emerald-600]="timeLeft() > 5"
-            [class.dark:text-emerald-400]="timeLeft() > 5"
-            [class.text-red-700]="timeLeft() <= 5"
-            [class.dark:text-red-400]="timeLeft() <= 5"
-            >{{ timeLeft() }}s</span
+            data-cy="no-time-limit"
+            class="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+            >No time limit</span
           >
-        </div>
+        }
       </div>
 
       <div class="h-1 bg-slate-100 dark:bg-slate-800">

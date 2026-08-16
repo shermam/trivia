@@ -6,6 +6,7 @@ import type Stripe from 'stripe';
 import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
 import { buildAccountExport } from './account-export';
+import { LEADERBOARD_BOARDS, leaderboardPathsFor } from './leaderboards';
 
 /**
  * Deletes the caller's account and everything attached to it.
@@ -14,7 +15,7 @@ import { buildAccountExport } from './account-export';
  * systems that no single client write can reach — Stripe, Auth, the
  * leaderboard, and the question bank — and because the Admin SDK bypasses
  * `firestore.rules`, which is the only way to touch documents the client is
- * deliberately forbidden from writing (`leaderboard` has no delete rule at
+ * deliberately forbidden from writing (no leaderboard has a delete rule at
  * all, and `custom_questions` is create-only).
  *
  * Order matters. Stripe is cancelled first, because it is the only step with
@@ -39,7 +40,11 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
   try {
     await cancelBillingFor(uid);
     await anonymiseContributedQuestions(uid);
-    await firestore.collection('leaderboard').doc(uid).delete();
+    // Every board, not just one. Since G7 a player can hold an entry on each
+    // timing constraint, and the legacy flat collection may still hold a
+    // pre-migration row — a deletion that missed any of them would leave the
+    // user's name and score publicly readable after they asked to be removed.
+    await Promise.all(leaderboardPathsFor(uid).map((path) => firestore.doc(path).delete()));
     await deleteCustomerRecord(uid);
     await getAuth().deleteUser(uid);
   } catch (error) {
@@ -78,7 +83,14 @@ export const exportAccountData = onCall(async (request) => {
     const [user, leaderboard, questions, customer, subscriptions, checkouts, portals] =
       await Promise.all([
         getAuth().getUser(uid),
-        firestore.collection('leaderboard').doc(uid).get(),
+        // One read per board. A player can hold an entry on each timing
+        // constraint since G7, and an export that returned only one of them
+        // would be an incomplete answer to a data-access request.
+        Promise.all(
+          LEADERBOARD_BOARDS.map((board) =>
+            firestore.doc(`leaderboards/${board}/entries/${uid}`).get(),
+          ),
+        ),
         firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
         customerRef.get(),
         customerRef.collection('subscriptions').get(),
@@ -88,7 +100,17 @@ export const exportAccountData = onCall(async (request) => {
 
     return buildAccountExport({
       user,
-      leaderboardEntry: leaderboard.exists ? (leaderboard.data() ?? null) : null,
+      // Pair each snapshot with its board *before* filtering. Filtering first
+      // and then reading `index` inside `map` renumbers the survivors, so a
+      // player with an entry on only the second board would have it labelled
+      // as the first — and having entries on some boards but not all is the
+      // normal case, not an edge one.
+      leaderboardEntries: LEADERBOARD_BOARDS.map((board, index) => ({
+        board,
+        snapshot: leaderboard[index],
+      }))
+        .filter(({ snapshot }) => snapshot.exists)
+        .map(({ board, snapshot }) => ({ board, ...snapshot.data() })),
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
       subscriptions: subscriptions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),

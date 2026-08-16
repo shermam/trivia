@@ -36,22 +36,61 @@ export interface TriviaQuestion {
   source: 'open_trivia' | 'custom';
 }
 
+/**
+ * How long the player gets per question, and therefore which leaderboard the
+ * game's score belongs on (finding G7).
+ *
+ * A fixed 15-second limit with no way to adjust, extend or turn it off is a
+ * WCAG 2.2.1 failure — `'unlimited'` is what actually satisfies it; the 30
+ * option exists because "a bit longer" is a far more common need than "no
+ * clock at all", and the standard is met either way.
+ *
+ * The numeric members are seconds, so `String(option)` is the board key
+ * (`'15'`, `'30'`, `'unlimited'`) that `firestore.rules` validates and that
+ * appears in the `leaderboards/{limit}/entries` path. One representation, no
+ * mapping table to fall out of sync.
+ */
+export type TimeLimitOption = 15 | 30 | 'unlimited';
+
+export const TIME_LIMIT_OPTIONS: readonly TimeLimitOption[] = [15, 30, 'unlimited'];
+
+/** The default, and what every game played before this feature used. */
+export const DEFAULT_TIME_LIMIT: TimeLimitOption = 15;
+
+/** The `{limit}` path segment / `timeLimit` field for a board. */
+export function boardKey(option: TimeLimitOption): string {
+  return String(option);
+}
+
+export function isTimeLimitOption(value: unknown): value is TimeLimitOption {
+  return TIME_LIMIT_OPTIONS.includes(value as TimeLimitOption);
+}
+
 export interface GameConfig {
   amount: number;
   category: string;
   difficulty: Difficulty | '';
   source: QuestionSource;
+  timeLimit: TimeLimitOption;
 }
 
 export interface LeaderboardEntry {
   id?: string;
-  /** Firebase Auth uid — also the Firestore document ID (one entry per user, best score kept). */
+  /** Firebase Auth uid — also the Firestore document ID (one entry per user *per board*, best score kept). */
   uid: string;
   name: string;
   score: number;
   totalQuestions: number;
   percentage: number;
   createdAt: number;
+  /**
+   * The board this entry belongs to — `'15'`, `'30'` or `'unlimited'`.
+   * Redundant with the document's path and stored anyway: the rules' exact-key
+   * allowlist cannot be widened later without rejecting every existing
+   * document, so a field that might be wanted has to be there from the start.
+   * `firestore.rules` requires it to equal the path segment.
+   */
+  timeLimit: string;
 }
 
 /** The question content itself, independent of who submitted it or when. */

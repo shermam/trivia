@@ -2,7 +2,12 @@ import { TestBed } from '@angular/core/testing';
 import { ApplicationRef, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { of } from 'rxjs';
-import { LeaderboardEntry, TriviaQuestion } from '../../models/question.model';
+import {
+  GameConfig,
+  LeaderboardEntry,
+  TimeLimitOption,
+  TriviaQuestion,
+} from '../../models/question.model';
 import { AuthService } from '../../services/auth.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
@@ -34,8 +39,14 @@ function makeEntry(overrides: Partial<LeaderboardEntry> = {}): LeaderboardEntry 
     totalQuestions: 10,
     percentage: 90,
     createdAt: Date.now(),
+    timeLimit: '15',
     ...overrides,
   };
+}
+
+/** A config whose only interesting part here is which board the game ranks on. */
+function makeConfig(timeLimit: TimeLimitOption = 15): GameConfig {
+  return { amount: 10, category: '', difficulty: '', source: 'open_trivia', timeLimit };
 }
 
 function setup(options: {
@@ -43,6 +54,7 @@ function setup(options: {
   existingEntry?: LeaderboardEntry | null;
   lookupFails?: boolean;
   score?: number;
+  timeLimit?: TimeLimitOption;
 }) {
   const saveHighScore = vi.fn().mockRejectedValue(options.saveError);
   const getLeaderboardEntry = vi.fn(() =>
@@ -60,6 +72,7 @@ function setup(options: {
           totalQuestions: signal(10),
           percentage: signal(70),
           questions: signal([]),
+          config: signal(makeConfig(options.timeLimit)),
           flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
           resetGame: () => undefined,
         },
@@ -106,7 +119,7 @@ describe('GameOverComponent save failures', () => {
 
     await component.saveScore();
 
-    expect(getLeaderboardEntry).toHaveBeenCalledWith('player-1');
+    expect(getLeaderboardEntry).toHaveBeenCalledWith('player-1', '15');
     expect(component.saveError()).toMatch(/already higher/);
     // Retry is suppressed here on purpose: the rules will refuse the same
     // write every time, so offering the form again would only mislead.
@@ -222,6 +235,7 @@ function configureReporting(options: {
   questions: TriviaQuestion[];
   reportError?: unknown;
   flaggedIds?: string[];
+  timeLimit?: TimeLimitOption;
 }) {
   const reportQuestion = options.reportError
     ? vi.fn().mockRejectedValue(options.reportError)
@@ -236,6 +250,7 @@ function configureReporting(options: {
           totalQuestions: signal(10),
           percentage: signal(70),
           questions: signal(options.questions),
+          config: signal(makeConfig(options.timeLimit)),
           // The flagged set drives which questions the screen leads with;
           // default to "all of them flagged" so the existing reporting tests
           // keep exercising the visible list rather than the dialog.
@@ -721,5 +736,139 @@ describe('GameOverComponent flagged questions and the report dialog', () => {
     const focused = document.activeElement as HTMLElement | null;
     expect(focused?.id).toBe('report-panel-q-custom-1');
     expect(focused?.closest('[data-cy="report-dialog"]')).not.toBeNull();
+  });
+});
+
+/**
+ * Finding G7, the leaderboard half. Each timing constraint has its own board,
+ * so the screen must read and write the one the game was actually played
+ * under — and say which one it is, or a modest score on the no-limit board
+ * reads as a modest score overall.
+ */
+describe('GameOverComponent — per-board leaderboards', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  function render(timeLimit: TimeLimitOption) {
+    const saveHighScore = vi.fn().mockResolvedValue(undefined);
+    const getTopScores = vi.fn(() => of([]));
+    const getLeaderboardEntry = vi.fn().mockResolvedValue(null);
+
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(7),
+            totalQuestions: signal(10),
+            percentage: signal(70),
+            questions: signal([]),
+            config: signal(makeConfig(timeLimit)),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isFullyAuthenticated: signal(true),
+            isAnonymous: signal(false),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
+        {
+          provide: FirebaseService,
+          useValue: { saveHighScore, getTopScores, getLeaderboardEntry },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    return { fixture, saveHighScore, getTopScores, host: fixture.nativeElement as HTMLElement };
+  }
+
+  it.each([
+    [15 as TimeLimitOption, '15'],
+    [30 as TimeLimitOption, '30'],
+    ['unlimited' as TimeLimitOption, 'unlimited'],
+  ])('loads the board matching the game played (%s)', (timeLimit, board) => {
+    const { getTopScores } = render(timeLimit);
+    expect(getTopScores).toHaveBeenCalledWith(board, 10);
+  });
+
+  /*
+   * The write has to carry the same board twice — in the path and in the
+   * `timeLimit` field — because `firestore.rules` requires them to agree. The
+   * component derives both from one value, and this is what pins that.
+   */
+  it.each([
+    [15 as TimeLimitOption, '15'],
+    [30 as TimeLimitOption, '30'],
+    ['unlimited' as TimeLimitOption, 'unlimited'],
+  ])('writes the score to that same board (%s)', async (timeLimit, board) => {
+    const { fixture, saveHighScore } = render(timeLimit);
+    const component = fixture.componentInstance as unknown as {
+      playerName: string;
+      saveScore(): Promise<void>;
+    };
+    component.playerName = 'Ada';
+
+    await component.saveScore();
+
+    expect(saveHighScore).toHaveBeenCalledWith(expect.objectContaining({ timeLimit: board }));
+  });
+
+  it.each([
+    [15 as TimeLimitOption, '15-second'],
+    [30 as TimeLimitOption, '30-second'],
+    ['unlimited' as TimeLimitOption, 'no-limit'],
+  ])('names the board on screen (%s)', (timeLimit, label) => {
+    const { host } = render(timeLimit);
+    expect(host.querySelector('[data-cy="leaderboard-title"]')?.textContent).toContain(label);
+  });
+
+  // A game restored from a save written before the picker existed has no
+  // limit recorded, and every one of those was played at 15 seconds.
+  it('falls back to the 15s board when the game carries no limit', () => {
+    const saveHighScore = vi.fn();
+    const getTopScores = vi.fn(() => of([]));
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(7),
+            totalQuestions: signal(10),
+            percentage: signal(70),
+            questions: signal([]),
+            config: signal(null),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'p', displayName: 'Ada' }),
+            isFullyAuthenticated: signal(true),
+            isAnonymous: signal(false),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
+        {
+          provide: FirebaseService,
+          useValue: { saveHighScore, getTopScores, getLeaderboardEntry: vi.fn() },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+
+    expect(getTopScores).toHaveBeenCalledWith('15', 10);
   });
 });

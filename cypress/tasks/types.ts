@@ -16,6 +16,13 @@ export interface CustomQuestionSeed {
   createdAt?: number;
 }
 
+/**
+ * The boards, one per timing constraint (finding G7). Must match
+ * `isValidBoard` in `firestore.rules`. Seeding and cleanup both have to visit
+ * every one of them, so the list lives here rather than at each call site.
+ */
+export const LEADERBOARD_BOARDS = ['15', '30', 'unlimited'] as const;
+
 export interface LeaderboardSeed {
   uid: string;
   name: string;
@@ -23,6 +30,8 @@ export interface LeaderboardSeed {
   totalQuestions: number;
   percentage: number;
   createdAt?: number;
+  /** Which board to seed into. Defaults to the 15-second board. */
+  timeLimit?: string;
 }
 
 export interface VerifiedUserSeed {

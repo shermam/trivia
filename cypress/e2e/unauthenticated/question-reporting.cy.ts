@@ -64,7 +64,7 @@ describe('reporting a community question', () => {
    *   selector simply does not exist on `/game-over` — so it fails saying so.
    *   `h2` matches three elements there (the leaderboard, the flagged card,
    *   the dialog) and jQuery's `.text()` silently *concatenates* a
-   *   multi-element match, which produced "Top 10 Leaderboard is not one of
+   *   multi-element match, which produced "Top 10 — 15-second games is not one of
    *   the seeded ones" and sent the reader to the seeding task.
    * - The `should` retries until the heading has moved on from the question
    *   just answered. The quiz holds an answered question on screen for two

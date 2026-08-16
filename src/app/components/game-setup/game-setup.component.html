@@ -219,6 +219,55 @@
         </div>
       </div>
 
+      <div>
+        <span
+          id="time-limit-label"
+          class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+          >Time per Question</span
+        >
+        <!--
+          Same radiogroup contract as Question Source above (G4). This one is
+          finding G7: a fixed 15-second limit with no way to adjust, extend or
+          turn it off is a WCAG 2.2.1 failure, and "No limit" is the option
+          that actually satisfies the criterion.
+        -->
+        <div
+          role="radiogroup"
+          aria-labelledby="time-limit-label"
+          class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+        >
+          @for (option of timeLimitOptions; track option.value) {
+            <label
+              class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
+              [class.bg-emerald-100]="form.value.timeLimit === option.value"
+              [class.dark:bg-emerald-500/20]="form.value.timeLimit === option.value"
+              [class.text-emerald-700]="form.value.timeLimit === option.value"
+              [class.dark:text-emerald-400]="form.value.timeLimit === option.value"
+              [class.text-slate-600]="form.value.timeLimit !== option.value"
+              [class.dark:text-slate-400]="form.value.timeLimit !== option.value"
+            >
+              <input
+                type="radio"
+                formControlName="timeLimit"
+                [value]="option.value"
+                [attr.data-cy]="'time-limit-' + option.value"
+                class="sr-only"
+              />
+              {{ option.label }}
+            </label>
+          }
+        </div>
+        <!--
+          Says the consequence, not just the setting. Each limit has its own
+          leaderboard — a score won with no clock is not comparable to one won
+          in 15 seconds — and a player who discovers that only after finishing
+          a game has been misled by omission.
+        -->
+        <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400" data-cy="time-limit-note">
+          {{ timeLimitNote() }}
+        </p>
+      </div>
+
       <button
         type="submit"
         [disabled]="gameController.isLoading()"

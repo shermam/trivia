@@ -14,10 +14,12 @@ import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import {
+  DEFAULT_TIME_LIMIT,
   LeaderboardEntry,
   NewQuestionReportDoc,
   QuestionReportReason,
   TriviaQuestion,
+  boardKey,
 } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
@@ -58,6 +60,23 @@ export class GameOverComponent implements OnInit {
   private readonly firebaseService = inject(FirebaseService);
 
   protected readonly initialsFor = initialsFor;
+
+  /**
+   * The board this game's score belongs on (finding G7) — derived from the
+   * config the game was actually played under, never from a separate piece of
+   * component state, so the screen cannot show one board and write to another.
+   *
+   * Falls back to the default for a game restored from a save written before
+   * the timer was adjustable; those were all played at 15 seconds.
+   */
+  protected readonly board = computed(() =>
+    boardKey(this.gameController.config()?.timeLimit ?? DEFAULT_TIME_LIMIT),
+  );
+
+  /** How the board is named in prose — "15-second", "30-second", "no-limit". */
+  protected readonly boardLabel = computed(() =>
+    this.board() === 'unlimited' ? 'no-limit' : `${this.board()}-second`,
+  );
 
   protected playerName = '';
   protected readonly isSaving = signal(false);
@@ -346,6 +365,7 @@ export class GameOverComponent implements OnInit {
         totalQuestions: this.gameController.totalQuestions(),
         percentage: this.gameController.percentage(),
         createdAt: Date.now(),
+        timeLimit: this.board(),
       });
       this.hasSaved.set(true);
       await this.loadLeaderboard();
@@ -457,7 +477,7 @@ export class GameOverComponent implements OnInit {
   private async reportSaveFailure(error: unknown, attemptedScore: number): Promise<void> {
     if (isPermissionDeniedError(error)) {
       const existing = await this.firebaseService
-        .getLeaderboardEntry(this.authService.user()?.uid ?? '')
+        .getLeaderboardEntry(this.authService.user()?.uid ?? '', this.board())
         .catch(() => null);
 
       if (existing && existing.score >= attemptedScore) {
@@ -480,7 +500,7 @@ export class GameOverComponent implements OnInit {
     this.isLoadingLeaderboard.set(true);
     this.leaderboardError.set(null);
     try {
-      const topScores = await firstValueFrom(this.firebaseService.getTopScores(10));
+      const topScores = await firstValueFrom(this.firebaseService.getTopScores(this.board(), 10));
       this.leaderboard.set(topScores);
     } catch {
       this.leaderboard.set([]);

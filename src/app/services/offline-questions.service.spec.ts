@@ -81,6 +81,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'mixed',
+      timeLimit: 15,
     });
     expect(result).toHaveLength(3);
   });
@@ -122,12 +123,14 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'open_trivia',
+      timeLimit: 15,
     });
     const fromCustom = await service.getOfflineQuestions({
       amount: 5,
       category: '',
       difficulty: '',
       source: 'custom',
+      timeLimit: 15,
     });
     expect(fromOpenTrivia.map((q) => q.source)).toEqual(['open_trivia']);
     expect(fromCustom.map((q) => q.source)).toEqual(['custom']);
@@ -175,6 +178,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'mixed',
+      timeLimit: 15,
     });
 
     expect(question).not.toHaveProperty('dedupeKey');
@@ -194,6 +198,7 @@ describe('OfflineQuestionsService', () => {
       category: 'History',
       difficulty: 'hard',
       source: 'mixed',
+      timeLimit: 15,
     });
 
     expect(result).toHaveLength(2);
@@ -213,6 +218,7 @@ describe('OfflineQuestionsService', () => {
       category: 'History',
       difficulty: 'hard',
       source: 'mixed',
+      timeLimit: 15,
     });
 
     // Only 1 question actually matches History/hard — falls back to the full 3-question pool.
@@ -233,6 +239,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'custom',
+      timeLimit: 15,
     });
 
     // Only 1 custom-sourced question is cached — must not pad with open_trivia ones.
@@ -248,6 +255,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'custom',
+      timeLimit: 15,
     });
 
     expect(result).toEqual([]);
@@ -265,6 +273,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'mixed',
+      timeLimit: 15,
     });
 
     expect(result).toHaveLength(2);
@@ -279,6 +288,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'mixed',
+      timeLimit: 15,
     });
 
     expect(result).toHaveLength(1);
@@ -291,6 +301,7 @@ describe('OfflineQuestionsService', () => {
       category: '',
       difficulty: '',
       source: 'mixed',
+      timeLimit: 15,
     });
     expect(result).toEqual([]);
   });

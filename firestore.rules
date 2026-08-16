@@ -45,30 +45,8 @@ service cloud.firestore {
     //
     // Raising the option list above 25 means raising this too — the rules
     // tests will fail loudly if the two ever disagree, which is the point.
-    function isValidLeaderboardEntry(uid) {
-      let data = request.resource.data;
-      return data.keys().hasOnly(
-                ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt']
-              )
-            && data.uid == uid
-            && data.name is string
-            && data.name.size() > 0
-            && data.name.size() <= 30
-            && data.score is int
-            && data.score >= 0
-            && data.totalQuestions is int
-            && data.totalQuestions >= 1
-            && data.totalQuestions <= 25
-            && data.totalQuestions >= data.score
-            // Must agree with score/totalQuestions rather than being a free
-            // 0..100 field — otherwise 1 correct out of 10 can be published as
-            // 100%. Firestore's math.round() was verified to match
-            // JavaScript's Math.round() on .5 boundaries, so exact equality is
-            // safe here and no tolerance is needed.
-            && data.percentage is int
-            && data.percentage == math.round(data.score * 100.0 / data.totalQuestions)
-            && isNearRequestTime(data.createdAt);
-    }
+    // Enforced by isValidBoardEntry below; the flat collection's own
+    // validator went away with its write rules when G7 retired it.
 
     // The timing constraints a game can be played under, and therefore the
     // set of leaderboards that exist (finding G7). A score won with no time
@@ -83,8 +61,8 @@ service cloud.firestore {
       return limit in ['15', '30', 'unlimited'];
     }
 
-    // As isValidLeaderboardEntry, plus the board the entry is being written
-    // to. `timeLimit` is redundant with the path and is required anyway: an
+    // Everything a leaderboard entry must be, plus the board it is being
+    // written to. `timeLimit` is redundant with the path and is required anyway: an
     // exact-key hasOnly() allowlist cannot be widened after the fact without
     // rejecting every existing document (the A10 wall), and an export or an
     // admin listing across boards should not have to parse document paths to
@@ -338,23 +316,24 @@ service cloud.firestore {
     // append-only in the sense that a write only succeeds if it beats that
     // user's existing best score.
     //
-    // This is the pre-G7 board, and it is being retired. Every entry in it was
-    // won under the fixed 15-second limit, so `scripts/migrate-leaderboard-to-boards.mjs`
-    // copies it into `leaderboards/15/entries`. It stays writable until the
-    // client is switched over to the per-board paths below, because the
-    // rules deploy before the client that matches them (`ci-cd.md` §4.2) —
-    // denying writes here first would break saving for every player still
-    // running the previous build.
+    // The pre-G7 board, now **retired**. Its contents were copied into
+    // `leaderboards/15/entries` by `scripts/migrate-leaderboard-to-boards.mjs`
+    // — every entry was won under the fixed 15-second limit — and the client
+    // no longer reads or writes it.
+    //
+    // Writes are denied rather than left open. A client cached from before the
+    // switch would otherwise keep writing scores into a collection nothing
+    // reads, which looks like success and silently loses every entry; refused,
+    // it shows "Could not save your score. Please try again", and a reload
+    // fixes it. Same trade as the checkout-session schema change
+    // (`data-model.md` §3).
+    //
+    // Reads stay open so the documents remain inspectable, and because the
+    // migration is re-runnable: deleting nothing is what makes a mistake here
+    // cost nothing.
     match /leaderboard/{uid} {
       allow read: if true;
-      allow create: if isRealAuthedUser()
-                    && request.auth.uid == uid
-                    && isValidLeaderboardEntry(uid);
-      allow update: if isRealAuthedUser()
-                    && request.auth.uid == uid
-                    && isValidLeaderboardEntry(uid)
-                    && request.resource.data.score > resource.data.score;
-      allow delete: if false;
+      allow write: if false;
     }
 
     // One board per timing constraint (finding G7). Same contract as above —
