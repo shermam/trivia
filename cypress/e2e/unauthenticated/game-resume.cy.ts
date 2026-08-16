@@ -73,6 +73,26 @@ describe('resuming a game after a reload (B8)', () => {
         expect(saved, 'the persisted game survives the page load').to.not.equal(null);
       });
 
+    /*
+     * Splits the two remaining causes before asserting the real contract.
+     *
+     * The record is in IndexedDB on both sides of the reload (above), so the
+     * game is either restored into the service and the guard simply ran too
+     * early to see it, or `load()` rejected the record and nothing was
+     * restored at all. The setup screen tells those apart without any
+     * instrumentation: its resume banner is driven by `hasResumableGame()`,
+     * so if the guard bounced us to `/` *and* the banner is there, the
+     * restore worked and the ordering is the bug.
+     */
+    cy.location('pathname').then((pathname) => {
+      if (pathname === '/') {
+        cy.contains('You have a game in progress').should(
+          'exist',
+          'bounced to / — if this banner is present the restore worked and the guard merely ran first',
+        );
+      }
+    });
+
     // Anchored on the quiz itself, not on the URL: after a reload the URL is
     // already /play, so a pathname assertion passes before Angular boots and
     // keeps passing if the guard then redirects to /.
