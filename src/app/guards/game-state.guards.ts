@@ -11,18 +11,32 @@ import { GameControllerService } from '../services/game-controller.service';
  * reaches. Returning a `UrlTree` from a guard cancels the navigation *before*
  * activation: no chunk flash, no history entry, one announcement.
  *
- * Both guards read `GameControllerService` synchronously. That is only correct
- * because the B8 app initializer awaits `restoreSavedGame()` before the first
- * route activates (`app.config.ts`) — a reload of `/play` mid-game sees the
- * restored question, not an empty store. If that initializer ever stops
- * blocking bootstrap, these guards start bouncing every deep-linked reload.
+ * Both guards **await** the B8 restore before deciding (finding B11). They
+ * used to read `GameControllerService` synchronously, which was correct only
+ * while the app initializer was guaranteed to have finished first — and it
+ * wasn't. That initializer gives up after a bounded wait, and on a slow device
+ * the expiry is indistinguishable from "there is no saved game", so a reload
+ * mid-game bounced the player to `/` while the game sat intact in IndexedDB.
+ * Reproduced on a throttled connection: intermittent, which is what marked it
+ * a race rather than a rejected record.
+ *
+ * `giveUpAfter` stops waiting without stopping the work, so the read is still
+ * in flight when bootstrap moves on — awaiting it here costs nothing in the
+ * common case and is the whole fix in the slow one.
+ *
+ * Note both services are injected *before* the first `await`. A guard runs in
+ * an injection context that does not survive suspension, so moving either
+ * `inject()` below the await throws at runtime rather than at compile time.
  */
 
 /** `/play` needs a question in memory — a restored game counts (B8). */
-export const hasActiveGameGuard: CanActivateFn = () => {
-  return inject(GameControllerService).currentQuestion()
-    ? true
-    : inject(Router).createUrlTree(['/']);
+export const hasActiveGameGuard: CanActivateFn = async () => {
+  const gameController = inject(GameControllerService);
+  const router = inject(Router);
+
+  await gameController.whenRestoreSettled();
+
+  return gameController.currentQuestion() ? true : router.createUrlTree(['/']);
 };
 
 /**
@@ -31,9 +45,13 @@ export const hasActiveGameGuard: CanActivateFn = () => {
  * screen offers to publish its score to the leaderboard, which a game still in
  * progress has no business doing.
  */
-export const hasCompletedGameGuard: CanActivateFn = () => {
+export const hasCompletedGameGuard: CanActivateFn = async () => {
   const gameController = inject(GameControllerService);
+  const router = inject(Router);
+
+  await gameController.whenRestoreSettled();
+
   return gameController.totalQuestions() > 0 && gameController.isComplete()
     ? true
-    : inject(Router).createUrlTree(['/']);
+    : router.createUrlTree(['/']);
 };

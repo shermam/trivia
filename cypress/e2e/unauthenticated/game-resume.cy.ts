@@ -5,15 +5,21 @@
  * that a real page load restores one, and that is the entire promise B8 makes:
  * a refresh, a tab crash or a PWA relaunch does not cost you the game.
  *
- * The three assertions are deliberately staged so a failure says *where* the
- * game was lost rather than just that it was:
+ * This spec is what found **B11**, and the staging is why it could: a failure
+ * says *where* the game was lost rather than only that it was.
  *
  *   1. persisted before the reload  → the write landed at all
  *   2. still persisted after it     → the record survived the page load
  *   3. quiz rendered                → bootstrap actually restored it
  *
- * Each rules out a different cause: an unflushed write, storage cleared by the
- * reload, or a restore that ran too late for the route guard.
+ * (1) and (2) passed and (3) failed, which located the bug between storage and
+ * the route guard: the bounded wait in `restoreSavedGame()` was expiring, and
+ * its expiry was indistinguishable from "there is no saved game", so the guard
+ * redirected while the game sat intact in IndexedDB. The guards now await the
+ * restore rather than racing it.
+ *
+ * Kept staged rather than collapsed into one assertion, because the next
+ * regression here will not necessarily be the same one.
  */
 
 const DB_NAME = 'trivia-offline';
@@ -72,25 +78,6 @@ describe('resuming a game after a reload (B8)', () => {
       .should((saved) => {
         expect(saved, 'the persisted game survives the page load').to.not.equal(null);
       });
-
-    /*
-     * Splits the two remaining causes, and does it *unconditionally*.
-     *
-     * The previous attempt branched on `cy.location('pathname')`, which is a
-     * one-shot read: immediately after a reload the URL is still /play, so the
-     * branch never ran and the round produced no information at all. Same
-     * class of mistake as the pathname assertion this spec already replaced —
-     * a non-retrying read standing in for a state that has not settled yet.
-     *
-     * The record is in IndexedDB on both sides of the reload, so either it was
-     * restored and the guard ran before it landed, or `load()` rejected it and
-     * nothing was restored. The setup screen's resume banner is driven by
-     * `hasResumableGame()`, so its presence answers that directly:
-     *
-     *   banner present → restore worked; the guard is the bug (ordering)
-     *   banner absent  → the record was rejected on read (validation)
-     */
-    cy.contains('You have a game in progress').should('exist');
 
     // Anchored on the quiz itself, not on the URL: after a reload the URL is
     // already /play, so a pathname assertion passes before Angular boots and
