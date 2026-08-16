@@ -14,6 +14,18 @@ import { TriviaService } from './trivia.service';
 const RESTORE_TIMEOUT_MS = 2000;
 
 /**
+ * How long a *route guard* waits for the restore, as opposed to how long
+ * bootstrap does.
+ *
+ * Longer than the bootstrap bound on purpose. `giveUpAfter` stops waiting
+ * without stopping the work, so when bootstrap gives up the read is still in
+ * flight — and by the time a guard asks, it has almost always landed. This
+ * bound exists only so a browser that can never open IndexedDB (Safari private
+ * mode) cannot wedge navigation entirely.
+ */
+const GUARD_RESTORE_TIMEOUT_MS = 10_000;
+
+/**
  * Holds all in-progress game state so it survives navigation between the setup,
  * quiz, and game-over screens — and, since B8, a reload as well.
  *
@@ -47,6 +59,9 @@ export class GameControllerService {
    * silently drop it.
    */
   readonly flaggedQuestionIds = signal<ReadonlySet<string>>(new Set());
+
+  /** The single in-flight restore, so bootstrap and the guards await the same read. */
+  private restorePromise: Promise<void> | null = null;
 
   /** Tail of the serialized persistence chain — see `enqueueWrite`. */
   private writeQueue: Promise<void> = Promise.resolve();
@@ -132,9 +147,48 @@ export class GameControllerService {
    * browser that cannot open IndexedDB at all (Safari private mode) must still
    * get a working game — just one that won't survive a reload.
    */
-  async restoreSavedGame(): Promise<void> {
-    const saved = await giveUpAfter(this.persistence.load(), RESTORE_TIMEOUT_MS).catch(() => null);
+  restoreSavedGame(): Promise<void> {
+    this.restorePromise ??= this.readAndApplySavedGame();
+    // Bootstrap stops *waiting* here, but the read carries on — which is what
+    // makes `whenRestoreSettled()` below worth awaiting rather than a second
+    // chance at the same coin flip.
+    return giveUpAfter(this.restorePromise, RESTORE_TIMEOUT_MS).catch(() => undefined);
+  }
+
+  /**
+   * Resolves once the restore has actually settled — what the route guards
+   * await before deciding whether a game exists.
+   *
+   * They used to read `currentQuestion()` synchronously, correct only while
+   * the app initializer is guaranteed to have finished first. It isn't: the
+   * initializer gives up after {@link RESTORE_TIMEOUT_MS}, and that expiry is
+   * indistinguishable from "there is no saved game", so a read slower than the
+   * bound would bounce the player home with their game intact in IndexedDB.
+   *
+   * Written while chasing finding B11, which turned out to be something else
+   * (a string reaching `GameConfig.amount`, declared `number` — see
+   * `game-setup.component.html`). This window was never the observed failure
+   * and has not been seen in the wild; it is closed anyway because awaiting a
+   * promise that has almost always already settled costs nothing, and the
+   * alternative costs a game.
+   */
+  whenRestoreSettled(): Promise<void> {
+    return giveUpAfter(this.restorePromise ?? Promise.resolve(), GUARD_RESTORE_TIMEOUT_MS).catch(
+      () => undefined,
+    );
+  }
+
+  private async readAndApplySavedGame(): Promise<void> {
+    const saved = await this.persistence.load().catch(() => null);
     if (!saved) {
+      return;
+    }
+
+    // A late restore must not clobber a game the player has since started.
+    // Bootstrap may have given up waiting and let them reach the setup screen
+    // and press Start before this landed; replacing that with the old game
+    // would be a worse bug than the one this fixes.
+    if (this.questions().length > 0) {
       return;
     }
 
