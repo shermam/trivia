@@ -27,12 +27,14 @@ Two additions specific to this queue:
 
 Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 
-| #   | Item                                                                  | Size | Status |
-| --- | --------------------------------------------------------------------- | ---- | ------ |
-| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                | M    | 🟡     |
-| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)          | L    | ⬜     |
-| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions) | M    | ⬜     |
-| 4   | [Review before publish](#4-review-before-publish)                     | L    | ⬜     |
+| #   | Item                                                                                            | Size | Status |
+| --- | ----------------------------------------------------------------------------------------------- | ---- | ------ |
+| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                                          | M    | 🟡     |
+| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | ⬜     |
+| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ⬜     |
+| 4   | [Review before publish](#4-review-before-publish)                                               | L    | ⬜     |
+| 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | ⬜     |
+| 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | ⬜     |
 
 ### Why this order
 
@@ -41,7 +43,10 @@ The two rules driving it are _don't write code twice_ and _don't rewrite on a su
 - **1 first** because it is the cheapest and because everything after it is safer on a suite that has been made honest. B11 is the argument: `parseSavedGame` rejected every save made after the player touched the question-count picker, and the whole persistence feature had looked green since it shipped, because both unit suites construct their config in TypeScript where `amount` is a number by construction, and no e2e had ever reloaded mid-game. Neither layer was lying; the seam between them was simply never crossed. Item 1 also lints `functions/`, which items 3 and 4 both add code to.
 - **2 second, not last.** It rewrites every Firestore call site. Doing it after items 3 and 4 means their new call sites get written against the SDK and immediately rewritten; doing it before means they are written against REST once. Foundation first, features on top.
 - **3 before 4** because it is much smaller, and because it has to choose a write-path mechanism (counter document vs. Cloud Function) that item 4 can then reuse. Choosing that mechanism with item 4 in view is most of the design work — see the note in item 3.
-- **4 last**: the largest, the only one with a schema migration against an exact-key `hasOnly()` allowlist, and the only one that changes what the product promises a paying subscriber.
+- **4** is the largest, the only one with a schema migration against an exact-key `hasOnly()` allowlist, and the only one that changes what the product promises a paying subscriber.
+- **5 and 6 are unordered against the rest** — both came out of publishing the policies rather than from the audit, and neither blocks anything. 5 is a decision that happens to need a small change; 6 is genuinely cheaper _after_ 4, because an edit that can bypass moderation is a hole, so editing has to know whether review exists before it can be designed.
+
+**Items 4, 5 and 6 all change published policy text**, and each one says so in its own section. That is not bookkeeping: the two documents state, in present tense, that submissions are published immediately and cannot be edited or withdrawn. Ship any of those features without touching the text and the app is misdescribing itself to its users — see `CLAUDE.md` §4.0.
 
 ---
 
@@ -115,6 +120,62 @@ Reserved rather than deferred: it is a product feature, recorded in `AUDIT_REMED
 
 **Watch out for:** the index changes. D3 is the precedent and it is the most expensive mistake this repo has made — a `firestore.indexes.json` error took the production deploy pipeline down for four merges while Hosting kept shipping happily, and `--dry-run` reported success the whole time. **The emulator cannot verify index configuration.** There is a smoke test now, but the habit is the real defence: after the merge, check that the deploy actually went green.
 
+**Policy impact — this PR is not done without it.** Shipping this falsifies a sentence that appears, in near-identical wording, in both published documents:
+
+> Submissions are published immediately, without review.
+
+Update `privacy-policy.component.html` (the "Questions you contribute" section), `terms-of-service.component.html` (the "Questions you contribute" section), and `LEGAL_LAST_UPDATED` in `legal.ts`, in the same PR. See `CLAUDE.md` §4.0 for why this is not optional.
+
+---
+
+### 5. Report retention vs. account deletion
+
+**Size: S. Status: ⬜**
+
+`question_reports` stores the reporter's uid in the `reportedBy` field **and** repeats it inside the document ID (`firestore.rules`). `deleteAccount` never touches the collection — `question_reports` appears nowhere in `functions/src/`. So deleting your account leaves your identifier behind in every report you ever filed, in two places.
+
+Found while writing the Privacy Policy from source (H2, [#37](https://github.com/shermam/trivia/pull/37)), which is the only exercise that asks "what is actually left after deletion?" of every collection in turn.
+
+It is not obviously a bug — an abuse signal that evaporates the moment its author deletes their account is worth much less, and a bad actor could file harassing reports and then erase the trail by deleting an account they can recreate in one click. But **nobody chose it**, and the account-deletion path is otherwise careful and deliberate about exactly this question.
+
+**Decided, on review of [#37](https://github.com/shermam/trivia/pull/37): anonymise, on two conditions.** Lean towards what regulation prefers — erasure — while keeping the signal for as long as it is actually useful. A report's reporter identifier is anonymised when **both** of these are true:
+
+1. the reporter has deleted their account, **and**
+2. the report has been reviewed.
+
+Condition 2 is what makes this better than anonymising on deletion alone: an unreviewed report still needs its author, because triaging it may mean looking at what else that account filed. Once it has been reviewed, the identifier has done its job and keeping it is retention without a purpose — which is the thing LGPD art 18(IV) and GDPR's storage-limitation principle both push against.
+
+**None of this exists yet**, and the Privacy Policy deliberately describes today's behaviour instead: reports are kept indefinitely, including the reporter's identifier, with the accountability reason given. Update that section in the same PR that ships the change.
+
+Two things this needs that do not exist today:
+
+- **A notion of "reviewed".** `question_reports` has no status field, and review is console-only. This is really the first piece of moderation tooling, so it may want to land with — or after — item 4.
+- **A way to run the anonymisation.** Both conditions can become true in either order (a report is reviewed after its author left; an author leaves after their report was reviewed), so `deleteAccount` alone is not enough. It needs either a check at both points or a sweep.
+
+**Watch out for:** the uid is in the document **ID** as well as the `reportedBy` field — the ID is `{window}-{slot}-{uid}` and the rules use it to cap how many reports one user can file. Anonymising the field but not the ID would be a fix that looks complete and is not. Changing the ID scheme means changing that cap, which is a rules change, which means rules tests **and** a mutation pass — per `CLAUDE.md` §4.6, the accept case as much as the reject cases. Also update `docs/data-model.md` and consider adding `question_reports` to the data export, which today omits it.
+
+---
+
+### 6. Edit and delete your own submitted questions
+
+**Size: M. Status: ⬜**
+
+`/add-question` only creates. `firestore.rules` says `allow update, delete: if false` on `custom_questions`, so there is no in-app way to fix a typo in a question you wrote, and no way to withdraw one — the only route is emailing for a manual console removal. Recorded in `docs/known-gaps.md` since long before the policies were published; queued now because publishing them made the gap a _stated_ one.
+
+Both halves are one item because they share every hard part: the rules change, the ownership check, and the same two sentences of published policy.
+
+- **Rules.** `update` and `delete` both flip from `if false` to an ownership check — and ownership is `createdBy == request.auth.uid`, which is **absent on documents predating A10** and is the `[deleted-user]` sentinel on documents whose author has left. Neither can be edited by anyone, and the rules have to say so rather than crash into it. An `update` also has to re-run the full `isValidCustomQuestion()` validator and must not permit rewriting `createdBy` or `createdAt`.
+- **Interaction with item 4.** If review-before-publish lands first, an edit has to decide whether it re-enters review. Almost certainly yes, or editing becomes the way to bypass moderation — which makes this cheaper to build _after_ item 4 than before it.
+- **Interaction with the licence.** The Terms grant an **irrevocable** licence that survives account deletion, which is what lets a departed contributor's questions stay in the bank. A per-question delete is a permission granted to the user on top of that, not a limitation of it — but the Terms currently say withdrawal is impossible, so they have to be rewritten carefully enough that the two do not appear to contradict each other.
+
+**Policy impact — this PR is not done without it.** Shipping either half falsifies this sentence, which appears in both published documents:
+
+> There is currently no way to edit or withdraw a question from within the app; to have one removed, write to the address above.
+
+A **delete** additionally touches the Privacy Policy's retention list, which currently states that contributed questions stay in the bank indefinitely, and the Terms' account-deletion section. Update those, plus `LEGAL_LAST_UPDATED`, in the same PR.
+
+**Watch out for:** `CLAUDE.md` §4.6 — a rules change ships with rules tests covering the reject cases, then gets mutation-tested. The reject cases here are the interesting ones: editing someone else's question, editing an unattributed legacy document, editing a `[deleted-user]` document, and rewriting `createdBy` to steal or disown authorship.
+
 ---
 
 ## 4. Items considered and not queued
@@ -139,5 +200,11 @@ These are not engineering work; they are in `AUDIT_REMEDIATION.md` §7 with full
 - **Second run of the leaderboard migration** now that [#103](https://github.com/shermam/trivia/pull/103) has deployed — it sweeps up any score written into the old flat collection between the first run and the client switch going live. The script is idempotent and deletes nothing.
 - **Rotate the service-account key** used for that migration if it was pasted into a Codespaces secret.
 - **Add `functions-tests` to `main`'s branch ruleset** — it reports on every PR but does not block a merge until someone adds it under Settings → Rules.
-- **Legal review of [#37](https://github.com/shermam/trivia/pull/37)**, plus the outstanding legal questions and the Firestore region confirmation.
+- **A one-off professional review of the published policies.** They are live and in force, and the page's banner says plainly that no lawyer has read them. **The two open legal questions used to render as amber callouts on the live pages; they were moved here instead** ([#37](https://github.com/shermam/trivia/pull/37) review) — an unresolved-item notice is a message to the maintainer, and a reader cannot act on it, so its only effect on the page was to invite them to discount the rest of the document. Neither is unfinished work; both need judgement this repo cannot supply:
+  1. **Children under Brazilian law.** The Terms state a minimum age of 13 and the Privacy Policy gives a parent/guardian deletion route, with no age gate. LGPD treats under-12s as a separate category with stricter parental-consent requirements than that threshold, and the EU rules differ again by member state. Whether an actual age gate is needed is the question.
+  2. **Liability.** There is deliberately **no** numeric cap and no blanket warranty disclaimer — under Brazilian consumer law a clause excluding the supplier's liability is a nullity, and an unenforceable clause is worse than none because it marks the document as copy-pasted. Whether a cap is worth having, and in what form, is the question. Note that leaving it out is itself a choice, not an omission.
+
+  Everything else that was blocked on a decision has been decided, and everything blocked on a _feature_ was unblocked by the features shipping.
+
+- **Point the Stripe Billing Portal at `/privacy` and `/terms`** — newly possible now that both routes exist rather than falling through the `**` catch-all. Has to be done again on the live-mode configuration at go-live, since portal configurations do not cross Stripe modes.
 - **Stripe go-live checklist** — the deployed key is still `sk_test_…`, and portal configurations, webhook endpoints and public business details do not carry over from test mode. `docs/known-gaps.md` §6 has the full list.

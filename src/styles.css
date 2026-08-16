@@ -86,6 +86,108 @@
     0 4px 16px rgba(5, 150, 105, 0.1);
 }
 
+/* Long-form prose styling for the /privacy and /terms pages (see
+   BRAND_DESIGN_SYSTEM.md §2's type scale). Declared centrally as a utility —
+   same convention as the shadow tokens above — rather than as per-element
+   utility classes in those two templates: they are the app's only long-form
+   documents, and their value is being *readable as copy* in review, which
+   dozens of inline classes per paragraph actively works against. Everything
+   else in the app stays utility-class-only. */
+@utility prose-legal {
+  color: var(--color-slate-700);
+  line-height: 1.7;
+
+  h2 {
+    margin-block: 2rem 0.75rem;
+    font-size: 1.125rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-slate-900);
+  }
+
+  h3 {
+    margin-block: 1.5rem 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-slate-900);
+  }
+
+  h2:first-child {
+    margin-top: 0;
+  }
+
+  p {
+    margin-block: 0.75rem;
+  }
+
+  ul {
+    margin-block: 0.75rem;
+    padding-left: 1.25rem;
+    list-style: disc;
+  }
+
+  li {
+    margin-block: 0.375rem;
+  }
+
+  strong {
+    font-weight: 600;
+    color: var(--color-slate-900);
+  }
+
+  a {
+    color: var(--color-emerald-700);
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  table {
+    margin-block: 1rem;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  th,
+  td {
+    border: 1px solid var(--color-slate-200);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    background: var(--color-slate-50);
+    font-weight: 600;
+    color: var(--color-slate-900);
+  }
+}
+
+.dark .prose-legal {
+  color: var(--color-slate-300);
+
+  h2,
+  h3,
+  strong,
+  th {
+    color: var(--color-slate-50);
+  }
+
+  a {
+    color: var(--color-emerald-400);
+  }
+
+  th,
+  td {
+    border-color: rgb(255 255 255 / 0.1);
+  }
+
+  th {
+    background: rgb(255 255 255 / 0.04);
+  }
+}
+
 /* Tailwind's preflight resets button cursors to the browser default
    (`default`, i.e. the arrow) — restore the hand cursor app-wide. Placed in
    the base layer so any explicit disabled:cursor-* utility on a component

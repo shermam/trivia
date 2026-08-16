@@ -1,0 +1,371 @@
+<app-legal-page title="Privacy Policy">
+  <p>
+    Trivimind is a trivia game. This policy describes what information the app handles, why it
+    handles it, and who else sees it. Everything below about data was written by reading the
+    application's own source code, so it describes what the app actually does rather than what a
+    generic policy template assumes.
+  </p>
+  <p>
+    The short version: you can play without an account, the app has no analytics or advertising of
+    any kind, it sets no cookies, and nothing about you is sold or shared. The leaderboard and the
+    community question bank are <strong>public</strong> — everything else is not.
+  </p>
+
+  <h2>Who is responsible for your information</h2>
+  <p>
+    Trivimind is operated by <strong>TRIVIMIND TECNOLOGIA INOVA SIMPLES (I.S.)</strong>, a company
+    registered in Brazil under CNPJ <strong>68.278.108/0001-84</strong>. That company is the
+    controller of the information described here, and "we" throughout this policy means it.
+  </p>
+  <p>
+    For anything in this policy — a question, a correction, a request about your data, or a
+    complaint — write to
+    <a href="mailto:quizloop.trivia&#64;gmail.com">quizloop.trivia&#64;gmail.com</a>.
+  </p>
+
+  <h2>Information you give us</h2>
+
+  <h3>Playing without an account</h3>
+  <p>
+    The moment you open Trivimind, before you interact with anything, the app creates an
+    <strong>anonymous account</strong> for you. It is a random identifier with no personal
+    information attached to it. It exists so you can play and so your session survives closing the
+    tab. You are never asked to sign in to play.
+  </p>
+
+  <h3>Signing in</h3>
+  <p>
+    Signing in is optional. It is only needed to save a score to the public leaderboard, or to
+    subscribe to Pro. If you sign in from an anonymous session, that same account is upgraded rather
+    than a second one being created, so anything already saved carries over.
+  </p>
+  <ul>
+    <li>
+      <strong>Email and password.</strong> We store your email address, and whether it has been
+      verified — saving a score requires a verified address. Your password is handled entirely by
+      Firebase Authentication and never passes through our own code. If you ask for a password
+      reset, the reset email is sent by Firebase; we are told nothing about whether you opened it.
+    </li>
+    <li>
+      <strong>Google, Facebook, GitHub, Microsoft, Apple, Twitter/X or Yahoo.</strong> The provider
+      gives us your email address, your display name, and an account identifier. We request nothing
+      beyond that and never receive your password. Your browser only contacts the provider at the
+      moment you click one of these buttons — not on page load.
+    </li>
+    <li>
+      <strong>Display name.</strong> Optional and set by you. If you save a score, this name is
+      shown publicly on the leaderboard, so choose it accordingly.
+    </li>
+  </ul>
+
+  <h3>Questions you contribute</h3>
+  <p>
+    Pro subscribers can add questions to the shared question bank. The question text, the answers,
+    the category and the difficulty are <strong>published publicly</strong> and shown to every other
+    player. Your account identifier is stored alongside each question as its author. Treat anything
+    you submit as permanently public, and please don't put personal information about yourself or
+    anyone else into a question — see <a routerLink="/terms">the Terms</a> for what happens to
+    contributions if you later delete your account.
+  </p>
+  <p>
+    Submissions are published immediately, without review. There is currently no way to edit or
+    withdraw a question from within the app; to have one removed, write to the address above.
+  </p>
+
+  <h3>Reports you file about a question</h3>
+  <p>
+    Any signed-in player can flag a question and file a report. The report stores the question's
+    identifier, the reason you chose, anything you typed in the optional detail box, and your
+    account identifier. Reports are readable only by us — never by other players, and not through
+    the app at all.
+  </p>
+
+  <h2>Information created by using the app</h2>
+
+  <h3>Leaderboard entries — these are public</h3>
+  <p>
+    When you save a score we store your display name, the score, how many questions the game had,
+    the resulting percentage, and when you saved it.
+    <strong>The leaderboards are readable by anyone</strong>, including people who are not signed
+    in. There is a separate board for each time limit — 15 seconds, 30 seconds and no limit — so you
+    may hold up to one entry on each, and each keeps only your best score.
+  </p>
+
+  <h3>Subscription records</h3>
+  <p>
+    If you subscribe to Pro we store the status of your subscription, which plan and price it is
+    for, and whether it is set to cancel at the end of the period. This includes no card details —
+    see below.
+  </p>
+
+  <h2>Why we handle it, and on what basis</h2>
+  <p>
+    Where the GDPR, UK GDPR or Brazil's LGPD apply to you, these are the grounds we rely on. We do
+    not ask for consent for any of it, because none of it is the kind of processing that consent
+    would be the right basis for — there is no advertising, profiling or tracking here to consent
+    to.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>What we do</th>
+        <th>Why</th>
+        <th>Basis</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Create an account and keep you signed in</td>
+        <td>The app cannot run a game or save anything without one</td>
+        <td>Performance of a contract</td>
+      </tr>
+      <tr>
+        <td>Store and publish leaderboard entries</td>
+        <td>You asked us to publish that score</td>
+        <td>Performance of a contract</td>
+      </tr>
+      <tr>
+        <td>Take payment and manage a Pro subscription</td>
+        <td>Delivering the subscription you bought</td>
+        <td>Performance of a contract</td>
+      </tr>
+      <tr>
+        <td>Record who contributed each question</td>
+        <td>So an abuse report can be acted on, and so contributors can be credited</td>
+        <td>Legitimate interests</td>
+      </tr>
+      <tr>
+        <td>Keep and review reports about questions</td>
+        <td>Keeping a public, user-written question bank usable and lawful</td>
+        <td>Legitimate interests</td>
+      </tr>
+      <tr>
+        <td>Keep the question bank intact after an author leaves</td>
+        <td>Other players are actively drawing on it; removing it would break the game for them</td>
+        <td>Legitimate interests</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    <strong>No automated decision-making and no profiling.</strong> Nothing here makes a decision
+    about you automatically, and no profile of you is built.
+  </p>
+
+  <h2>Payments</h2>
+  <p>
+    Payments are processed entirely by
+    <a href="https://stripe.com" rel="noopener noreferrer" target="_blank">Stripe</a>.
+    <strong>We never see, receive or store your card number.</strong> When you first subscribe we
+    send Stripe your email address and an internal account identifier, so your subscription can be
+    matched to your Trivimind account. Everything after that — the payment form, the billing portal,
+    your saved payment methods — happens on Stripe's own systems under
+    <a href="https://stripe.com/privacy" rel="noopener noreferrer" target="_blank"
+      >Stripe's privacy policy</a
+    >.
+  </p>
+
+  <h2>What is stored on your device</h2>
+  <p><strong>Trivimind sets no cookies.</strong> It uses your browser's own storage instead:</p>
+  <ul>
+    <li>
+      <strong>Local storage</strong> — your light/dark theme preference, and your sign-in session
+      (managed by Firebase Authentication).
+    </li>
+    <li>
+      <strong>IndexedDB</strong> — up to 200 trivia questions you have already been served, so a
+      game can start with no network connection; and a snapshot of a game in progress, so a reload
+      or a crash doesn't lose it. The saved game is discarded after six hours. Neither contains
+      personal information beyond the game itself.
+    </li>
+    <li>
+      <strong>Service worker cache</strong> — the app's own files (scripts, styles, icons), so it
+      loads offline and can be installed to your home screen.
+    </li>
+  </ul>
+  <p>All of it is removed if you clear site data for this site in your browser.</p>
+
+  <h2>Who else your browser contacts</h2>
+  <p>
+    Using Trivimind necessarily reveals your IP address to the services below, as it would with any
+    website. There are no others: the app declares an explicit allow-list of every host it may talk
+    to, enforced by the browser.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th>What it does</th>
+        <th>When</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Google Firebase</td>
+        <td>Hosting, sign-in, database and server functions — the app's entire backend</td>
+        <td>Always</td>
+      </tr>
+      <tr>
+        <td>Open Trivia DB</td>
+        <td>Supplies the general trivia questions. We send it no information about you</td>
+        <td>When questions are fetched</td>
+      </tr>
+      <tr>
+        <td>Stripe</td>
+        <td>Payment and billing management</td>
+        <td>Only if you subscribe or manage billing</td>
+      </tr>
+      <tr>
+        <td>Your chosen sign-in provider</td>
+        <td>Authenticates you</td>
+        <td>Only at the moment you click that provider</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Fonts, scripts, styles and images are all served from Trivimind's own domain. Nothing is loaded
+    from a third-party CDN, so no font or asset request tells anyone else that you visited.
+  </p>
+
+  <h2>What we do not do</h2>
+  <p>
+    Trivimind has
+    <strong
+      >no analytics, no advertising, no tracking pixels and no third-party marketing tools</strong
+    >
+    of any kind. We do not sell your information, we do not share it for advertising, and we do not
+    build a profile of you. The services in the table above are there because the app cannot
+    function without them, not to observe you.
+  </p>
+
+  <h2>Where your information is stored</h2>
+  <p>
+    The database is hosted in Google Cloud's <strong>nam5</strong> multi-region, in the United
+    States. Firebase Authentication and the server functions are operated by Google and may process
+    data in the United States as well. Stripe processes payment data on its own infrastructure,
+    which is also primarily in the United States.
+  </p>
+  <p>
+    If you are in the European Economic Area, the United Kingdom or Brazil, this means your
+    information is transferred outside your country. Those transfers rely on the data-processing
+    terms and standard contractual clauses we have in place with Google and Stripe as our
+    processors. You can ask us for details of these at the contact address above.
+  </p>
+
+  <h2>How long we keep it</h2>
+  <p>
+    We would rather describe this accurately than quote a period we don't actually enforce. What is
+    true today:
+  </p>
+  <ul>
+    <li>
+      <strong>Your account, leaderboard entries and billing records</strong> are kept for as long as
+      your account exists. Delete your account and they go — see below.
+    </li>
+    <li>
+      <strong>Checkout and billing-portal records</strong> expire 24 hours after they are created
+      and are then deleted automatically. The sweep is best-effort, so treat 24 hours as the
+      earliest they go, not a guarantee of the latest.
+    </li>
+    <li>
+      <strong>A game saved in your browser</strong> is discarded after six hours; the offline
+      question pool is capped at 200 questions, oldest first.
+    </li>
+    <li>
+      <strong>Questions you contributed</strong> stay in the shared bank indefinitely, including
+      after you delete your account, with your authorship removed. This is the one place where
+      deletion is not complete, and it is deliberate — the reasoning is in the next section and in
+      <a routerLink="/terms">the Terms</a>.
+    </li>
+    <li>
+      <strong>Reports you file about a question</strong> are kept indefinitely, including your
+      account identifier, and are not removed when you delete your account. A report is a record
+      that something needed looking at; if it vanished when its author left, the abuse signal would
+      go with it.
+    </li>
+    <li>
+      <strong>Anonymous accounts</strong> that are never signed in to hold no personal information,
+      and no data of any kind is attached to them. Firebase deletes them automatically after 30 days
+      without activity.
+    </li>
+  </ul>
+
+  <h2>Your rights over your information</h2>
+  <p>
+    Two of the important ones are built into the app, in the account menu, and need no request to
+    us:
+  </p>
+  <ul>
+    <li>
+      <strong>Download my data</strong> gives you a JSON file containing your account details, your
+      leaderboard entries on every board, every question you have contributed, and your billing
+      records. It also lists what is deliberately not in it and why.
+    </li>
+    <li>
+      <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
+      record and the payment methods stored against it, deletes your leaderboard entries on every
+      board, deletes your billing records, and deletes your sign-in account itself.
+      <strong
+        >Questions you contributed are kept, with your authorship replaced by a
+        <code>[deleted-user]</code> marker.</strong
+      >
+      They are part of a bank other players are drawing on; what goes is the link between them and
+      you. This is irreversible, and there is no recovery period.
+    </li>
+  </ul>
+  <p>
+    Depending on where you live you may also have the right to ask us to correct information, to
+    restrict or object to how we use it, to receive it in a portable form, or to complain to a data
+    protection authority — in Brazil, the ANPD; in the EEA or UK, your national authority. To
+    exercise any of these, write to
+    <a href="mailto:quizloop.trivia&#64;gmail.com">quizloop.trivia&#64;gmail.com</a>. We aim to
+    reply within 15 days, which is the shortest deadline that applies to us.
+  </p>
+  <p>
+    You do not have to give us anything beyond an account to play. An email address is only required
+    if you want to save a score or subscribe.
+  </p>
+
+  <h2>Children</h2>
+  <p>
+    Trivimind is a general-audience game and is not directed at children. You must be
+    <strong>13 or older</strong> to use it, as set out in <a routerLink="/terms">the Terms</a>. We
+    do not knowingly collect information from anyone under 13, and there is no age verification —
+    the app asks for a date of birth nowhere.
+  </p>
+  <p>
+    If you are a parent or guardian and believe a child under 13 has created an account, write to
+    <a href="mailto:quizloop.trivia&#64;gmail.com">quizloop.trivia&#64;gmail.com</a> and we will
+    delete it and its data.
+  </p>
+  <h2>How your information is protected</h2>
+  <p>
+    Rather than describe this in adjectives, here is what is actually in place. Everything is served
+    over HTTPS only. Access to every record in the database is enforced by server-side rules, not by
+    the app's interface, so a request that bypasses the app entirely is refused the same way — your
+    billing records, for instance, are readable only by you, and reports are readable by nobody
+    through the app. Passwords are handled by Firebase Authentication and never reach our own code.
+    Payment card details never reach us at all. The app sends a strict Content Security Policy that
+    names every host the browser is allowed to contact and forbids being embedded in a frame by
+    anyone.
+  </p>
+  <p>
+    No system is perfectly secure, and we don't claim otherwise. If you find a security problem,
+    please tell us at
+    <a href="mailto:quizloop.trivia&#64;gmail.com">quizloop.trivia&#64;gmail.com</a> before
+    disclosing it publicly.
+  </p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    If this policy changes, the date at the top of this page changes with it. If a change materially
+    affects how your information is handled, we will say so on this page rather than change it
+    quietly. We do not currently email you about changes, because we do not send marketing email of
+    any kind and would rather not start.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    <a href="mailto:quizloop.trivia&#64;gmail.com">quizloop.trivia&#64;gmail.com</a> — for privacy
+    requests, content takedowns, security reports, or anything else about this policy.
+  </p>
+</app-legal-page>

@@ -22,7 +22,22 @@
 -->
 <p role="status" aria-live="polite" class="sr-only">{{ routeAnnouncer.message() }}</p>
 
-<!-- `tabindex="-1"` is what lets the skip link actually move focus here; without it the browser jumps the scroll position and leaves focus behind. -->
-<main id="main-content" tabindex="-1" class="focus:outline-none">
+<!--
+  `tabindex="-1"` is what lets the skip link actually move focus here; without
+  it the browser jumps the scroll position and leaves focus behind.
+
+  `min-h-screen` reserves the viewport while the lazily-loaded route is still
+  in flight, and it is load-bearing for the footer below rather than cosmetic.
+  Every route's own root is already `min-h-screen`, so this changes nothing
+  once a route has rendered — but until then `<main>` is zero-high, so the
+  footer painted directly under the top bar and was then shoved a full
+  viewport down when the route arrived. Measured: that single shift scored
+  0.113 of a 0.178 CLS and took Lighthouse performance from 0.89 to 0.80,
+  against a 0.85 threshold.
+-->
+<main id="main-content" tabindex="-1" class="min-h-screen focus:outline-none">
   <router-outlet />
 </main>
+@if (!embedMode.isEmbedded()) {
+  <app-footer />
+}
