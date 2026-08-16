@@ -136,17 +136,23 @@ Update `privacy-policy.component.html` (the "Questions you contribute" section),
 
 Found while writing the Privacy Policy from source (H2, [#37](https://github.com/shermam/trivia/pull/37)), which is the only exercise that asks "what is actually left after deletion?" of every collection in turn.
 
-**This is not obviously a bug**, which is why it is a decision rather than a fix. A report is a record that something needed looking at, and an abuse signal that evaporates the moment its author deletes their account is worth much less — a bad actor could file harassing reports and erase the trail by deleting an account they can recreate in one click. The policy currently discloses the behaviour and justifies it on that ground.
+It is not obviously a bug — an abuse signal that evaporates the moment its author deletes their account is worth much less, and a bad actor could file harassing reports and then erase the trail by deleting an account they can recreate in one click. But **nobody chose it**, and the account-deletion path is otherwise careful and deliberate about exactly this question.
 
-What makes it worth queueing anyway is that **nobody chose it.** It is the one place where deletion is quietly less complete than the surrounding code implies, and the account-deletion path is otherwise careful and deliberate about exactly this question. Three options, roughly in order of preference:
+**Decided, on review of [#37](https://github.com/shermam/trivia/pull/37): anonymise, on two conditions.** Lean towards what regulation prefers — erasure — while keeping the signal for as long as it is actually useful. A report's reporter identifier is anonymised when **both** of these are true:
 
-1. **Endorse it** — keep the uid, and add `question_reports` to the data export so a user can at least see what is held about them. Cheapest, and closes the "less complete than it looks" objection without losing the signal.
-2. **Anonymise on deletion** — replace `reportedBy` with the same `[deleted-user]` sentinel `custom_questions` uses. Consistent with the existing design, but the uid is still in the document ID, so the ID scheme would have to change too, and it is load-bearing for the volume cap.
-3. **Delete outright** — simplest to explain, loses the most.
+1. the reporter has deleted their account, **and**
+2. the report has been reviewed.
 
-Whichever is chosen, `docs/data-model.md`, the Privacy Policy's retention section and its `<app-review-required>` note all have to move together.
+Condition 2 is what makes this better than anonymising on deletion alone: an unreviewed report still needs its author, because triaging it may mean looking at what else that account filed. Once it has been reviewed, the identifier has done its job and keeping it is retention without a purpose — which is the thing LGPD art 18(IV) and GDPR's storage-limitation principle both push against.
 
-**Watch out for:** the document ID is `{window}-{slot}-{uid}` and the rules use it to cap how many reports one user can file. Changing the ID scheme means changing that cap, which is a rules change, which means rules tests **and** a mutation pass — and per `CLAUDE.md` §4.6, the accept case as much as the reject cases.
+**None of this exists yet**, and the Privacy Policy deliberately describes today's behaviour instead: reports are kept indefinitely, including the reporter's identifier, with the accountability reason given. Update that section in the same PR that ships the change.
+
+Two things this needs that do not exist today:
+
+- **A notion of "reviewed".** `question_reports` has no status field, and review is console-only. This is really the first piece of moderation tooling, so it may want to land with — or after — item 4.
+- **A way to run the anonymisation.** Both conditions can become true in either order (a report is reviewed after its author left; an author leaves after their report was reviewed), so `deleteAccount` alone is not enough. It needs either a check at both points or a sweep.
+
+**Watch out for:** the uid is in the document **ID** as well as the `reportedBy` field — the ID is `{window}-{slot}-{uid}` and the rules use it to cap how many reports one user can file. Anonymising the field but not the ID would be a fix that looks complete and is not. Changing the ID scheme means changing that cap, which is a rules change, which means rules tests **and** a mutation pass — per `CLAUDE.md` §4.6, the accept case as much as the reject cases. Also update `docs/data-model.md` and consider adding `question_reports` to the data export, which today omits it.
 
 ---
 
@@ -194,7 +200,11 @@ These are not engineering work; they are in `AUDIT_REMEDIATION.md` §7 with full
 - **Second run of the leaderboard migration** now that [#103](https://github.com/shermam/trivia/pull/103) has deployed — it sweeps up any score written into the old flat collection between the first run and the client switch going live. The script is idempotent and deletes nothing.
 - **Rotate the service-account key** used for that migration if it was pasted into a Codespaces secret.
 - **Add `functions-tests` to `main`'s branch ruleset** — it reports on every PR but does not block a merge until someone adds it under Settings → Rules.
-- **A one-off professional review of the published policies.** They are live and in force, and the page says plainly that no lawyer has read them. Three passages are still marked: whether a report should keep the reporter's identifier, whether Brazil's under-12 rule needs an actual age gate rather than a stated minimum age of 13, and whether a liability cap is worth having. Everything else that was blocked on a decision has been decided, and everything blocked on a _feature_ was unblocked by the features shipping.
+- **A one-off professional review of the published policies.** They are live and in force, and the page's banner says plainly that no lawyer has read them. **The two open legal questions used to render as amber callouts on the live pages; they were moved here instead** ([#37](https://github.com/shermam/trivia/pull/37) review) — an unresolved-item notice is a message to the maintainer, and a reader cannot act on it, so its only effect on the page was to invite them to discount the rest of the document. Neither is unfinished work; both need judgement this repo cannot supply:
+  1. **Children under Brazilian law.** The Terms state a minimum age of 13 and the Privacy Policy gives a parent/guardian deletion route, with no age gate. LGPD treats under-12s as a separate category with stricter parental-consent requirements than that threshold, and the EU rules differ again by member state. Whether an actual age gate is needed is the question.
+  2. **Liability.** There is deliberately **no** numeric cap and no blanket warranty disclaimer — under Brazilian consumer law a clause excluding the supplier's liability is a nullity, and an unenforceable clause is worse than none because it marks the document as copy-pasted. Whether a cap is worth having, and in what form, is the question. Note that leaving it out is itself a choice, not an omission.
+
+  Everything else that was blocked on a decision has been decided, and everything blocked on a _feature_ was unblocked by the features shipping.
+
 - **Point the Stripe Billing Portal at `/privacy` and `/terms`** — newly possible now that both routes exist rather than falling through the `**` catch-all. Has to be done again on the live-mode configuration at go-live, since portal configurations do not cross Stripe modes.
-- **Settle the C3 contradiction.** `AUDIT_REMEDIATION.md` §7's anonymous-auto-deletion row asserts both that the setting is on and that it is off, on the same date. One `GET` on the Identity Platform config endpoint resolves it. The Privacy Policy deliberately claims nothing about anonymous-account retention until it is resolved.
 - **Stripe go-live checklist** — the deployed key is still `sk_test_…`, and portal configurations, webhook endpoints and public business details do not carry over from test mode. `docs/known-gaps.md` §6 has the full list.

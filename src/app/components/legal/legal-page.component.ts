@@ -48,8 +48,7 @@ import {
                 This document applies to your use of the service today, and everything it says about
                 what the app does with your information was written by reading the application's own
                 source code — so it describes real behaviour rather than what a template assumes.
-                What it has not had is a professional legal review, and a few passages marked
-                <strong>Review required</strong> are waiting on one. If you spot something wrong,
+                What it has not had is a professional legal review. If you spot something wrong,
                 unclear, or missing, please write to
                 <a
                   [href]="'mailto:' + contactEmail"

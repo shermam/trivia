@@ -108,6 +108,22 @@ describe('legal pages', () => {
         expect(notice?.textContent).toContain('not yet reviewed by a lawyer');
       });
 
+      it('carries no unresolved-item callouts, and no banner claim of any', async () => {
+        const el = await render(component);
+        const body = el.querySelector('.prose-legal');
+
+        // Open questions live in BACKLOG.md §5, not on a page a reader cannot
+        // act on. These two assertions are a pair on purpose: the banner used
+        // to say "a few passages marked Review required are waiting on one",
+        // so removing the callouts without editing the banner would leave the
+        // page pointing at markers that no longer exist — true of neither
+        // state, and exactly the kind of half-finished edit that reads as
+        // finished.
+        expect(body?.querySelector('app-review-required')).toBe(null);
+        expect(body?.textContent).not.toContain('Review required');
+        expect(el.textContent).not.toContain('Review required');
+      });
+
       it('does not describe itself as a draft', async () => {
         const el = await render(component);
 

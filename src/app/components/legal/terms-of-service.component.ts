@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { LegalPageComponent } from './legal-page.component';
-import { ReviewRequiredComponent } from './review-required.component';
 
 // No `RouterLink` here, unlike the Privacy Policy: this template links out to
 // nothing. Angular reports an unused import as NG8113, which is a *warning*
@@ -9,7 +8,7 @@ import { ReviewRequiredComponent } from './review-required.component';
 @Component({
   selector: 'app-terms-of-service',
   standalone: true,
-  imports: [LegalPageComponent, ReviewRequiredComponent],
+  imports: [LegalPageComponent],
   templateUrl: './terms-of-service.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

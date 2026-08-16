@@ -3,9 +3,18 @@
  *
  * These documents were drafted from what the application verifiably does —
  * every factual claim about data handling was written by reading the source,
- * not from a template. What could *not* be derived from source is anything
- * requiring legal judgement, and those passages are marked inline with
- * `<app-review-required>`.
+ * not from a template.
+ *
+ * What could *not* be derived from source is anything requiring legal
+ * judgement. Those passages were originally marked inline with an
+ * `<app-review-required>` callout rendered on the page; that component is
+ * gone. **The open questions did not go with it** — they moved to
+ * `BACKLOG.md` §5, which is where work needing a human already lives. The
+ * reasoning is that an unresolved-item notice is a message to the
+ * maintainer, and the live page is the wrong place to hold a maintainer's
+ * to-do list: a reader cannot act on it, and it invites them to discount the
+ * rest of the document. The page-level banner still discloses the one thing
+ * a reader genuinely needs — that no lawyer has reviewed this.
  *
  * **Keeping them true is part of changing the app.** A policy that misstates
  * its own product is worse than one with gaps: a gap is honest, a stale claim
