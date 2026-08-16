@@ -1,7 +1,12 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
-import { LEGAL_ATTRIBUTION_URL, LEGAL_IS_DRAFT, LEGAL_LAST_UPDATED } from './legal';
+import {
+  LEGAL_ATTRIBUTION_URL,
+  LEGAL_AWAITING_PROFESSIONAL_REVIEW,
+  LEGAL_CONTACT_EMAIL,
+  LEGAL_LAST_UPDATED,
+} from './legal';
 
 /**
  * Shared shell for /privacy and /terms: page chrome, the draft banner, and
@@ -30,21 +35,28 @@ import { LEGAL_ATTRIBUTION_URL, LEGAL_IS_DRAFT, LEGAL_LAST_UPDATED } from './leg
           </h1>
           <p class="text-sm text-slate-500 dark:text-slate-400">Last updated: {{ lastUpdated }}</p>
 
-          @if (isDraft) {
+          @if (awaitingReview) {
             <div
-              role="alert"
+              role="note"
               class="mt-6 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3.5 dark:border-amber-500/30 dark:bg-amber-500/10"
             >
               <p class="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200">
                 <app-icon name="triangle-alert" [size]="17" class="shrink-0" />
-                Draft — not legally reviewed
+                In force, but not yet reviewed by a lawyer
               </p>
               <p class="mt-1 text-sm text-amber-900/90 dark:text-amber-200/90">
-                This document is a working draft. The descriptions of what data the app collects and
-                where it goes were written from the application's source code and are accurate to
-                the best of our knowledge, but the passages marked
-                <strong>Review required</strong> are unresolved and nothing here has been checked by
-                a lawyer. Don't rely on it yet.
+                Trivimind is run by one person. This document applies to your use of the service
+                today, and everything it says about what the app does with your information was
+                written by reading the application's own source code — so it describes real
+                behaviour rather than what a template assumes. What it has not had is a professional
+                legal review, and a few passages marked <strong>Review required</strong> are waiting
+                on one. If you spot something wrong, unclear, or missing, please write to
+                <a
+                  [href]="'mailto:' + contactEmail"
+                  class="font-semibold underline underline-offset-2"
+                  >{{ contactEmail }}</a
+                >
+                — that is genuinely useful and it will be fixed.
               </p>
             </div>
           }
@@ -81,7 +93,8 @@ import { LEGAL_ATTRIBUTION_URL, LEGAL_IS_DRAFT, LEGAL_LAST_UPDATED } from './leg
 export class LegalPageComponent {
   readonly title = input.required<string>();
 
-  protected readonly isDraft = LEGAL_IS_DRAFT;
+  protected readonly awaitingReview = LEGAL_AWAITING_PROFESSIONAL_REVIEW;
   protected readonly lastUpdated = LEGAL_LAST_UPDATED;
   protected readonly attributionUrl = LEGAL_ATTRIBUTION_URL;
+  protected readonly contactEmail = LEGAL_CONTACT_EMAIL;
 }

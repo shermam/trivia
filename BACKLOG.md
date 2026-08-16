@@ -27,12 +27,13 @@ Two additions specific to this queue:
 
 Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 
-| #   | Item                                                                  | Size | Status |
-| --- | --------------------------------------------------------------------- | ---- | ------ |
-| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                | M    | 🟡     |
-| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)          | L    | ⬜     |
-| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions) | M    | ⬜     |
-| 4   | [Review before publish](#4-review-before-publish)                     | L    | ⬜     |
+| #   | Item                                                                             | Size | Status |
+| --- | -------------------------------------------------------------------------------- | ---- | ------ |
+| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                           | M    | 🟡     |
+| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                     | L    | ⬜     |
+| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)            | M    | ⬜     |
+| 4   | [Review before publish](#4-review-before-publish)                                | L    | ⬜     |
+| 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion) | S    | ⬜     |
 
 ### Why this order
 
@@ -117,7 +118,29 @@ Reserved rather than deferred: it is a product feature, recorded in `AUDIT_REMED
 
 ---
 
-## 4. Items considered and not queued
+### 5. Report retention vs. account deletion
+
+**Size: S. Status: ⬜**
+
+`question_reports` stores the reporter's uid in the `reportedBy` field **and** repeats it inside the document ID (`firestore.rules`). `deleteAccount` never touches the collection — `question_reports` appears nowhere in `functions/src/`. So deleting your account leaves your identifier behind in every report you ever filed, in two places.
+
+Found while writing the Privacy Policy from source (H2, [#37](https://github.com/shermam/trivia/pull/37)), which is the only exercise that asks "what is actually left after deletion?" of every collection in turn.
+
+**This is not obviously a bug**, which is why it is a decision rather than a fix. A report is a record that something needed looking at, and an abuse signal that evaporates the moment its author deletes their account is worth much less — a bad actor could file harassing reports and erase the trail by deleting an account they can recreate in one click. The policy currently discloses the behaviour and justifies it on that ground.
+
+What makes it worth queueing anyway is that **nobody chose it.** It is the one place where deletion is quietly less complete than the surrounding code implies, and the account-deletion path is otherwise careful and deliberate about exactly this question. Three options, roughly in order of preference:
+
+1. **Endorse it** — keep the uid, and add `question_reports` to the data export so a user can at least see what is held about them. Cheapest, and closes the "less complete than it looks" objection without losing the signal.
+2. **Anonymise on deletion** — replace `reportedBy` with the same `[deleted-user]` sentinel `custom_questions` uses. Consistent with the existing design, but the uid is still in the document ID, so the ID scheme would have to change too, and it is load-bearing for the volume cap.
+3. **Delete outright** — simplest to explain, loses the most.
+
+Whichever is chosen, `docs/data-model.md`, the Privacy Policy's retention section and its `<app-review-required>` note all have to move together.
+
+**Watch out for:** the document ID is `{window}-{slot}-{uid}` and the rules use it to cap how many reports one user can file. Changing the ID scheme means changing that cap, which is a rules change, which means rules tests **and** a mutation pass — and per `CLAUDE.md` §4.6, the accept case as much as the reject cases.
+
+---
+
+## 6. Items considered and not queued
 
 Recorded so they are not silently re-proposed.
 
@@ -132,12 +155,14 @@ Recorded so they are not silently re-proposed.
 
 ---
 
-## 5. Blocked on a human
+## 7. Blocked on a human
 
 These are not engineering work; they are in `AUDIT_REMEDIATION.md` §7 with full instructions. Repeated here because they are the things a session cannot do for itself:
 
 - **Second run of the leaderboard migration** now that [#103](https://github.com/shermam/trivia/pull/103) has deployed — it sweeps up any score written into the old flat collection between the first run and the client switch going live. The script is idempotent and deletes nothing.
 - **Rotate the service-account key** used for that migration if it was pasted into a Codespaces secret.
 - **Add `functions-tests` to `main`'s branch ruleset** — it reports on every PR but does not block a merge until someone adds it under Settings → Rules.
-- **Legal review of [#37](https://github.com/shermam/trivia/pull/37)**, plus the outstanding legal questions and the Firestore region confirmation.
+- **A one-off professional review of the published policies.** They are live and in force, and the page says plainly that no lawyer has read them. Three passages are still marked: whether a report should keep the reporter's identifier, whether Brazil's under-12 rule needs an actual age gate rather than a stated minimum age of 13, and whether a liability cap is worth having. Everything else that was blocked on a decision has been decided, and everything blocked on a _feature_ was unblocked by the features shipping.
+- **Point the Stripe Billing Portal at `/privacy` and `/terms`** — newly possible now that both routes exist rather than falling through the `**` catch-all. Has to be done again on the live-mode configuration at go-live, since portal configurations do not cross Stripe modes.
+- **Settle the C3 contradiction.** `AUDIT_REMEDIATION.md` §7's anonymous-auto-deletion row asserts both that the setting is on and that it is off, on the same date. One `GET` on the Identity Platform config endpoint resolves it. The Privacy Policy deliberately claims nothing about anonymous-account retention until it is resolved.
 - **Stripe go-live checklist** — the deployed key is still `sk_test_…`, and portal configurations, webhook endpoints and public business details do not carry over from test mode. `docs/known-gaps.md` §6 has the full list.
