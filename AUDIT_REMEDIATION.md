@@ -464,7 +464,7 @@ The planned design held on two points and was dropped on a third.
 
 ---
 
-### What G7 actually shipped
+### What G7 actually shipped ([#101](https://github.com/shermam/trivia/pull/101), [#103](https://github.com/shermam/trivia/pull/103))
 
 **Two PRs, because the deploy order forced it.** Rules reach production before the client that matches them (`ci-cd.md` §4.2), so adding the boards and switching the client in one change would have left a window where a cached client wrote to a collection the new rules had moved past. #101 added the boards and the migration with the old collection untouched; the owner ran the migration; the second PR moved the client and closed the old collection. Nothing was unavailable in between, which is the only reason to split a feature this way.
 
