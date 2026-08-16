@@ -43,11 +43,10 @@ export const LEGAL_LAST_UPDATED = '16 August 2026';
  * The single published contact route, used by both documents for privacy
  * requests, content takedowns, refunds and everything else.
  *
- * One address rather than four role addresses: a solo operator will actually
- * read one inbox, and GDPR Art 13(1)(a) asks for "contact details", not a
- * postal address. It has to keep working — a published address that bounces
- * is worse than no address, because several sections here promise a reply to
- * it.
+ * One address rather than four role addresses: one inbox actually gets read,
+ * and GDPR Art 13(1)(a) asks for "contact details", not a postal address. It
+ * has to keep working — a published address that bounces is worse than no
+ * address, because several sections here promise a reply to it.
  */
 export const LEGAL_CONTACT_EMAIL = 'quizloop.trivia@gmail.com';
 
