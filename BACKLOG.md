@@ -29,7 +29,7 @@ Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 
 | #   | Item                                                                  | Size | Status |
 | --- | --------------------------------------------------------------------- | ---- | ------ |
-| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                | S    | ⬜     |
+| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                | M    | 🟡     |
 | 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)          | L    | ⬜     |
 | 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions) | M    | ⬜     |
 | 4   | [Review before publish](#4-review-before-publish)                     | L    | ⬜     |
@@ -49,16 +49,18 @@ The two rules driving it are _don't write code twice_ and _don't rewrite on a su
 
 ### 1. Coverage & hygiene sweep
 
-**Size: S. Status: ⬜**
+**Size: S → M. Status: 🟡 in progress** — the lint half is done; the two Cypress items and the icon remain.
 
 Close what B11 exposed, plus the small accumulated items in `docs/known-gaps.md` that have no reason to keep waiting.
 
-- **Lint `cypress/` and `functions/`.** `ng lint`'s `lintFilePatterns` in `angular.json` is `src/**/*.ts` and `src/**/*.html`, so neither directory is linted today — including `functions/`, which is the code that actually ships to the Cloud Functions runtime. Both need their own flat-config entry in `eslint.config.js` with `projectService` wiring against their own `tsconfig`, and `cypress/` additionally needs the Cypress globals. Expect this to find real defects: F2 found 25 the first time ESLint was pointed at `src/`.
+- ~~**Lint `cypress/` and `functions/`.**~~ ✅ [#106](https://github.com/shermam/trivia/pull/106) — three config blocks, the Angular set narrowed to `src/`, and a `tsc --noEmit` over `cypress/` added to `lint.yml` after it turned out nothing had ever typechecked that tree. Mutation-verified in all four blocks with a type-aware rule. **Still unlinted and deliberately excluded**: `firestore-tests/` (also untypechecked — Vitest transpiles without checking, exactly the position `cypress/` was in) and `scripts/` (plain `.mjs`, no tsconfig, so it wants a JS-flavoured block rather than a type-aware one). Both are small; they were left out to keep one PR reviewable, not because they are fine.
 - **Close the e2e blind spot around persistence.** `game-resume.cy.ts` (added by [#104](https://github.com/shermam/trivia/pull/104)) is the only spec that reloads mid-game. It should not be the only one — reload on `/game-over`, and resume via the setup screen's banner rather than only via the `/play` route, are both untested paths through the same feature.
 - **Clear IndexedDB between tests.** `cy.resetBackend()` resets the Firebase emulators and nothing else, and Cypress's test isolation does not clear IndexedDB — so a saved game, the offline question pool and the theme all leak from one test into the next. Nothing has broken because of it yet, which is precisely the state in which to fix it: the failure it produces is order-dependent and would be blamed on anything but the real cause.
 - **A `maskable` icon variant.** Every entry in `public/manifest.webmanifest` is `purpose: "any"`, so Android's adaptive-icon mask crops the Trivimind glyph, which was not drawn with a safe zone. Needs a padded variant, not a manifest edit.
 
-**Watch out for:** the two lint entries are the risky part, not the volume of fixes. Type-aware linting over a second `tsconfig` is where `projectService` misconfiguration silently lints nothing — confirm each entry actually reports by breaking a rule on purpose in each directory, the same discipline the rules tests use. A lint config that covers a directory in name only is worse than not claiming to cover it.
+**Watch out for:** ~~the two lint entries are the risky part~~ — settled, and the warning was right for a reason slightly different from the one written down. `projectService` did resolve all three trees with no `project` array needed, so the feared silent no-op never happened; what it hid instead was **`cypress/tsconfig.json` being inert config**, loaded by nothing, with a live type error in it. The general lesson survives intact: a config that claims to cover a directory has to be shown doing it. Every block was mutation-probed with a _type-aware_ rule specifically, because a syntactic rule passes whether or not the project service resolved anything.
+
+The remaining risk sits with the two Cypress items, and it is a different one: **`npm run e2e` cannot be run from the cloud sandbox** — `download.cypress.io` is a 403 policy denial at the network gateway, so the binary cannot be installed. Everything else in the gate runs there now (`npm test`, `functions:test`, `rules:test` with the JDK 21 that is present, `lighthouse` with `CHROME_PATH` pointed at the Playwright Chromium, `build:prod`, `lint`, `format:check`). Spec changes therefore either go to a machine that can run Cypress, or are driven through CI — and B11 is the standing argument for the former: three CI rounds of inference lost to what one local `console.log` answered.
 
 ### 2. Firestore client SDK → REST
 

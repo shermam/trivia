@@ -76,7 +76,9 @@ describe('choosing a time limit', () => {
 
   it('carries the choice through to the board named at game over', () => {
     startWith('unlimited');
-    questionsFixture.results.forEach((q) => cy.answerQuestion(q.correct_answer));
+    questionsFixture.results.forEach((q) => {
+      cy.answerQuestion(q.correct_answer);
+    });
 
     cy.location('pathname').should('eq', '/game-over');
     cy.contains('Game Over!');

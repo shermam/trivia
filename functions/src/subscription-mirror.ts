@@ -5,7 +5,14 @@ import type Stripe from 'stripe';
  * from `customers/{uid}/subscriptions/{id}`. A `type`, not an `interface`, so
  * it picks up the implicit index signature `setIfNotStale`'s
  * `Record<string, unknown>` parameter needs.
+ *
+ * `consistent-type-definitions` disagrees, and its autofix does not compile:
+ * an `interface` has no implicit index signature, so `subscriptions.ts:34`
+ * fails with TS2345 the moment this becomes one. Verified by making the
+ * change and running `tsc --noEmit`. Disabled at the line rather than for the
+ * package, so the rule keeps applying everywhere it is right.
  */
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- see above: an interface breaks the Record<string, unknown> call site
 export type SubscriptionMirrorDoc = {
   status: Stripe.Subscription.Status;
   role: string | null;

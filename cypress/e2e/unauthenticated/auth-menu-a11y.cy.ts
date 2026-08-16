@@ -76,7 +76,9 @@ describe('auth menu accessibility (G1, G2)', () => {
   // it, not to the top bar, or closing teleports the user across the page.
   it('returns focus to the opener when the menu was opened from elsewhere', () => {
     cy.startGame(5);
-    CORRECT_ANSWERS.forEach((answer) => cy.answerQuestion(answer));
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
     cy.location('pathname').should('eq', '/game-over');
 
     // By data-cy, not by text: the top bar's own trigger also reads "Sign in"
