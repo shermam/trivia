@@ -73,3 +73,14 @@ jobs:
 
       - name: Typecheck the Cypress suite
         run: npm run typecheck:cypress
+
+      # Measures the committed PNGs against the `purpose` the manifest
+      # declares for them. Here for the same reason as the typecheck: nothing
+      # else in the pipeline can catch it. Lighthouse dropped its PWA category
+      # in v12, so there is no `maskable-icon` audit any more, and a wrong
+      # `purpose` renders perfectly everywhere except an Android home screen.
+      # Pure Node — no browser, no image library — so it costs about a second.
+      # Generating the icons needs Chromium; checking them does not, which is
+      # what lets the check run here at all.
+      - name: Verify PWA icons match their declared purpose
+        run: npm run icons:verify
