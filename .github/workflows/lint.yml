@@ -1,7 +1,13 @@
+# The name is now narrower than what this workflow does — it also typechecks
+# — and is left alone deliberately. `lint` is a *required* check in main's
+# ruleset, and a required context can be stored with the workflow name as a
+# disambiguator, so renaming risks silently detaching the requirement and
+# letting PRs merge unchecked. That is a real downside against a cosmetic
+# gain. Same family of mistake as the job-name warning below.
 name: Lint & Format
 
-# Static checks — Prettier formatting and ESLint — on every PR targeting
-# main, plus main itself as a safety net.
+# Static checks — Prettier formatting, ESLint, and the Cypress typecheck — on
+# every PR targeting main, plus main itself as a safety net.
 #
 # Its own workflow rather than extra steps inside unit-tests.yml, matching
 # this repo's one-workflow-per-concern convention (see the same reasoning in
@@ -11,9 +17,23 @@ name: Lint & Format
 # surface on the same push rather than the first hiding the second; and the
 # red check names the actual problem without anyone opening the log.
 #
-# Both checks live in one job on purpose — they're a single "does this code
-# meet the bar" question, and splitting them would pay for a second `npm ci`
-# to tell us something a step name already makes obvious.
+# All three checks live in one job on purpose — they're a single "does this
+# code meet the bar" question, and splitting them would pay for another
+# `npm ci` to tell us something a step name already makes obvious.
+#
+# The typecheck was added here rather than as a fourth workflow, which is a
+# deliberate exception to working rule 6 in AUDIT_REMEDIATION.md §3, for a
+# reason that only applies to an already-required check: `lint` is in main's
+# ruleset today, so a step added here gates a merge immediately, while a new
+# workflow reports without blocking until an admin adds it — the state
+# `functions-tests` has been sitting in. Making a check real today beat
+# making it tidy and inert.
+#
+# It covers `cypress/` alone because that is the only tree nothing else
+# typechecks: `src/` goes through `ng build`/`ng test`, and `functions/`
+# through the `tsc` that `functions:test` runs first. `cypress/tsconfig.json`
+# was referenced by no script and no CI step until now, and was hiding a real
+# error when it was finally run.
 on:
   pull_request:
     branches: [main]
@@ -50,3 +70,6 @@ jobs:
 
       - name: Lint (ESLint + angular-eslint)
         run: npm run lint
+
+      - name: Typecheck the Cypress suite
+        run: npm run typecheck:cypress

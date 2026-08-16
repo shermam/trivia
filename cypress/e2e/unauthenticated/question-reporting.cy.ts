@@ -237,7 +237,9 @@ describe('reporting a community question', () => {
 
     // Everything from the game is offered here, flagged or not.
     cy.get('[data-cy="report-dialog"]').within(() => {
-      customQuestions.forEach((q) => cy.contains(q.question));
+      customQuestions.forEach((q) => {
+        cy.contains(q.question);
+      });
     });
 
     // Focus lands on the dialog itself, so it is announced with its title
@@ -331,7 +333,9 @@ describe('reporting a community question', () => {
     // An Open Trivia DB question is not ours to moderate, so it gets no flag
     // either — the affordance is absent from the quiz loop, not just disabled.
     cy.get('[data-cy="flag-question"]').should('not.exist');
-    questionsFixture.results.forEach((q) => cy.answerQuestion(q.correct_answer));
+    questionsFixture.results.forEach((q) => {
+      cy.answerQuestion(q.correct_answer);
+    });
     cy.location('pathname').should('eq', '/game-over');
     cy.contains('Game Over!');
     cy.contains('Questions you flagged').should('not.exist');

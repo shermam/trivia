@@ -40,7 +40,9 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.contains(`Question 2 / ${CORRECT_ANSWERS.length}`);
     cy.contains('Score: 0');
 
-    restCorrect.forEach((answer) => cy.answerQuestion(answer));
+    restCorrect.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
 
     cy.location('pathname').should('eq', '/game-over');
     cy.contains(`${restCorrect.length} / ${CORRECT_ANSWERS.length}`);

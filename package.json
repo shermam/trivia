@@ -29,6 +29,7 @@
     "lighthouse:runner": "lhci autorun --config=./lighthouserc.json",
     "lighthouse": "npm run build:lighthouse && npm run lighthouse:config && npx --yes firebase-tools@13 emulators:exec --config firebase.lighthouse.json --project demo-trivia-app-e2e --only hosting,auth,firestore \"npm run lighthouse:runner\"",
     "lint": "ng lint",
+    "typecheck:cypress": "tsc -p cypress/tsconfig.json --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lighthouse:config": "node scripts/make-lighthouse-firebase-config.mjs"

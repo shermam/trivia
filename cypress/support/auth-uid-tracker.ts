@@ -46,6 +46,22 @@ function seen(): Set<string> {
 const INSTALLED_FLAG = '__triviaAuthUidTrackerInstalled';
 
 /**
+ * A real browser window, as opposed to the `Window` *interface*.
+ *
+ * The distinction is not pedantry: `lib.dom.d.ts` declares the global
+ * constructors (`Storage`, `Response`, `URL`) as `var`s in the global scope,
+ * not as members of `interface Window` — so `win.Storage` is a type error on a
+ * bare `Window` even though it is always there at runtime. Cypress hands these
+ * functions a `Cypress.AUTWindow`, which is `Window & typeof globalThis`, so
+ * the widened type is what was actually being passed all along.
+ *
+ * Nothing caught this because nothing typechecked `cypress/`: its `tsconfig`
+ * was referenced by no script and no CI step, so it was inert config. It is
+ * loaded now — by type-aware lint, and by `npm run typecheck:cypress`.
+ */
+type BrowserWindow = Window & typeof globalThis;
+
+/**
  * Wraps `Storage.prototype.setItem` for this window so every persisted uid is
  * recorded.
  *
@@ -59,7 +75,7 @@ const INSTALLED_FLAG = '__triviaAuthUidTrackerInstalled';
  * instrumenting a failing run rather than by reading the code, because both
  * forms behave identically in an ordinary page.
  */
-export function installAuthUidTracker(win: Window): void {
+export function installAuthUidTracker(win: BrowserWindow): void {
   const storagePrototype = win.Storage?.prototype as
     (Storage & { [INSTALLED_FLAG]?: boolean }) | undefined;
   if (!storagePrototype || storagePrototype[INSTALLED_FLAG]) {
@@ -83,7 +99,7 @@ export function installAuthUidTracker(win: Window): void {
  * restores the session from storage without writing it again, so `setItem`
  * alone would never see it.
  */
-export function rememberExistingUid(win: Window): void {
+export function rememberExistingUid(win: BrowserWindow): void {
   for (const key of Object.keys(win.localStorage)) {
     if (key.startsWith(FIREBASE_AUTH_KEY_PREFIX)) {
       rememberUidFrom(win.localStorage.getItem(key));

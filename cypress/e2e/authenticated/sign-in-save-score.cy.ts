@@ -31,7 +31,9 @@ describe('verified user saves a score to the leaderboard', () => {
     });
 
     cy.startGame(5);
-    CORRECT_ANSWERS.forEach((answer) => cy.answerQuestion(answer));
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
     cy.location('pathname').should('eq', '/game-over');
 
     // Anonymous at game-over: prompted to sign in instead of the save form.
@@ -51,7 +53,9 @@ describe('verified user saves a score to the leaderboard', () => {
 
   it('surfaces a friendly message when the new score does not beat the existing best', () => {
     cy.startGame(5);
-    CORRECT_ANSWERS.forEach((answer) => cy.answerQuestion(answer));
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
     cy.location('pathname').should('eq', '/game-over');
 
     cy.signInFromGameOver(email, password);
@@ -70,7 +74,9 @@ describe('verified user saves a score to the leaderboard', () => {
     // perfect score already on file for this uid.
     const wrongAnswer = questionsFixture.results[0].incorrect_answers[0];
     cy.answerQuestion(wrongAnswer);
-    CORRECT_ANSWERS.slice(1).forEach((answer) => cy.answerQuestion(answer));
+    CORRECT_ANSWERS.slice(1).forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
     cy.location('pathname').should('eq', '/game-over');
 
     cy.get('input[name=playerName]').clear().type('Repeat Player');

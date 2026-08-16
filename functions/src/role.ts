@@ -24,7 +24,7 @@ export function deriveClaimRole(
  * the webhook, but nothing here should have to assume that).
  */
 export function chooseStripeRole(
-  subscriptionDocs: ReadonlyArray<Record<string, unknown>>,
+  subscriptionDocs: readonly Record<string, unknown>[],
 ): string | null {
   for (const data of subscriptionDocs) {
     const candidate = deriveClaimRole(
