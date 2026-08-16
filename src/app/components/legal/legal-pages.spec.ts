@@ -3,6 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import {
   LEGAL_AWAITING_PROFESSIONAL_REVIEW,
   LEGAL_CONTACT_EMAIL,
+  LEGAL_ENTITY_CNPJ,
+  LEGAL_ENTITY_NAME,
   LEGAL_LAST_UPDATED,
 } from './legal';
 import { PrivacyPolicyComponent } from './privacy-policy.component';
@@ -72,6 +74,20 @@ describe('legal pages', () => {
         for (const href of mailtos) {
           expect(href).toBe(`mailto:${LEGAL_CONTACT_EMAIL}`);
         }
+      });
+
+      it('identifies the operating company by name and CNPJ', async () => {
+        const el = await render(component);
+        const body = el.querySelector('.prose-legal');
+
+        // GDPR Art 13(1)(a) wants the controller's *identity*, and Brazil's
+        // e-commerce decree separately wants the corporate name and CNPJ shown
+        // to a consumer. "Operated from Brazil" was a location, not either of
+        // those. Both documents have to name the company: the Privacy Policy
+        // because it is the controller, the Terms because it is the party
+        // being contracted with.
+        expect(body?.textContent).toContain(LEGAL_ENTITY_NAME);
+        expect(body?.textContent).toContain(LEGAL_ENTITY_CNPJ);
       });
 
       it('carries the CC BY attribution the licence requires', async () => {

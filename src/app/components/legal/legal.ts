@@ -51,6 +51,31 @@ export const LEGAL_LAST_UPDATED = '16 August 2026';
 export const LEGAL_CONTACT_EMAIL = 'quizloop.trivia@gmail.com';
 
 /**
+ * The legal entity behind Trivimind: the controller under the LGPD and the
+ * GDPR, and the party you are contracting with under the Terms.
+ *
+ * Naming it is not decoration. GDPR Art 13(1)(a) requires the controller's
+ * *identity*, and Brazil's e-commerce decree (7.962/2013) separately requires
+ * a supplier to display its corporate name and CNPJ where a consumer can see
+ * them before buying. "Operated from Brazil" satisfied neither; it was a
+ * location, not an identification.
+ *
+ * The CNPJ is published deliberately. It is public record, it is what makes
+ * the corporate name verifiable rather than a claim, and a consumer-facing
+ * Brazilian business is expected to show it.
+ *
+ * Still missing, and a live gap rather than an oversight: the decree also
+ * wants a **physical address**. That is a decision about what the owner is
+ * willing to publish (a caixa postal or escritório virtual are the usual
+ * answers to not publishing a home address), and Stripe will require one at
+ * go-live regardless — see `docs/known-gaps.md`.
+ */
+export const LEGAL_ENTITY_NAME = 'TRIVIMIND TECNOLOGIA INOVA SIMPLES (I.S.)';
+
+/** Brazilian company registration number, shown alongside {@link LEGAL_ENTITY_NAME}. */
+export const LEGAL_ENTITY_CNPJ = '68.278.108/0001-84';
+
+/**
  * Structure and tone are adapted from Basecamp's open-sourced policies
  * (https://github.com/basecamp/policies), used under CC BY 4.0, which
  * requires attribution and requires that adaptations are indicated as such.
