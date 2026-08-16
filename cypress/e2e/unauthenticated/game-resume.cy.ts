@@ -79,6 +79,22 @@ describe('resuming a game after a reload (B8)', () => {
         expect(saved, 'the persisted game survives the page load').to.not.equal(null);
       });
 
+    /*
+     * Captures the post-fix state before the real assertion, because the
+     * previous rounds showed how easily this fails ambiguously. Both are
+     * unconditional and retrying — a `cy.location` branch is useless here,
+     * since right after a reload the URL is still /play whatever happens next.
+     *
+     *   banner present → restored, but the guard let the redirect happen anyway
+     *   banner absent  → still nothing restored, so `load()` is returning null
+     *                    and the bounded wait was not the whole story
+     */
+    cy.get('body').then(($body) => {
+      const banner = $body.text().includes('You have a game in progress');
+      cy.log(`B11 post-fix: resume banner ${banner ? 'PRESENT' : 'ABSENT'}`);
+    });
+    cy.location('pathname').should('be.oneOf', ['/play', '/']);
+
     // Anchored on the quiz itself, not on the URL: after a reload the URL is
     // already /play, so a pathname assertion passes before Angular boots and
     // keeps passing if the guard then redirects to /.
