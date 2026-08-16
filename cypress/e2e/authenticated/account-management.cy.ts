@@ -104,14 +104,19 @@ describe('account management: export and deletion', () => {
       (data: Record<string, never>) => {
         const exported = data as unknown as {
           account: { uid: string; email: string; signInProviders: string[] };
-          leaderboardEntry: { score: number } | null;
+          leaderboardEntries: { board: string; score: number }[];
           contributedQuestions: { id: string }[];
           notHeldHere: string[];
         };
         expect(exported.account.uid).to.eq(uid);
         expect(exported.account.email).to.eq(email);
         expect(exported.account.signInProviders).to.include('password');
-        expect(exported.leaderboardEntry?.score).to.eq(3);
+        // One entry per board since G7, each labelled with the board it came
+        // from — an export that collapsed them would be an incomplete answer
+        // to a data-access request.
+        expect(exported.leaderboardEntries).to.have.length(1);
+        expect(exported.leaderboardEntries[0].board).to.eq('15');
+        expect(exported.leaderboardEntries[0].score).to.eq(3);
         expect(exported.contributedQuestions.map((q) => q.id)).to.include('authored-for-export');
         // The export has to say what it deliberately does not contain,
         // otherwise a missing card number reads as concealment.

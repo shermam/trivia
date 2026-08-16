@@ -278,6 +278,23 @@ describe('GameControllerService persistence (B8)', () => {
     expect(fresh.totalQuestions()).toBe(3);
   });
 
+  // Reproduces the e2e failure: choosing "no limit" and reloading must not
+  // silently move the player onto a different board.
+  it('carries an unlimited time limit through a reload', async () => {
+    const service = await playAndPersist(10, 3, 2);
+    service.config.set({
+      amount: 10,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 'unlimited',
+    });
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    expect((await reload()).config()?.timeLimit).toBe('unlimited');
+  });
+
   it('marks the game complete when advancing past the last question', async () => {
     const service = await playAndPersist(3, 2, 3);
     expect(service.isComplete()).toBe(false);

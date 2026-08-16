@@ -85,11 +85,23 @@ describe('choosing a time limit', () => {
 
   // A reload mid-game must not silently move the player onto a different
   // board: the limit is part of the persisted game (B8), not of the session.
+  //
+  // This is the first spec in the suite to reload mid-game at all, so it is
+  // also the first browser-level check that B8's resume works end to end.
   it('keeps the chosen limit across a reload', () => {
     startWith('unlimited');
 
+    // The persisting effect queues an async IndexedDB write and there is no
+    // observable signal for "landed", so throwing the page away immediately
+    // would be testing the race rather than the feature.
+    cy.wait(1000);
     cy.reload();
-    cy.location('pathname').should('eq', '/play');
+
+    // Anchored on the quiz genuinely re-rendering. `cy.location('pathname')`
+    // cannot stand in for that here: after a reload the URL is *already*
+    // /play, so the assertion passes before Angular has booted and would go
+    // on passing if the guard then redirected to /.
+    cy.get('[data-cy="question-text"]').should('be.visible');
     cy.get('[data-cy="no-time-limit"]').should('exist');
     cy.get('[data-cy="question-timer"]').should('not.exist');
   });
