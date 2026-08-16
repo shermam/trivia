@@ -13,7 +13,15 @@ import { giveUpAfter } from '../utils/give-up-after.util';
 import { FirebaseAppService } from './firebase-app.service';
 
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
-const LEADERBOARD_COLLECTION = 'leaderboard';
+/**
+ * The per-timing-constraint boards (finding G7). Entries live at
+ * `leaderboards/{board}/entries/{uid}` — a subcollection rather than a
+ * `timeLimit` field on one flat collection, because the flat version needs a
+ * composite index and index configuration is the one thing the emulator cannot
+ * verify (`docs/data-model.md` §3).
+ */
+const LEADERBOARDS_COLLECTION = 'leaderboards';
+const BOARD_ENTRIES_SUBCOLLECTION = 'entries';
 const QUESTION_REPORTS_COLLECTION = 'question_reports';
 // Must agree with the {window}-{slot} arithmetic in firestore.rules'
 // sessionWindow()/the question_reports ID pattern — same contract as
@@ -253,17 +261,28 @@ export class FirebaseService {
   }
 
   /**
-   * Leaderboard entries are keyed by uid (one entry per user, best score
-   * wins) — the write is a `setDoc` on `leaderboard/{uid}`, not an
-   * auto-id `addDoc`. Firestore rules reject the write outright if
-   * `entry.score` isn't higher than the user's existing best, so a
-   * rejection here doesn't necessarily mean an error, just "not a new PB".
+   * Leaderboard entries are keyed by uid *within a board* (one entry per user
+   * per timing constraint, best score wins) — the write is a `setDoc` on
+   * `leaderboards/{board}/entries/{uid}`, not an auto-id `addDoc`. Firestore
+   * rules reject the write outright if `entry.score` isn't higher than that
+   * user's existing best **on that board**, so a rejection here doesn't
+   * necessarily mean an error, just "not a new PB".
+   *
+   * The board comes from `entry.timeLimit` rather than a separate argument, so
+   * the path and the field the rules compare it against cannot be passed
+   * inconsistently from here.
    */
   async saveHighScore(entry: LeaderboardEntry): Promise<void> {
     const { firestore, firestoreModule } = await this.getFirestore();
     await giveUpAfter(
       firestoreModule.setDoc(
-        firestoreModule.doc(firestore, LEADERBOARD_COLLECTION, entry.uid),
+        firestoreModule.doc(
+          firestore,
+          LEADERBOARDS_COLLECTION,
+          entry.timeLimit,
+          BOARD_ENTRIES_SUBCOLLECTION,
+          entry.uid,
+        ),
         entry,
       ),
       FIRESTORE_TIMEOUT_MS,
@@ -280,20 +299,38 @@ export class FirebaseService {
    * the existing row is what tells those apart. A document `get` on a known
    * path, not a collection scan — see `CLAUDE.md` §4.1.
    */
-  async getLeaderboardEntry(uid: string): Promise<LeaderboardEntry | null> {
+  async getLeaderboardEntry(uid: string, board: string): Promise<LeaderboardEntry | null> {
     const { firestore, firestoreModule } = await this.getFirestore();
     const snapshot = await giveUpAfter(
-      firestoreModule.getDoc(firestoreModule.doc(firestore, LEADERBOARD_COLLECTION, uid)),
+      firestoreModule.getDoc(
+        firestoreModule.doc(
+          firestore,
+          LEADERBOARDS_COLLECTION,
+          board,
+          BOARD_ENTRIES_SUBCOLLECTION,
+          uid,
+        ),
+      ),
       FIRESTORE_TIMEOUT_MS,
     );
     return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as LeaderboardEntry) : null;
   }
 
-  getTopScores(topN = 10): Observable<LeaderboardEntry[]> {
+  /**
+   * The top `topN` of one board. Needs only Firestore's automatic
+   * single-field index on `score`, which is the reason the boards are
+   * subcollections — see `LEADERBOARDS_COLLECTION` above.
+   */
+  getTopScores(board: string, topN = 10): Observable<LeaderboardEntry[]> {
     return defer(() =>
       this.getFirestore().then(({ firestore, firestoreModule }) => {
         const leaderboardQuery = firestoreModule.query(
-          firestoreModule.collection(firestore, LEADERBOARD_COLLECTION),
+          firestoreModule.collection(
+            firestore,
+            LEADERBOARDS_COLLECTION,
+            board,
+            BOARD_ENTRIES_SUBCOLLECTION,
+          ),
           firestoreModule.orderBy('score', 'desc'),
           firestoreModule.limit(topN),
         );

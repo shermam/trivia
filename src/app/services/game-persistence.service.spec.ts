@@ -56,7 +56,13 @@ function makeQuestion(id: string): TriviaQuestion {
   };
 }
 
-const config: GameConfig = { amount: 2, category: '', difficulty: '', source: 'open_trivia' };
+const config: GameConfig = {
+  amount: 2,
+  category: '',
+  difficulty: '',
+  source: 'open_trivia',
+  timeLimit: 15,
+};
 
 function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[0]> = {}) {
   return {
@@ -144,6 +150,37 @@ describe('GamePersistenceService (B8)', () => {
     const loaded = await service.load();
     expect(loaded).not.toBeNull();
     expect(loaded?.flaggedQuestionIds).toEqual([]);
+  });
+
+  /*
+   * The chosen time limit rides the same record (G7). It has to: it decides
+   * which leaderboard the finished game ranks on, so a reload that silently
+   * reset it to 15 would publish the score to the wrong board.
+   */
+  it('round-trips the chosen time limit', async () => {
+    await service.save(makeGame({ config: { ...config, timeLimit: 'unlimited' } }));
+
+    expect((await service.load())?.config.timeLimit).toBe('unlimited');
+  });
+
+  // Same call as flaggedQuestionIds: additive, unambiguous default, so no
+  // SCHEMA_VERSION bump and no in-progress game thrown away on deploy.
+  it('defaults a pre-G7 save to 15 seconds, the only limit it could have been', async () => {
+    // A genuine pre-G7 record: the field simply is not there. Reusing the
+    // shared `config` fixture would pass for the wrong reason, since that one
+    // now carries timeLimit: 15 of its own.
+    const { timeLimit: _absent, ...preG7Config } = config;
+    await putRaw(validRecord({ config: preG7Config }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.config.timeLimit).toBe(15);
+  });
+
+  it('refuses a config naming a time limit that is not an option', async () => {
+    await putRaw(validRecord({ config: { ...config, timeLimit: 99 } }));
+
+    expect(await service.load()).toBeNull();
   });
 
   // Dropped, not fatal: a flag is a hint about a question, and losing one is

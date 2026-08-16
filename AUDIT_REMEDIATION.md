@@ -17,9 +17,9 @@ Related documents:
 
 |                       | Findings |
 | --------------------- | -------- |
-| ✅ Fixed and merged   | 56       |
+| ✅ Fixed and merged   | 57       |
 | ☑️ Closed by decision | 1        |
-| 🔵 In review          | 2        |
+| 🔵 In review          | 1        |
 | ⬜ Not started        | 0        |
 | **Total**             | **59**   |
 
@@ -461,6 +461,23 @@ The planned design held on two points and was dropped on a third.
 
 - **Section numbers were not renumbered.** §1.5 is still §1.5, it just lives in `docs/app.md`. That kept all 137 existing `§x.y` references valid, including the ones in source comments (`icon.component.ts`, `environment.ts`, `cypress/tasks/types.ts`) and in `CLAUDE.md`/`AUDIT_REMEDIATION.md`. Cross-document references gained a filename prefix — the convention the repo already used for `INFRASTRUCTURE.md` §8 and `AUDIT_REMEDIATION.md` §7, so nothing new had to be learned.
 - **The move was verified, not trusted.** A script normalised away the deliberate qualifier rewrites and diffed the concatenated result against the original: 429 content lines in, 429 out, zero differences. A second pass resolved all 98 cross-document section references and all 30 Markdown links against the files that actually hold those sections — 0 broken. Both were worth writing: the first rewrite pass silently skipped 18 references that were already qualified as _other_ documents (`CLAUDE.md` §4.5 would otherwise have been rewritten to `ci-cd.md` §4.5), and only a checker that resolves the target catches that class.
+
+---
+
+### What G7 actually shipped
+
+**Two PRs, because the deploy order forced it.** Rules reach production before the client that matches them (`ci-cd.md` §4.2), so adding the boards and switching the client in one change would have left a window where a cached client wrote to a collection the new rules had moved past. #101 added the boards and the migration with the old collection untouched; the owner ran the migration; the second PR moved the client and closed the old collection. Nothing was unavailable in between, which is the only reason to split a feature this way.
+
+**The interesting decision was the schema, not the timer.** Three boards — `15`, `30`, `unlimited` — as `leaderboards/{limit}/entries/{uid}`, a **subcollection** rather than a `timeLimit` field on one flat collection. The flat version needs `where('timeLimit','==',x).orderBy('score','desc')`, which requires a composite index, and index configuration is the one thing the emulator cannot verify — the gap that took the deploy pipeline down for four consecutive merges (D3). This way `firestore.indexes.json` is untouched. A second benefit fell out for free: the improving-score rule reads `resource.data` at the board's own path, so a player's 15-second best cannot block their first unlimited entry without any extra logic.
+
+**"Unlimited" had to mean no deadline, not a large one.** `startTimer()` returns before creating the interval. A very large number would satisfy the letter of WCAG 2.2.1 and miss its point, and it would also leave a timer for a backgrounded tab to throttle (B10's territory).
+
+**Two things the change reached that the finding never mentioned**, and both would have been silent:
+
+- **Account deletion removed one leaderboard entry.** With three boards, deleting an account would have left the user's name and score publicly readable on the two boards it did not visit — after they asked to be removed. `deleteAccount` now sweeps every board plus the legacy collection.
+- **The data export returned one entry.** It now returns one per board, each labelled. Writing that revealed a bug worth recording: filtering the snapshots before pairing them with their board renumbers the survivors, so a player with an entry on only the second board gets it reported as the first's. Having entries on some boards but not all is the ordinary case, not an edge one. Pinned by a test that fails against the filter-then-index version.
+
+**A vacuous test, caught by mutation and worth the retelling.** The first version of "never auto-answers an unlimited game" advanced Vitest's fake timers by an hour and asserted no answer was registered — and passed against a deliberately broken build that _did_ schedule a countdown. The countdown reads the wall clock (B10), and this file's `useFakeTimers` fakes only the interval, so `Date.now()` stayed real, the deadline stayed in the future, and the assertion held for a reason unrelated to the code. The existing B10 tests already knew this and spy on `Date.now`; the new ones now do too. Two lessons, both general: **the mutation is the test's test**, and a mutation that fails to apply looks exactly like one that was caught — the first attempt at this had a silently non-matching string replace, and only asserting that the mutation applied told the two apart.
 
 ---
 

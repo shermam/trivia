@@ -1,7 +1,7 @@
 import { App, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { CustomQuestionSeed, LeaderboardSeed, VerifiedUserSeed } from './types';
+import { CustomQuestionSeed, LEADERBOARD_BOARDS, LeaderboardSeed, VerifiedUserSeed } from './types';
 
 const PROJECT_ID = 'intellectura-3b26a';
 
@@ -65,10 +65,10 @@ export function registerFirebasePreviewTasks(on: Cypress.PluginEvents): void {
 
     async seedLeaderboardEntry(entry: LeaderboardSeed) {
       trackedLeaderboardUids.add(entry.uid);
+      const board = entry.timeLimit ?? '15';
       await firestore
-        .collection('leaderboard')
-        .doc(entry.uid)
-        .set({ createdAt: Date.now(), ...entry });
+        .doc(`leaderboards/${board}/entries/${entry.uid}`)
+        .set({ createdAt: Date.now(), ...entry, timeLimit: board });
       return null;
     },
 
@@ -93,12 +93,15 @@ export function registerFirebasePreviewTasks(on: Cypress.PluginEvents): void {
 
       await Promise.all([
         ...[...trackedAuthUids].map((uid) => auth.deleteUser(uid).catch(() => undefined)),
-        ...[...leaderboardUids].map((uid) =>
-          firestore
-            .collection('leaderboard')
-            .doc(uid)
-            .delete()
-            .catch(() => undefined),
+        // Every board, or a preview run leaves real rows behind on the two
+        // this suite happens not to write to.
+        ...[...leaderboardUids].flatMap((uid) =>
+          LEADERBOARD_BOARDS.map((board) =>
+            firestore
+              .doc(`leaderboards/${board}/entries/${uid}`)
+              .delete()
+              .catch(() => undefined),
+          ),
         ),
         ...[...trackedCustomQuestionIds].map((id) =>
           firestore

@@ -1,7 +1,16 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
-import { GameConfig } from '../../models/question.model';
+import { DEFAULT_TIME_LIMIT, GameConfig, TimeLimitOption } from '../../models/question.model';
 import { ConnectivityService } from '../../services/connectivity.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
@@ -20,6 +29,7 @@ import { LogoComponent } from '../logo/logo.component';
 })
 export class GameSetupComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
   private readonly triviaService = inject(TriviaService);
   protected readonly gameController = inject(GameControllerService);
@@ -39,11 +49,44 @@ export class GameSetupComponent implements OnInit {
     category: [''],
     difficulty: [''],
     source: ['open_trivia' as GameConfig['source'], Validators.required],
+    timeLimit: [DEFAULT_TIME_LIMIT as TimeLimitOption, Validators.required],
   });
+
+  /**
+   * The picker's options. Labelled in words rather than as raw values —
+   * "No limit" is what the player is choosing; `'unlimited'` is what the
+   * leaderboard path calls it.
+   */
+  protected readonly timeLimitOptions: { value: TimeLimitOption; label: string }[] = [
+    { value: 15, label: '15 seconds' },
+    { value: 30, label: '30 seconds' },
+    { value: 'unlimited', label: 'No limit' },
+  ];
+
+  /**
+   * Names the leaderboard the chosen limit ranks on, before the game starts.
+   *
+   * Each timing constraint has its own board, because a score won with no
+   * clock is not comparable to one won in 15 seconds. A player who only finds
+   * that out at game over has been misled by omission, which is why this sits
+   * under the picker rather than on the results screen.
+   */
+  protected readonly timeLimitNote = computed(() => {
+    const chosen = this.timeLimit();
+    return chosen === 'unlimited'
+      ? 'No countdown. Ranks on the separate no-limit leaderboard.'
+      : `Ranks on the ${chosen}-second leaderboard — each time limit has its own.`;
+  });
+
+  /** Mirrors the form control into a signal so `timeLimitNote` recomputes. */
+  private readonly timeLimit = signal<TimeLimitOption>(DEFAULT_TIME_LIMIT);
 
   // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
   ngOnInit(): void {
     void this.loadCategories();
+    this.form.controls.timeLimit.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => this.timeLimit.set(value));
   }
 
   /**
@@ -82,6 +125,7 @@ export class GameSetupComponent implements OnInit {
       category: raw.category,
       difficulty: raw.difficulty as GameConfig['difficulty'],
       source: raw.source,
+      timeLimit: raw.timeLimit,
     };
 
     void this.gameController.startGame(config);

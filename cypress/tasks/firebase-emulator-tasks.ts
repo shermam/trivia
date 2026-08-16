@@ -10,6 +10,7 @@ import {
   QuestionReportRecord,
   VerifiedUserSeed,
 } from './types';
+import { LEADERBOARD_BOARDS } from './types';
 
 const AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 const FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
@@ -76,6 +77,12 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
       await Promise.all([
         users.length ? auth.deleteUsers(users.map((u) => u.uid)) : Promise.resolve(),
         deleteCollection(firestore.collection('leaderboard')),
+        // One per board (G7). `recursiveDelete` on `leaderboards` would not
+        // reach them: the board documents themselves are never created, and a
+        // recursive delete starts from documents that exist.
+        ...LEADERBOARD_BOARDS.map((board) =>
+          deleteCollection(firestore.collection(`leaderboards/${board}/entries`)),
+        ),
         deleteCollection(firestore.collection('custom_questions')),
         deleteCollection(firestore.collection('question_reports')),
         // `recursiveDelete` (not the plain `deleteCollection` helper above)
@@ -119,7 +126,11 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
     async inspectAccountState({ uid, questionId }: AccountStateQuery) {
       const [authUser, leaderboardDoc, questionDoc, customerDoc] = await Promise.all([
         auth.getUser(uid).catch(() => null),
-        firestore.collection('leaderboard').doc(uid).get(),
+        Promise.all(
+          LEADERBOARD_BOARDS.map((board) =>
+            firestore.doc(`leaderboards/${board}/entries/${uid}`).get(),
+          ),
+        ),
         questionId
           ? firestore.collection('custom_questions').doc(questionId).get()
           : Promise.resolve(null),
@@ -127,7 +138,9 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
       ]);
       return {
         authUserExists: authUser !== null,
-        leaderboardExists: leaderboardDoc.exists,
+        // True if *any* board still holds an entry — deletion has to clear
+        // all of them, and asserting on one would pass while two survived.
+        leaderboardExists: leaderboardDoc.some((snapshot) => snapshot.exists),
         customerExists: customerDoc.exists,
         questionExists: questionDoc?.exists ?? false,
         questionCreatedBy: (questionDoc?.data()?.['createdBy'] as string | undefined) ?? null,
@@ -147,10 +160,10 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
     },
 
     async seedLeaderboardEntry(entry: LeaderboardSeed) {
+      const board = entry.timeLimit ?? '15';
       await firestore
-        .collection('leaderboard')
-        .doc(entry.uid)
-        .set({ createdAt: Date.now(), ...entry });
+        .doc(`leaderboards/${board}/entries/${entry.uid}`)
+        .set({ createdAt: Date.now(), ...entry, timeLimit: board });
       return null;
     },
 

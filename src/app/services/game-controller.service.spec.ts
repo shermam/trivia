@@ -147,7 +147,13 @@ describe('GameControllerService persistence (B8)', () => {
   /** Plays a game far enough to have something worth saving, then flushes the persisting effect. */
   async function playAndPersist(questionCount: number, index: number, score: number) {
     const service = setup(questionCount);
-    service.config.set({ amount: questionCount, category: '', difficulty: '', source: 'custom' });
+    service.config.set({
+      amount: questionCount,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
     service.currentIndex.set(index);
     service.score.set(score);
     TestBed.tick(); // effects are flushed by change detection, not synchronously
@@ -260,7 +266,13 @@ describe('GameControllerService persistence (B8)', () => {
     await fresh.restoreSavedGame();
     expect(fresh.flaggedQuestionIds().size).toBeGreaterThan(0); // the leak this guards
 
-    await fresh.startGame({ amount: 3, category: '', difficulty: '', source: 'custom' });
+    await fresh.startGame({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
 
     expect([...fresh.flaggedQuestionIds()]).toEqual([]);
     expect(fresh.totalQuestions()).toBe(3);

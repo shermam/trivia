@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Answer, TriviaQuestion } from '../../models/question.model';
+import { Answer, GameConfig, TimeLimitOption, TriviaQuestion } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { QuizLoopComponent } from './quiz-loop.component';
@@ -25,10 +25,23 @@ function makeQuestion(overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
   };
 }
 
-function setup(options: { playingOffline?: boolean; question?: TriviaQuestion } = {}) {
+function setup(
+  options: {
+    playingOffline?: boolean;
+    question?: TriviaQuestion;
+    timeLimit?: TimeLimitOption;
+  } = {},
+) {
   const registerAnswer = vi.fn();
   const advanceQuestion = vi.fn();
   const gameController = {
+    config: signal<GameConfig | null>({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'open_trivia',
+      timeLimit: options.timeLimit ?? 15,
+    }),
     currentQuestion: signal<TriviaQuestion | null>(options.question ?? makeQuestion()),
     currentIndex: signal(0),
     totalQuestions: signal(1),
@@ -340,5 +353,100 @@ describe('QuizLoopComponent — flagging a question', () => {
     )?.textContent;
 
     expect(first).not.toEqual(second);
+  });
+});
+
+/**
+ * Finding G7. A fixed 15-second limit that cannot be adjusted, extended or
+ * turned off fails WCAG 2.2.1, and "turned off" is the part these cover: an
+ * unlimited game must have no deadline at all, not a generous one.
+ *
+ * The clock is driven with `vi.spyOn(Date, 'now')`, matching the B10 tests
+ * above, because the countdown reads the wall clock rather than counting
+ * ticks. The global `useFakeTimers` here deliberately fakes only the
+ * interval — advancing that alone leaves `Date.now()` real, the deadline
+ * permanently in the future, and an "it never expired" assertion passing for
+ * a reason that has nothing to do with the code under test. Confirmed by
+ * mutation: written that way, these did not fail when `startTimer` was
+ * changed to schedule a countdown for an unlimited game.
+ */
+describe('QuizLoopComponent — the adjustable timer (G7)', () => {
+  const START = 1_000_000_000;
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  const ring = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector('[data-cy="question-timer"]');
+  const noLimitBadge = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector('[data-cy="no-time-limit"]');
+
+  it('counts down from the chosen limit, not a hard-coded 15', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { fixture } = setup({ timeLimit: 30 });
+
+    expect(ring(fixture)?.textContent).toContain('30s');
+
+    now = START + 5000;
+    vi.advanceTimersByTime(250);
+    fixture.detectChanges();
+    expect(ring(fixture)?.textContent).toContain('25s');
+  });
+
+  it('shows no countdown at all for an unlimited game', () => {
+    const { fixture } = setup({ timeLimit: 'unlimited' });
+
+    expect(ring(fixture)).toBeNull();
+    expect(noLimitBadge(fixture)?.textContent).toContain('No time limit');
+  });
+
+  /*
+   * The criterion itself. `unlimited` has to mean "no deadline", not "a very
+   * large one" — a big number is still a deadline, just a less obvious one —
+   * so the wall clock jumps an hour and the question must still be unanswered.
+   */
+  it('never auto-answers an unlimited game, however long the player takes', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { fixture, registerAnswer } = setup({ timeLimit: 'unlimited' });
+
+    now = START + 60 * 60 * 1000;
+    vi.advanceTimersByTime(250);
+    fixture.detectChanges();
+
+    expect(registerAnswer).not.toHaveBeenCalled();
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-cy="result-status"]')
+        ?.textContent,
+    ).not.toContain("Time's up");
+  });
+
+  it('still expires a timed game on its own deadline', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { registerAnswer } = setup({ timeLimit: 30 });
+
+    // One second short of the 30s deadline: a 15s limit would already have fired.
+    now = START + 29_000;
+    vi.advanceTimersByTime(250);
+    expect(registerAnswer).not.toHaveBeenCalled();
+
+    now = START + 30_500;
+    vi.advanceTimersByTime(250);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  // A save written before the picker existed carries no limit, and every one
+  // of those games was played at 15 seconds.
+  it('falls back to 15 seconds when the config predates the picker', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { fixture, gameController, registerAnswer } = setup();
+    gameController.config.set(null);
+    fixture.detectChanges();
+
+    now = START + 15_500;
+    vi.advanceTimersByTime(250);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(false);
   });
 });

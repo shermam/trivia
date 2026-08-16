@@ -1,5 +1,12 @@
 import { Injectable, inject } from '@angular/core';
-import { Difficulty, GameConfig, QuestionSource, TriviaQuestion } from '../models/question.model';
+import {
+  DEFAULT_TIME_LIMIT,
+  Difficulty,
+  GameConfig,
+  QuestionSource,
+  TriviaQuestion,
+  isTimeLimitOption,
+} from '../models/question.model';
 import { CURRENT_GAME_KEY, GAME_STATE_STORE, OfflineDbService } from './offline-db.service';
 
 /**
@@ -72,14 +79,30 @@ function isQuestion(value: unknown): value is TriviaQuestion {
   );
 }
 
+/**
+ * `timeLimit` is deliberately **not** required here, and the schema version was
+ * not bumped for it — same call as `flaggedQuestionIds` before it. The field is
+ * additive, an absent one has an unambiguous correct answer (every game saved
+ * before the picker existed was played at 15 seconds, the only limit there
+ * was), and bumping would have thrown away every in-progress game on deploy to
+ * prevent a problem that does not exist. A *present* value still has to be one
+ * of the real options: a hand-edited record naming a board that isn't real
+ * would produce a game whose score the rules refuse.
+ */
 function isConfig(value: unknown): value is GameConfig {
   return (
     isRecord(value) &&
     typeof value['amount'] === 'number' &&
     typeof value['category'] === 'string' &&
     (value['difficulty'] === '' || DIFFICULTIES.includes(value['difficulty'] as Difficulty)) &&
-    SOURCES.includes(value['source'] as QuestionSource)
+    SOURCES.includes(value['source'] as QuestionSource) &&
+    (value['timeLimit'] === undefined || isTimeLimitOption(value['timeLimit']))
   );
+}
+
+/** Fills in the limit a pre-G7 save was necessarily played under. */
+function withTimeLimit(config: GameConfig): GameConfig {
+  return { ...config, timeLimit: config.timeLimit ?? DEFAULT_TIME_LIMIT };
 }
 
 /**
@@ -142,7 +165,7 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
   return {
     version: SCHEMA_VERSION,
     savedAt,
-    config,
+    config: withTimeLimit(config),
     questions,
     currentIndex,
     score,

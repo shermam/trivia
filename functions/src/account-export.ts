@@ -21,7 +21,8 @@ export interface AccountExport {
     createdAt: string | null;
     lastSignInAt: string | null;
   };
-  leaderboardEntry: Record<string, unknown> | null;
+  /** One entry per board the player has a score on (finding G7); empty if none. */
+  leaderboardEntries: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
   billing: {
     stripeCustomerId: string | null;
@@ -45,7 +46,7 @@ export function buildAccountExport(input: {
     UserRecord,
     'uid' | 'email' | 'displayName' | 'emailVerified' | 'providerData' | 'metadata'
   >;
-  leaderboardEntry: Record<string, unknown> | null;
+  leaderboardEntries: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
   stripeCustomerId: string | null;
   subscriptions: Record<string, unknown>[];
@@ -64,7 +65,7 @@ export function buildAccountExport(input: {
       createdAt: input.user.metadata.creationTime ?? null,
       lastSignInAt: input.user.metadata.lastSignInTime ?? null,
     },
-    leaderboardEntry: input.leaderboardEntry,
+    leaderboardEntries: input.leaderboardEntries,
     contributedQuestions: input.contributedQuestions,
     billing: {
       stripeCustomerId: input.stripeCustomerId,

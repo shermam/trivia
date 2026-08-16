@@ -218,9 +218,64 @@ describe('leaderboards: improving-score is scoped to one board', () => {
   });
 });
 
+/*
+ * These moved here wholesale when G7 retired the flat `leaderboard`
+ * collection. Its write rules — and the `isValidLeaderboardEntry` function
+ * behind them — are gone, so the only place this validation still runs is on a
+ * board. The cases are the ones that pinned finding A1 and the bounds that
+ * followed it; losing them along with the collection would have quietly
+ * dropped the anti-cheat coverage on the way through a refactor.
+ */
 describe('leaderboards: the score bounds carry over', () => {
   const write = (overrides: Record<string, unknown>) =>
     setDoc(entryRef(asVerifiedPassword(env, 'u'), '15', 'u'), boardEntry('u', '15', overrides));
+
+  const rejects = (label: string, overrides: Record<string, unknown>) =>
+    it(`rejects ${label}`, async () => {
+      await assertFails(write(overrides));
+    });
+
+  rejects('an empty name', { name: '' });
+  rejects('a non-string name', { name: 42 });
+  rejects('a negative score', { score: -1 });
+  rejects('a non-integer score', { score: 1.5 });
+  rejects('totalQuestions below score', { score: 10, totalQuestions: 5 });
+  rejects('zero questions', { score: 0, totalQuestions: 0, percentage: 0 });
+  rejects('a percentage above 100', { percentage: 101 });
+  rejects('a negative percentage', { percentage: -1 });
+  rejects('a percentage off by one', { score: 7, totalQuestions: 10, percentage: 71 });
+  rejects('a non-integer createdAt', { createdAt: 'yesterday' });
+  rejects('a future-dated createdAt', { createdAt: Date.now() + 60 * 60 * 1000 });
+
+  it('rejects a document missing a required key', async () => {
+    const { percentage: _dropped, ...withoutPercentage } = boardEntry('u', '15');
+    await assertFails(setDoc(entryRef(asVerifiedPassword(env, 'u'), '15', 'u'), withoutPercentage));
+  });
+
+  /*
+   * A `custom` or `mixed` game returns fewer questions than requested when the
+   * bank is short — asking for 25 when 7 exist is a genuine 7-question game.
+   * Bounding totalQuestions to the menu options instead of a range would
+   * reject these.
+   */
+  it('accepts a short game from a thin question bank', async () => {
+    await assertSucceeds(write({ score: 2, totalQuestions: 3 }));
+  });
+
+  it('accepts a single-question game', async () => {
+    await assertSucceeds(write({ score: 1, totalQuestions: 1 }));
+  });
+
+  // Firestore's math.round() was verified to match JavaScript's on .5
+  // boundaries; this pins that agreement so a future rules change cannot
+  // silently start rejecting honest scores.
+  it('accepts a percentage landing exactly on a .5 rounding boundary', async () => {
+    await assertSucceeds(write({ score: 1, totalQuestions: 8, percentage: 13 }));
+  });
+
+  it('tolerates a clock a couple of minutes behind', async () => {
+    await assertSucceeds(write({ createdAt: Date.now() - 2 * 60 * 1000 }));
+  });
 
   it('accepts the longest game the app offers', async () => {
     await assertSucceeds(write({ score: 25, totalQuestions: 25 }));
@@ -259,18 +314,34 @@ describe('leaderboards: delete is closed', () => {
   });
 });
 
-describe('leaderboard (pre-G7): still writable until the client moves', () => {
+describe('leaderboard (pre-G7): retired, read-only', () => {
   /*
-   * The old flat collection stays open for one release. Rules deploy before
-   * the client that matches them (`ci-cd.md` §4.2), so denying writes here in
-   * the same change that adds the boards above would break saving for every
-   * player still running the previous build. This test is what stops that
-   * being done by accident; it is expected to be deleted, deliberately, in the
-   * PR that switches the client over.
+   * The counterpart of the test this replaces. That one pinned the old
+   * collection as writable so it could not be closed while a cached client was
+   * still using it; now the client has moved, and closing it is the point.
+   *
+   * Writes are refused rather than ignored: a stale client writing into a
+   * collection nothing reads looks like success and loses the score silently.
    */
-  it('accepts a write to the old collection', async () => {
-    await assertSucceeds(
+  it('still serves reads', async () => {
+    await assertSucceeds(getDocs(collection(asSignedOut(env).firestore(), 'leaderboard')));
+  });
+
+  it('refuses a write even from the entry owner', async () => {
+    await assertFails(
       setDoc(doc(asVerifiedPassword(env, 'u').firestore(), 'leaderboard', 'u'), validEntry('u')),
+    );
+  });
+
+  it('refuses an update to an entry that is already there', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'leaderboard', 'u'), validEntry('u', { score: 1 }));
+    });
+    await assertFails(
+      setDoc(
+        doc(asVerifiedPassword(env, 'u').firestore(), 'leaderboard', 'u'),
+        validEntry('u', { score: 9 }),
+      ),
     );
   });
 });

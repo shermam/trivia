@@ -65,7 +65,7 @@
             <p class="font-semibold">Score saved to the leaderboard!</p>
             @if (playerRank(); as rank) {
               <p class="text-sm text-emerald-800/80 dark:text-emerald-300/80">
-                You're ranked #{{ rank }} on the leaderboard.
+                You're ranked #{{ rank }} on the {{ boardLabel() }} leaderboard.
               </p>
             }
           </div>
@@ -112,7 +112,7 @@
           class="flex items-center gap-1.5 text-sm font-bold text-emerald-900 dark:text-emerald-200 mb-3"
         >
           <app-icon name="save" [size]="15" />
-          Save your score to the leaderboard
+          Save your score to the {{ boardLabel() }} leaderboard
         </p>
         <form (ngSubmit)="saveScore()" class="flex flex-col sm:flex-row gap-2">
           <input
@@ -153,7 +153,17 @@
         class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
       >
         <app-icon name="medal" [size]="18" class="text-amber-500" />
-        <h2 class="text-base font-bold text-slate-900 dark:text-slate-50">Top 10 Leaderboard</h2>
+        <!--
+          Names the board, because there is more than one now (G7). "Top 10"
+          alone would quietly imply a single global ranking and make a modest
+          score on the no-limit board look like a modest score overall.
+        -->
+        <h2
+          class="text-base font-bold text-slate-900 dark:text-slate-50"
+          data-cy="leaderboard-title"
+        >
+          Top 10 — {{ boardLabel() }} games
+        </h2>
       </div>
 
       @if (isLoadingLeaderboard()) {

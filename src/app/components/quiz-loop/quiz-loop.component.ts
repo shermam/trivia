@@ -8,13 +8,18 @@ import {
   signal,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { Answer } from '../../models/question.model';
+import { Answer, DEFAULT_TIME_LIMIT } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 
-const QUESTION_DURATION_SECONDS = 15;
-const QUESTION_DURATION_MS = QUESTION_DURATION_SECONDS * 1000;
+/**
+ * Fallback for a game whose config predates the adjustable timer (finding
+ * G7) — a save written before the picker existed was played at 15 seconds.
+ * The live value comes from `GameConfig.timeLimit`.
+ */
+const FALLBACK_DURATION_SECONDS: number =
+  DEFAULT_TIME_LIMIT === 'unlimited' ? 15 : DEFAULT_TIME_LIMIT;
 /**
  * The countdown ticks several times a second rather than once, so expiry is
  * caught promptly (within a tick of the true deadline) instead of up to a full
@@ -63,7 +68,21 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly timerRingRadius = TIMER_RING_RADIUS;
   protected readonly timerRingCircumference = TIMER_RING_CIRCUMFERENCE;
 
-  protected readonly timeLeft = signal(QUESTION_DURATION_SECONDS);
+  /**
+   * The chosen limit in seconds, or `null` for an unlimited game — in which
+   * case no countdown runs at all: no interval, no ring, and no auto-answer
+   * when the player takes their time. That last part is the point of WCAG
+   * 2.2.1, and it is why this is a `null` rather than a very large number:
+   * a big number is still a deadline, just a less obvious one.
+   */
+  protected readonly limitSeconds = computed<number | null>(() => {
+    const chosen = this.gameController.config()?.timeLimit ?? FALLBACK_DURATION_SECONDS;
+    return chosen === 'unlimited' ? null : chosen;
+  });
+
+  protected readonly isTimed = computed(() => this.limitSeconds() !== null);
+
+  protected readonly timeLeft = signal<number>(FALLBACK_DURATION_SECONDS);
   protected readonly selectedAnswer = signal<Answer | null>(null);
   protected readonly isAnswered = signal(false);
 
@@ -98,11 +117,13 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     return `Incorrect. The correct answer is ${question.correct_answer}.`;
   });
 
-  protected readonly timerRingOffset = computed(
-    () =>
-      TIMER_RING_CIRCUMFERENCE -
-      (this.timeLeft() / QUESTION_DURATION_SECONDS) * TIMER_RING_CIRCUMFERENCE,
-  );
+  protected readonly timerRingOffset = computed(() => {
+    const limit = this.limitSeconds();
+    if (limit === null) {
+      return 0;
+    }
+    return TIMER_RING_CIRCUMFERENCE - (this.timeLeft() / limit) * TIMER_RING_CIRCUMFERENCE;
+  });
 
   /**
    * Whether the question on screen is flagged, and what to announce about it.
@@ -220,8 +241,16 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   }
 
   private startTimer(): void {
-    this.deadline = Date.now() + QUESTION_DURATION_MS;
-    this.timeLeft.set(QUESTION_DURATION_SECONDS);
+    const limit = this.limitSeconds();
+    if (limit === null) {
+      // No deadline, so nothing to schedule. Returning before creating the
+      // interval is what makes "unlimited" actually unlimited rather than
+      // merely long, and it also means a backgrounded tab has no timer to
+      // throttle.
+      return;
+    }
+    this.deadline = Date.now() + limit * 1000;
+    this.timeLeft.set(limit);
     this.timerHandle = setInterval(() => this.tickTimer(), TIMER_TICK_MS);
   }
 
