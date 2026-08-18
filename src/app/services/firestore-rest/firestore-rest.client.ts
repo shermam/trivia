@@ -123,6 +123,24 @@ export class FirestoreRestError extends Error {
   }
 }
 
+/**
+ * Whether an error is Firestore refusing a request under `firestore.rules`.
+ *
+ * Exported and shared because three call sites branch on it and each one gets
+ * it wrong differently if it drifts: `FirebaseService.reportQuestion` would
+ * abandon its `{window}-{slot}` slot loop on the first collision and report a
+ * rate limit nobody hit, and the two components would stop explaining a
+ * refusal they can explain and fall back to "please try again".
+ *
+ * Under the SDK this was `error.code === 'permission-denied'` written out at
+ * each site. That shape no longer exists — REST reports `PERMISSION_DENIED` in
+ * the response body — and a duck-typed check against the old shape now matches
+ * nothing at all, silently. One function, so there is one thing to keep true.
+ */
+export function isFirestorePermissionDenied(error: unknown): boolean {
+  return error instanceof FirestoreRestError && error.isPermissionDenied;
+}
+
 @Injectable({ providedIn: 'root' })
 export class FirestoreRestClient {
   private readonly firebaseAppService = inject(FirebaseAppService);

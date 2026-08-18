@@ -57,6 +57,8 @@ The same mark is also used in-app as the brand badge — top bar logo, `GameSetu
 
 `FirebaseService` and `AuthService` wrap the Firebase modular SDK (`firebase/app`, `firebase/firestore`, `firebase/auth`) directly — **no AngularFire** — by design, so they can later be reused unmodified in non-Angular shells (e.g. Capacitor/Tauri) per an in-code comment.
 
+**`FirebaseService` no longer uses the Firestore SDK.** All six of its reads and writes go through `FirestoreRestClient` (below). The SDK is still in the bundle only because `SubscriptionService` holds two `onSnapshot` listeners, which REST has no equivalent for; `FirebaseService.getFirestore()` survives purely to hand them a Firestore instance and goes when they do — the last PR of `BACKLOG.md` item 2.
+
 Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. `FirebaseAppService.getApp()` fetches that config and calls `initializeApp` exactly once, shared by both Firestore and Auth. `FirebaseAppService.getConfig()` exposes the same memoized config **without** initializing the app, for the REST client below — which needs the `projectId` and `apiKey` but has no use for a `FirebaseApp`.
 
 #### `FirestoreRestClient` — the Firestore SDK's replacement, being phased in
@@ -74,7 +76,9 @@ Two files:
 
 **Every network call carries a deadline, using whatever cancellation the API actually offers.** `fetch` (the runtime-config load) uses `AbortSignal.timeout`; Firebase callables (`deleteAccount`, `exportAccountData`) use `HttpsCallableOptions.timeout`, which the SDK documents as cancelling the request; the checkout/portal `onSnapshot` handshake clears its own listener on the deadline, which previously stayed attached for the rest of the session.
 
-Firestore's one-shot operations (`getDocs`, `getDoc`, `setDoc`, `addDoc`) and `signInAnonymously` offer nothing — no options argument, and `AbortSignal` appears nowhere in those SDKs' type definitions — so they use `giveUpAfter()` (10s), which stops _waiting_ without stopping the work, and is named to say so. That deadline can't simply be dropped: the Firestore SDK's promises never reject on their own if the backend is unreachable (e.g. placeholder/misconfigured credentials), which would leave the UI stuck in a permanent loading state, and `TriviaService`'s offline fallback only triggers when the fetch throws.
+`giveUpAfter()` (10s) covers what is left, and the list is shrinking. It stops _waiting_ without stopping the work, and is named to say so. `signInAnonymously` takes no options argument at all — `AbortSignal` appears nowhere in the Auth SDK's type definitions — and Auth is not being migrated, so that one is permanent; `GameControllerService`'s restore is an IndexedDB read rather than a network call, where "stop waiting" is genuinely the right verb. The Firestore holdouts are the two `getDocs` in `SubscriptionService.getProPriceId()`, and they go with the SDK.
+
+Everything in `FirebaseService` now uses `AbortSignal.timeout` instead, which tears the connection down rather than abandoning it. The deadline itself stays load-bearing either way: the Firestore SDK's promises never reject on their own if the backend is unreachable (e.g. placeholder/misconfigured credentials), which would leave the UI stuck in a permanent loading state, and `TriviaService`'s offline fallback only triggers when the fetch throws.
 
 ### 2.4 Cloud Functions backend (`functions/`)
 

@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import type { Firestore, QueryConstraint } from 'firebase/firestore';
+import type { Firestore } from 'firebase/firestore';
 import { Observable, defer, map } from 'rxjs';
 import { environment } from '../../environments/environment';
 import {
@@ -9,8 +9,14 @@ import {
   NewCustomQuestionDoc,
   NewQuestionReportDoc,
 } from '../models/question.model';
-import { giveUpAfter } from '../utils/give-up-after.util';
 import { FirebaseAppService } from './firebase-app.service';
+import {
+  DOCUMENT_ID_FIELD,
+  FirestoreRestClient,
+  RestFieldFilter,
+  RestQuery,
+  isFirestorePermissionDenied,
+} from './firestore-rest/firestore-rest.client';
 
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
 /**
@@ -91,9 +97,29 @@ function randomDocumentId(): string {
   return id;
 }
 
+/**
+ * Asserts an expected document shape onto data Firestore returned untyped.
+ *
+ * The SDK's `DocumentData` has `any`-valued fields, so `doc.data() as X` was a
+ * direct assertion. `RestDocument.data` is honestly typed as
+ * `Record<string, unknown>`, which does not overlap with a concrete interface,
+ * so the same assertion now has to go through `unknown`. That is the identical
+ * amount of checking — none — just said out loud, and it lives here rather
+ * than at three call sites so the fact that it is unchecked is stated once.
+ */
+function asDocumentData<T>(data: Record<string, unknown>): T {
+  return data as unknown as T;
+}
+
+/** `leaderboards/{board}/entries/{uid}` — one place the path is spelled. */
+function boardEntryPath(board: string, uid: string): string {
+  return `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_ENTRIES_SUBCOLLECTION}/${uid}`;
+}
+
 @Injectable({ providedIn: 'root' })
 export class FirebaseService {
   private readonly firebaseAppService = inject(FirebaseAppService);
+  private readonly rest = inject(FirestoreRestClient);
 
   private firestorePromise: Promise<{
     firestore: Firestore;
@@ -101,10 +127,14 @@ export class FirebaseService {
   }> | null = null;
 
   /**
-   * Public so other services (e.g. SubscriptionService) can share the same
-   * lazily-initialized Firestore instance instead of each opening their own
-   * — `getFirestore(app)` is idempotent per app, but there's no reason to
-   * duplicate the dynamic import + emulator-connect logic below.
+   * The last thing in this app still holding the Firestore SDK.
+   *
+   * Every method below now goes over REST. What keeps the SDK in the bundle —
+   * and therefore keeps the entire 558.98 kB of it shipping — is
+   * `SubscriptionService`'s two `onSnapshot` listeners, which REST has no
+   * equivalent for. Replacing those (with a read on load, and a poll for the
+   * checkout handshake) is the next and last PR of `BACKLOG.md` item 2, and
+   * this method goes with them. Nothing new should call it.
    */
   getFirestore() {
     if (!this.firestorePromise) {
@@ -168,36 +198,38 @@ export class FirebaseService {
       return [];
     }
 
-    const { firestore, firestoreModule: fm } = await this.getFirestore();
-    const collection = fm.collection(firestore, CUSTOM_QUESTIONS_COLLECTION);
-
-    const filters = [
-      ...(category ? [fm.where('category', '==', category)] : []),
-      ...(difficulty ? [fm.where('difficulty', '==', difficulty)] : []),
+    const filters: RestFieldFilter[] = [
+      ...(category ? [{ field: 'category', op: 'EQUAL' as const, value: category }] : []),
+      ...(difficulty ? [{ field: 'difficulty', op: 'EQUAL' as const, value: difficulty }] : []),
     ];
     const cursor = randomDocumentId();
 
-    const runQuery = async (...constraints: QueryConstraint[]) => {
-      const snapshot = await giveUpAfter(
-        fm.getDocs(fm.query(collection, ...filters, fm.orderBy(fm.documentId()), ...constraints)),
-        FIRESTORE_TIMEOUT_MS,
+    const runQuery = (
+      bounds: Pick<RestQuery, 'limit' | 'startAtDocumentId' | 'endBeforeDocumentId'>,
+    ) =>
+      this.rest.runQuery(
+        {
+          collectionPath: CUSTOM_QUESTIONS_COLLECTION,
+          where: filters,
+          orderBy: [{ field: DOCUMENT_ID_FIELD }],
+          ...bounds,
+        },
+        { timeoutMs: FIRESTORE_TIMEOUT_MS },
       );
-      return snapshot.docs;
-    };
 
-    const docs = await runQuery(fm.startAt(cursor), fm.limit(limit));
+    const docs = await runQuery({ startAtDocumentId: cursor, limit });
 
     // The cursor landed near the end of the collection (or the bank simply
     // holds fewer than `limit` matches), so take the remainder from the start.
     // Without this, a high cursor would systematically return short and the
     // questions sorting earliest would be served far less often than the rest.
     if (docs.length < limit) {
-      docs.push(...(await runQuery(fm.endBefore(cursor), fm.limit(limit - docs.length))));
+      docs.push(...(await runQuery({ endBeforeDocumentId: cursor, limit: limit - docs.length })));
     }
 
     return docs.map((doc) => ({
       id: doc.id,
-      ...(doc.data() as CustomQuestionDoc),
+      ...asDocumentData<CustomQuestionDoc>(doc.data),
     }));
   }
 
@@ -213,13 +245,10 @@ export class FirebaseService {
    * than mis-attributing the question.
    */
   async addCustomQuestion(question: NewCustomQuestionDoc): Promise<void> {
-    const { firestore, firestoreModule } = await this.getFirestore();
-    await giveUpAfter(
-      firestoreModule.addDoc(
-        firestoreModule.collection(firestore, CUSTOM_QUESTIONS_COLLECTION),
-        question,
-      ),
-      FIRESTORE_TIMEOUT_MS,
+    await this.rest.createDocument(
+      CUSTOM_QUESTIONS_COLLECTION,
+      { ...question },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
     );
   }
 
@@ -236,22 +265,20 @@ export class FirebaseService {
    * ten is worth surfacing, and the thrown message says what to do about it.
    */
   async reportQuestion(report: NewQuestionReportDoc): Promise<void> {
-    const { firestore, firestoreModule } = await this.getFirestore();
     const currentWindow = Math.floor(Date.now() / REPORT_WINDOW_MS);
     const firstSlot = Math.floor(Math.random() * REPORT_SLOTS_PER_WINDOW);
 
     for (let attempt = 0; attempt < REPORT_SLOTS_PER_WINDOW; attempt++) {
       const slot = (firstSlot + attempt) % REPORT_SLOTS_PER_WINDOW;
-      const reportRef = firestoreModule.doc(
-        firestore,
-        QUESTION_REPORTS_COLLECTION,
-        `${currentWindow}-${slot}-${report.reportedBy}`,
-      );
       try {
-        await giveUpAfter(firestoreModule.setDoc(reportRef, report), FIRESTORE_TIMEOUT_MS);
+        await this.rest.setDocument(
+          `${QUESTION_REPORTS_COLLECTION}/${currentWindow}-${slot}-${report.reportedBy}`,
+          { ...report },
+          { timeoutMs: FIRESTORE_TIMEOUT_MS },
+        );
         return;
       } catch (error) {
-        if ((error as { code?: string })?.code !== 'permission-denied') {
+        if (!isFirestorePermissionDenied(error)) {
           throw error;
         }
       }
@@ -273,19 +300,10 @@ export class FirebaseService {
    * inconsistently from here.
    */
   async saveHighScore(entry: LeaderboardEntry): Promise<void> {
-    const { firestore, firestoreModule } = await this.getFirestore();
-    await giveUpAfter(
-      firestoreModule.setDoc(
-        firestoreModule.doc(
-          firestore,
-          LEADERBOARDS_COLLECTION,
-          entry.timeLimit,
-          BOARD_ENTRIES_SUBCOLLECTION,
-          entry.uid,
-        ),
-        entry,
-      ),
-      FIRESTORE_TIMEOUT_MS,
+    await this.rest.setDocument(
+      boardEntryPath(entry.timeLimit, entry.uid),
+      { ...entry },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
     );
   }
 
@@ -300,20 +318,12 @@ export class FirebaseService {
    * path, not a collection scan — see `CLAUDE.md` §4.1.
    */
   async getLeaderboardEntry(uid: string, board: string): Promise<LeaderboardEntry | null> {
-    const { firestore, firestoreModule } = await this.getFirestore();
-    const snapshot = await giveUpAfter(
-      firestoreModule.getDoc(
-        firestoreModule.doc(
-          firestore,
-          LEADERBOARDS_COLLECTION,
-          board,
-          BOARD_ENTRIES_SUBCOLLECTION,
-          uid,
-        ),
-      ),
-      FIRESTORE_TIMEOUT_MS,
-    );
-    return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as LeaderboardEntry) : null;
+    const document = await this.rest.getDocument(boardEntryPath(board, uid), {
+      timeoutMs: FIRESTORE_TIMEOUT_MS,
+    });
+    return document
+      ? { id: document.id, ...asDocumentData<Omit<LeaderboardEntry, 'id'>>(document.data) }
+      : null;
   }
 
   /**
@@ -323,24 +333,19 @@ export class FirebaseService {
    */
   getTopScores(board: string, topN = 10): Observable<LeaderboardEntry[]> {
     return defer(() =>
-      this.getFirestore().then(({ firestore, firestoreModule }) => {
-        const leaderboardQuery = firestoreModule.query(
-          firestoreModule.collection(
-            firestore,
-            LEADERBOARDS_COLLECTION,
-            board,
-            BOARD_ENTRIES_SUBCOLLECTION,
-          ),
-          firestoreModule.orderBy('score', 'desc'),
-          firestoreModule.limit(topN),
-        );
-        return giveUpAfter(firestoreModule.getDocs(leaderboardQuery), FIRESTORE_TIMEOUT_MS);
-      }),
+      this.rest.runQuery(
+        {
+          collectionPath: `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_ENTRIES_SUBCOLLECTION}`,
+          orderBy: [{ field: 'score', direction: 'DESCENDING' }],
+          limit: topN,
+        },
+        { timeoutMs: FIRESTORE_TIMEOUT_MS },
+      ),
     ).pipe(
-      map((snapshot) =>
-        snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Omit<LeaderboardEntry, 'id'>),
+      map((documents) =>
+        documents.map((document) => ({
+          id: document.id,
+          ...asDocumentData<Omit<LeaderboardEntry, 'id'>>(document.data),
         })),
       ),
     );

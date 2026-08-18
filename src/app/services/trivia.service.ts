@@ -109,8 +109,9 @@ export class TriviaService {
    * skip a working Firestore fetch during a real CI run, silently substituting cached offline
    * content for the live one). Always attempting the real fetch first and only falling back on
    * an actual thrown failure is both more robust and no slower in the genuinely-offline case —
-   * every underlying network call here already has its own deadline (`giveUpAfter` in
-   * `FirebaseService`, the `HttpClient` call failing fast on a real connection error).
+   * every underlying network call here already has its own deadline (`AbortSignal.timeout`
+   * inside `FirestoreRestClient`, the `HttpClient` call failing fast on a real connection
+   * error).
    */
   async getQuestions(config: GameConfig): Promise<TriviaQuestion[]> {
     try {
