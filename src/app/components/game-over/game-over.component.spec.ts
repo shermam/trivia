@@ -12,6 +12,7 @@ import { AuthService } from '../../services/auth.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
+import { FirestoreRestError } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
 import { GameOverComponent } from './game-over.component';
 
@@ -26,10 +27,18 @@ import { GameOverComponent } from './game-over.component';
  * succeeded on a second attempt.
  */
 
+/**
+ * The error a rules refusal actually produces now.
+ *
+ * It used to be `Object.assign(new Error(...), { code: 'permission-denied' })`,
+ * mirroring the Firestore SDK. That shape no longer exists — `FirebaseService`
+ * goes over REST and throws `FirestoreRestError` — and the old fake is the
+ * reason this suite kept passing while the component underneath had stopped
+ * recognising a refusal at all. Building the real error is what makes the test
+ * a check on the contract rather than on a copy of it.
+ */
 const permissionDenied = () =>
-  Object.assign(new Error('Missing permissions.'), {
-    code: 'permission-denied',
-  });
+  new FirestoreRestError('PERMISSION_DENIED', 403, 'Missing permissions.');
 
 function makeEntry(overrides: Partial<LeaderboardEntry> = {}): LeaderboardEntry {
   return {

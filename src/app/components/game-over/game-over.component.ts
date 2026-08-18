@@ -25,12 +25,9 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
+import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
 import { IconComponent } from '../icon/icon.component';
-
-function isPermissionDeniedError(error: unknown): boolean {
-  return (error as { code?: string } | null)?.code === 'permission-denied';
-}
 
 /** Derives initials for a leaderboard avatar, e.g. "Jane Doe" -> "JD". */
 function initialsFor(name: string): string {
@@ -475,7 +472,7 @@ export class GameOverComponent implements OnInit {
    * gets the generic message and keeps the form open.
    */
   private async reportSaveFailure(error: unknown, attemptedScore: number): Promise<void> {
-    if (isPermissionDeniedError(error)) {
+    if (isFirestorePermissionDenied(error)) {
       const existing = await this.firebaseService
         .getLeaderboardEntry(this.authService.user()?.uid ?? '', this.board())
         .catch(() => null);

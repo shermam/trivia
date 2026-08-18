@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { FirestoreRestError } from '../../services/firestore-rest/firestore-rest.client';
 import { NewCustomQuestionDoc } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
@@ -20,10 +21,18 @@ import { AddQuestionComponent } from './add-question.component';
  * day, while the user sees nothing move.
  */
 
+/**
+ * The error a rules refusal actually produces now.
+ *
+ * It used to be `Object.assign(new Error(...), { code: 'permission-denied' })`,
+ * mirroring the Firestore SDK. That shape no longer exists — `FirebaseService`
+ * goes over REST and throws `FirestoreRestError` — and the old fake is the
+ * reason this suite kept passing while the component underneath had stopped
+ * recognising a refusal at all. Building the real error is what makes the test
+ * a check on the contract rather than on a copy of it.
+ */
 const permissionDenied = () =>
-  Object.assign(new Error('Missing or insufficient permissions.'), {
-    code: 'permission-denied',
-  });
+  new FirestoreRestError('PERMISSION_DENIED', 403, 'Missing or insufficient permissions.');
 
 type AddCustomQuestion = (question: NewCustomQuestionDoc) => Promise<void>;
 

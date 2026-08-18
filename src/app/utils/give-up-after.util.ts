@@ -16,17 +16,23 @@
  *   `SubscriptionService`)
  * - Angular `HttpClient` → RxJS `timeout()`, since unsubscribing aborts
  *
- * This helper survives only for the Firestore one-shot operations (`getDocs`,
- * `getDoc`, `setDoc`, `addDoc`) and `signInAnonymously`, which take no options
- * argument at all — `AbortSignal` appears nowhere in the Firestore or Auth SDK
- * type definitions, so there is nothing to cancel with. If a future SDK adds
- * one, these call sites should move to it and this file should go.
+ * What is left of it is shrinking on purpose. `signInAnonymously` takes no
+ * options argument at all — `AbortSignal` appears nowhere in the Auth SDK's
+ * type definitions — and Auth is not being migrated, so that call site is
+ * permanent. `GameControllerService`'s restore is an IndexedDB read, not a
+ * network one, and is a genuine "stop waiting" rather than a missing
+ * cancellation.
  *
- * It cannot simply be dropped either: `TriviaService.getQuestions()` falls back
- * to the offline question pool only when the fetch *throws*, and Firestore
- * queues rather than failing when the backend is unreachable. Without a
- * deadline a custom game on a dead network waits forever instead of falling
- * back to cached questions.
+ * The Firestore call sites are going. `FirebaseService` moved to
+ * `FirestoreRestClient` and a real `AbortSignal.timeout` (`BACKLOG.md` item 2);
+ * the two `getDocs` in `SubscriptionService.getProPriceId()` are the last
+ * holdouts and go with the SDK in the next PR of that item.
+ *
+ * The deadline itself is load-bearing wherever it lives, however:
+ * `TriviaService.getQuestions()` falls back to the offline question pool only
+ * when the fetch *throws*, and the Firestore SDK queues rather than failing
+ * when the backend is unreachable. Without a deadline a custom game on a dead
+ * network waits forever instead of falling back to cached questions.
  *
  * The timer is cleared however the race settles — otherwise every call that
  * finished normally left one armed for its full duration, ten seconds after a

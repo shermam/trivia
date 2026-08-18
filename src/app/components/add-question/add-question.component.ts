@@ -12,6 +12,7 @@ import { Difficulty, NewCustomQuestionDoc, QuestionType } from '../../models/que
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { FirebaseService } from '../../services/firebase.service';
+import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
@@ -241,7 +242,7 @@ export class AddQuestionComponent implements OnInit {
    * rather than being narrated wrongly.
    */
   private explainSubmitFailure(error: unknown): string {
-    const isPermissionDenied = (error as { code?: string } | null)?.code === 'permission-denied';
+    const isPermissionDenied = isFirestorePermissionDenied(error);
     if (isPermissionDenied && !this.authService.isProUser()) {
       return (
         'Your account does not have Pro access right now, so the question was rejected. ' +
