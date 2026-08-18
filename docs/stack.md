@@ -57,7 +57,20 @@ The same mark is also used in-app as the brand badge — top bar logo, `GameSetu
 
 `FirebaseService` and `AuthService` wrap the Firebase modular SDK (`firebase/app`, `firebase/firestore`, `firebase/auth`) directly — **no AngularFire** — by design, so they can later be reused unmodified in non-Angular shells (e.g. Capacitor/Tauri) per an in-code comment.
 
-Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. `FirebaseAppService.getApp()` fetches that config and calls `initializeApp` exactly once, shared by both Firestore and Auth.
+Notably, the app **never commits a Firebase config/API key to source**. Instead it fetches `/__/firebase/init.json` at runtime — a reserved endpoint that Firebase Hosting auto-generates for whatever project is serving the current origin. In local dev, `src/proxy.conf.json` proxies that path to the live Hosting site (`https://intellectura-3b26a.web.app`) so `ng serve` gets a real config without any secrets in the repo. `FirebaseAppService.getApp()` fetches that config and calls `initializeApp` exactly once, shared by both Firestore and Auth. `FirebaseAppService.getConfig()` exposes the same memoized config **without** initializing the app, for the REST client below — which needs the `projectId` and `apiKey` but has no use for a `FirebaseApp`.
+
+#### `FirestoreRestClient` — the Firestore SDK's replacement, being phased in
+
+`src/app/services/firestore-rest/` holds a `fetch`-based client for Firestore's REST API. It is the first step of `BACKLOG.md` item 2, and the case for it is `FIRESTORE_SDK_VS_REST.md`: the Firestore client SDK is **558.98 kB raw / 141.26 kB transfer**, the single largest thing the app ships — roughly 5× the app's own code — for thirteen API symbols over five collections of flat documents, with its headline feature (offline persistence) deliberately switched off.
+
+Two files:
+
+- **`firestore-value.ts`** — the wire codec. REST tags every value with its type (`{"stringValue": …}`, `{"integerValue": "7"}`) and **sends integers as strings**. All eleven Firestore value types are handled in both directions, and two things are rejected rather than coerced: `undefined`, and any number that cannot survive the round trip (non-finite, or an integer outside the safe range). `FIRESTORE_SDK_VS_REST.md` §7 names this the migration's main correctness risk — a `"7"` where `7` was meant reaches `firestore.rules`, fails `is int`, and returns a `permission-denied` that names no cause.
+- **`firestore-rest.client.ts`** — `getDocument` / `setDocument` / `createDocument` / `runQuery`, each with a real `AbortSignal.timeout` rather than a `Promise.race`. Requests carry the project's API key for quota and the user's ID token as a bearer token for `firestore.rules`; the token is optional, because `custom_questions`, `products` and the leaderboards are all `allow read: if true`.
+
+**`firestore.rules` is unaffected.** A REST request authenticated with a Firebase ID token goes through the same rules engine with the same `request.auth`, so the security boundary and `npm run rules:test` are unchanged by the transport.
+
+**Token handling stays the Auth SDK's job**, which is a smaller manual surface than §7 of the design document anticipated: Auth is not being migrated, so `AuthService.getIdToken()` delegates to the SDK's `getIdToken()`, which already caches and re-mints within five minutes of expiry. Only attaching the header is manual.
 
 **Every network call carries a deadline, using whatever cancellation the API actually offers.** `fetch` (the runtime-config load) uses `AbortSignal.timeout`; Firebase callables (`deleteAccount`, `exportAccountData`) use `HttpsCallableOptions.timeout`, which the SDK documents as cancelling the request; the checkout/portal `onSnapshot` handshake clears its own listener on the deadline, which previously stayed attached for the rest of the session.
 

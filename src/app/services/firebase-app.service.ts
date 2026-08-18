@@ -48,6 +48,29 @@ const EMULATOR_CONFIG: FirebaseOptions = {
 @Injectable({ providedIn: 'root' })
 export class FirebaseAppService {
   private appPromise: Promise<FirebaseApp> | null = null;
+  private configPromise: Promise<FirebaseOptions> | null = null;
+
+  /**
+   * The runtime config on its own, without initializing the Firebase app.
+   *
+   * `FirestoreRestClient` needs the `projectId` (it goes in every REST URL)
+   * and the `apiKey`, but has no use for a `FirebaseApp` — REST is `fetch`.
+   * Exposing the config separately keeps the SDK out of that path entirely.
+   *
+   * Memoized separately from `appPromise` so the config is fetched once
+   * however it is reached first, and **cleared on rejection**: a cached
+   * rejected promise turns one transient blip into a permanently broken
+   * session (`CLAUDE.md` §4.4).
+   */
+  getConfig(): Promise<FirebaseOptions> {
+    if (!this.configPromise) {
+      this.configPromise = this.loadRuntimeConfig();
+      this.configPromise.catch(() => {
+        this.configPromise = null;
+      });
+    }
+    return this.configPromise;
+  }
 
   private async loadRuntimeConfig(): Promise<FirebaseOptions> {
     if (environment.useEmulators) {
@@ -74,7 +97,7 @@ export class FirebaseAppService {
    */
   getApp(): Promise<FirebaseApp> {
     if (!this.appPromise) {
-      this.appPromise = Promise.all([import('firebase/app'), this.loadRuntimeConfig()]).then(
+      this.appPromise = Promise.all([import('firebase/app'), this.getConfig()]).then(
         ([{ initializeApp }, config]) => initializeApp(config),
       );
     }

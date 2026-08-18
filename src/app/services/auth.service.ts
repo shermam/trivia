@@ -348,6 +348,34 @@ export class AuthService {
     }
   }
 
+  /**
+   * The current user's ID token, or `null` when nobody is signed in.
+   *
+   * This is what a Firestore REST call puts in its `Authorization: Bearer`
+   * header. `FIRESTORE_SDK_VS_REST.md` §7 flags manual token handling as one
+   * of the two likely sources of a quiet bug in the migration, and it is worth
+   * being precise about how much of that risk actually lands here: **the Auth
+   * SDK stays**, and `getIdToken()` already returns a cached token and
+   * re-mints it when it is within five minutes of expiring. Expiry and refresh
+   * are therefore still the SDK's job. The manual part is only attaching the
+   * header.
+   *
+   * `authStateReady()` for the same reason `ensureSignedIn` awaits it:
+   * `currentUser` reads `null` for a moment while persistence restores a
+   * returning session, and a read that lost that race would go out
+   * unauthenticated and be refused by rules that were going to allow it.
+   *
+   * Returns `null` rather than throwing when signed out — the public
+   * collections (`custom_questions`, `products`, the leaderboards) are
+   * readable with no token at all, so an anonymous-sign-in that has not landed
+   * yet should not fail a read that never needed it.
+   */
+  async getIdToken(): Promise<string | null> {
+    const { auth } = await this.getAuth();
+    await auth.authStateReady();
+    return (await auth.currentUser?.getIdToken()) ?? null;
+  }
+
   private async loadStripeRoleClaim(authModule: AuthModule, user: User | null): Promise<void> {
     if (!user) {
       this.stripeRoleSignal.set(null);
