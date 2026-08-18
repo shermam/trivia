@@ -46,6 +46,16 @@ Cypress.on('window:before:load', (win) => {
   }) as typeof fetch;
 });
 
+// There is no `resetBackend()` here — the backend is the real project — but
+// the *browser* is just as dirty as it is against the emulator, and for the
+// same reason: `testIsolation` does not clear IndexedDB. The saved game leaks
+// between tests on this runner too, so the same hook runs, before the first
+// `cy.visit()` (see `offline-storage.ts`). It touches nothing but local
+// browser storage, so it is safe against a real deployment.
+beforeEach(() => {
+  cy.clearOfflineStorage();
+});
+
 // This is the real, persistent, public database — never wipe it. Instead,
 // track whatever Auth/Firestore state each test created (including the
 // ambient anonymous user every `cy.visit()` creates) and delete exactly

@@ -1,3 +1,4 @@
+import { deleteOfflineDatabase } from './offline-storage';
 import type {
   AccountState,
   AccountStateQuery,
@@ -13,6 +14,17 @@ declare global {
     interface Chainable {
       /** Wipes all emulator Auth users + Firestore `leaderboard`/`custom_questions` docs. */
       resetBackend(): Chainable<null>;
+      /**
+       * Deletes the app's IndexedDB database — the saved game and the offline
+       * question pool — which Cypress's own test isolation does not touch.
+       *
+       * **Must be called before the test's first `cy.visit()`**, and is, from
+       * the `beforeEach` in both support files. `deleteDatabase` blocks on any
+       * open connection, and the app holds one for the life of the tab; see
+       * `offline-storage.ts` for the two placements that were tried and what
+       * each one actually did.
+       */
+      clearOfflineStorage(): Chainable<void>;
       /** Intercepts the Open Trivia DB endpoints with deterministic fixtures. */
       stubOpenTrivia(): Chainable<null>;
       /**
@@ -64,6 +76,12 @@ declare global {
 
 Cypress.Commands.add('resetBackend', () => {
   cy.task('resetBackend');
+});
+
+Cypress.Commands.add('clearOfflineStorage', () => {
+  // `{ log: false }` on the window read only: the deletion itself stays in the
+  // command log, so a spec that fails on leaked state shows this ran.
+  cy.window({ log: false }).then((win) => deleteOfflineDatabase(win));
 });
 
 Cypress.Commands.add('stubOpenTrivia', () => {
