@@ -1,5 +1,7 @@
 # Firestore: client SDK vs REST API
 
+> **Done, and measured.** The migration this document recommends shipped as [#109](https://github.com/shermam/trivia/pull/109), [#110](https://github.com/shermam/trivia/pull/110) and [#111](https://github.com/shermam/trivia/pull/111) (`BACKLOG.md` item 2). **§11 has the outcome and the numbers**; everything between here and there is the reasoning as it stood beforehand, left as written so the prediction can be checked against the result. Where a figure below is stale, §11 says so rather than the number being quietly edited.
+
 A decision document, not a plan. It exists because the timeout work in [#60](https://github.com/shermam/trivia/pull/60) exposed something uncomfortable: seven of this app's Firestore calls cannot be cancelled at all, because the SDK offers no mechanism. `fetch` does. That prompted the wider question of whether the SDK is earning its place here.
 
 Every number below was measured against this repo on 2026-08-09, not taken from a blog post. Where something is a judgement rather than a measurement, it says so.
@@ -181,3 +183,38 @@ So the last argument for the SDK is gone on purpose rather than by experiment, a
 | Token handling            | **SDK**                                    | medium — main bug risk |
 | Wire-format safety        | **SDK**                                    | medium — main bug risk |
 | Implementation cost       | **SDK** (zero)                             | one-off                |
+
+---
+
+## 11. Outcome
+
+Measured on 2026-08-18, after the last call site moved. Both builds are `npm run build:prod` on the same machine after `rm -rf dist`, summing **every** emitted JavaScript file — not just the initial bundle — and compressing each with brotli at Node's default quality, so the two columns are the same measurement made twice rather than a build-report estimate. Both reproduce byte for byte across repeated builds.
+
+**kB here means 1000 bytes**, matching Angular's build report. The raw byte counts are given too, because getting exactly this wrong is the subject of the first correction below.
+
+|                    | before ([`aa7fbca`](https://github.com/shermam/trivia/commit/aa7fbca)) |                     after |                  change |
+| ------------------ | ---------------------------------------------------------------------: | ------------------------: | ----------------------: |
+| JavaScript, raw    |                                               1,325,892 B (1325.89 kB) | **772,759 B (772.76 kB)** | **−553,133 B (−41.7%)** |
+| JavaScript, brotli |                                                  337,591 B (337.59 kB) | **198,016 B (198.02 kB)** | **−139,575 B (−41.3%)** |
+| files emitted      |                                                                     22 |                        21 |                      −1 |
+
+**§9's acceptance criterion is met**: the Firestore chunk does not appear in a build at all, let alone in the network panel — `firebase/firestore` is imported nowhere under `src/`, and `onSnapshot` appears in no emitted file.
+
+### Where the estimates landed
+
+- **§2 was right about the size, and the "drift" was a unit error — mine, twice over.** §2 quotes 545.8 kB raw / 161.0 kB gzipped; `npm run build:prod` reports 558.98 kB raw / 141.26 kB transfer for what is plainly the same chunk. `BACKLOG.md` and the first draft of this section both explained the gap as "the raw size grew and the compressed estimate fell — a dependency bump plus a change in Angular's compression reporting". **That explanation was invented, and it was wrong.** It is one unchanged file of 558,976 bytes: ÷1024 = 545.88 KiB (§2's figure), ÷1000 = 558.98 kB (Angular's). Its gzip is 164,795 B = 160.93 KiB (§2's "161.0"); its brotli is 141,263 B = 141.26 kB (Angular's estimate). KiB versus kB, and gzip versus brotli — no drift, and no dependency bump either, since `firebase` was pinned at the same version throughout. The outcome table above then made the _same_ mistake, reporting KiB as kB, which is why its figures moved when they were re-derived; both are now corrected and stated in bytes. **The general lesson is cheap: a number without its unit is not a measurement, and "it must have drifted" is a story, not a finding.**
+
+- **§2 was wrong about one thing, and it is worth correcting rather than leaving.** It states the chunk "loads on the **landing page** of a cold session", verified in a real browser in August. That had stopped being true before this work began: a Lighthouse run against `main` shows the anonymous landing page fetching 21 requests and none of them the Firestore chunk, because nothing on that path reaches a Firestore call any more. So the _transfer_ half of the win did not apply to a first-time visitor who never signs in — it applied to everyone who did. The parse-cost argument is unaffected, and the bundle is smaller for every user either way.
+- **§7 overstated the token risk, for a reason it could not have known.** It calls manual token handling one of the two likely sources of a quiet bug. In the event, Auth was not migrated, so `getIdToken()` still caches and re-mints within five minutes of expiry and the only manual part is attaching a header. It produced no bugs.
+- **§7 was exactly right about the wire format**, which is where the care went: an eleven-type codec with a table-driven test, `undefined` and unsafe numbers rejected rather than coerced, and assertions pinning that integers leave as `integerValue` strings — because a JSON number stores as a double, fails `is int` in `firestore.rules`, and returns a `permission-denied` that names no cause.
+- **§4 was right that both listeners were replaceable, and understated one of them.** The checkout handshake became a 500 ms poll bounded at 20 s, as sketched. Subscription status became a read — but a plain read on load is not sufficient, because Stripe's redirect back to `/pricing?checkout=success` races our own `stripeWebhook` delivery and often wins. That case needs a bounded poll of its own, which the listener had been quietly absorbing.
+
+### The bug the migration actually produced
+
+Not in the codec, and not in token handling. Two components detected a rules refusal by the SDK's error shape (`error.code === 'permission-denied'`), which `FirestoreRestError` does not carry — so both would have stopped explaining a refusal they could explain. **Both component specs kept passing**, because their fakes were built to the old shape and therefore encoded the contract that had just stopped being true. Found by reading the call sites, not by running anything. Fixed with one shared predicate and specs that construct the real error; see [#110](https://github.com/shermam/trivia/pull/110).
+
+### What was given up
+
+- **Real-time subscription status across tabs.** A second tab now needs a reload to notice a subscription change. Judged acceptable in §4 and still is: the tier costs $0.99/month and its only entitlement is an "Add a question" link.
+- **The SDK's internal retry.** A failed subscription read is not retried, where a listener would have reconnected. The consequence is bounded because the signal is not the gate — `isProUser` is `claim || document`, so a subscriber whose token already carries `stripeRole` is unaffected.
+- **Nothing else.** `firestore.rules` is untouched; REST requests carry the same ID token through the same rules engine, and the rules suite never had to change.

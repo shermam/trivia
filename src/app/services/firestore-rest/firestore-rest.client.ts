@@ -113,7 +113,7 @@ export class FirestoreRestError extends Error {
   }
 
   /**
-   * A rules refusal. Three call sites branch on this rather than on a message,
+   * A rules refusal. Four call sites branch on this rather than on a message,
    * because it is routine rather than exceptional for them: a taken
    * `{window}-{slot}` document ID means "try the next slot", and a leaderboard
    * write that does not beat the existing best is simply not a new PB.
@@ -126,11 +126,12 @@ export class FirestoreRestError extends Error {
 /**
  * Whether an error is Firestore refusing a request under `firestore.rules`.
  *
- * Exported and shared because three call sites branch on it and each one gets
- * it wrong differently if it drifts: `FirebaseService.reportQuestion` would
- * abandon its `{window}-{slot}` slot loop on the first collision and report a
- * rate limit nobody hit, and the two components would stop explaining a
- * refusal they can explain and fall back to "please try again".
+ * Exported and shared because four call sites branch on it and each one gets
+ * it wrong differently if it drifts: `FirebaseService.reportQuestion` and
+ * `SubscriptionService.createSessionDoc` would each abandon their
+ * `{window}-{slot}` slot loop on the first collision and report a rate limit
+ * nobody hit, and the two components would stop explaining a refusal they can
+ * explain and fall back to "please try again".
  *
  * Under the SDK this was `error.code === 'permission-denied'` written out at
  * each site. That shape no longer exists — REST reports `PERMISSION_DENIED` in

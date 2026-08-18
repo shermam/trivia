@@ -12,8 +12,8 @@
  * - `fetch` → `AbortSignal.timeout(ms)` (see `FirebaseAppService`)
  * - Firebase callables → `httpsCallable(fns, name, { timeout: ms })` (see
  *   `AccountService`)
- * - `onSnapshot` → call its `unsubscribe` on the deadline (see
- *   `SubscriptionService`)
+ * - a poll → bound it on the wall clock and stop (see `pollUntil`, which
+ *   replaced this app's `onSnapshot` listeners)
  * - Angular `HttpClient` → RxJS `timeout()`, since unsubscribing aborts
  *
  * What is left of it is shrinking on purpose. `signInAnonymously` takes no
@@ -23,16 +23,16 @@
  * network one, and is a genuine "stop waiting" rather than a missing
  * cancellation.
  *
- * The Firestore call sites are going. `FirebaseService` moved to
- * `FirestoreRestClient` and a real `AbortSignal.timeout` (`BACKLOG.md` item 2);
- * the two `getDocs` in `SubscriptionService.getProPriceId()` are the last
- * holdouts and go with the SDK in the next PR of that item.
+ * The Firestore call sites are gone. Every one of them goes over
+ * `FirestoreRestClient` and a real `AbortSignal.timeout` now, and the SDK with
+ * them (`BACKLOG.md` item 2) — so nothing here is waiting on Firestore any
+ * more.
  *
- * The deadline itself is load-bearing wherever it lives, however:
+ * The deadline itself remains load-bearing wherever it lives:
  * `TriviaService.getQuestions()` falls back to the offline question pool only
- * when the fetch *throws*, and the Firestore SDK queues rather than failing
- * when the backend is unreachable. Without a deadline a custom game on a dead
- * network waits forever instead of falling back to cached questions.
+ * when the fetch *throws*. That is now guaranteed by `AbortSignal.timeout`
+ * rather than by this helper, which is the stronger version of the same
+ * property — the request is actually cancelled instead of merely abandoned.
  *
  * The timer is cleared however the race settles — otherwise every call that
  * finished normally left one armed for its full duration, ten seconds after a

@@ -35,7 +35,7 @@ const REJECTED_MESSAGE = 'Could not start checkout. Please reload the page and t
 
 /**
  * The Angular client (`SubscriptionService.startProCheckout`) creates a doc
- * here and then listens on it for `url`/`error` — this function is the
+ * here and then polls it for `url`/`error` — this function is the
  * other half of that handshake, replacing the equivalent trigger the
  * "Run Subscriptions with Stripe" extension used to provide.
  */
