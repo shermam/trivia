@@ -1,7 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import type { Firestore } from 'firebase/firestore';
 import { Observable, defer, map } from 'rxjs';
-import { environment } from '../../environments/environment';
 import {
   CustomQuestionDoc,
   Difficulty,
@@ -9,7 +7,6 @@ import {
   NewCustomQuestionDoc,
   NewQuestionReportDoc,
 } from '../models/question.model';
-import { FirebaseAppService } from './firebase-app.service';
 import {
   DOCUMENT_ID_FIELD,
   FirestoreRestClient,
@@ -36,15 +33,6 @@ const QUESTION_REPORTS_COLLECTION = 'question_reports';
 const REPORT_WINDOW_MS = 300_000;
 const REPORT_SLOTS_PER_WINDOW = 10;
 const FIRESTORE_TIMEOUT_MS = 10_000;
-const FIRESTORE_EMULATOR_HOST = '127.0.0.1';
-const FIRESTORE_EMULATOR_PORT = 8080;
-
-/**
- * Thin wrapper around the Firebase modular SDK. Kept framework-agnostic
- * (no AngularFire) so this service can be reused as-is inside Capacitor
- * and Tauri shells without pulling in Angular-specific DI wiring.
- */
-type FirestoreModule = typeof import('firebase/firestore');
 
 /**
  * Every `{window}-{slot}` document ID was refused. Usually that means the
@@ -73,8 +61,8 @@ export interface CustomQuestionsQuery {
 /**
  * The alphabet Firestore draws auto-IDs from, and the length it uses.
  *
- * Reproduced rather than imported because the SDK doesn't export its ID
- * generator. It only has to describe the same *space* the real IDs occupy —
+ * Reproduced rather than imported because the SDK is gone and never exported
+ * its ID generator anyway. It only has to describe the same *space* the real IDs occupy —
  * a cursor is a position to start reading from, never a document that has to
  * exist.
  */
@@ -118,43 +106,7 @@ function boardEntryPath(board: string, uid: string): string {
 
 @Injectable({ providedIn: 'root' })
 export class FirebaseService {
-  private readonly firebaseAppService = inject(FirebaseAppService);
   private readonly rest = inject(FirestoreRestClient);
-
-  private firestorePromise: Promise<{
-    firestore: Firestore;
-    firestoreModule: FirestoreModule;
-  }> | null = null;
-
-  /**
-   * The last thing in this app still holding the Firestore SDK.
-   *
-   * Every method below now goes over REST. What keeps the SDK in the bundle —
-   * and therefore keeps the entire 558.98 kB of it shipping — is
-   * `SubscriptionService`'s two `onSnapshot` listeners, which REST has no
-   * equivalent for. Replacing those (with a read on load, and a poll for the
-   * checkout handshake) is the next and last PR of `BACKLOG.md` item 2, and
-   * this method goes with them. Nothing new should call it.
-   */
-  getFirestore() {
-    if (!this.firestorePromise) {
-      this.firestorePromise = Promise.all([
-        import('firebase/firestore'),
-        this.firebaseAppService.getApp(),
-      ]).then(([firestoreModule, app]) => {
-        const firestore = firestoreModule.getFirestore(app);
-        if (environment.useEmulators) {
-          firestoreModule.connectFirestoreEmulator(
-            firestore,
-            FIRESTORE_EMULATOR_HOST,
-            FIRESTORE_EMULATOR_PORT,
-          );
-        }
-        return { firestore, firestoreModule };
-      });
-    }
-    return this.firestorePromise;
-  }
 
   /**
    * Draws up to `limit` questions from the shared bank, filtered server-side.

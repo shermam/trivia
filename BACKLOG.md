@@ -30,7 +30,7 @@ Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 | #   | Item                                                                                            | Size | Status |
 | --- | ----------------------------------------------------------------------------------------------- | ---- | ------ |
 | 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                                          | M    | ✅     |
-| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | 🟡     |
+| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | ✅     |
 | 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ⬜     |
 | 4   | [Review before publish](#4-review-before-publish)                                               | L    | ⬜     |
 | 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | ⬜     |
@@ -79,13 +79,22 @@ That is how this item finished: the two Cypress bullets went to a machine with a
 
 ### 2. Firestore client SDK → REST
 
-**Size: L. Status: 🟡 in progress** — split into three PRs, because the SDK only leaves the bundle on the last one and a single PR rewriting every Firestore call site at once is not reviewable:
+**Size: L. Status: ✅ done** — split into three PRs, because the SDK only leaves the bundle on the last one and a single PR rewriting every Firestore call site at once is not reviewable:
 
-| PR                                                        | What                                                                                                                      | Bundle                               |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| ✅ A — [#109](https://github.com/shermam/trivia/pull/109) | `FirestoreRestClient` + wire codec, behind unit tests. **No call sites change**, so it is fully tree-shaken out.          | unchanged                            |
-| 🔵 B — [#110](https://github.com/shermam/trivia/pull/110) | `FirebaseService`'s six one-shot reads and writes move to REST. The SDK stays in the bundle, held by the listeners alone. | unchanged                            |
-| ⬜ C                                                      | Both `onSnapshot` listeners replaced, `getFirestore()` deleted, the win measured.                                         | −558.98 kB raw / −141.26 kB transfer |
+| PR                                                        | What                                                                                                                      | Bundle              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| ✅ A — [#109](https://github.com/shermam/trivia/pull/109) | `FirestoreRestClient` + wire codec, behind unit tests. **No call sites change**, so it is fully tree-shaken out.          | unchanged           |
+| ✅ B — [#110](https://github.com/shermam/trivia/pull/110) | `FirebaseService`'s six one-shot reads and writes move to REST. The SDK stays in the bundle, held by the listeners alone. | unchanged           |
+| 🔵 C — [#111](https://github.com/shermam/trivia/pull/111) | Both `onSnapshot` listeners replaced, `getFirestore()` deleted, the win measured.                                         | **the whole chunk** |
+
+**Result, measured 2026-08-18** — every emitted JS file, both builds on the same machine after `rm -rf dist`, brotli at Node's default quality, reproducible byte for byte. **kB is 1000 bytes**, matching Angular's build report; raw byte counts are given because an earlier draft of these very figures divided by 1024 and labelled the result kB (see `FIRESTORE_SDK_VS_REST.md` §11):
+
+|                    |                   before |                     after |                  change |
+| ------------------ | -----------------------: | ------------------------: | ----------------------: |
+| JavaScript, raw    | 1,325,892 B (1325.89 kB) | **772,759 B (772.76 kB)** | **−553,133 B (−41.7%)** |
+| JavaScript, brotli |    337,591 B (337.59 kB) | **198,016 B (198.02 kB)** | **−139,575 B (−41.3%)** |
+
+`firebase/firestore` is imported nowhere under `src/`, and `onSnapshot` appears in no emitted file. `FIRESTORE_SDK_VS_REST.md` §11 records how the design document's predictions held up — including the two places it was wrong, and the fact that the one bug the migration produced was in neither of the two spots it warned about.
 
 **Baseline re-measured on 2026-08-18** (this item's own instruction, below): `npm run build:prod` reports the Firestore chunk at **558.98 kB raw / 141.26 kB transfer** — identical to the 2026-08-16 figure, so there has been no drift, and `FIRESTORE_SDK_VS_REST.md`'s 545.8 kB / 161.0 kB remains the stale one. Initial bundle for context: 178.19 kB raw / 36.19 kB transfer.
 

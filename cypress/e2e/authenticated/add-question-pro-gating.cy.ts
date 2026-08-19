@@ -23,15 +23,34 @@ describe('add-question Pro gating', () => {
     cy.createVerifiedUser({ email, password }).then(({ uid }) => {
       cy.visit('/');
       cy.signInViaUi(email, password);
-      // Simulates what our Stripe webhook handler does after a real
-      // checkout — no page reload here on purpose: this exercises the app's own
-      // real-time subscription listener + token refresh (SubscriptionService
-      // / AuthService.refreshIdToken), the same path a real subscriber hits
-      // right after returning from Stripe Checkout.
+
+      // Stripe sends a real subscriber back to
+      // `${origin}/pricing?checkout=success` (functions/src/checkout-sessions.ts),
+      // so that is the page a new subscription first becomes visible on — and
+      // this test goes there rather than staying put.
+      //
+      // It used to stay put *on purpose*: `SubscriptionService` held an
+      // `onSnapshot` listener that saw the webhook's write whenever it landed,
+      // wherever the user happened to be. That listener was one of the two
+      // things keeping the 559 kB Firestore SDK in the bundle and is gone
+      // (`BACKLOG.md` item 2). What replaces it is a read when the signed-in
+      // user changes, plus a bounded poll on this exact page.
+      cy.visit('/pricing?checkout=success');
+
+      // Seeded *after* landing, so the subscription document arrives while the
+      // page is already open. That is the race `awaitProActivation` exists
+      // for — Stripe's redirect and our own `stripeWebhook` delivery run
+      // concurrently and the redirect usually wins. Seeding before the visit
+      // would be answered by the plain read-on-load and would never exercise
+      // the poll.
       cy.setProSubscription({ uid });
     });
 
-    cy.contains('a', '+ Create custom question').click();
+    // Fails unless the poll actually picks the subscription up: nothing else
+    // on this page will notice it.
+    cy.contains("You're subscribed");
+
+    cy.visit('/add-question');
     cy.location('pathname').should('eq', '/add-question');
 
     // This screen carries the other two segmented pickers (Question Type and,
@@ -40,9 +59,9 @@ describe('add-question Pro gating', () => {
     // unauthenticated spec.
     assertRadiosAreGrouped();
 
-    // Retries until the reactive Pro-gated form actually renders — i.e.
-    // until the real-time subscription listener + token refresh have
-    // landed, not just until the doc write resolved.
+    // Retries until the Pro-gated form actually renders — i.e. until the
+    // subscription read and the forced token refresh have landed, not just
+    // until the doc write resolved.
     cy.get('#category').type('Science');
     cy.get('#question').type('What planet is known as the Red Planet?');
     cy.get('#correctAnswer').type('Mars');

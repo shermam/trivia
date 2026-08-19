@@ -19,7 +19,7 @@ type CheckoutQueryStatus = 'success' | 'cancelled' | null;
 export class PricingComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
-  private readonly subscriptionService = inject(SubscriptionService);
+  protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly authService = inject(AuthService);
   protected readonly authMenuState = inject(AuthMenuStateService);
 
@@ -33,6 +33,19 @@ export class PricingComponent {
   protected readonly checkoutStatus = signal<CheckoutQueryStatus>(
     (this.route.snapshot.queryParamMap.get('checkout') as CheckoutQueryStatus) ?? null,
   );
+
+  constructor() {
+    // Landing here from Stripe's `success_url` means the payment went through,
+    // but not that our own `stripeWebhook` has finished mirroring the
+    // subscription document yet — the redirect and the webhook delivery race,
+    // and the redirect often wins. `SubscriptionService` used to hold an
+    // `onSnapshot` listener that simply saw the write whenever it landed;
+    // since the Firestore SDK left the bundle (`BACKLOG.md` item 2) that has
+    // to be asked for, and this is the one place that knows to ask.
+    if (this.checkoutStatus() === 'success') {
+      void this.subscriptionService.awaitProActivation();
+    }
+  }
 
   // `AuthService.isAnonymous`/`isFullyAuthenticated` both default to `false`
   // before the very first auth state resolves (`user()` is still `null`),

@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
-import { FirebaseService } from './firebase.service';
+import { FirebaseAppService } from './firebase-app.service';
 import { SubscriptionService } from './subscription.service';
 
 /**
@@ -13,125 +13,340 @@ import { SubscriptionService } from './subscription.service';
  * file the compiler never sees, which is exactly the kind of agreement that
  * rots silently.
  *
- * Firestore is faked at the module boundary — `FirebaseService.getFirestore()`
- * hands back the SDK namespace, so a stand-in for it is enough to observe
- * every call without an emulator.
+ * Firestore is faked at `fetch`, one layer below where this suite used to
+ * stand. It had to move: the two `onSnapshot` listeners it was built around no
+ * longer exist (`BACKLOG.md` item 2), and the SDK namespace it faked is not in
+ * the bundle any more. The replacement is better placed anyway — these tests
+ * now run through the real `FirestoreRestClient` and assert on the request
+ * that would actually reach Firestore.
  */
 
+const PROJECT = 'demo-project';
+const RESOURCE_ROOT = `projects/${PROJECT}/databases/(default)/documents`;
+const URL_ROOT = `https://firestore.googleapis.com/v1/${RESOURCE_ROOT}`;
 const SESSION_WINDOW_MS = 300_000;
 
 interface WrittenDoc {
-  path: string[];
+  path: string;
   data: Record<string, unknown>;
 }
 
-/** Fails `setDoc` for any doc ID in `deniedIds`, the way the rules would. */
-function fakeFirestore(
-  options: {
-    deniedIds?: string[];
-    writeBack?: Record<string, unknown>;
-    /** Never call back, so the handshake reaches its deadline instead. */
-    neverRespond?: boolean;
-    /**
-     * Documents the `customers/{uid}/subscriptions` listener should see. The
-     * service filters these by `role` in memory (a composite index is not
-     * worth one boolean), so what they carry is the whole point.
-     */
-    subscriptionDocs?: Record<string, unknown>[];
-  } = {},
-) {
-  const writes: WrittenDoc[] = [];
-  const denied = new Set(options.deniedIds ?? []);
-  const unsubscribe = vi.fn();
-
-  const firestoreModule = {
-    doc: (_firestore: unknown, ...path: string[]) => ({ path }),
-    collection: (_firestore: unknown, ...path: string[]) => ({ path }),
-    query: (ref: unknown) => ref,
-    where: () => undefined,
-    getDocs: () => Promise.resolve({ docs: [] }),
-    setDoc: (ref: { path: string[] }, data: Record<string, unknown>) => {
-      const id = ref.path[ref.path.length - 1];
-      if (denied.has(id)) {
-        return Promise.reject(
-          Object.assign(new Error('Missing permissions.'), {
-            code: 'permission-denied',
-          }),
-        );
-      }
-      writes.push({ path: ref.path, data });
-      return Promise.resolve();
-    },
-    // Two different listeners run through here — the subscriptions *query*
-    // and the session *document* handshake — and they take different
-    // snapshot shapes. Emitting one shape for both would let a `.docs` read
-    // pass against a fake that never produces documents.
-    onSnapshot: (ref: { path: string[] }, next: (snap: never) => void) => {
-      const isSubscriptionsQuery = ref.path[ref.path.length - 1] === 'subscriptions';
-      if (isSubscriptionsQuery) {
-        queueMicrotask(() =>
-          next({
-            docs: (options.subscriptionDocs ?? []).map((data) => ({ data: () => data })),
-          } as never),
-        );
-        return unsubscribe;
-      }
-      // Stand in for the Cloud Function's write-back, which is what the
-      // service is waiting on.
-      if (!options.neverRespond) {
-        queueMicrotask(() =>
-          next({ data: () => options.writeBack ?? { url: 'https://stripe.test/s' } } as never),
-        );
-      }
-      return unsubscribe;
-    },
-  };
-
-  return { writes, firestoreModule, unsubscribe };
+interface RecordedQuery {
+  collectionPath: string;
+  /** Field, operator and decoded value — the operator matters: IN is not EQUAL. */
+  wheres: { field: string; op: string; value: unknown }[];
+  limit?: number;
 }
 
-function configure(fake: ReturnType<typeof fakeFirestore>, user: unknown, hasProClaim = false) {
+interface ProductSeed {
+  id: string;
+  role: string | null;
+  active: boolean;
+  prices: { id: string; active: boolean; interval: string }[];
+  /** Lets a test make the *first* product the slowest to answer. */
+  delayMs?: number;
+}
+
+/** Deliberately not the production encoder, so a symmetric bug cannot hide. */
+function wire(value: unknown): unknown {
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') return { integerValue: String(value) };
+  if (value === null) return { nullValue: null };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(wire) } };
+  return { mapValue: { fields: wireFields(value as Record<string, unknown>) } };
+}
+
+function wireFields(data: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(data).map(([k, v]) => [k, wire(v)]));
+}
+
+/**
+ * The inverse, for reading back what the service wrote and what it asked for.
+ * Also deliberately local.
+ *
+ * `arrayValue` is here because without it the status filter is *structurally*
+ * unobservable: `status IN ['trialing','active']` recorded as `null` cannot be
+ * asserted on, so the one thing keeping the client's Pro signal from being
+ * broader than the server's gate had no test at all.
+ */
+function unwire(value: Record<string, unknown>): unknown {
+  if ('stringValue' in value) return value['stringValue'];
+  if ('integerValue' in value) return Number(value['integerValue']);
+  if ('booleanValue' in value) return value['booleanValue'];
+  if ('nullValue' in value) return null;
+  if ('arrayValue' in value) {
+    const values = (value['arrayValue'] as { values?: Record<string, unknown>[] }).values ?? [];
+    return values.map(unwire);
+  }
+  throw new Error('fake server cannot decode ' + JSON.stringify(value));
+}
+
+function unwireFields(fields: Record<string, Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, unwire(v)]));
+}
+
+interface FakeOptions {
+  /** Session document IDs the rules should refuse, as a spent slot would be. */
+  deniedIds?: string[];
+  /** What the Cloud Function eventually writes onto the session document. */
+  writeBack?: Record<string, unknown>;
+  /** Never write back, so the handshake reaches its deadline instead. */
+  neverRespond?: boolean;
+  /** Reads of the session document that answer "still working" before `writeBack`. */
+  writeBackAfterReads?: number;
+  /** Documents in `customers/{uid}/subscriptions`. Filtered by `role` in memory. */
+  subscriptionDocs?: Record<string, unknown>[];
+  /**
+   * One entry per subscriptions query, in order, for tests that need two
+   * concurrent reads to answer differently or out of order. The last entry
+   * repeats once exhausted.
+   */
+  subscriptionQueryPlan?: { docs: Record<string, unknown>[]; delayMs?: number }[];
+  /** Fail this many session reads before answering, as a flaky network would. */
+  failSessionReads?: number;
+  /** The `products` catalog, for the price lookup. */
+  products?: ProductSeed[];
+  /** A write failure that is *not* a rules refusal. */
+  failWriteWith?: 'server-error';
+}
+
+function fakeFirestore(options: FakeOptions = {}) {
+  const writes: WrittenDoc[] = [];
+  const queries: RecordedQuery[] = [];
+  const sessionReads: string[] = [];
+  // Every deadline the client actually armed, so a test can check that a poll
+  // hands each read the budget it has left rather than the whole budget.
+  const armedTimeouts: number[] = [];
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+    armedTimeouts.push(ms);
+    return new AbortController().signal;
+  });
+  const denied = new Set(options.deniedIds ?? []);
+  let subscriptionQueryCount = 0;
+  let failedSessionReads = 0;
+  let inFlightPriceQueries = 0;
+  let maxConcurrentPriceQueries = 0;
+
+  const ok = (body: unknown) =>
+    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+  const fail = (status: number, code: string) =>
+    Promise.resolve({
+      ok: false,
+      status,
+      json: () => Promise.resolve({ error: { status: code, message: code } }),
+    });
+  const docsFor = (
+    collectionPath: string,
+    rows: { id: string; data: Record<string, unknown> }[],
+  ) =>
+    rows.length
+      ? rows.map((row) => ({
+          document: {
+            name: `${RESOURCE_ROOT}/${collectionPath}/${row.id}`,
+            fields: wireFields(row.data),
+          },
+        }))
+      : [{ readTime: '2026-08-18T00:00:00Z' }];
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: { method: string; body?: string }) => {
+      const body = init.body ? (JSON.parse(init.body) as Record<string, never>) : undefined;
+      const pathOf = (u: string) => u.split('?')[0].slice(`${URL_ROOT}/`.length);
+
+      if (url.includes(':runQuery')) {
+        const query = body!['structuredQuery'] as Record<string, never>;
+        const collectionId = (query['from'] as { collectionId: string }[])[0].collectionId;
+        const parent = url.startsWith(`${URL_ROOT}:runQuery`)
+          ? ''
+          : pathOf(url.replace(':runQuery', ''));
+        const collectionPath = parent ? `${parent}/${collectionId}` : collectionId;
+
+        const where = query['where'] as Record<string, never> | undefined;
+        const rawFilters = where
+          ? ((where['compositeFilter'] as { filters: Record<string, never>[] } | undefined)
+              ?.filters ?? [where])
+          : [];
+        const wheres = rawFilters.map((filter) => {
+          const f = filter['fieldFilter'] as {
+            field: { fieldPath: string };
+            op: string;
+            value: Record<string, unknown>;
+          };
+          return { field: f.field.fieldPath, op: f.op, value: unwire(f.value) };
+        });
+        queries.push({ collectionPath, wheres, limit: query['limit'] as number | undefined });
+
+        if (collectionId === 'subscriptions') {
+          const plan = options.subscriptionQueryPlan;
+          const step = plan ? plan[Math.min(subscriptionQueryCount, plan.length - 1)] : undefined;
+          subscriptionQueryCount++;
+          if (step?.delayMs) {
+            await new Promise((resolve) => setTimeout(resolve, step.delayMs));
+          }
+          // Applies the filter rather than returning the seed verbatim. A fake
+          // that ignores `where` cannot distinguish a query that asks for the
+          // right statuses from one that asks for all of them, which is
+          // exactly the assertion this collection most needs.
+          let rows = step ? step.docs : (options.subscriptionDocs ?? []);
+          for (const filter of wheres) {
+            rows = rows.filter((doc) =>
+              filter.op === 'IN'
+                ? (filter.value as unknown[]).includes(doc[filter.field])
+                : doc[filter.field] === filter.value,
+            );
+          }
+          return ok(
+            docsFor(
+              collectionPath,
+              rows.map((data, i) => ({ id: `sub_${i}`, data })),
+            ),
+          );
+        }
+
+        if (collectionId === 'products') {
+          let rows = options.products ?? [];
+          for (const filter of wheres) {
+            rows = rows.filter(
+              (p) => (p as unknown as Record<string, unknown>)[filter.field] === filter.value,
+            );
+          }
+          return ok(
+            docsFor(
+              collectionPath,
+              rows.map((p) => ({ id: p.id, data: { role: p.role, active: p.active } })),
+            ),
+          );
+        }
+
+        // prices, under products/{id}/prices
+        inFlightPriceQueries++;
+        maxConcurrentPriceQueries = Math.max(maxConcurrentPriceQueries, inFlightPriceQueries);
+        const productId = collectionPath.split('/')[1];
+        const product = (options.products ?? []).find((p) => p.id === productId)!;
+        if (product.delayMs) {
+          await new Promise((resolve) => setTimeout(resolve, product.delayMs));
+        }
+        inFlightPriceQueries--;
+        let prices = product.prices;
+        for (const filter of wheres) {
+          prices = prices.filter(
+            (p) => (p as unknown as Record<string, unknown>)[filter.field] === filter.value,
+          );
+        }
+        return ok(
+          docsFor(
+            collectionPath,
+            prices.map((p) => ({ id: p.id, data: { interval: p.interval } })),
+          ),
+        );
+      }
+
+      const path = pathOf(url);
+
+      if (init.method === 'GET') {
+        // Polling a session document for the Cloud Function's write-back.
+        sessionReads.push(path);
+        if (
+          options.failSessionReads !== undefined &&
+          failedSessionReads < options.failSessionReads
+        ) {
+          failedSessionReads++;
+          return fail(503, 'UNAVAILABLE');
+        }
+        if (options.neverRespond) {
+          return fail(404, 'NOT_FOUND');
+        }
+        if (
+          options.writeBackAfterReads !== undefined &&
+          sessionReads.length <= options.writeBackAfterReads
+        ) {
+          // The document exists but the function has not finished — neither a
+          // url nor an error yet.
+          return ok({ name: `${RESOURCE_ROOT}/${path}`, fields: {} });
+        }
+        return ok({
+          name: `${RESOURCE_ROOT}/${path}`,
+          fields: wireFields(options.writeBack ?? { url: 'https://stripe.test/s' }),
+        });
+      }
+
+      // A write: the session document.
+      if (options.failWriteWith === 'server-error') {
+        return fail(500, 'INTERNAL');
+      }
+      if (denied.has(path.slice(path.lastIndexOf('/') + 1))) {
+        return fail(403, 'PERMISSION_DENIED');
+      }
+      writes.push({
+        path,
+        data: unwireFields(body!['fields'] as Record<string, Record<string, unknown>>),
+      });
+      return ok({ name: `${RESOURCE_ROOT}/${path}` });
+    }),
+  );
+
+  return {
+    writes,
+    queries,
+    sessionReads,
+    armedTimeouts,
+    priceQueries: () => queries.filter((q) => q.collectionPath.endsWith('/prices')),
+    maxConcurrentPriceQueries: () => maxConcurrentPriceQueries,
+  };
+}
+
+function configure(user: unknown, hasProClaim = false) {
+  const refreshIdToken = vi.fn(() => Promise.resolve());
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: FirebaseService,
-        useValue: {
-          getFirestore: () =>
-            Promise.resolve({ firestore: {}, firestoreModule: fake.firestoreModule }),
-        },
+        provide: FirebaseAppService,
+        useValue: { getConfig: () => Promise.resolve({ projectId: PROJECT, apiKey: 'test-key' }) },
       },
       {
         provide: AuthService,
         useValue: {
           user: signal(user),
           isProUser: signal(hasProClaim),
-          refreshIdToken: () => Promise.resolve(),
+          refreshIdToken,
+          getIdToken: () => Promise.resolve('id-token'),
         },
       },
     ],
   });
-  return TestBed.inject(SubscriptionService);
+  return { service: TestBed.inject(SubscriptionService), refreshIdToken };
 }
+
+/** Lets the effect's read and any queued microtasks land before asserting. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+const currentWindow = () => Math.floor(Date.now() / SESSION_WINDOW_MS);
+const slotIds = () => Array.from({ length: 10 }, (_, slot) => `${currentWindow()}-${slot}`);
 
 describe('SubscriptionService session handshake', () => {
   const user = { uid: 'user-1', isAnonymous: false };
-  let assign: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    assign = vi.fn();
     // `window.location.assign` is non-configurable in a real browser, but this
     // is jsdom; the redirect itself is covered for real by pricing.cy.ts.
-    vi.stubGlobal('location', { origin: 'https://example.web.app', assign });
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     TestBed.resetTestingModule();
   });
 
   it('writes only the origin for a billing-portal session', async () => {
     const fake = fakeFirestore();
-    await configure(fake, user).openBillingPortal();
+    await configure(user).service.openBillingPortal();
 
     expect(fake.writes).toHaveLength(1);
     expect(fake.writes[0].data).toEqual({ origin: 'https://example.web.app' });
@@ -143,65 +358,80 @@ describe('SubscriptionService session handshake', () => {
   // it.
   it('never sends redirect URLs or a mode the function decides for itself', async () => {
     const fake = fakeFirestore();
-    await configure(fake, user).openBillingPortal();
+    await configure(user).service.openBillingPortal();
 
     expect(Object.keys(fake.writes[0].data)).toEqual(['origin']);
   });
 
-  it('writes under a {5-minute window}-{slot} document ID the volume cap accepts', async () => {
-    const fake = fakeFirestore();
-    await configure(fake, user).openBillingPortal();
+  // The assertion above covers `portal_sessions`, whose rules allowlist is
+  // `hasOnly(['origin'])`. Finding A2 was about `checkout_sessions`, whose
+  // allowlist is `hasOnly(['price','origin'])` — a different collection and a
+  // different key set, so it needs its own test. Without this, putting
+  // `success_url` or `mode` back into the checkout payload passes every test
+  // here and is refused by the rules at runtime.
+  it('sends exactly price and origin for a checkout session', async () => {
+    const fake = fakeFirestore({
+      products: [
+        {
+          id: 'prod_pro',
+          role: 'pro',
+          active: true,
+          prices: [{ id: 'price_pro', active: true, interval: 'month' }],
+        },
+      ],
+    });
 
-    const [, uid, collectionName, id] = fake.writes[0].path;
-    expect(uid).toBe('user-1');
-    expect(collectionName).toBe('portal_sessions');
-    expect(id).toMatch(new RegExp(`^${Math.floor(Date.now() / SESSION_WINDOW_MS)}-[0-9]$`));
+    await configure(user).service.startProCheckout();
+
+    expect(Object.keys(fake.writes[0].data).sort()).toEqual(['origin', 'price']);
   });
 
-  // A slot already spent this window is a `permission-denied`, and a user who
-  // genuinely opens the portal twice in five minutes should not see an error
-  // for it.
+  it('writes under a {5-minute window}-{slot} document ID the volume cap accepts', async () => {
+    const fake = fakeFirestore();
+    await configure(user).service.openBillingPortal();
+
+    expect(fake.writes[0].path).toMatch(
+      new RegExp(`^customers/user-1/portal_sessions/${currentWindow()}-[0-9]$`),
+    );
+  });
+
+  // A slot already spent this window is a refusal, and a user who genuinely
+  // opens the portal twice in five minutes should not see an error for it.
   it('moves to another slot when the one it picked is already spent', async () => {
-    const allSlots = Array.from({ length: 10 }, (_, slot) => {
-      return `${Math.floor(Date.now() / SESSION_WINDOW_MS)}-${slot}`;
-    });
-    const fake = fakeFirestore({ deniedIds: allSlots.slice(0, 9) });
-    await configure(fake, user).openBillingPortal();
+    const fake = fakeFirestore({ deniedIds: slotIds().slice(0, 9) });
+    await configure(user).service.openBillingPortal();
 
     expect(fake.writes).toHaveLength(1);
-    expect(allSlots.indexOf(fake.writes[0].path[3])).toBe(9);
+    expect(fake.writes[0].path.endsWith(slotIds()[9])).toBe(true);
   });
 
   it('gives up with an actionable message once every slot in the window is spent', async () => {
-    const allSlots = Array.from({ length: 10 }, (_, slot) => {
-      return `${Math.floor(Date.now() / SESSION_WINDOW_MS)}-${slot}`;
-    });
-    const fake = fakeFirestore({ deniedIds: allSlots });
+    const fake = fakeFirestore({ deniedIds: slotIds() });
 
-    await expect(configure(fake, user).openBillingPortal()).rejects.toThrow(/Reload the page/);
+    await expect(configure(user).service.openBillingPortal()).rejects.toThrow(/Reload the page/);
     expect(fake.writes).toHaveLength(0);
   });
 
-  // Only `permission-denied` means "try another slot"; anything else is a real
+  // Only a rules refusal means "try another slot"; anything else is a real
   // failure and burning nine more writes on it would just delay reporting it.
   it('does not retry a failure that is not a permission denial', async () => {
-    const fake = fakeFirestore();
-    fake.firestoreModule.setDoc = () => Promise.reject(new Error('offline'));
+    const fake = fakeFirestore({ failWriteWith: 'server-error' });
 
-    await expect(configure(fake, user).openBillingPortal()).rejects.toThrow('offline');
+    await expect(configure(user).service.openBillingPortal()).rejects.toThrow(/INTERNAL/);
+    expect(fake.writes).toHaveLength(0);
   });
 
   it('surfaces the error the Cloud Function writes back', async () => {
-    const fake = fakeFirestore({ writeBack: { error: { message: 'Could not start checkout.' } } });
+    fakeFirestore({ writeBack: { error: { message: 'Could not start checkout.' } } });
 
-    await expect(configure(fake, user).openBillingPortal()).rejects.toThrow(
+    await expect(configure(user).service.openBillingPortal()).rejects.toThrow(
       'Could not start checkout.',
     );
   });
 
   it('refuses an anonymous caller before writing anything', async () => {
     const fake = fakeFirestore();
-    const service = configure(fake, { uid: 'anon-1', isAnonymous: true });
+    const { service } = configure({ uid: 'anon-1', isAnonymous: true });
 
     await expect(service.openBillingPortal()).rejects.toThrow('Sign in before managing');
     await expect(service.startProCheckout()).rejects.toThrow('Sign in before subscribing');
@@ -211,28 +441,21 @@ describe('SubscriptionService session handshake', () => {
   // The price lookup is a pair of Firestore reads; an anonymous click that
   // can't succeed anyway shouldn't pay for them.
   it('does not look up the Pro price for a caller it will refuse', async () => {
-    const fake = fakeFirestore();
-    let priceLookups = 0;
-    fake.firestoreModule.getDocs = () => {
-      priceLookups++;
-      return Promise.resolve({ docs: [] });
-    };
+    const fake = fakeFirestore({ products: [] });
 
     await expect(
-      configure(fake, { uid: 'anon-1', isAnonymous: true }).startProCheckout(),
+      configure({ uid: 'anon-1', isAnonymous: true }).service.startProCheckout(),
     ).rejects.toThrow();
-    expect(priceLookups).toBe(0);
+    expect(fake.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(0);
   });
 });
 
 /**
- * Part of finding B6. The handshake's deadline used to be a `Promise.race`
- * around the listener, and `Promise.race` settles without telling the loser —
- * so a timed-out checkout left its `onSnapshot` subscription attached for the
- * rest of the session, still receiving writes, and still billed for them, for
- * a checkout nobody was waiting on any more.
+ * What replaced the `onSnapshot` handshake. The Cloud Function writes the URL
+ * onto the session document some moments after the client creates it, and
+ * there is no listener to hear that any more — so the client asks again.
  */
-describe('SubscriptionService handshake deadline', () => {
+describe('SubscriptionService handshake polling', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
@@ -241,36 +464,121 @@ describe('SubscriptionService handshake deadline', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     TestBed.resetTestingModule();
   });
 
-  it('detaches the listener when the function never writes back', async () => {
-    const fake = fakeFirestore({ neverRespond: true });
-    const service = configure(fake, { uid: 'user-1', isAnonymous: false });
+  it('keeps reading until the function writes the URL back', async () => {
+    const fake = fakeFirestore({ writeBackAfterReads: 3 });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
+
+    const pending = service.openBillingPortal();
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(fake.sessionReads).toHaveLength(4);
+  });
+
+  // A document that does not exist yet is the normal first state of the
+  // handshake — the client's own create has landed but the function has not
+  // run. Treating that 404 as a failure would break every checkout.
+  it('treats a not-yet-written document as "still working", not a failure', async () => {
+    fakeFirestore({ neverRespond: true });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
 
     const pending = service.openBillingPortal();
     const assertion = expect(pending).rejects.toThrow(/Timed out/);
-
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.runAllTimersAsync();
     await assertion;
-
-    expect(fake.unsubscribe).toHaveBeenCalledTimes(1);
-    // And nothing is left ticking for a handshake that is over.
-    expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('detaches the listener on the success path too', async () => {
-    const fake = fakeFirestore();
-    const service = configure(fake, { uid: 'user-1', isAnonymous: false });
+  /**
+   * Part of finding B6. The handshake's deadline used to be a `Promise.race`
+   * around an `onSnapshot`, and `Promise.race` settles without telling the
+   * loser — so a timed-out checkout left its subscription attached for the
+   * rest of the session, still receiving writes and still billed for them.
+   * Polling has nothing to detach, but it can still leave a timer armed, which
+   * is the same bug wearing different clothes.
+   */
+  it('leaves nothing armed once the handshake is over', async () => {
+    const fake = fakeFirestore({ neverRespond: true });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
 
-    // A delta, not an absolute count: TestBed and Angular's effect scheduling
-    // have timers of their own, and this test is only about whether the
-    // handshake leaves its own deadline behind.
-    const before = vi.getTimerCount();
-    await service.openBillingPortal();
+    const pending = service.openBillingPortal();
+    const assertion = expect(pending).rejects.toThrow(/Timed out/);
+    // Advanced by a fixed amount rather than `runAllTimersAsync()`, which
+    // drains the queue by definition and made this assertion a tautology — a
+    // leaked one-hour timer per poll iteration passed it. Twenty-five seconds
+    // is past the deadline but nowhere near a leak, so a leak is still
+    // pending and still counted.
+    await vi.advanceTimersByTimeAsync(25_000);
+    await assertion;
 
-    expect(fake.unsubscribe).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(before);
+    expect(vi.getTimerCount()).toBe(0);
+    // And nothing kept polling past the deadline.
+    const readsAtDeadline = fake.sessionReads.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.sessionReads).toHaveLength(readsAtDeadline);
+  });
+
+  // `onSnapshot` reconnected through a transient drop by itself and only
+  // surfaced terminal errors. A poll that rejects on the first failed read
+  // would turn the payment path one-strike — a regression the migration has no
+  // reason to cause.
+  it('treats a failed read as a not-yet rather than killing the checkout', async () => {
+    const fake = fakeFirestore({ failSessionReads: 3 });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
+
+    const pending = service.openBillingPortal();
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(fake.sessionReads.length).toBeGreaterThan(3);
+  });
+
+  // ...but tolerating a failure must not mean hiding it. Reaching the deadline
+  // while every read is failing is a network fault, and reporting it as
+  // "timed out waiting for Stripe" would narrate a cause nobody verified
+  // (`CLAUDE.md` §4.4).
+  it('reports the read failure, not a timeout, when the reads never recover', async () => {
+    fakeFirestore({ failSessionReads: 1_000 });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
+
+    const pending = service.openBillingPortal();
+    const assertion = expect(pending).rejects.toThrow(/UNAVAILABLE/);
+    await vi.runAllTimersAsync();
+    await assertion;
+  });
+
+  it('hands each read the budget that is left, not the whole budget', async () => {
+    // Giving every read the full CHECKOUT_TIMEOUT_MS composes two 20s bounds
+    // into forty seconds of wall clock, because a read starting at 19.5s is
+    // still allowed its own twenty. Every armed deadline would be exactly
+    // 20000 without the fix; with it they shrink towards zero.
+    const fake = fakeFirestore({ neverRespond: true });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
+
+    const pending = service.openBillingPortal();
+    const assertion = expect(pending).rejects.toThrow(/Timed out/);
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect(Math.min(...fake.armedTimeouts)).toBeLessThan(1_000);
+  });
+
+  it('bounds the number of reads a single handshake can cost', async () => {
+    const fake = fakeFirestore({ neverRespond: true });
+    const { service } = configure({ uid: 'user-1', isAnonymous: false });
+
+    const pending = service.openBillingPortal();
+    const assertion = expect(pending).rejects.toThrow(/Timed out/);
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    // 20s at 500ms. The point is that it is a fixed, small number rather than
+    // something that grows with how long the function takes.
+    expect(fake.sessionReads.length).toBeLessThanOrEqual(40);
+    expect(fake.sessionReads.length).toBeGreaterThan(1);
   });
 });
 
@@ -287,165 +595,33 @@ describe('SubscriptionService handshake deadline', () => {
  * exactly one product exists; the day a second is added the client would send a
  * price the server is bound to reject, and checkout would simply stop working.
  */
-
-interface ProductSeed {
-  id: string;
-  role: string | null;
-  active: boolean;
-  prices: { id: string; active: boolean; interval: string }[];
-  /** Lets a test make the *first* product the slowest to answer. */
-  delayMs?: number;
-}
-
-interface RecordedQuery {
-  target: string;
-  wheres: [string, unknown][];
-  limit?: number;
-}
-
-function fakeCatalog(products: ProductSeed[]) {
-  const queries: RecordedQuery[] = [];
-  const writes: WrittenDoc[] = [];
-  let inFlightPriceQueries = 0;
-  let maxConcurrentPriceQueries = 0;
-
-  const firestoreModule = {
-    doc: (_fs: unknown, ...path: string[]) => ({ path }),
-    collection: (parent: { __productId?: string } | unknown, ...path: string[]) => {
-      const productId = (parent as { __productId?: string } | null)?.__productId;
-      return productId ? { target: 'prices', productId } : { target: 'products', path };
-    },
-    where: (field: string, _op: string, value: unknown) => ({ __where: [field, value] }),
-    limit: (value: number) => ({ __limit: value }),
-    query: (ref: unknown, ...constraints: Record<string, unknown>[]) => ({ ref, constraints }),
-    getDocs: async (q: {
-      ref: { target: string; productId?: string };
-      constraints: Record<string, unknown>[];
-    }) => {
-      const wheres = q.constraints
-        .filter((c) => c['__where'])
-        .map((c) => c['__where'] as [string, unknown]);
-      const limitConstraint = q.constraints.find((c) => c['__limit'] !== undefined);
-      queries.push({
-        target: q.ref.target,
-        wheres,
-        limit: limitConstraint?.['__limit'] as number | undefined,
-      });
-
-      if (q.ref.target === 'products') {
-        let rows = products;
-        for (const [field, value] of wheres) {
-          rows = rows.filter((p) => (p as unknown as Record<string, unknown>)[field] === value);
-        }
-        rows = rows.slice(0, (limitConstraint?.['__limit'] as number) ?? rows.length);
-        return {
-          docs: rows.map((p) => ({
-            id: p.id,
-            ref: { __productId: p.id },
-            data: () => ({ role: p.role, active: p.active }),
-          })),
-        };
-      }
-
-      inFlightPriceQueries++;
-      maxConcurrentPriceQueries = Math.max(maxConcurrentPriceQueries, inFlightPriceQueries);
-      const product = products.find((p) => p.id === q.ref.productId)!;
-      if (product.delayMs) {
-        await new Promise((resolve) => setTimeout(resolve, product.delayMs));
-      }
-      inFlightPriceQueries--;
-
-      let prices = product.prices;
-      for (const [field, value] of wheres) {
-        prices = prices.filter((p) => (p as unknown as Record<string, unknown>)[field] === value);
-      }
-      prices = prices.slice(0, (limitConstraint?.['__limit'] as number) ?? prices.length);
-      return { docs: prices.map((p) => ({ id: p.id, data: () => ({ interval: p.interval }) })) };
-    },
-    setDoc: (ref: { path: string[] }, data: Record<string, unknown>) => {
-      writes.push({ path: ref.path, data });
-      return Promise.resolve();
-    },
-    // Same two-shapes problem as the fake above: the subscriptions listener
-    // is attached for every signed-in user, catalog test or not, and it reads
-    // `.docs`. Emitting the session-document shape for it threw inside a
-    // microtask — which Vitest reports as an *unhandled error* while every
-    // test still passes, so the suite summary says 189 passed and the run
-    // exits non-zero.
-    onSnapshot: (
-      target: { path?: string[]; ref?: { path?: string[] } },
-      next: (snap: never) => void,
-    ) => {
-      // `query()` in this fake wraps the ref as `{ref, constraints}`, while a
-      // plain document ref is passed through as-is — so the path has to be
-      // read from either shape.
-      const path = target.path ?? target.ref?.path ?? [];
-      if (path[path.length - 1] === 'subscriptions') {
-        queueMicrotask(() => next({ docs: [] } as never));
-        return vi.fn();
-      }
-      queueMicrotask(() => next({ data: () => ({ url: 'https://stripe.test/s' }) } as never));
-      return vi.fn();
-    },
-  };
-
-  return {
-    firestoreModule,
-    queries,
-    writes,
-    priceQueries: () => queries.filter((q) => q.target === 'prices'),
-    maxConcurrentPriceQueries: () => maxConcurrentPriceQueries,
-  };
-}
-
-function configureCatalog(fake: ReturnType<typeof fakeCatalog>) {
-  TestBed.configureTestingModule({
-    providers: [
-      {
-        provide: FirebaseService,
-        useValue: {
-          getFirestore: () =>
-            Promise.resolve({ firestore: {}, firestoreModule: fake.firestoreModule }),
-        },
-      },
-      {
-        provide: AuthService,
-        useValue: {
-          user: signal({ uid: 'user-1', isAnonymous: false }),
-          isProUser: signal(false),
-          refreshIdToken: () => Promise.resolve(),
-        },
-      },
-    ],
-  });
-  return TestBed.inject(SubscriptionService);
-}
-
-/** The price the service settled on, read off the checkout-session doc it wrote. */
-function writtenPrice(fake: ReturnType<typeof fakeCatalog>): unknown {
-  return fake.writes.at(-1)?.data['price'];
-}
-
-const monthly = (id: string) => ({ id, active: true, interval: 'month' });
-
 describe('SubscriptionService Pro price lookup (C5)', () => {
+  const monthly = (id: string) => ({ id, active: true, interval: 'month' });
+
   beforeEach(() => {
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     TestBed.resetTestingModule();
   });
 
-  it('fetches every product’s prices at once instead of one after another', async () => {
-    const fake = fakeCatalog([
-      { id: 'prod_a', role: 'pro', active: true, prices: [], delayMs: 20 },
-      { id: 'prod_b', role: 'pro', active: true, prices: [], delayMs: 20 },
-      { id: 'prod_c', role: 'pro', active: true, prices: [monthly('price_c')], delayMs: 20 },
-    ]);
+  /** The price the service settled on, read off the session doc it wrote. */
+  const writtenPrice = (fake: ReturnType<typeof fakeFirestore>) =>
+    fake.writes.at(-1)?.data['price'];
 
-    await configureCatalog(fake).startProCheckout();
+  it('fetches every product’s prices at once instead of one after another', async () => {
+    const fake = fakeFirestore({
+      products: [
+        { id: 'prod_a', role: 'pro', active: true, prices: [], delayMs: 20 },
+        { id: 'prod_b', role: 'pro', active: true, prices: [], delayMs: 20 },
+        { id: 'prod_c', role: 'pro', active: true, prices: [monthly('price_c')], delayMs: 20 },
+      ],
+    });
+
+    await configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
 
     expect(fake.priceQueries()).toHaveLength(3);
     // The finding itself: sequentially, this would never exceed 1.
@@ -453,34 +629,42 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
   });
 
   it('bounds both queries with a limit', async () => {
-    const fake = fakeCatalog([
-      { id: 'prod_a', role: 'pro', active: true, prices: [monthly('price_a')] },
-    ]);
+    const fake = fakeFirestore({
+      products: [{ id: 'prod_a', role: 'pro', active: true, prices: [monthly('price_a')] }],
+    });
 
-    await configureCatalog(fake).startProCheckout();
+    await configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
 
     expect(fake.queries.every((q) => q.limit !== undefined)).toBe(true);
   });
 
   it('selects on role, the same predicate the server enforces', async () => {
-    const fake = fakeCatalog([
-      { id: 'prod_other', role: 'team', active: true, prices: [monthly('price_team')] },
-      { id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_pro')] },
-    ]);
+    const fake = fakeFirestore({
+      products: [
+        { id: 'prod_other', role: 'team', active: true, prices: [monthly('price_team')] },
+        { id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_pro')] },
+      ],
+    });
 
-    await configureCatalog(fake).startProCheckout();
+    await configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
 
-    expect(fake.queries[0].wheres).toContainEqual(['role', 'pro']);
+    expect(fake.queries.find((q) => q.collectionPath === 'products')!.wheres).toContainEqual({
+      field: 'role',
+      op: 'EQUAL',
+      value: 'pro',
+    });
     expect(writtenPrice(fake)).toBe('price_pro');
   });
 
   it('ignores a Pro product that is no longer active', async () => {
-    const fake = fakeCatalog([
-      { id: 'prod_old', role: 'pro', active: false, prices: [monthly('price_old')] },
-      { id: 'prod_new', role: 'pro', active: true, prices: [monthly('price_new')] },
-    ]);
+    const fake = fakeFirestore({
+      products: [
+        { id: 'prod_old', role: 'pro', active: false, prices: [monthly('price_old')] },
+        { id: 'prod_new', role: 'pro', active: true, prices: [monthly('price_new')] },
+      ],
+    });
 
-    await configureCatalog(fake).startProCheckout();
+    await configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
 
     expect(fake.priceQueries()).toHaveLength(1);
     expect(writtenPrice(fake)).toBe('price_new');
@@ -489,46 +673,50 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
   // Parallelism must not make the answer depend on which request came back
   // first — the catalog's own order decides.
   it('picks the first product in catalog order even when it answers last', async () => {
-    const fake = fakeCatalog([
-      {
-        id: 'prod_first',
-        role: 'pro',
-        active: true,
-        prices: [monthly('price_first')],
-        delayMs: 30,
-      },
-      { id: 'prod_second', role: 'pro', active: true, prices: [monthly('price_second')] },
-    ]);
+    const fake = fakeFirestore({
+      products: [
+        {
+          id: 'prod_first',
+          role: 'pro',
+          active: true,
+          prices: [monthly('price_first')],
+          delayMs: 30,
+        },
+        { id: 'prod_second', role: 'pro', active: true, prices: [monthly('price_second')] },
+      ],
+    });
 
-    await configureCatalog(fake).startProCheckout();
+    await configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
 
     expect(writtenPrice(fake)).toBe('price_first');
   });
 
   it('only considers monthly prices', async () => {
-    const fake = fakeCatalog([
-      {
-        id: 'prod_pro',
-        role: 'pro',
-        active: true,
-        prices: [
-          { id: 'price_yearly', active: true, interval: 'year' },
-          { id: 'price_monthly', active: true, interval: 'month' },
-        ],
-      },
-    ]);
+    const fake = fakeFirestore({
+      products: [
+        {
+          id: 'prod_pro',
+          role: 'pro',
+          active: true,
+          prices: [
+            { id: 'price_yearly', active: true, interval: 'year' },
+            { id: 'price_monthly', active: true, interval: 'month' },
+          ],
+        },
+      ],
+    });
 
-    await configureCatalog(fake).startProCheckout();
+    await configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
 
     expect(writtenPrice(fake)).toBe('price_monthly');
   });
 
   it('reports an actionable error when the catalog has no Pro price', async () => {
-    const fake = fakeCatalog([{ id: 'prod_pro', role: 'pro', active: true, prices: [] }]);
+    fakeFirestore({ products: [{ id: 'prod_pro', role: 'pro', active: true, prices: [] }] });
 
-    await expect(configureCatalog(fake).startProCheckout()).rejects.toThrow(
-      /check the Stripe Dashboard/i,
-    );
+    await expect(
+      configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout(),
+    ).rejects.toThrow(/check the Stripe Dashboard/i);
   });
 });
 
@@ -547,16 +735,15 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
 describe('SubscriptionService entitlement signal', () => {
   const user = { uid: 'user-1', isAnonymous: false };
 
-  afterEach(() => TestBed.resetTestingModule());
-
-  /** Lets the listener's queued microtask deliver before asserting. */
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
 
   it('grants Pro for an active subscription carrying the pro role', async () => {
-    const service = configure(
-      fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] }),
-      user,
-    );
+    fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] });
+    const { service } = configure(user);
     await flush();
     expect(service.isProUser()).toBe(true);
   });
@@ -565,50 +752,176 @@ describe('SubscriptionService entitlement signal', () => {
   // firebaseRole metadata — unlocked the add-question form while the rules
   // refused every write it produced.
   it('does NOT grant Pro for an active subscription whose role is null', async () => {
-    const service = configure(
-      fakeFirestore({ subscriptionDocs: [{ status: 'active', role: null }] }),
-      user,
-    );
+    fakeFirestore({ subscriptionDocs: [{ status: 'active', role: null }] });
+    const { service } = configure(user);
     await flush();
     expect(service.isProUser()).toBe(false);
   });
 
   it('does not grant Pro for a role that is not pro', async () => {
-    const service = configure(
-      fakeFirestore({ subscriptionDocs: [{ status: 'trialing', role: 'basic' }] }),
-      user,
-    );
+    fakeFirestore({ subscriptionDocs: [{ status: 'trialing', role: 'basic' }] });
+    const { service } = configure(user);
     await flush();
     expect(service.isProUser()).toBe(false);
   });
 
   it('grants Pro from a role-carrying doc even alongside a role-less one', async () => {
-    const service = configure(
-      fakeFirestore({
-        subscriptionDocs: [
-          { status: 'active', role: null },
-          { status: 'active', role: 'pro' },
-        ],
-      }),
-      user,
-    );
+    fakeFirestore({
+      subscriptionDocs: [
+        { status: 'active', role: null },
+        { status: 'active', role: 'pro' },
+      ],
+    });
+    const { service } = configure(user);
     await flush();
     expect(service.isProUser()).toBe(true);
   });
 
   // The claim is the authority; the doc signal only ever front-runs it.
   it('still grants Pro from the claim alone when no document has arrived', async () => {
-    const service = configure(fakeFirestore(), user, /* hasProClaim */ true);
+    fakeFirestore();
+    const { service } = configure(user, /* hasProClaim */ true);
     await flush();
     expect(service.isProUser()).toBe(true);
   });
 
-  it('grants nothing to an anonymous session', async () => {
-    const service = configure(
-      fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] }),
-      { uid: 'anon-1', isAnonymous: true },
-    );
+  it('grants nothing to an anonymous session, and does not read for one', async () => {
+    const fake = fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] });
+    const { service } = configure({ uid: 'anon-1', isAnonymous: true });
     await flush();
+    expect(service.isProUser()).toBe(false);
+    expect(fake.queries).toHaveLength(0);
+  });
+
+  it('asks only for the statuses that can be paying, and bounds the read', async () => {
+    // The listener this replaced filtered by status but carried no limit,
+    // which §4.1 asks for on every read.
+    const fake = fakeFirestore({ subscriptionDocs: [] });
+    configure(user);
+    await flush();
+
+    expect(fake.queries).toHaveLength(1);
+    expect(fake.queries[0].collectionPath).toBe('customers/user-1/subscriptions');
+    expect(fake.queries[0].limit).toBeDefined();
+    // The load-bearing assertion, and it was missing. The status list is the
+    // ONLY thing keeping this client signal from being broader than the
+    // server's gate: `subscriptionMirrorFrom` stores the price's
+    // `firebaseRole` on the document whatever the status, so a cancelled
+    // subscription is still mirrored with `role: 'pro'`, while
+    // `deriveClaimRole` grants the claim only for active/trialing. Widening
+    // this list — or dropping the filter, or sending EQUAL instead of IN —
+    // unlocks UI the server is bound to refuse, which is finding H6 exactly
+    // (`CLAUDE.md` §4.2).
+    expect(fake.queries[0].wheres).toEqual([
+      { field: 'status', op: 'IN', value: ['trialing', 'active'] },
+    ]);
+  });
+
+  it('does not grant Pro from a cancelled subscription that still carries the role', async () => {
+    // The end-to-end half of the assertion above: the server filters by status,
+    // so the document must never come back at all. `role: 'pro'` is deliberate
+    // — the mirror keeps the role on a cancelled subscription, so filtering on
+    // role alone would grant Pro to someone who has stopped paying.
+    fakeFirestore({ subscriptionDocs: [{ status: 'canceled', role: 'pro' }] });
+    const { service } = configure(user);
+    await flush();
+    expect(service.isProUser()).toBe(false);
+  });
+
+  it('nudges the ID token to refresh the first time it sees Pro', async () => {
+    // The claim is what firestore.rules actually checks, and it is only
+    // re-minted on request — so a subscription that has just gone active has
+    // to prompt a refresh or the user stays gated for up to an hour.
+    fakeFirestore({ subscriptionDocs: [{ status: 'active', role: 'pro' }] });
+    const { refreshIdToken } = configure(user);
+    await flush();
+    expect(refreshIdToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not nudge a refresh when there is no Pro subscription', async () => {
+    fakeFirestore({ subscriptionDocs: [{ status: 'active', role: null }] });
+    const { refreshIdToken } = configure(user);
+    await flush();
+    expect(refreshIdToken).not.toHaveBeenCalled();
+  });
+
+  it('survives a failed read without breaking the claim half of the signal', async () => {
+    // A read that fails leaves the optimistic half false. It must not throw
+    // out of the effect, and it must not stop the claim from granting Pro.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('offline'))),
+    );
+    const { service } = configure(user, /* hasProClaim */ true);
+    await flush();
+    expect(service.isProUser()).toBe(true);
+  });
+});
+
+/**
+ * The other half of what the subscription listener used to do for free: notice
+ * that Pro has arrived. Stripe redirects to `/pricing?checkout=success`, which
+ * is a full page load — but our own `stripeWebhook` races that redirect and
+ * often loses, so a single read on load would show the user as not-Pro on the
+ * very page confirming their payment.
+ */
+describe('SubscriptionService.awaitProActivation', () => {
+  const user = { uid: 'user-1', isAnonymous: false };
+
+  beforeEach(() => vi.useFakeTimers());
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('keeps asking until the webhook’s subscription document lands', async () => {
+    const docs: Record<string, unknown>[] = [];
+    const fake = fakeFirestore({ subscriptionDocs: docs });
+    const { service } = configure(user);
+
+    const pending = service.awaitProActivation();
+    // The webhook lands after a few polls.
+    setTimeout(() => docs.push({ status: 'active', role: 'pro' }), 3_500);
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(service.isProUser()).toBe(true);
+    expect(fake.queries.length).toBeGreaterThan(1);
+  });
+
+  it('does not let a slower earlier read undo a newer one', async () => {
+    // Both readers are live on this page at once: the constructor effect's
+    // read, and this poll. If the effect's read started first, found nothing
+    // (the webhook had not landed), and lands *after* the poll has found Pro,
+    // an unordered apply flips Pro back off on the page confirming the
+    // payment. `onSnapshot` could not do this — one stream, commit order.
+    const fake = fakeFirestore({
+      subscriptionQueryPlan: [
+        { docs: [], delayMs: 5_000 }, // the effect's read: started first, slow, stale
+        { docs: [{ status: 'active', role: 'pro' }] }, // the poll's read: fresh
+      ],
+    });
+    const { service } = configure(user);
+
+    const pending = service.awaitProActivation();
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(fake.queries.length).toBeGreaterThan(1);
+    expect(service.isProUser()).toBe(true);
+  });
+
+  it('gives up quietly at the deadline rather than throwing at the user', async () => {
+    fakeFirestore({ subscriptionDocs: [] });
+    const { service } = configure(user);
+
+    const pending = service.awaitProActivation();
+    await vi.runAllTimersAsync();
+
+    await expect(pending).resolves.toBeUndefined();
     expect(service.isProUser()).toBe(false);
   });
 });

@@ -22,7 +22,7 @@ const REJECTED_MESSAGE = 'Could not open the billing portal. Please reload the p
 
 /**
  * The Angular client (`SubscriptionService.openBillingPortal`) creates a doc
- * here and then listens on it for `url`/`error` — same handshake shape as
+ * here and then polls it for `url`/`error` — same handshake shape as
  * `createCheckoutSession` (checkout-sessions.ts). Lets an existing Pro
  * subscriber manage payment method / cancel from Stripe's own hosted portal
  * instead of console-only.
