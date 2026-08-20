@@ -32,6 +32,7 @@
     "typecheck:cypress": "tsc -p cypress/tsconfig.json --noEmit",
     "icons:build": "node scripts/make-maskable-icons.mjs",
     "icons:verify": "node scripts/verify-icons.mjs",
+    "csp:verify": "node scripts/verify-csp.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lighthouse:config": "node scripts/make-lighthouse-firebase-config.mjs"

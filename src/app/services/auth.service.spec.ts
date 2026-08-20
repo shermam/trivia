@@ -467,6 +467,43 @@ describe('AuthService OAuth upgrade fallbacks', () => {
     expect(h.state.lastCredential).toBe(credential);
     expect(h.state.calls.filter((c) => c === 'signInWithPopup')).toEqual([]);
   });
+
+  // A blocked popup is a thing the person in front of the screen can fix, and
+  // for a long time it read as "Something went wrong. Please try again."
+  it('says so when the browser blocks the popup', async () => {
+    const service = setup();
+    await service.ensureSignedIn();
+    await settle();
+    h.state.popupError = Object.assign(new Error('blocked'), { code: 'auth/popup-blocked' });
+
+    await expect(service.signInWithOAuth('google.com')).rejects.toThrow(
+      /blocked the sign-in popup/,
+    );
+  });
+
+  /**
+   * Google sign-in failed intermittently for weeks and the only artefact was
+   * the sentence "Something went wrong. Please try again." — the code behind it
+   * was thrown away here. The message still has to stay generic for codes this
+   * broad (`CLAUDE.md` §4.4: do not narrate a cause you have not verified), so
+   * what this pins is the other half: the code survives to somewhere a
+   * maintainer can read it.
+   */
+  it('logs the code it could not explain, instead of discarding it', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const service = setup();
+    await service.ensureSignedIn();
+    await settle();
+    h.state.popupError = Object.assign(new Error('boom'), { code: 'auth/internal-error' });
+
+    await expect(service.signInWithOAuth('google.com')).rejects.toThrow(/Something went wrong/);
+
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('auth/internal-error'),
+      expect.anything(),
+    );
+    logged.mockRestore();
+  });
 });
 
 describe('AuthService password reset (H1)', () => {
