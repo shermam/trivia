@@ -66,7 +66,35 @@ function friendlyAuthErrorMessage(error: unknown): string {
       return 'This account is already linked to another user.';
     case 'auth/network-request-failed':
       return 'Network error. Please check your connection and try again.';
+    // The OAuth popup's own failure modes. Each of these has a single,
+    // checkable meaning, so naming it is not narrating an unverified cause —
+    // and each is something the person in front of the screen can act on,
+    // which "something went wrong" is not.
+    case 'auth/popup-blocked':
+      return 'Your browser blocked the sign-in popup. Allow popups for this site, then try again.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account with this email already exists, created with a different sign-in method.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled.';
+    case 'auth/unauthorized-domain':
+      return "Sign-in isn't allowed from this address yet.";
+    case 'auth/operation-not-supported-in-this-environment':
+      return "This browser can't complete that sign-in method.";
     default:
+      // The message stays deliberately vague, because the codes that reach
+      // here are broad ones — `auth/internal-error` covers everything from a
+      // transient backend hiccup to a resource the popup resolver could not
+      // load — and inventing a story for them would be false whenever the
+      // real cause was something else (`CLAUDE.md` §4.4).
+      //
+      // Vague to the user must not mean lost to whoever has to fix it,
+      // though, and it was: Google sign-in failed intermittently for weeks
+      // with no artefact but this sentence, because the code behind it was
+      // discarded on this line. It turned out to be the service worker
+      // re-fetching `apis.google.com/js/api.js` under a `connect-src` that
+      // did not list it (`scripts/verify-csp.mjs`). The one line below is
+      // what would have named it on day one.
+      console.error(`[auth] unhandled ${code ?? 'error without a code'}`, error);
       return 'Something went wrong. Please try again.';
   }
 }

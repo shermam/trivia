@@ -84,3 +84,15 @@ jobs:
       # what lets the check run here at all.
       - name: Verify PWA icons match their declared purpose
         run: npm run icons:verify
+
+      # Checks that every origin the page may load a subresource from is also
+      # in `connect-src`. Not redundancy: the Angular service worker re-fetches
+      # every request from inside the worker, where `connect-src` is the
+      # directive that applies rather than `script-src`/`frame-src`. An origin
+      # missing from it loads fine until the service worker takes control and
+      # then fails as a synthetic 504, with the CSP refusal logged in the
+      # worker's console rather than the page's. That is how Google sign-in
+      # broke, and nothing else in the pipeline can see it — Lighthouse loads
+      # the page once, uncontrolled, and OAuth is not in the e2e suite.
+      - name: Verify the CSP covers the service worker's re-fetches
+        run: npm run csp:verify
