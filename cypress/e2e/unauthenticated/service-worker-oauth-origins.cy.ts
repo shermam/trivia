@@ -123,6 +123,55 @@ describe('service worker: OAuth origins stay reachable (PR #112)', () => {
     }
   });
 
+  it('serves a worker whose bytes carry a fingerprint of the CSP served with it', () => {
+    // A service worker's CSP is fixed when its *script is installed*, not when
+    // it runs, and `ngsw-worker.js` is a static file — byte-identical across
+    // every deploy that does not bump `@angular/service-worker`. The update
+    // algorithm compares bytes, finds none changed, and installs nothing, so a
+    // header-only change never reaches an already-installed worker. That is why
+    // #112 fixed Google sign-in for new visitors and left everyone whose worker
+    // predated the deploy refusing `apis.google.com` under the old policy,
+    // quoting a `connect-src` that no longer existed on the server.
+    //
+    // `scripts/stamp-service-worker.mjs` (wired into `build:prod`) appends a
+    // fingerprint of the CSP so the bytes move when the policy moves. This
+    // asserts the deployed artifact actually carries it — remove the build step
+    // and the stamp silently stops applying, which is exactly how the original
+    // bug behaved.
+    cy.request(`${Cypress.config('baseUrl')}/ngsw-worker.js`).then((response) => {
+      const csp = response.headers['content-security-policy'] as string;
+      const body = response.body as string;
+
+      const stamped = /\/\/ service-worker-policy-fingerprint: ([0-9a-f]{16})\s*$/.exec(body);
+      expect(
+        stamped,
+        'ngsw-worker.js carries a policy fingerprint — without one, a CSP change can never ' +
+          'reach a browser that already installed this worker',
+      ).to.not.be.null;
+
+      // Recomputed from the header actually served, not from `firebase.json`:
+      // a stamp that describes a policy nobody is serving is no protection.
+      return cy
+        .wrap(null, { log: false })
+        .then(() =>
+          crypto.subtle
+            .digest('SHA-256', new TextEncoder().encode(`Content-Security-Policy: ${csp}`))
+            .then((buffer) =>
+              [...new Uint8Array(buffer)]
+                .map((b) => b.toString(16).padStart(2, '0'))
+                .join('')
+                .slice(0, 16),
+            ),
+        )
+        .then((expected) => {
+          expect(
+            stamped![1],
+            'the fingerprint in ngsw-worker.js describes the CSP served with it',
+          ).to.equal(expected);
+        });
+    });
+  });
+
   it('re-fetches the OAuth popup resolver’s resources without synthesizing a 504', () => {
     // `app.config.ts` gates registration on `!navigator.webdriver`, which is
     // true for Cypress — so the worker this spec is about never registers on
