@@ -48,75 +48,21 @@
  * never sees it and can never re-fetch it. The same goes for a popup. Requiring
  * those origins in `connect-src` enforced a real rule for a false reason, which
  * is worth removing even though the extra entry was harmless.
+ *
+ * The rule itself lives in `csp-rules.mjs`, as a pure function, because the
+ * preview e2e suite enforces the same rule against the policy a deployed
+ * channel actually *serves* — a different input, and one this script cannot
+ * see. They were separate implementations for exactly one PR and had already
+ * drifted apart; see that file's header.
  */
-
 import { readFileSync } from 'node:fs';
+
+import { RUNTIME_ORIGINS, SUBRESOURCE_DIRECTIVES, findCspProblems } from './csp-rules.mjs';
 
 const CONFIG = 'firebase.json';
 
-/**
- * Origins this app requests at runtime, and what requests them. Every one of
- * these is a `fetch`/`XHR` and therefore governed by `connect-src`.
- *
- * Keep the reason attached to each entry — an origin nobody can explain is one
- * nobody can safely remove.
- */
-const RUNTIME_ORIGINS = [
-  ['https://opentdb.com', 'Open Trivia DB — TriviaService, via HttpClient'],
-  ['https://firestore.googleapis.com', 'every Firestore read and write — FirestoreRestClient'],
-  ['https://identitytoolkit.googleapis.com', 'Firebase Auth — sign-in, sign-up, profile'],
-  ['https://securetoken.googleapis.com', 'Firebase Auth — ID token refresh'],
-  [
-    'https://apis.google.com',
-    'gapi loader for the OAuth popup resolver — browserPopupRedirectResolver',
-  ],
-  [
-    'https://us-central1-intellectura-3b26a.cloudfunctions.net',
-    'httpsCallable: deleteAccount and exportAccountData — AccountService. ' +
-      'Region is @firebase/functions DEFAULT_REGION; setting a region on the functions ' +
-      'means changing this.',
-  ],
-];
-
-/**
- * Directives naming origins the page may load a **subresource** from, which the
- * service worker will therefore re-fetch. `frame-src` is excluded on purpose —
- * see the header. `default-src` is included because it is the fallback for
- * every fetch directive *absent* from the policy (`media-src`, `child-src`,
- * `script-src-elem`, `prefetch-src`, …), so an origin written only there is
- * still loadable as a subresource.
- */
-const SUBRESOURCE_DIRECTIVES = [
-  'default-src',
-  'script-src',
-  'script-src-elem',
-  'style-src',
-  'style-src-elem',
-  'img-src',
-  'font-src',
-  'media-src',
-  'worker-src',
-  'manifest-src',
-  'child-src',
-  'prefetch-src',
-];
-
-/** CSP directive names are ASCII case-insensitive; `Script-Src` is valid. */
-function directivesOf(csp) {
-  const directives = new Map();
-  for (const part of csp.split(';')) {
-    const [name, ...values] = part.trim().split(/\s+/);
-    if (name) {
-      directives.set(name.toLowerCase(), values);
-    }
-  }
-  return directives;
-}
-
-const isOrigin = (value) => value.startsWith('https://') || value.startsWith('http://');
-
 function fail(message) {
-  console.error(`✗ ${message}`);
+  console.error(`\u2717 ${message}`);
   process.exit(1);
 }
 
@@ -126,42 +72,13 @@ const rule = hosting?.headers?.find((entry) => entry.source === '**');
 const header = rule?.headers?.find((h) => h.key.toLowerCase() === 'content-security-policy');
 
 if (!header) {
-  fail(`No Content-Security-Policy on the '**' rule in ${CONFIG} — has it moved?`);
+  fail(`No Content-Security-Policy on the '**' rule in ${CONFIG} \u2014 has it moved?`);
 }
 
-const directives = directivesOf(header.value);
-const connectSrc = new Set(directives.get('connect-src') ?? []);
-
-if (connectSrc.size === 0) {
-  fail('No connect-src directive in the CSP — nothing to check against.');
-}
-
-const problems = [];
-
-for (const [origin, reason] of RUNTIME_ORIGINS) {
-  if (!connectSrc.has(origin)) {
-    problems.push({
-      origin,
-      detail: `requested at runtime by ${reason}`,
-      why: 'A fetch to it will be refused outright, in production only.',
-    });
-  }
-}
-
-for (const directive of SUBRESOURCE_DIRECTIVES) {
-  for (const value of directives.get(directive) ?? []) {
-    if (isOrigin(value) && !connectSrc.has(value)) {
-      problems.push({
-        origin: value,
-        detail: `allowed by ${directive}, missing from connect-src`,
-        why: 'It will load until a service worker controls the page, then 504.',
-      });
-    }
-  }
-}
+const problems = findCspProblems(header.value);
 
 if (problems.length > 0) {
-  console.error(`✗ ${problems.length} origin(s) missing from connect-src:\n`);
+  console.error(`\u2717 ${problems.length} origin(s) missing from connect-src:\n`);
   for (const { origin, detail, why } of problems) {
     console.error(`    ${origin}`);
     console.error(`      ${detail}`);
@@ -169,13 +86,13 @@ if (problems.length > 0) {
   }
   console.error(
     `  Add each to connect-src in ${CONFIG}. For an origin already allowed by another\n` +
-      `  directive this grants strictly less than it already has — fetching bytes from a host\n` +
+      `  directive this grants strictly less than it already has \u2014 fetching bytes from a host\n` +
       `  you may already execute scripts from is not a widening.\n`,
   );
   process.exit(1);
 }
 
 console.log(
-  `✓ CSP: ${RUNTIME_ORIGINS.length} runtime origin(s) reachable, and every subresource origin ` +
+  `\u2713 CSP: ${RUNTIME_ORIGINS.length} runtime origin(s) reachable, and every subresource origin ` +
     `across ${SUBRESOURCE_DIRECTIVES.length} directives is re-fetchable by the service worker.`,
 );

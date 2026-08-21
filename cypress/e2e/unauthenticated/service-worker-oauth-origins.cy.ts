@@ -14,9 +14,11 @@
  * `504 Gateway Timeout`. The popup resolver could not initialise and sign-in
  * failed with a code the client could not explain.
  *
- * `npm run csp:verify` (`scripts/verify-csp.mjs`, run by lint.yml) already pins
- * the invariant **in `firebase.json`**. This spec covers the two things reading
- * a file on disk cannot:
+ * `npm run csp:verify` (`scripts/verify-csp.mjs`, run by lint.yml) pins the
+ * invariant **in `firebase.json`**, using the rule in `scripts/csp-rules.mjs`.
+ * This spec imports that same function — deliberately not its own copy of the
+ * rule — and applies it to what a deployed channel actually serves, covering
+ * the two things reading a file on disk cannot:
  *
  *  1. that the policy `firebase.json` describes is the policy actually *served*
  *     — a headers rule that stopped matching `**`, a deploy that didn't take,
@@ -43,30 +45,7 @@
  * has to get past a check that reads the real deployed header.
  */
 
-/** Directives naming origins the page may load a subresource from. Mirrors `scripts/verify-csp.mjs`. */
-const SUBRESOURCE_DIRECTIVES = [
-  'script-src',
-  'style-src',
-  'img-src',
-  'font-src',
-  'frame-src',
-  'worker-src',
-  'manifest-src',
-] as const;
-
-function directivesOf(csp: string): Map<string, string[]> {
-  const directives = new Map<string, string[]>();
-  for (const part of csp.split(';')) {
-    const [name, ...values] = part.trim().split(/\s+/);
-    if (name) {
-      directives.set(name, values);
-    }
-  }
-  return directives;
-}
-
-/** Keywords and hashes are not things a worker can be told to connect to. */
-const isOrigin = (value: string) => value.startsWith('https://') || value.startsWith('http://');
+import { findCspProblems } from '../../../scripts/csp-rules.mjs';
 
 /**
  * What a `mode: 'no-cors'` fetch came back as. `ngsw`'s synthetic 504 is a
@@ -94,31 +73,31 @@ describe('service worker: OAuth origins stay reachable (PR #112)', () => {
     });
   });
 
-  it('serves a CSP whose connect-src covers every origin the page may subresource-load', () => {
-    // The worker script's own headers are what govern its `fetch()`, so it is
-    // the response that actually matters — but the app shell is checked too,
-    // because `firebase.json` applies one `**` rule to both and a regression
-    // that split them apart is exactly the kind worth catching.
+  it('serves a CSP that satisfies the same rule csp:verify enforces on disk', () => {
+    // The rule is imported, not restated. `scripts/verify-csp.mjs` applies
+    // `findCspProblems` to the policy written in `firebase.json`; this applies
+    // the identical function to the policy a deployed channel actually serves.
+    // Those are different questions — a headers rule that stops matching `**`,
+    // a deploy that didn't take, or a CDN rewriting the header are all
+    // invisible on disk — but they are the same *rule*, and it only stays the
+    // same rule if there is one copy of it. There were two for the span of one
+    // PR and they had already drifted (see `scripts/csp-rules.mjs`).
+    //
+    // The worker script's own headers are what govern its `fetch()`, so that is
+    // the response that matters most — but the app shell is checked too, since
+    // `firebase.json` applies one `**` rule to both and a regression splitting
+    // them apart is exactly the kind worth catching.
     for (const path of ['/', '/ngsw-worker.js']) {
       cy.request(`${Cypress.config('baseUrl')}${path}`).then((response) => {
         const csp = response.headers['content-security-policy'];
         expect(csp, `Content-Security-Policy served with ${path}`).to.be.a('string');
 
-        const directives = directivesOf(csp as string);
-        const connectSrc = new Set(directives.get('connect-src') ?? []);
-        expect(connectSrc.size, `connect-src origins served with ${path}`).to.be.greaterThan(0);
-
-        const missing = SUBRESOURCE_DIRECTIVES.flatMap((directive) =>
-          (directives.get(directive) ?? [])
-            .filter(isOrigin)
-            .filter((origin) => !connectSrc.has(origin))
-            .map((origin) => `${origin} (allowed by ${directive})`),
+        const problems = findCspProblems(csp as string).map(
+          ({ origin, detail, why }) => `${origin} — ${detail}. ${why}`,
         );
-        expect(
-          missing,
-          `origins the page may load from ${path} but the service worker may not re-fetch — ` +
-            `each would fail as a synthetic 504 once the worker controls the page`,
-        ).to.deep.equal([]);
+        expect(problems, `the CSP served with ${path} fails csp:verify's own rule`).to.deep.equal(
+          [],
+        );
       });
     }
   });
