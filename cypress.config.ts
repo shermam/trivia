@@ -16,6 +16,14 @@ export default defineConfig({
     baseUrl: 'http://localhost:4200',
     supportFile: 'cypress/support/e2e.ts',
     specPattern: 'cypress/e2e/**/*.cy.ts',
+    // `service-worker-oauth-origins.cy.ts` is preview-only. It registers
+    // `ngsw-worker.js` and asserts the CSP served alongside it, and this runner
+    // has neither: `ng serve --configuration=e2e` sets no `serviceWorker` in
+    // `angular.json`, so no worker is emitted to register, and a dev server
+    // sends none of `firebase.json`'s headers. Run against the real deployed
+    // Hosting channel by `cypress.preview.config.ts`, which picks up everything
+    // under `cypress/e2e/unauthenticated/` automatically.
+    excludeSpecPattern: ['cypress/e2e/unauthenticated/service-worker-oauth-origins.cy.ts'],
     fixturesFolder: 'cypress/fixtures',
     video: false,
     // Deliberately above the app's own 15s per-question countdown
