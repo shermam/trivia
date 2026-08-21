@@ -35,6 +35,7 @@ Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 | 4   | [Review before publish](#4-review-before-publish)                                               | L    | ⬜     |
 | 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | ⬜     |
 | 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | ⬜     |
+| 7   | [Recover from a wedged service worker](#7-recover-from-a-wedged-service-worker)                 | S    | ⬜     |
 
 ### Why this order
 
@@ -45,6 +46,7 @@ The two rules driving it are _don't write code twice_ and _don't rewrite on a su
 - **3 before 4** because it is much smaller, and because it has to choose a write-path mechanism (counter document vs. Cloud Function) that item 4 can then reuse. Choosing that mechanism with item 4 in view is most of the design work — see the note in item 3.
 - **4** is the largest, the only one with a schema migration against an exact-key `hasOnly()` allowlist, and the only one that changes what the product promises a paying subscriber.
 - **5 and 6 are unordered against the rest** — both came out of publishing the policies rather than from the audit, and neither blocks anything. 5 is a decision that happens to need a small change; 6 is genuinely cheaper _after_ 4, because an edit that can bypass moderation is a hole, so editing has to know whether review exists before it can be designed.
+- **7 is unordered and independent of everything above it.** It came out of the Google sign-in investigation ([#115](https://github.com/shermam/trivia/pull/115)) rather than the audit, touches nothing any other item touches, and is the only item here whose triggering failure has never been reproduced — which is why it is queued small rather than queued early.
 
 **Items 4, 5 and 6 all change published policy text**, and each one says so in its own section. That is not bookkeeping: the two documents state, in present tense, that submissions are published immediately and cannot be edited or withdrawn. Ship any of those features without touching the text and the app is misdescribing itself to its users — see `CLAUDE.md` §4.0.
 
@@ -202,6 +204,28 @@ Both halves are one item because they share every hard part: the rules change, t
 A **delete** additionally touches the Privacy Policy's retention list, which currently states that contributed questions stay in the bank indefinitely, and the Terms' account-deletion section. Update those, plus `LEGAL_LAST_UPDATED`, in the same PR.
 
 **Watch out for:** `CLAUDE.md` §4.6 — a rules change ships with rules tests covering the reject cases, then gets mutation-tested. The reject cases here are the interesting ones: editing someone else's question, editing an unattributed legacy document, editing a `[deleted-user]` document, and rewriting `createdBy` to steal or disown authorship.
+
+---
+
+### 7. Recover from a wedged service worker
+
+**Size: S. Status: ⬜**
+
+`grep -rn "SwUpdate\|unrecoverable\|versionUpdates" src/` returns nothing. The app registers `ngsw-worker.js` (`app.config.ts`) and then never speaks to it again: no `unrecoverable` listener, no `versionUpdates` subscription. Angular's service worker **does** emit `unrecoverable` when its cached version fails an integrity check and it cannot repair itself, and today nothing is listening — so the app cannot recover, and cannot tell the user anything either. The only escape is a hard reload, which is not a thing a non-technical user knows to try.
+
+Came out of the Google sign-in investigation, as step 4 of the brief that produced [#114](https://github.com/shermam/trivia/pull/114) and [#115](https://github.com/shermam/trivia/pull/115).
+
+**The failure was never reproduced, and that is the honest status of this item.** `/ngsw/state` on production was checked repeatedly across that investigation and reported `Driver state: NORMAL ((nominal))` every time, with a single version and an empty debug log. This is a latent robustness gap, not a known-live bug — which is why it is an S and sits at the bottom.
+
+**It does not supersede [#115](https://github.com/shermam/trivia/pull/115), and the distinction is the interesting part.** That PR fixed a _different_ kind of service-worker staleness: the worker's **policy container**, which holds the CSP delivered with its script and is fixed at install time. `unrecoverable` says nothing about that — a worker serving a year-old CSP is working perfectly by its own lights. Cache corruption and policy staleness are two separate failure modes of the same component, and the fingerprint in `scripts/stamp-service-worker.mjs` covers only the second.
+
+What it needs: inject `SwUpdate`, subscribe to `unrecoverable`, surface a plain message and offer `location.reload()`. `versionUpdates` is worth considering in the same pass — the app currently has no "a new version is available" affordance either — but that is UX with a design question attached, and `unrecoverable` is the part that is purely a hole.
+
+**Watch out for:**
+
+- **`SwUpdate.isEnabled` is `false` in dev and under Cypress.** `app.config.ts` gates registration on `!isDevMode() && !navigator.webdriver`, so anything written here must tolerate a disabled `SwUpdate` rather than assume its observables ever emit. That is also why the one existing spec that needs a real worker (`service-worker-oauth-origins.cy.ts`) registers it by hand and runs preview-only — see `ci-cd.md` §4.3, including what leaving it registered costs other specs.
+- **A prompt that appears on a wedged app has to work on a wedged app.** Whatever renders the message must not depend on a lazy route chunk the broken cache is what failed to serve.
+- The matching entry in `docs/known-gaps.md` §6 gets struck when this ships, per the note at the top of this file.
 
 ---
 
