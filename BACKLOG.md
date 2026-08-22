@@ -31,7 +31,7 @@ Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 | --- | ----------------------------------------------------------------------------------------------- | ---- | ------ |
 | 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                                          | M    | ✅     |
 | 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | ✅     |
-| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ⬜     |
+| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ✅     |
 | 4   | [Review before publish](#4-review-before-publish)                                               | L    | ⬜     |
 | 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | ⬜     |
 | 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | ⬜     |
@@ -121,7 +121,15 @@ Two secondary wins come free, and both are things the audit worked around rather
 
 ### 3. Rate limit on `custom_questions`
 
-**Size: M. Status: ⬜**
+**Size: M. Status: ✅ done** — [#119](https://github.com/shermam/trivia/pull/119). **20 per hour per account**, enforced in `firestore.rules` against a `custom_question_quota/{window}-{uid}` counter the client must increment in the same batched commit.
+
+**The mechanism question this item posed, answered.** Neither of the two options it listed won outright, and a third — the `{window}-{slot}` document-ID trick already proven twice here — turned out to be unusable on this collection for a non-obvious reason: `getCustomQuestions()` samples the bank by generating a random Firestore auto-ID and reading forward, so question IDs have to stay uniformly distributed across that keyspace. A `{window}-{uid}` ID starts with digits, which sort before every auto-ID, so capped questions would cluster at the start and be nearly unreachable by a forward scan. C1's sampling fix and A3's cap are quietly incompatible.
+
+**Cost was not the discriminator; cost _under abuse_ was.** All three options are free at any volume this app will see. What differs is what an attacker's rejected attempt costs: a rules refusal is not billed at all, so spam costs only the rules read, whereas every rejected call to a Cloud Function is a billed invocation. And Firestore has no synchronous before-write trigger — `onDocumentCreated` fires _after_ commit, so a function could only have deleted over-quota questions once they were already public in a world-readable collection. Rules refuse synchronously, before anything is stored, and add no latency to the submissions that succeed.
+
+**Item 4 does not need a Cloud Function either**, which is what this item asked to check before committing to a mechanism: a status field, an admin claim distinguished from `stripeRole`, and query/index changes are all rules-expressible, with moderation console-only to begin with. So nothing here has to be rebuilt for it.
+
+**The arithmetic was probed against the emulator first**, as this item insisted. `string(millis / 3600000)` renders a plain integer; the `math.floor()` form that produced `"5954006.0"` renders the float. Both directions are pinned, and the accept cases matter most — downgrading `getAfter` to `get` in a mutation run broke every _accept_ test, which is the fails-100%-closed mode this item warned about.
 
 A single Pro subscriber can submit questions in a loop; nothing bounds it. Deferred from A10 by an explicit decision (`AUDIT_REMEDIATION.md` §4) on the grounds that — unlike attribution, which could never be added retroactively once an exact-key `hasOnly()` allowlist existed — a rate limit can be added at any time. That is still true, which is why this is item 3 rather than item 1.
 

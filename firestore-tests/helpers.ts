@@ -4,6 +4,7 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
+import { collection, doc, writeBatch } from 'firebase/firestore';
 
 const FIRESTORE_EMULATOR_HOST = '127.0.0.1';
 const FIRESTORE_EMULATOR_PORT = 8080;
@@ -162,4 +163,47 @@ export function validEntry(uid: string, overrides: Record<string, unknown> = {})
     createdAt: Date.now(),
     ...overrides,
   };
+}
+
+/** The hourly bucket `questionQuotaWindow()` in `firestore.rules` computes. */
+export const questionQuotaWindow = (): string => String(Math.floor(Date.now() / 3_600_000));
+
+export const questionQuotaId = (uid: string): string => `${questionQuotaWindow()}-${uid}`;
+
+/**
+ * Submits a question the way the app now has to: the question **and** its
+ * hourly quota counter in a single batch (`BACKLOG.md` item 3).
+ *
+ * Every `custom_questions` create goes through here, including the ones
+ * expected to fail. That is the point. `firestore.rules` reads the counter's
+ * post-commit state with `getAfter()`, so a bare `addDoc` is now refused for
+ * *volume* — and a schema test written that way would still go green while
+ * proving nothing about the schema. Same trap as an auth context built
+ * slightly wrong: passing for a reason unrelated to the rule it names.
+ */
+export function submitQuestion(
+  ctx: RulesTestContext,
+  options: {
+    uid: string;
+    payload: Record<string, unknown>;
+    /** The value written to the counter. `create` demands 1; `update` demands exactly +1. */
+    count?: number;
+    /** Bill the submission to a different account's counter — must be refused. */
+    quotaOwner?: string;
+    /** Leave the counter out entirely — must be refused. */
+    withQuota?: boolean;
+  },
+): Promise<void> {
+  const db = ctx.firestore();
+  const batch = writeBatch(db);
+  if (options.withQuota !== false) {
+    batch.set(
+      doc(db, 'custom_question_quota', questionQuotaId(options.quotaOwner ?? options.uid)),
+      {
+        count: options.count ?? 1,
+      },
+    );
+  }
+  batch.set(doc(collection(db, 'custom_questions')), options.payload);
+  return batch.commit();
 }

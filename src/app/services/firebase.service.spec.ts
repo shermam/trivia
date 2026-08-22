@@ -216,6 +216,39 @@ function fakeServer(
         );
       }
 
+      if (url.includes(':commit')) {
+        // A batched write. Recorded per-document so a test can assert what the
+        // batch contained, and refused as a unit, which is how Firestore
+        // treats it.
+        const batch = (body!['writes'] as Record<string, never>[]).map((write) => {
+          const update = write['update'] as { name: string; fields: Record<string, unknown> };
+          return {
+            method: 'COMMIT',
+            path: update.name.slice(`${RESOURCE_ROOT}/`.length),
+            fields: update.fields,
+          } as RecordedWrite;
+        });
+        server.attempts.push(...batch);
+        const outcome = onWrite(batch.map((w) => w.path).join(','), writeAttempt++);
+        if (outcome === 'permission-denied') {
+          return Promise.resolve({
+            ok: false,
+            status: 403,
+            json: () =>
+              Promise.resolve({ error: { status: 'PERMISSION_DENIED', message: 'refused' } }),
+          });
+        }
+        if (outcome === 'server-error') {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            json: () => Promise.resolve({ error: { status: 'INTERNAL', message: 'boom' } }),
+          });
+        }
+        server.writes.push(...batch);
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+      }
+
       // A write: PATCH at a chosen ID, or POST for a server-generated one.
       const path = pathFromUrl(url);
       const record: RecordedWrite = {
@@ -588,22 +621,102 @@ describe('FirebaseService leaderboard', () => {
   });
 });
 
-describe('FirebaseService.addCustomQuestion', () => {
-  it('POSTs to the collection so Firestore mints the ID', async () => {
+describe('FirebaseService.addCustomQuestion (item 3: the hourly quota)', () => {
+  const question = () => ({
+    ...makeQuestion(),
+    createdBy: 'user-1',
+    createdAt: 1_755_000_000_000,
+  });
+  const quotaPath = () => `custom_question_quota/${Math.floor(Date.now() / 3_600_000)}-user-1`;
+
+  it('commits the question and the counter as one batch', async () => {
+    // Two sequential writes would let a client send the question and simply
+    // never send the increment. `firestore.rules` reads the counter's
+    // post-commit state with getAfter(), which only means anything if the two
+    // are one commit.
     const { service, writes } = setup([]);
 
-    await service.addCustomQuestion({
-      ...makeQuestion(),
-      createdBy: 'user-1',
-      createdAt: 1_755_000_000_000,
+    await service.addCustomQuestion(question());
+
+    expect(writes).toHaveLength(2);
+    expect(writes.every((w) => w.method === 'COMMIT')).toBe(true);
+    expect(writes.map((w) => w.path.split('/')[0]).sort()).toEqual([
+      'custom_question_quota',
+      'custom_questions',
+    ]);
+  });
+
+  it('mints a question ID from Firestore’s own auto-ID alphabet', async () => {
+    // Load-bearing, and the reason the cap is not folded into the question's
+    // ID the way the session and report caps are: getCustomQuestions() samples
+    // the bank by picking a random point in this exact keyspace, so anything
+    // that clusters IDs skews which questions players ever see.
+    const { service, writes } = setup([]);
+
+    await service.addCustomQuestion(question());
+
+    const id = writes.find((w) => w.path.startsWith('custom_questions/'))!.path.split('/')[1];
+    expect(id).toMatch(/^[A-Za-z0-9]{20}$/);
+  });
+
+  it('carries the attribution the rules bind to the caller', async () => {
+    const { service, writes } = setup([]);
+
+    await service.addCustomQuestion(question());
+
+    const doc = writes.find((w) => w.path.startsWith('custom_questions/'))!;
+    expect(doc.fields['createdBy']).toEqual({ stringValue: 'user-1' });
+    expect(doc.fields['createdAt']).toEqual({ integerValue: '1755000000000' });
+  });
+
+  it('increments the counter from whatever the hour already holds', async () => {
+    const { service, writes } = setup([{ id: quotaPath().split('/')[1], data: { count: 7 } }]);
+
+    await service.addCustomQuestion(question());
+
+    const counter = writes.find((w) => w.path.startsWith('custom_question_quota/'))!;
+    expect(counter.fields['count']).toEqual({ integerValue: '8' });
+  });
+
+  it('starts the counter at 1 in a fresh hour', async () => {
+    const { service, writes } = setup([]);
+
+    await service.addCustomQuestion(question());
+
+    const counter = writes.find((w) => w.path.startsWith('custom_question_quota/'))!;
+    expect(counter.fields['count']).toEqual({ integerValue: '1' });
+  });
+
+  it('refuses at the cap, and says so only after reading the counter', async () => {
+    // The B4 lesson: a refusal alone does not license the claim "you have hit
+    // the limit". This message is allowed because the count was checked.
+    const { service, writes } = setup([{ id: quotaPath().split('/')[1], data: { count: 20 } }]);
+
+    await expect(service.addCustomQuestion(question())).rejects.toThrow(/20 questions/);
+    expect(writes).toHaveLength(0);
+  });
+
+  it('retries a refusal, because a racing submission is not an error', async () => {
+    // Two tabs compute the same next value; Firestore serializes the writes so
+    // the loser's `count == resource.data.count + 1` no longer holds. A fresh
+    // read fixes it and the user should never learn it happened.
+    let attempts = 0;
+    const { service, writes } = setup([], () => (attempts++ === 0 ? 'permission-denied' : 'ok'));
+
+    await service.addCustomQuestion(question());
+
+    expect(attempts).toBe(2);
+    expect(writes).toHaveLength(2);
+  });
+
+  it('does not retry a failure that is not a refusal', async () => {
+    let attempts = 0;
+    const { service } = setup([], () => {
+      attempts++;
+      return 'server-error';
     });
 
-    expect(writes).toHaveLength(1);
-    expect(writes[0].method).toBe('POST');
-    expect(writes[0].path).toBe('custom_questions');
-    // Attribution is what makes an abuse report actionable (A10/H4), and the
-    // rules bind `createdBy` to the caller's own uid.
-    expect(writes[0].fields['createdBy']).toEqual({ stringValue: 'user-1' });
-    expect(writes[0].fields['createdAt']).toEqual({ integerValue: '1755000000000' });
+    await expect(service.addCustomQuestion(question())).rejects.toThrow(/boom/);
+    expect(attempts).toBe(1);
   });
 });

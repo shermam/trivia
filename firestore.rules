@@ -163,6 +163,43 @@ service cloud.firestore {
       );
     }
 
+    // The hourly bucket a question submission counts against, as a string, for
+    // the `custom_question_quota` document ID.
+    //
+    // Integer division, deliberately, and NOT `math.floor()`. `math.floor()`
+    // returns a float, so `string(math.floor(x))` renders "5954006.0" — which
+    // is how the session-document cap came to reject every legitimate checkout
+    // while a suite of nothing but `assertFails` passed. Probed against the
+    // emulator before this was written: `string(millis / 3600000)` renders a
+    // plain integer, and the ".0" form is rejected. Both directions are pinned
+    // in `firestore-tests/custom-questions.rules.spec.ts`.
+    function questionQuotaWindow() {
+      return string(request.time.toMillis() / 3600000);
+    }
+
+    function questionQuotaPath() {
+      return /databases/$(database)/documents/custom_question_quota/$(questionQuotaWindow() + '-' + request.auth.uid);
+    }
+
+    // How many questions one account may publish per hour.
+    //
+    // Rules cannot count a user's documents, so the count lives in a document
+    // the client has to write in the *same batch* — `getAfter()` reads its
+    // post-commit state, which is what makes declining to increment it
+    // impossible rather than merely discouraged. The document ID carries the
+    // window and the uid, so a new hour is simply a new document and there is
+    // no rollover arithmetic to get wrong, and the path is derived here from
+    // `request.auth.uid` rather than from anything the client sends — batching
+    // against somebody else's counter does not typecheck.
+    function withinQuestionQuota() {
+      return existsAfter(questionQuotaPath())
+             && getAfter(questionQuotaPath()).data.count <= maxQuestionsPerWindow();
+    }
+
+    function maxQuestionsPerWindow() {
+      return 20;
+    }
+
     function isValidCustomQuestion() {
       let data = request.resource.data;
       return data.keys().hasOnly(
@@ -208,8 +245,52 @@ service cloud.firestore {
     // is console-only.
     match /custom_questions/{questionId} {
       allow read: if true;
-      allow create: if isRealAuthedUser() && isProUser() && isValidCustomQuestion();
+      allow create: if isRealAuthedUser()
+                    && isProUser()
+                    && isValidCustomQuestion()
+                    && withinQuestionQuota();
       allow update, delete: if false;
+    }
+
+    // The per-hour submission counter, and the only reason a question write is
+    // ever refused for volume (`BACKLOG.md` item 3).
+    //
+    // Deliberately NOT folded into the question's own document ID, which is how
+    // the session and report caps work. `getCustomQuestions()` samples the bank
+    // by generating a random Firestore auto-ID and reading forward from it, so
+    // it depends on question IDs being uniformly distributed across that
+    // 62-character space. A `{window}-{uid}` ID begins with digits, which sort
+    // before every auto-ID, so capped questions would cluster at the very start
+    // of the keyspace: nearly unreachable by a forward scan and
+    // over-represented on the wrap-around. The cap would have quietly skewed
+    // which questions players see.
+    match /custom_question_quota/{quotaId} {
+      // Readable by its owner so a refused submission can be explained
+      // honestly — "you have reached the limit" is a claim the client is only
+      // allowed to make after checking (`CLAUDE.md` §4.4).
+      allow read: if isRealAuthedUser() && quotaId.matches('.*-' + request.auth.uid + '$');
+
+      // Only ever the current window, only ever the caller's own, and only
+      // ever starting at 1.
+      allow create: if isRealAuthedUser()
+                    && isProUser()
+                    && quotaId == questionQuotaWindow() + '-' + request.auth.uid
+                    && request.resource.data.keys().hasOnly(['count'])
+                    && request.resource.data.count is int
+                    && request.resource.data.count == 1;
+
+      // Strictly +1. Anything else — a decrement, a reset, a jump — is refused,
+      // which is what stops the counter being walked back down.
+      allow update: if isRealAuthedUser()
+                    && isProUser()
+                    && quotaId == questionQuotaWindow() + '-' + request.auth.uid
+                    && request.resource.data.keys().hasOnly(['count'])
+                    && request.resource.data.count is int
+                    && request.resource.data.count == resource.data.count + 1
+                    && request.resource.data.count <= maxQuestionsPerWindow();
+
+      // Deleting one would reset the hour.
+      allow delete: if false;
     }
 
     // A player's report about a community question (finding H4).
