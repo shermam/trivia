@@ -11,7 +11,7 @@ import { Router } from '@angular/router';
 import { Difficulty, NewCustomQuestionDoc, QuestionType } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
-import { FirebaseService } from '../../services/firebase.service';
+import { FirebaseService, QuestionQuotaExceededError } from '../../services/firebase.service';
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
@@ -242,6 +242,13 @@ export class AddQuestionComponent implements OnInit {
    * rather than being narrated wrongly.
    */
   private explainSubmitFailure(error: unknown): string {
+    // Checked, not guessed. `FirebaseService` only raises this after reading
+    // the counter back and finding the hour genuinely full — a refusal on its
+    // own would not license the claim, since a stale counter is refused
+    // identically (`CLAUDE.md` §4.4, finding B4).
+    if (error instanceof QuestionQuotaExceededError) {
+      return error.message;
+    }
     const isPermissionDenied = isFirestorePermissionDenied(error);
     if (isPermissionDenied && !this.authService.isProUser()) {
       return (

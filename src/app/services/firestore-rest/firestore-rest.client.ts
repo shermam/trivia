@@ -90,6 +90,19 @@ export interface RestQuery {
   endBeforeDocumentId?: string;
 }
 
+/** One document write inside a batched {@link FirestoreRestClient.commit}. */
+export interface RestWrite {
+  /** Document path, e.g. `custom_questions/abc123`. */
+  path: string;
+  data: Record<string, unknown>;
+  /**
+   * Require that the document does not already exist. Firestore refuses the
+   * whole batch if it does, which is what makes a client-generated document ID
+   * safe to mint.
+   */
+  mustNotExist?: boolean;
+}
+
 export interface RestRequestOptions {
   timeoutMs?: number;
 }
@@ -224,6 +237,43 @@ export class FirestoreRestClient {
       options,
     );
     return toRestDocument(document);
+  }
+
+  /**
+   * Commits several writes atomically — all of them land or none do.
+   *
+   * This exists for one reason: `firestore.rules` cannot count documents, so
+   * the hourly cap on `custom_questions` is a counter the client must
+   * increment in the *same* batch as the question it is submitting. The rule
+   * reads that counter's post-commit state with `getAfter()`, which only means
+   * anything if the two writes are one commit. Two sequential writes would let
+   * a client send the question and simply never send the increment.
+   */
+  async commit(writes: RestWrite[], options: RestRequestOptions = {}): Promise<void> {
+    for (const write of writes) {
+      assertDocumentPath(write.path);
+    }
+    const { url, resourceName } = await this.getDocumentsRoot();
+
+    await this.request<unknown>(
+      `${url}:commit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          writes: writes.map((write) => {
+            const fields = encodeFields(write.data);
+            return {
+              update: { name: `${resourceName}/${write.path}`, fields },
+              // Named explicitly, so a write only ever touches the keys it
+              // carries — same reasoning as `setDocument`.
+              updateMask: { fieldPaths: Object.keys(fields).map(assertPlainFieldName) },
+              ...(write.mustNotExist ? { currentDocument: { exists: false } } : {}),
+            };
+          }),
+        }),
+      },
+      options,
+    );
   }
 
   /** Runs a structured query over one collection. */
@@ -470,17 +520,19 @@ function documentIdCursor(resourceName: string, collectionPath: string, document
   return { referenceValue: `${resourceName}/${collectionPath}/${documentId}` };
 }
 
+function assertPlainFieldName(name: string): string {
+  if (!PLAIN_FIELD_NAME.test(name)) {
+    throw new TypeError(
+      `Cannot write the field "${name}": an updateMask path needs backtick quoting for ` +
+        'anything but a plain identifier, which this client does not implement.',
+    );
+  }
+  return name;
+}
+
 function updateMaskFor(fields: FirestoreFields): string {
   return Object.keys(fields)
-    .map((name) => {
-      if (!PLAIN_FIELD_NAME.test(name)) {
-        throw new TypeError(
-          `Cannot write the field "${name}": an updateMask path needs backtick quoting for ` +
-            'anything but a plain identifier, which this client does not implement.',
-        );
-      }
-      return `updateMask.fieldPaths=${encodeURIComponent(name)}`;
-    })
+    .map((name) => `updateMask.fieldPaths=${encodeURIComponent(assertPlainFieldName(name))}`)
     .join('&');
 }
 

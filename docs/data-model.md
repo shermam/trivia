@@ -36,6 +36,20 @@ Two consequences worth being explicit about:
 - **This was not retrofittable, which is why it landed before the features that need it.** No backfill can invent an author for a document that never recorded one, and the exact-key `hasOnly()` allowlist actively _rejects_ adding the field to an existing document. Attribution is what makes an abuse report actionable and what lets account deletion (Known Gaps) find a user's contributions at all.
 - **Documents created before this change have no `createdBy` and never will.** `CustomQuestionDoc` therefore types both fields as optional on the _read_ path while `NewCustomQuestionDoc` requires them on the _write_ path — the asymmetry is deliberate, because typing the read shape as always-attributed would be a lie the compiler then helps spread. Those legacy questions remain permanently unattributable.
 
+### `custom_question_quota` — the hourly submission cap
+
+`custom_question_quota/{window}-{uid}`, holding a single `count`. One document per account per hour; a new hour is a new document.
+
+**Why a separate collection rather than the document-ID trick used everywhere else.** The session and report caps encode `{window}-{slot}` in the _capped document's own ID_, which costs nothing. That is unavailable here. `getCustomQuestions()` samples the bank by generating a random Firestore auto-ID and reading forward from it (§ "How `custom_questions` is sampled"), so it depends on question IDs being uniformly distributed across that 62-character space. A `{window}-{uid}` ID begins with digits, which sort before every auto-ID — capped questions would cluster at the very start of the keyspace, nearly unreachable by a forward scan and over-represented on the wrap-around. The cap would have silently skewed which questions players see.
+
+**How it is enforced.** Rules cannot count documents, so the client writes the counter itself — and the question's own rule requires it, with `getAfter()` reading the counter's **post-commit** state. The two writes therefore have to be one batched commit (`FirestoreRestClient.commit`); a client that sends the question and declines to send the increment is refused. The quota path is derived in the rule from `request.auth.uid` and `request.time`, never from anything the client sends, so a submission cannot be billed to another account's counter and the question needs no extra field — which matters, because adding one would mean widening `custom_questions`' exact-key `hasOnly()` allowlist.
+
+**Limit: 20 per hour** (`maxQuestionsPerWindow()` in `firestore.rules`, `MAX_QUESTIONS_PER_HOUR` in `firebase.service.ts` — they must agree, and the rules tests fail loudly if they drift). `create` demands exactly `count == 1`, `update` demands exactly `+1` and `<= 20`, and `delete` is refused, so the counter cannot be reset, walked backwards, or started high.
+
+**Cost.** One extra read and one extra write per submission. Refused writes are not billed, so an account hammering the cap costs only the rules read — which is why this is cheaper under abuse than a Cloud Function, where every rejected attempt would be a billed invocation. Firestore has no synchronous before-write trigger, so a function could only have deleted over-quota questions _after_ they were already public in a world-readable collection.
+
+**Documents accumulate.** One per active submitter per hour, never deleted by the app. Small, but unbounded over time — a Firestore TTL policy is the intended cleanup, as with the session documents.
+
 ### `question_reports` — player reports about community questions
 
 ```

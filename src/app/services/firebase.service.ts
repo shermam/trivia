@@ -35,6 +35,27 @@ const REPORT_SLOTS_PER_WINDOW = 10;
 const FIRESTORE_TIMEOUT_MS = 10_000;
 
 /**
+ * The hourly cap on question submissions, and the collection holding the
+ * counter (`BACKLOG.md` item 3). Both have to agree with
+ * `questionQuotaWindow()`/`maxQuestionsPerWindow()` in `firestore.rules`; if
+ * they disagree, every submission is refused and the rules tests say so.
+ */
+const QUESTION_QUOTA_COLLECTION = 'custom_question_quota';
+const QUESTION_QUOTA_WINDOW_MS = 3_600_000;
+export const MAX_QUESTIONS_PER_HOUR = 20;
+
+/**
+ * How many times to re-read the counter and try again when the batch is
+ * refused. Two submissions racing each other both compute the same next value,
+ * and Firestore serializes writes to a document, so the loser's
+ * `count == resource.data.count + 1` no longer holds and its batch is refused.
+ * That is correct behaviour, not an error worth showing anyone — it just needs
+ * a fresh read. Three attempts is far more than a human can cause and still
+ * bounded.
+ */
+const QUOTA_WRITE_ATTEMPTS = 3;
+
+/**
  * Every `{window}-{slot}` document ID was refused. Usually that means the
  * volume cap — ten reports per five-minute window per user — but an invalid
  * payload is refused with the same `permission-denied` on every slot, and
@@ -45,6 +66,21 @@ const FIRESTORE_TIMEOUT_MS = 10_000;
 export class QuestionReportRejectedError extends Error {
   constructor() {
     super('Could not send the report just now. Please try again in a few minutes.');
+  }
+}
+
+/**
+ * The submitter has published the hour's allowance. Thrown only after reading
+ * the counter back and finding it genuinely full — a refusal alone does not
+ * justify the claim, since the rules refuse a stale counter identically
+ * (`CLAUDE.md` §4.4).
+ */
+export class QuestionQuotaExceededError extends Error {
+  constructor() {
+    super(
+      `You have added ${MAX_QUESTIONS_PER_HOUR} questions in the past hour, which is the limit. ` +
+        'Please try again later.',
+    );
   }
 }
 
@@ -102,6 +138,16 @@ function asDocumentData<T>(data: Record<string, unknown>): T {
 /** `leaderboards/{board}/entries/{uid}` — one place the path is spelled. */
 function boardEntryPath(board: string, uid: string): string {
   return `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_ENTRIES_SUBCOLLECTION}/${uid}`;
+}
+
+/**
+ * The quota document for a uid in the current hour. Must render the same string
+ * as `questionQuotaWindow()` in `firestore.rules`, which uses integer division
+ * on `request.time` — deliberately not `math.floor()`, which returns a float
+ * and renders as "5954006.0".
+ */
+function questionQuotaId(uid: string): string {
+  return `${Math.floor(Date.now() / QUESTION_QUOTA_WINDOW_MS)}-${uid}`;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -197,11 +243,64 @@ export class FirebaseService {
    * than mis-attributing the question.
    */
   async addCustomQuestion(question: NewCustomQuestionDoc): Promise<void> {
-    await this.rest.createDocument(
-      CUSTOM_QUESTIONS_COLLECTION,
-      { ...question },
-      { timeoutMs: FIRESTORE_TIMEOUT_MS },
-    );
+    const quotaPath = `${QUESTION_QUOTA_COLLECTION}/${questionQuotaId(question.createdBy)}`;
+
+    for (let attempt = 0; attempt < QUOTA_WRITE_ATTEMPTS; attempt++) {
+      const used = await this.readQuestionsUsedThisHour(quotaPath);
+      if (used >= MAX_QUESTIONS_PER_HOUR) {
+        throw new QuestionQuotaExceededError();
+      }
+
+      try {
+        // One commit, because `firestore.rules` reads the counter's
+        // post-commit state with `getAfter()`. Two sequential writes would let
+        // a client send the question and never send the increment.
+        //
+        // The question's ID is minted here rather than by the server, since a
+        // batch has to name what it writes. `randomDocumentId()` draws from
+        // Firestore's own auto-ID alphabet, which keeps IDs uniformly
+        // distributed across the keyspace — load-bearing for
+        // `getCustomQuestions()`, which samples the bank by picking a random
+        // point in exactly that space.
+        await this.rest.commit(
+          [
+            { path: quotaPath, data: { count: used + 1 } },
+            {
+              path: `${CUSTOM_QUESTIONS_COLLECTION}/${randomDocumentId()}`,
+              data: { ...question },
+              mustNotExist: true,
+            },
+          ],
+          { timeoutMs: FIRESTORE_TIMEOUT_MS },
+        );
+        return;
+      } catch (error) {
+        // A refusal here has two plausible causes and they need different
+        // answers: the counter moved under us (another submission landed
+        // first), or something about the payload is wrong. Re-reading
+        // distinguishes them on the next pass; anything that is not a refusal
+        // is a real failure and is not retried.
+        if (!isFirestorePermissionDenied(error) || attempt === QUOTA_WRITE_ATTEMPTS - 1) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  /**
+   * How many questions this account has published in the current hour.
+   *
+   * Read before the write so the counter can be incremented to a known value,
+   * and read *again* on the failure path so a refusal can be explained
+   * honestly rather than guessed at — the difference between "you have reached
+   * the limit" and "please try again", which B4 is the standing lesson about.
+   */
+  private async readQuestionsUsedThisHour(quotaPath: string): Promise<number> {
+    const document = await this.rest.getDocument(quotaPath, {
+      timeoutMs: FIRESTORE_TIMEOUT_MS,
+    });
+    const count = document?.data['count'];
+    return typeof count === 'number' ? count : 0;
   }
 
   /**
