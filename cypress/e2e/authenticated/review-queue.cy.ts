@@ -61,6 +61,17 @@ describe('the review queue', () => {
     cy.contains('Is this question already live?').should('not.exist');
   });
 
+  /**
+   * Every button here is addressed by `data-cy`, never by its text, and that
+   * is not stylistic. The first version of this test clicked
+   * `cy.contains('button', 'Approve')` — which matched the **"Approved" tab**,
+   * because "Approved" contains "Approve" and the tab bar precedes the list in
+   * the DOM. It switched tabs instead of approving anything, and the
+   * `should('not.exist')` that followed then passed for entirely the wrong
+   * reason: the pending question was absent because the *Approved* tab was
+   * showing, not because it had been approved. Only the assertion after it
+   * failed, which is the sole reason this was caught at all.
+   */
   it('approves a pending question, and the decision survives a reload', () => {
     cy.createVerifiedUser({ ...REVIEWER, displayName: 'Rev' }).then(({ uid }) => {
       cy.seedReviewer({ uid, reviewer: true });
@@ -69,17 +80,22 @@ describe('the review queue', () => {
     cy.signInViaUi(REVIEWER.email, REVIEWER.password);
     cy.visit('/review');
 
+    cy.get('[data-cy="review-question"]').should('have.length', 1);
     cy.contains('Is this question waiting for review?').should('be.visible');
-    cy.contains('button', 'Approve').click();
+    cy.get('[data-cy="approve-question"]').click();
 
-    // Gone from Pending...
-    cy.contains('Is this question waiting for review?').should('not.exist');
+    // Gone from Pending, and the tab is genuinely empty rather than merely not
+    // containing that one string.
+    cy.get('[data-cy="review-question"]').should('have.length', 0);
 
-    // ...and the write actually landed, rather than only the row disappearing.
-    cy.contains('button', 'Approved').click();
+    // ...and the write actually landed, rather than only the row disappearing
+    // from a list the browser was holding in memory.
+    cy.get('[data-cy="review-tab"][data-status="approved"]').click();
+    cy.get('[data-cy="review-question"]').should('have.length', 2);
     cy.contains('Is this question waiting for review?').should('be.visible');
+
     cy.reload();
-    cy.contains('button', 'Approved').click();
+    cy.get('[data-cy="review-tab"][data-status="approved"]').click();
     cy.contains('Is this question waiting for review?').should('be.visible');
   });
 
