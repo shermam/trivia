@@ -237,6 +237,74 @@ service cloud.firestore {
             && isNearRequestTime(data.createdAt);
     }
 
+    // Moderation roles, granted by hand. Empty today: nothing reads it yet
+    // (`BACKLOG.md` item 4a), and the rules that will are deliberately not in
+    // this PR, because a rules helper no rule calls cannot be mutation-tested
+    // and an untestable security helper is worse than a later one.
+    //
+    // **A document rather than a custom claim**, for two reasons that point the
+    // same way. The Firebase console cannot set custom claims at all — there is
+    // no claims editor on the Authentication page, and no gcloud equivalent —
+    // so a claim would mean running an Admin SDK script for every promotion,
+    // rather than the by-hand console edit this was specified to be. And a
+    // claim revokes
+    // *slowly*: unsetting one only changes what the **next** ID token says, so
+    // a removed reviewer keeps the privilege until the token already in their
+    // browser expires, up to an hour (`CLAUDE.md` §4.2). That window was
+    // accepted for `stripeRole` on the explicit grounds that it gates nothing
+    // more valuable than adding a question to a shared bank (A13); approving
+    // *other people's* questions into that bank is more valuable than that, so
+    // the acceptance does not carry over. A rule that reads a document is
+    // evaluated at request time — delete the document and the very next
+    // request is refused, with no token refresh and no sign-out.
+    //
+    // The cost is one billed read, and only on operations a reviewer actually
+    // performs: `||` short-circuits, so a rule written as
+    // `<public condition> || isReviewer()` never evaluates the lookup for the
+    // players who satisfy the public condition. Probed against the emulator
+    // rather than assumed, along with the three other behaviours this design
+    // rests on — a missing role document denies rather than erroring open,
+    // `get()` is usable inside a `list` rule, and a role document that exists
+    // with `reviewer: false` denies exactly like one that is absent.
+    //
+    // One document per user carrying flags, not a `reviewers/{uid}`
+    // collection: a single read serves any number of role checks, and an
+    // `admin` flag is already foreseen. Nothing here is client-writable, so
+    // there is no exact-key `hasOnly()` allowlist and therefore none of the
+    // A10 one-way door — fields can be added later at no cost, which is the
+    // exact inverse of `custom_questions` and worth knowing before treating
+    // this schema as fixed.
+    match /user_roles/{uid} {
+      // Your own document, and only ever as a single-document `get`. This is
+      // what lets the UI offer a reviewer a way in without guessing: it reads
+      // the same document and the same field the privileged rules will read,
+      // so the client signal cannot drift *broader* than the server gate the
+      // way `isProUser` did (H6). It is not a mirror of the predicate, it is
+      // the predicate.
+      //
+      // `request.auth != null` and not `isRealAuthedUser()`: an anonymous
+      // session gets a fresh uid it does not choose, so it can never name a
+      // document somebody was granted a role on, and the read returns nothing.
+      // Narrowing it would add a second condition that has to stay in step
+      // with nothing.
+      allow get: if request.auth != null && request.auth.uid == uid;
+
+      // Never enumerable, by anyone — including a reviewer. Who moderates is
+      // not public, and a list of moderators is a list of accounts worth
+      // attacking. Spelled out rather than left to default-deny because the
+      // obvious `allow read` would have granted both verbs, and the difference
+      // between them is the entire point of this rule.
+      allow list: if false;
+
+      // Assignment is out of band: the console and the Admin SDK bypass these
+      // rules, and no client path exists at all. That is why there is no
+      // `admin` role yet — with nothing for one to guard there is no
+      // bootstrapping problem to solve and no self-escalation path to close.
+      // Adding in-app role management is what creates the need for one, and it
+      // is queued as such in `BACKLOG.md`.
+      allow create, update, delete: if false;
+    }
+
     // Question bank: readable by anyone playing the game. Creating a new
     // question requires both the anti-flood gate (real, non-anonymous,
     // verified-if-password account) and an active Pro subscription — this

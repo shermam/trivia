@@ -10,6 +10,46 @@ Part of the project overview — start at [`PROJECT_OVERVIEW.md`](../PROJECT_OVE
 
 ## 3. Data Model (Firestore)
 
+### `user_roles` — moderation roles, granted by hand
+
+```
+user_roles/{uid}
+  reviewer: boolean
+```
+
+One document per account, named by uid, holding role flags. **Empty today** — nothing reads it yet. It ships ahead of the rules that will consult it (`BACKLOG.md` item 4) so that the register, its lockdown and its tests are deployed and provable before any privilege depends on them, and so roles can be granted before there is anything to grant them for.
+
+- **Read**: `get` on your own document only (`request.auth != null && request.auth.uid == uid`). Any uid, anonymous included — see below.
+- **List**: never, by anyone.
+- **Create / Update / Delete**: never, by any client. Assignment is console-only; the console and the Admin SDK bypass rules entirely.
+
+**A document rather than a custom claim**, decided on two grounds that point the same way.
+
+The first is practical: **the Firebase console cannot set custom claims.** There is no claims editor on the Authentication page and no `gcloud` equivalent, so a claim-based role means writing and running an Admin SDK script for every promotion. The whole requirement here was that the owner can appoint a reviewer by hand, from the console, today.
+
+The second is the one that would matter even if the console could: **a claim revokes slowly.** Unsetting one only changes what the _next_ ID token says, so a removed reviewer keeps the privilege until the token already in their browser expires — up to an hour, and `revokeRefreshTokens` does not close it because rules do not check revocation (`CLAUDE.md` §4.2). That window was accepted for `stripeRole` (A13) on the explicit and recorded grounds that it gates nothing more valuable than adding a question to a shared bank. Approving _other people's_ questions into that bank is more valuable than that, so the acceptance does not transfer. A rule that reads a document is evaluated at request time: delete the document and the very next request is refused, with no token refresh and no sign-out.
+
+**Cost: one billed read, and only on operations a reviewer actually performs.** `||` short-circuits, so a rule shaped `<public condition> || isReviewer()` never evaluates the lookup for callers who satisfy the public condition. That, and the three other rules-language behaviours this design rests on, were probed against the emulator before the design was chosen rather than assumed — the `math.floor()` habit (§ "Rules test suite"):
+
+| Probed                                                                        | Result                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get()` on a **missing** document, unguarded (`get(p).data.reviewer == true`) | Denies. No `exists()` guard needed; bare, exists-guarded and `.data.get('reviewer', false)` forms all behaved identically on every case.                                                     |
+| A document that exists with `reviewer: false`, and one missing the field      | Both deny — it is not an existence or truthiness check.                                                                                                                                      |
+| `\|\|` short-circuit                                                          | A caller with no role document read a public document successfully, which is only possible if the lookup was never evaluated. This is the cost proof.                                        |
+| `get()` inside a `list` rule                                                  | Works. A privileged caller's unfiltered query and their filtered query both succeeded where an unprivileged caller's failed — so a review queue is a plain query, not a separate collection. |
+
+**One document with flags, not a `reviewers/{uid}` collection.** A single read serves any number of role checks, and an `admin` flag is already foreseen; two collections would be two reads.
+
+**No exact-key `hasOnly()` allowlist, and there must not be one.** Nothing here is client-writable, so there is nothing to constrain — and consequently none of the A10 one-way door. Fields can be added later at no cost, which is the exact inverse of `custom_questions`. `grantedAt` or a free-text `note` can be added by hand for provenance; treat them as documentation, not as an audit trail. Console edits leave no automatic record unless Cloud Audit Logs **Data Access** logging is enabled for Firestore, which is off by default and billed.
+
+**There is no `admin` role, deliberately.** With `allow create, update, delete: if false` there is no client write path to the register at all, so there is nothing for an admin role to guard, no bootstrapping problem to solve, and no self-escalation path to close. In-app role management is what creates the need for one, and it is queued as such in `BACKLOG.md` — the first admin will be seeded from the console at that point, exactly as reviewers are now.
+
+**Why the read is `request.auth != null` and not `isRealAuthedUser()`.** An anonymous session is handed a uid it does not choose, so it can never name a document a role was granted on, and the read returns nothing. Narrowing it would add a condition that has to stay in step with nothing. Pinned by a test so that tightening it later is a decision rather than a reflex.
+
+**Why the read is `get` and `list` spelled separately.** `allow read` grants both, and who moderates is not public — a list of moderators is a list of accounts worth attacking. This distinction is unusually easy to test _vacuously_, and the mutation run proved it: with `allow read: if request.auth.uid == uid` and no `allow list`, the **unfiltered** list is still denied, because Firestore cannot prove the wildcard matches every document the query would return. Every test but one keeps passing. The shape that catches it is a query constrained to `documentId() == <own uid>`, which Firestore _can_ prove and therefore serves — `firestore-tests/user-roles.rules.spec.ts` carries that row with a comment saying not to delete it.
+
+**Granting a role, by hand:** Authentication → Users → copy the **User UID**; Firestore Database → collection `user_roles` → document ID = that uid → field `reviewer`, type boolean, value `true`. Revoke by deleting the document. Effective on the next request.
+
 ### `custom_questions` — first-party question bank
 
 ```
@@ -224,10 +264,10 @@ Deliberately **no `random` field on the documents**, which is the textbook appro
 
 ### Rules test suite
 
-`firestore.rules` is the app's real security boundary, so it has a dedicated unit suite (`npm run rules:test`, `firestore-tests/`, 138 tests) built on `@firebase/rules-unit-testing` and run against the Firestore emulator. Deliberately outside `src/` and driven by its own `vitest.rules.config.ts`, so the Angular build, `ng test` and the ESLint globs never pick it up.
+`firestore.rules` is the app's real security boundary, so it has a dedicated unit suite (`npm run rules:test`, `firestore-tests/`, 222 tests across six spec files) built on `@firebase/rules-unit-testing` and run against the Firestore emulator. Deliberately outside `src/` and driven by its own `vitest.rules.config.ts`, so the Angular build, `ng test` and the ESLint globs never pick it up.
 
 - **Every branch is covered by its reject case, not just its happy path** — signed-out, anonymous, unverified-password, verified-but-not-Pro, a `stripeRole` that is set but isn't `pro`, cross-uid writes, every schema bound, and default-deny on an undeclared collection.
 - **Auth contexts always set `firebase.sign_in_provider` explicitly** (`firestore-tests/helpers.ts`). Omitting it yields a provider that satisfies `!= 'anonymous'`, so a test leaning on the default would pass for the wrong reason and would keep passing if the anonymous check were deleted outright.
 - **Each spec file uses its own `projectId`**, because `clearFirestore()` wipes a whole project — sharing one would make parallel files race each other's fixtures.
-- **The suite is mutation-tested whenever it's extended**: breaking `isProUser()` to always return true, deleting the anonymous check, and dropping the leaderboard's improving-score condition each produced failures (3, 4 and 2 respectively) when it was first written. The session-document rules were checked the same way — dropping the volume cap, dropping either schema check, widening the slot space, and dropping the origin pattern produced 8, 12, 9, 2 and 6 failures respectively. A rules suite that passes against broken rules is worse than none.
+- **The suite is mutation-tested whenever it's extended**: breaking `isProUser()` to always return true, deleting the anonymous check, and dropping the leaderboard's improving-score condition each produced failures (3, 4 and 2 respectively) when it was first written. The session-document rules were checked the same way — dropping the volume cap, dropping either schema check, widening the slot space, and dropping the origin pattern produced 8, 12, 9, 2 and 6 failures respectively. A rules suite that passes against broken rules is worse than none. `user_roles` was checked the same way: opening `list`, dropping the ownership check on `get`, allowing self-writes, and deleting the whole block produced 4, 2, 5 and 6 failures respectively — and the deletion run is the one that matters most, because all six of its failures are _accept_ cases, which is the fails-100%-closed mode a suite of nothing but `assertFails` cannot see. The fifth mutation, `allow read` in place of `get` + `list: if false`, scored **1**, and that single row is described in the section above.
 - **The `CURRENTLY ACCEPTS` pins are gone.** Two findings were deliberately pinned with `assertSucceeds` — the unbounded leaderboard score (A1) and the unvalidated checkout-session payload (A2/A3) — so that the PRs closing them would have to flip the expectation to `assertFails` in the diff rather than quietly deleting a test. Both have now flipped. It's a pattern worth reusing for any finding whose fix lands later than its discovery.

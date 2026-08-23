@@ -32,10 +32,11 @@ Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 | 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                                          | M    | ✅     |
 | 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | ✅     |
 | 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ✅     |
-| 4   | [Review before publish](#4-review-before-publish)                                               | L    | ⬜     |
+| 4   | [Review before publish](#4-review-before-publish)                                               | L    | 🟡     |
 | 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | ⬜     |
 | 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | ⬜     |
 | 7   | [Recover from a wedged service worker](#7-recover-from-a-wedged-service-worker)                 | S    | ⬜     |
+| 8   | [In-app role management](#8-in-app-role-management)                                             | M    | ⬜     |
 
 ### Why this order
 
@@ -46,6 +47,7 @@ The two rules driving it are _don't write code twice_ and _don't rewrite on a su
 - **3 before 4** because it is much smaller, and because it has to choose a write-path mechanism (counter document vs. Cloud Function) that item 4 can then reuse. Choosing that mechanism with item 4 in view is most of the design work — see the note in item 3.
 - **4** is the largest, the only one with a schema migration against an exact-key `hasOnly()` allowlist, and the only one that changes what the product promises a paying subscriber.
 - **5 and 6 are unordered against the rest** — both came out of publishing the policies rather than from the audit, and neither blocks anything. 5 is a decision that happens to need a small change; 6 is genuinely cheaper _after_ 4, because an edit that can bypass moderation is a hole, so editing has to know whether review exists before it can be designed.
+- **8 is last on purpose, and its absence is a feature.** Granting a role by hand in the console works, is instant, and leaves `user_roles` with no client write path to defend. Building the UI is what turns the privilege register into something a client can write, which is what creates the need for an `admin` role, rules to gate it and tests to prove them. Nothing is waiting on it.
 - **7 is unordered and independent of everything above it.** It came out of the Google sign-in investigation ([#115](https://github.com/shermam/trivia/pull/115)) rather than the audit, touches nothing any other item touches, and is the only item here whose triggering failure has never been reproduced — which is why it is queued small rather than queued early.
 
 **Items 4, 5 and 6 all change published policy text**, and each one says so in its own section. That is not bookkeeping: the two documents state, in present tense, that submissions are published immediately and cannot be edited or withdrawn. Ship any of those features without touching the text and the app is misdescribing itself to its users — see `CLAUDE.md` §4.0.
@@ -144,7 +146,28 @@ A single Pro subscriber can submit questions in a loop; nothing bounds it. Defer
 
 ### 4. Review before publish
 
-**Size: L. Status: ⬜**
+**Size: L. Status: 🟡 in progress — split into three PRs, 4a done.**
+
+| Sub-PR | What                                                                                                                                                                                                   | Status                           |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| **4a** | The `user_roles` register: rules, lockdown, rules tests, docs. Grants nothing — nothing reads it yet.                                                                                                  | ✅ this PR                       |
+| **4b** | The pending/approved representation, reviewer-only reads of non-approved questions, reviewer-only approve/reject, and the review queue UI. Everything existing stays approved, so no behaviour change. | ⬜                               |
+| **4c** | Flip new submissions to pending. Policy text in both documents, `LEGAL_LAST_UPDATED`, the contributor-facing "awaiting review" state, the `docs/known-gaps.md` strike.                                 | ⬜ — the only one a user notices |
+
+**Why split.** Each part is independently deployable and only the last changes behaviour, so the schema migration and the index changes — the two things most likely to go wrong — land with nothing else moving. 4a ships alone specifically so the register can be exercised in production, by hand, before any privilege depends on it.
+
+**Do not land 4c before the review queue UI exists.** The moment it lands, the Firestore console _is_ the queue and every contributor waits on the owner opening it. That is why the queue UI sits in 4b rather than trailing 4c.
+
+#### Decisions taken (4a)
+
+- **A reviewer role, not an admin role**, and it is a **Firestore document, not a custom claim**. The Firebase console cannot set custom claims at all, and a claim revokes slowly — up to an hour of a token already issued, which A13 accepted for `stripeRole` on the recorded grounds that it gates nothing more valuable than adding a question. Approving other people's questions is more valuable than that, so the acceptance does not transfer. Full reasoning and the emulator probes behind it: `data-model.md` § `user_roles`.
+- **There is no `admin` role yet, and that is the design, not a gap.** `user_roles` has no client write path at all, so there is nothing for one to guard — no bootstrapping problem, no self-escalation path. Item 8 is what creates the need for one.
+- **Reviewer read access to `question_reports` is deliberately _not_ in 4a.** The Privacy Policy states that reports are "readable by nobody through the app". Opening them to reviewers is a real policy change and belongs with the PR that updates the text, not smuggled in alongside a rules register.
+- **`isReviewer()` is deferred to 4b.** A rules helper that no rule calls cannot be mutation-tested, and an untestable security helper is worse than a later one.
+
+#### Still to decide (4b)
+
+**Status field vs. a separate `custom_questions_pending` collection.** The separate collection avoids the allowlist widening, the backfill and the index changes entirely — but approval would then mean writing into `custom_questions` on behalf of another user, which needs either a Cloud Function on the write path or a rules branch letting a reviewer create a document whose `createdBy` is not their own uid. That weakens `isValidCustomQuestion()`'s cleanest invariant. **Leaning to the status field**, where approval is a one-field update authored by the reviewer and `createdBy` stays immutable, at the cost of a one-off Admin SDK backfill and three new composite indexes: `getCustomQuestions` runs four filter shapes, and while `status` alone rides the automatic single-field index, `status+category`, `status+difficulty` and `status+category+difficulty` all need declaring.
 
 Today any fully authenticated Pro subscriber publishes straight into the shared question bank. H4 shipped the reporting half — submissions are attributed (`createdBy`) and any player can flag a question mid-game and file the report at game over — so abuse is actionable end-to-end, report → attributed author → console removal. What is missing is the step before publication.
 
@@ -234,6 +257,23 @@ What it needs: inject `SwUpdate`, subscribe to `unrecoverable`, surface a plain 
 - **`SwUpdate.isEnabled` is `false` in dev and under Cypress.** `app.config.ts` gates registration on `!isDevMode() && !navigator.webdriver`, so anything written here must tolerate a disabled `SwUpdate` rather than assume its observables ever emit. That is also why the one existing spec that needs a real worker (`service-worker-oauth-origins.cy.ts`) registers it by hand and runs preview-only — see `ci-cd.md` §4.3, including what leaving it registered costs other specs.
 - **A prompt that appears on a wedged app has to work on a wedged app.** Whatever renders the message must not depend on a lazy route chunk the broken cache is what failed to serve.
 - The matching entry in `docs/known-gaps.md` §6 gets struck when this ships, per the note at the top of this file.
+
+---
+
+### 8. In-app role management
+
+**Size: M. Status: ⬜ — lower priority than 5, 6 and 7.**
+
+`user_roles` (item 4a, `data-model.md`) is granted entirely by hand in the Firebase console: Authentication → Users for the uid, Firestore → `user_roles/{uid}` → `reviewer: true`. That is a deliberate starting point, not an oversight — it works, it is instant, and it has **no client write path at all**, so the register has no attack surface to defend.
+
+This item is the point at which that changes, and the cost of changing it is the reason it is queued low.
+
+- **It is what creates the need for an `admin` role.** Today there is nothing for one to guard. An in-app grant form is a client write path into the privilege register, so it needs a role that may use it, rules that gate it, and rules tests covering the reject cases — a reviewer must not be able to recruit, and nobody must be able to promote themselves. `firestore-tests/user-roles.rules.spec.ts` already pins both of those against the current `if false`, and those rows are exactly the ones that have to be rewritten rather than deleted.
+- **Bootstrapping is already solved and should stay that way.** The first admin is seeded from the console, the same way reviewers are now. Do not build a "first user becomes admin" path; it is a privilege-escalation bug with a friendly name.
+- **It needs a way to find a user.** The console flow works because Authentication lists every account with its uid. In-app, an admin knows an email address, and the client cannot look up a uid from one — Auth's admin queries are Admin SDK only. So this almost certainly needs a Cloud Function, which is the bulk of the work and the rest of the reason it is an M.
+- **Provenance becomes worth having** once grants are not hand-typed: `grantedBy`, `grantedAt`. The collection has no exact-key `hasOnly()` allowlist precisely so those can be added later without a migration — but note that adding a client write path is what makes an allowlist necessary in the first place, so this item both adds the fields and adds the constraint that would have blocked them.
+
+**Watch out for:** the read rule. `allow list: if false` is what keeps the set of moderators unenumerable, and a management screen wants exactly that list. Widening it for an admin is legitimate; widening it by reflex to `allow read` is not — see the mutation note in `data-model.md`, where that specific mistake survives every test in the file but one.
 
 ---
 
