@@ -4,7 +4,7 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { addDoc, collection, deleteDoc, doc, getDocs, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import {
   asAnonymous,
@@ -15,6 +15,8 @@ import {
   asVerifiedPassword,
   asWrongRole,
   createTestEnv,
+  questionQuotaId,
+  submitQuestion,
   validQuestion,
 } from './helpers';
 
@@ -42,32 +44,47 @@ describe('custom_questions: read', () => {
 
 describe('custom_questions: create — who may write', () => {
   it('rejects a signed-out caller', async () => {
-    await assertFails(addDoc(questions(asSignedOut(env)), validQuestion('nobody')));
+    await assertFails(
+      submitQuestion(asSignedOut(env), { uid: 'nobody', payload: validQuestion('nobody') }),
+    );
   });
 
   it('rejects an anonymous caller', async () => {
-    await assertFails(addDoc(questions(asAnonymous(env, 'anon')), validQuestion('anon')));
+    await assertFails(
+      submitQuestion(asAnonymous(env, 'anon'), { uid: 'anon', payload: validQuestion('anon') }),
+    );
   });
 
   it('rejects an unverified password account', async () => {
-    await assertFails(addDoc(questions(asUnverifiedPassword(env, 'u')), validQuestion('u')));
+    await assertFails(
+      submitQuestion(asUnverifiedPassword(env, 'u'), { uid: 'u', payload: validQuestion('u') }),
+    );
   });
 
   it('rejects a verified password account with no Pro claim', async () => {
-    await assertFails(addDoc(questions(asVerifiedPassword(env, 'u')), validQuestion('u')));
+    await assertFails(
+      submitQuestion(asVerifiedPassword(env, 'u'), { uid: 'u', payload: validQuestion('u') }),
+    );
   });
 
   it('rejects an OAuth account with no Pro claim', async () => {
-    await assertFails(addDoc(questions(asOAuth(env, 'u')), validQuestion('u')));
+    await assertFails(submitQuestion(asOAuth(env, 'u'), { uid: 'u', payload: validQuestion('u') }));
   });
 
   // Guards against the claim check ever being loosened to a truthiness test.
   it('rejects a stripeRole that is set but is not exactly "pro"', async () => {
-    await assertFails(addDoc(questions(asWrongRole(env, 'u')), validQuestion('u')));
+    await assertFails(
+      submitQuestion(asWrongRole(env, 'u'), { uid: 'u', payload: validQuestion('u') }),
+    );
   });
 
   it('allows a verified Pro subscriber', async () => {
-    await assertSucceeds(addDoc(questions(asPro(env, 'pro-user')), validQuestion('pro-user')));
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+      }),
+    );
   });
 });
 
@@ -75,7 +92,10 @@ describe('custom_questions: create — schema validation', () => {
   const rejects = (label: string, overrides: Record<string, unknown>) =>
     it(`rejects ${label}`, async () => {
       await assertFails(
-        addDoc(questions(asPro(env, 'pro-user')), validQuestion('pro-user', overrides)),
+        submitQuestion(asPro(env, 'pro-user'), {
+          uid: 'pro-user',
+          payload: validQuestion('pro-user', overrides),
+        }),
       );
     });
 
@@ -117,10 +137,10 @@ describe('custom_questions: create — schema validation', () => {
 
   it('accepts the maximum three incorrect answers', async () => {
     await assertSucceeds(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', { incorrect_answers: ['CO2', 'O2', 'NaCl'] }),
-      ),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { incorrect_answers: ['CO2', 'O2', 'NaCl'] }),
+      }),
     );
   });
 
@@ -129,50 +149,67 @@ describe('custom_questions: create — schema validation', () => {
   // business judging them.
   it('accepts answers that differ only by case or spacing', async () => {
     await assertSucceeds(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', { correct_answer: 'H2O', incorrect_answers: ['h2o', ' H2O'] }),
-      ),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', {
+          correct_answer: 'H2O',
+          incorrect_answers: ['h2o', ' H2O'],
+        }),
+      }),
     );
   });
 
   it('rejects a document missing a required key', async () => {
     const { incorrect_answers: _dropped, ...withoutAnswers } = validQuestion('pro-user');
-    await assertFails(addDoc(questions(asPro(env, 'pro-user')), withoutAnswers));
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), { uid: 'pro-user', payload: withoutAnswers }),
+    );
   });
 
   it('accepts the minimum of one incorrect answer (a true/false question)', async () => {
     await assertSucceeds(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', {
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', {
           type: 'boolean',
           correct_answer: 'True',
           incorrect_answers: ['False'],
         }),
-      ),
+      }),
     );
   });
 });
 
 describe('custom_questions: create — attribution cannot be spoofed', () => {
   it('rejects a createdBy naming someone else — the whole point of attribution', async () => {
-    await assertFails(addDoc(questions(asPro(env, 'pro-user')), validQuestion('some-other-user')));
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('some-other-user'),
+      }),
+    );
   });
 
   it('rejects a document with no createdBy at all', async () => {
     const { createdBy: _dropped, ...unattributed } = validQuestion('pro-user');
-    await assertFails(addDoc(questions(asPro(env, 'pro-user')), unattributed));
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), { uid: 'pro-user', payload: unattributed }),
+    );
   });
 
   it('rejects a document with no createdAt at all', async () => {
     const { createdAt: _dropped, ...undated } = validQuestion('pro-user');
-    await assertFails(addDoc(questions(asPro(env, 'pro-user')), undated));
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), { uid: 'pro-user', payload: undated }),
+    );
   });
 
   it('rejects a non-string createdBy', async () => {
     await assertFails(
-      addDoc(questions(asPro(env, 'pro-user')), validQuestion('pro-user', { createdBy: 42 })),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { createdBy: 42 }),
+      }),
     );
   });
 
@@ -180,28 +217,28 @@ describe('custom_questions: create — attribution cannot be spoofed', () => {
   // chosen to make a submission look older than it is.
   it('rejects a backdated createdAt', async () => {
     await assertFails(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', { createdAt: Date.now() - 60 * 60 * 1000 }),
-      ),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { createdAt: Date.now() - 60 * 60 * 1000 }),
+      }),
     );
   });
 
   it('rejects a future-dated createdAt', async () => {
     await assertFails(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', { createdAt: Date.now() + 60 * 60 * 1000 }),
-      ),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { createdAt: Date.now() + 60 * 60 * 1000 }),
+      }),
     );
   });
 
   it('rejects a non-integer createdAt', async () => {
     await assertFails(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', { createdAt: 'just now' }),
-      ),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { createdAt: 'just now' }),
+      }),
     );
   });
 
@@ -209,10 +246,10 @@ describe('custom_questions: create — attribution cannot be spoofed', () => {
   // wrong clock or a slow connection simply can't contribute.
   it('tolerates a clock a couple of minutes behind', async () => {
     await assertSucceeds(
-      addDoc(
-        questions(asPro(env, 'pro-user')),
-        validQuestion('pro-user', { createdAt: Date.now() - 2 * 60 * 1000 }),
-      ),
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { createdAt: Date.now() - 2 * 60 * 1000 }),
+      }),
     );
   });
 });
@@ -235,5 +272,168 @@ describe('custom_questions: update and delete are console-only', () => {
 
   it('rejects a delete even from a Pro subscriber', async () => {
     await assertFails(deleteDoc(question(asPro(env, 'pro-user'), 'seeded')));
+  });
+});
+
+/**
+ * `BACKLOG.md` item 3. Rules cannot count a user's documents, so the hourly cap
+ * lives in a counter the client must increment in the *same batch* as the
+ * question — `getAfter()` reads its post-commit state, which is what makes
+ * declining to increment it impossible rather than merely discouraged.
+ *
+ * The accept cases matter as much as the rejections here, and more than usual.
+ * A cap is exactly the kind of rule that fails 100% closed and looks correct
+ * doing so: the session-document cap built on `string(math.floor(x))` refused
+ * every legitimate checkout while a suite of nothing but `assertFails` passed
+ * (`CLAUDE.md` §4.6).
+ */
+describe('custom_questions: the hourly quota (item 3)', () => {
+  const quota = (ctx: RulesTestContext, uid: string) =>
+    doc(ctx.firestore(), 'custom_question_quota', questionQuotaId(uid));
+
+  /** Puts the counter at `count` without going through the rules. */
+  const seedQuota = (uid: string, count: number) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_question_quota', questionQuotaId(uid)), { count });
+    });
+
+  it('accepts the very first submission of the hour, which creates the counter at 1', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+      }),
+    );
+  });
+
+  it('accepts the twentieth submission — the cap is inclusive', async () => {
+    // The off-by-one that would make the advertised limit 19.
+    await seedQuota('pro-user', 19);
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        count: 20,
+      }),
+    );
+  });
+
+  it('refuses the twenty-first', async () => {
+    await seedQuota('pro-user', 20);
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        count: 21,
+      }),
+    );
+  });
+
+  it('refuses a question whose batch leaves the counter out entirely', async () => {
+    // The whole reason the counter is read with getAfter rather than get: a
+    // client that simply declines to increment must not get a free write.
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        withQuota: false,
+      }),
+    );
+  });
+
+  it('refuses a question billed to someone else’s counter', async () => {
+    await seedQuota('other-user', 1);
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        quotaOwner: 'other-user',
+        count: 2,
+      }),
+    );
+  });
+
+  it('refuses a counter that stands still instead of incrementing', async () => {
+    await seedQuota('pro-user', 5);
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        count: 5,
+      }),
+    );
+  });
+
+  it('refuses a counter that walks itself back down', async () => {
+    await seedQuota('pro-user', 10);
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        count: 1,
+      }),
+    );
+  });
+
+  it('refuses a first submission that starts the counter above 1', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+        count: 0,
+      }),
+    );
+  });
+
+  it('refuses deleting the counter, which would reset the hour', async () => {
+    await seedQuota('pro-user', 20);
+    await assertFails(deleteDoc(quota(asPro(env, 'pro-user'), 'pro-user')));
+  });
+
+  it('refuses a counter carrying any key but count', async () => {
+    await assertFails(
+      setDoc(quota(asPro(env, 'pro-user'), 'pro-user'), { count: 1, bypass: true }),
+    );
+  });
+
+  it('refuses a counter written under a window that is not now', async () => {
+    // The ID is what scopes the cap to an hour. A client that picks its own
+    // window could mint a fresh allowance whenever it liked.
+    const nextHour = String(Math.floor(Date.now() / 3_600_000) + 1);
+    await assertFails(
+      setDoc(
+        doc(asPro(env, 'pro-user').firestore(), 'custom_question_quota', `${nextHour}-pro-user`),
+        {
+          count: 1,
+        },
+      ),
+    );
+  });
+
+  it('lets an owner read their own counter, so a refusal can be explained honestly', async () => {
+    await seedQuota('pro-user', 20);
+    await assertSucceeds(getDoc(quota(asPro(env, 'pro-user'), 'pro-user')));
+  });
+
+  it('does not let one subscriber read another’s counter', async () => {
+    await seedQuota('other-user', 3);
+    await assertFails(getDoc(quota(asPro(env, 'pro-user'), 'other-user')));
+  });
+
+  it('gives the next hour a fresh allowance, because the ID changes', async () => {
+    // Not a clock trick: a previous hour's exhausted counter is a different
+    // document, so it cannot constrain this hour.
+    const lastHour = String(Math.floor(Date.now() / 3_600_000) - 1);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_question_quota', `${lastHour}-pro-user`), {
+        count: 20,
+      });
+    });
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user'),
+      }),
+    );
   });
 });
