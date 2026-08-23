@@ -1,6 +1,5 @@
-import { cert, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { readFileSync } from 'node:fs';
+import { initAdminApp } from './admin-credential.mjs';
 
 /**
  * One-off migration for finding G7: copies the pre-G7 flat `leaderboard`
@@ -19,27 +18,8 @@ import { readFileSync } from 'node:fs';
  *
  * It runs through the Admin SDK, which bypasses `firestore.rules` — that is
  * the point, since `timeLimit` is not a field the old documents have and no
- * client may write another user's entry. It also means the usual guardrails
- * are absent here, so the script refuses to touch anything unless it is told
- * exactly which project to talk to.
- *
- * The credential can be supplied either way, because both are normal:
- *
- *   # a file on disk
- *   GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json \
- *     node scripts/migrate-leaderboard-to-boards.mjs --project intellectura-3b26a
- *
- *   # the key's JSON itself, e.g. from a Codespaces or CI secret, where there
- *   # is no file to point at
- *   GOOGLE_APPLICATION_CREDENTIALS_JSON="$SERVICE_ACCOUNT_JSON" \
- *     node scripts/migrate-leaderboard-to-boards.mjs --project intellectura-3b26a
- *
- * `GOOGLE_APPLICATION_CREDENTIALS` also accepts inline JSON, even though
- * Google's own convention is that it names a path. That is a deliberate
- * kindness rather than sloppiness: a secret store hands you a value, not a
- * file, so putting the JSON in the variable whose name you already know is
- * the obvious thing to try — and the failure when the script assumed a path
- * was `ENAMETOOLONG`, which says nothing at all about what went wrong.
+ * client may write another user's entry. Credential handling, the `--project`
+ * cross-check and why it exists all live in `admin-credential.mjs`.
  *
  * Add `--dry-run` to print what it would write and exit without writing. Do
  * that first.
@@ -60,103 +40,7 @@ const ENTRY_KEYS = [
   'timeLimit',
 ];
 
-function parseArgs(argv) {
-  const args = { dryRun: false, project: '' };
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--dry-run') args.dryRun = true;
-    else if (argv[i] === '--project') args.project = argv[++i] ?? '';
-  }
-  return args;
-}
-
-function fail(message) {
-  console.error(`\n  ${message}\n`);
-  process.exit(1);
-}
-
-const { dryRun, project } = parseArgs(process.argv.slice(2));
-
-if (!project) {
-  fail('--project is required. Refusing to guess which Firestore to write to.');
-}
-
-/**
- * Parses a service-account key, saying something useful when it will not parse.
- *
- * The control-character case is called out by name because it is the one a
- * secret store actually produces: a key's `private_key` is a single JSON
- * string containing `\n` escapes, and pasting it somewhere that turns those
- * into real newlines yields JSON that is invalid in a way the default message
- * ("Bad control character in string literal") does not explain.
- */
-function parseServiceAccount(raw, source) {
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    const hint = /control character/i.test(error.message)
-      ? ' — the key looks like it was pasted with real newlines inside private_key. ' +
-        'Store the file\'s exact bytes, so the "\\n" escapes stay escaped.'
-      : '';
-    fail(`${source} is not valid JSON: ${error.message}${hint}`);
-  }
-}
-
-/**
- * Resolves the credential from either a file path or inline JSON.
- *
- * Inline is detected by shape rather than by a flag: a service-account key is
- * a JSON object, and no filesystem path begins with `{`, so the two cases
- * cannot be confused for one another.
- */
-function loadServiceAccount() {
-  const inline = process.env['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
-  if (inline?.trim()) {
-    return parseServiceAccount(inline, 'GOOGLE_APPLICATION_CREDENTIALS_JSON');
-  }
-
-  const fromEnv = process.env['GOOGLE_APPLICATION_CREDENTIALS']?.trim();
-  if (!fromEnv) {
-    fail(
-      'No credential supplied. Set GOOGLE_APPLICATION_CREDENTIALS to a service-account ' +
-        "JSON file's path, or GOOGLE_APPLICATION_CREDENTIALS_JSON to the key's JSON itself.",
-    );
-  }
-
-  if (fromEnv.startsWith('{')) {
-    // Unset it before any Google library sees it. The variable is Google's own
-    // convention for a *path*, so leaving several kilobytes of JSON in it
-    // invites some other code path to hand it to open(2) and fail exactly the
-    // way this script used to.
-    delete process.env['GOOGLE_APPLICATION_CREDENTIALS'];
-    return parseServiceAccount(fromEnv, 'GOOGLE_APPLICATION_CREDENTIALS (read as inline JSON)');
-  }
-
-  try {
-    return parseServiceAccount(readFileSync(fromEnv, 'utf8'), `The key file at ${fromEnv}`);
-  } catch (error) {
-    fail(`Could not read GOOGLE_APPLICATION_CREDENTIALS (${fromEnv}): ${error.message}`);
-  }
-}
-
-// The credential decides which project is actually reached; --project is the
-// operator's statement of intent. Requiring both and checking they agree is
-// what stops a stale ambient credential pointing this at the wrong database —
-// the same reasoning as deriving Stripe's live/test mode from the key rather
-// than from a project name (`CLAUDE.md` §4.3).
-const serviceAccount = loadServiceAccount();
-
-if (!serviceAccount.project_id) {
-  fail('That credential has no project_id — it does not look like a service-account key.');
-}
-
-if (serviceAccount.project_id !== project) {
-  fail(
-    `Credential is for project "${serviceAccount.project_id}" but --project says "${project}". ` +
-      'Refusing to run against a project you did not name.',
-  );
-}
-
-initializeApp({ credential: cert(serviceAccount), projectId: project });
+const { dryRun, project } = initAdminApp(process.argv.slice(2));
 const firestore = getFirestore();
 
 /** Shapes an old flat entry into a board entry, keeping only the allowed keys. */

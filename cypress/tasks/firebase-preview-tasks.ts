@@ -55,9 +55,10 @@ export function registerFirebasePreviewTasks(on: Cypress.PluginEvents): void {
       await Promise.all(
         questions.map((q, index) => {
           const { id, ...doc } = q;
+          const seeded = { status: 'approved', ...doc };
           const docId = id ?? `preview-seed-${index}`;
           trackedCustomQuestionIds.add(docId);
-          return firestore.collection('custom_questions').doc(docId).set(doc);
+          return firestore.collection('custom_questions').doc(docId).set(seeded);
         }),
       );
       return null;
