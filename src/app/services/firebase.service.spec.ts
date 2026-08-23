@@ -3,7 +3,7 @@ import { firstValueFrom } from 'rxjs';
 import { CustomQuestionDoc, NewQuestionReportDoc } from '../models/question.model';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
-import { FirebaseService, QuestionReportRejectedError } from './firebase.service';
+import { FirebaseService, QuestionReportRejectedError, REVIEW_PAGE_SIZE } from './firebase.service';
 
 /**
  * Finding C1. `getCustomQuestions()` was `getDocs(collection(...))` — no
@@ -44,6 +44,11 @@ function makeQuestion(overrides: Partial<CustomQuestionDoc> = {}): CustomQuestio
     question: 'Q?',
     correct_answer: 'A',
     incorrect_answers: ['B'],
+    // Every question in the real bank carries one once
+    // `scripts/backfill-question-status.mjs` has run, and `getCustomQuestions`
+    // now filters on it — a fixture without one models a state that no longer
+    // exists, and would make every query in this file return nothing.
+    status: 'approved',
     ...overrides,
   };
 }
@@ -368,9 +373,24 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
 
     expect(result.map((q) => q.id)).toEqual(['qa']);
     expect(queries[0].wheres).toEqual([
+      { field: 'status', value: 'approved' },
       { field: 'category', value: 'Science' },
       { field: 'difficulty', value: 'easy' },
     ]);
+  });
+
+  it('always filters on status, so players are never served an unapproved question', async () => {
+    pinCursor(LOW_CURSOR);
+    const { service, queries } = setup(bank);
+
+    await firstValueFrom(service.getCustomQuestions({ limit: 3 }));
+
+    // Not conditional on anything the caller passes. This is the client half
+    // of review-before-publish, and the half that has to be unconditional —
+    // the rule stays open for one release, so until 4c this filter is the only
+    // thing keeping a rejected question out of a game.
+    expect(queries.every((q) => q.wheres.some((w) => w.field === 'status'))).toBe(true);
+    expect(queries[0].wheres).toContainEqual({ field: 'status', value: 'approved' });
   });
 
   it('omits a filter that was not asked for', async () => {
@@ -379,7 +399,9 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
 
     await firstValueFrom(service.getCustomQuestions({ category: '', difficulty: '', limit: 3 }));
 
-    expect(queries[0].wheres).toEqual([]);
+    // Only `status`, which is never optional — the two the caller declined are
+    // absent. An empty category must not become `category == ''`.
+    expect(queries[0].wheres).toEqual([{ field: 'status', value: 'approved' }]);
   });
 
   // Without the wrap, a cursor landing past the last document returns nothing,
@@ -732,5 +754,91 @@ describe('FirebaseService.addCustomQuestion (item 3: the hourly quota)', () => {
 
     await expect(service.addCustomQuestion(question())).rejects.toThrow(/boom/);
     expect(attempts).toBe(1);
+  });
+});
+
+describe('FirebaseService: the review queue (item 4b-ii)', () => {
+  const seed: SeedDoc[] = [
+    { id: 'p2', data: makeQuestion({ status: 'pending', createdAt: 200 }) as never },
+    { id: 'p1', data: makeQuestion({ status: 'pending', createdAt: 100 }) as never },
+    { id: 'a1', data: makeQuestion({ status: 'approved', createdAt: 150 }) as never },
+    { id: 'r1', data: makeQuestion({ status: 'rejected', createdAt: 50 }) as never },
+  ];
+
+  it('asks the server for one status and bounds the read', async () => {
+    // `CLAUDE.md` §4.1 — a `getDocs` without both a `where` and a `limit` is
+    // billed per document over a collection that grows with other people's
+    // contributions.
+    const { service, queries } = setup(seed);
+
+    await firstValueFrom(service.getQuestionsByStatus('pending'));
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0].collectionPath).toBe('custom_questions');
+    expect(queries[0].wheres).toEqual([{ field: 'status', value: 'pending' }]);
+    expect(queries[0].limit).toBe(REVIEW_PAGE_SIZE);
+  });
+
+  it('returns only the requested status', async () => {
+    const { service } = setup(seed);
+
+    const result = await firstValueFrom(service.getQuestionsByStatus('pending'));
+
+    expect(result.map((q) => q.id).sort()).toEqual(['p1', 'p2']);
+  });
+
+  it('sends no orderBy, so the query needs no composite index', async () => {
+    // The trade is deliberate and documented on REVIEW_PAGE_SIZE: sorting in
+    // the browser costs a page boundary that is not strictly by age, and buys
+    // the removal of a whole class of D3 deploy risk.
+    const { service, queries } = setup(seed);
+
+    await firstValueFrom(service.getQuestionsByStatus('pending'));
+
+    expect(queries[0].orderBy).toEqual([]);
+  });
+
+  it('sorts the page oldest-first in the browser', async () => {
+    const { service } = setup(seed);
+
+    const result = await firstValueFrom(service.getQuestionsByStatus('pending'));
+
+    expect(result.map((q) => q.id)).toEqual(['p1', 'p2']);
+  });
+
+  it('sorts an unattributed question first rather than dropping it', async () => {
+    // Documents predating attribution have no `createdAt` and never will. They
+    // still have to appear in a queue whose whole job is to show everything in
+    // a status.
+    const { service } = setup([
+      { id: 'dated', data: makeQuestion({ status: 'pending', createdAt: 100 }) as never },
+      { id: 'legacy', data: makeQuestion({ status: 'pending' }) as never },
+    ]);
+
+    const result = await firstValueFrom(service.getQuestionsByStatus('pending'));
+
+    expect(result.map((q) => q.id)).toEqual(['legacy', 'dated']);
+  });
+
+  it('writes only the status field, leaving the question as its author wrote it', async () => {
+    // The app's first genuinely partial write. `firestore.rules` allows a
+    // moderation update that affects no key but `status`, so a full-document
+    // replace would be refused as well as destructive — and the updateMask is
+    // what makes this a patch.
+    const { service, writes } = setup(seed);
+
+    await service.setQuestionStatus('p1', 'approved');
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].method).toBe('PATCH');
+    expect(writes[0].path).toBe('custom_questions/p1');
+    expect(Object.keys(writes[0].fields)).toEqual(['status']);
+    expect(writes[0].fields['status']).toEqual({ stringValue: 'approved' });
+  });
+
+  it('propagates a refused decision rather than reporting success', async () => {
+    const { service } = setup(seed, () => 'permission-denied');
+
+    await expect(service.setQuestionStatus('p1', 'approved')).rejects.toThrow();
   });
 });

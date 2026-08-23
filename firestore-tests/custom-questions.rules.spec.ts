@@ -4,7 +4,7 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import {
   asAnonymous,
@@ -15,6 +15,7 @@ import {
   asVerifiedPassword,
   asWrongRole,
   createTestEnv,
+  grantReviewer,
   questionQuotaId,
   submitQuestion,
   validQuestion,
@@ -326,6 +327,129 @@ describe('custom_questions: create — the moderation status (item 4b)', () => {
       submitQuestion(asPro(env, 'pro-user'), {
         uid: 'pro-user',
         payload: validQuestion('pro-user', { reviewedBy: 'someone' }),
+      }),
+    );
+  });
+});
+
+describe('custom_questions: moderation — a reviewer may change the status (item 4b-ii)', () => {
+  const REVIEWER = 'reviewer-uid';
+  const AUTHOR = 'pro-user';
+
+  beforeEach(async () => {
+    await grantReviewer(env, REVIEWER);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion(AUTHOR, { status: 'pending' }),
+      );
+    });
+  });
+
+  const question = (ctx: RulesTestContext) => doc(ctx.firestore(), 'custom_questions', 'q1');
+
+  it('lets a reviewer approve a pending question', async () => {
+    await assertSucceeds(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), { status: 'approved' }),
+    );
+  });
+
+  it('lets a reviewer reject a question', async () => {
+    await assertSucceeds(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), { status: 'rejected' }),
+    );
+  });
+
+  it('lets a reviewer put a decided question back to pending', async () => {
+    await assertSucceeds(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), { status: 'pending' }),
+    );
+  });
+
+  // Deliberately allowed. The client cannot always know whether a write that
+  // timed out landed, so an idempotent retry must not be refused for writing
+  // the value that is already there.
+  it('accepts a no-op write of the status already stored', async () => {
+    await assertSucceeds(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), { status: 'pending' }),
+    );
+  });
+
+  it('refuses a signed-in account with no role document', async () => {
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'nobody')), { status: 'approved' }),
+    );
+  });
+
+  // Pro is a *contributor* entitlement. Paying for the ability to add questions
+  // must never imply the ability to approve them — including your own.
+  it('refuses a Pro subscriber who is not a reviewer', async () => {
+    await assertFails(updateDoc(question(asPro(env, AUTHOR)), { status: 'approved' }));
+  });
+
+  it('refuses an account whose role document says reviewer: false', async () => {
+    await grantReviewer(env, 'demoted', false);
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'demoted')), { status: 'approved' }),
+    );
+  });
+
+  it('refuses an anonymous caller', async () => {
+    await assertFails(updateDoc(question(asAnonymous(env, 'anon')), { status: 'approved' }));
+  });
+
+  it('refuses a signed-out caller', async () => {
+    await assertFails(updateDoc(question(asSignedOut(env)), { status: 'approved' }));
+  });
+
+  it('refuses a status outside the union', async () => {
+    await assertFails(updateDoc(question(asVerifiedPassword(env, REVIEWER)), { status: 'banana' }));
+  });
+
+  // The four rows below are what `affectedKeys().hasOnly(['status'])` buys, and
+  // each is a distinct thing a moderator must not be able to do.
+  it('refuses a reviewer rewriting the question text alongside the status', async () => {
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), {
+        status: 'approved',
+        question: 'something the author never wrote',
+      }),
+    );
+  });
+
+  it('refuses a reviewer editing the question text on its own', async () => {
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), { question: 'rewritten' }),
+    );
+  });
+
+  it('refuses a reviewer rewriting createdBy to steal or disown authorship', async () => {
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), {
+        status: 'approved',
+        createdBy: REVIEWER,
+      }),
+    );
+  });
+
+  // `isValidCustomQuestion()` only guards creates, so without the affectedKeys
+  // check an update would sail straight past the exact-key allowlist.
+  it('refuses a reviewer introducing a field outside the create allowlist', async () => {
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, REVIEWER)), { reviewedBy: REVIEWER }),
+    );
+  });
+
+  it('refuses a reviewer deleting a question — that is still console-only', async () => {
+    await assertFails(deleteDoc(question(asVerifiedPassword(env, REVIEWER))));
+  });
+
+  // The register is not self-serve, and this is the row that says so from the
+  // side that matters: holding the role does not let you hand it out.
+  it('refuses a reviewer granting the role to somebody else', async () => {
+    await assertFails(
+      setDoc(doc(asVerifiedPassword(env, REVIEWER).firestore(), 'user_roles', 'friend'), {
+        reviewer: true,
       }),
     );
   });

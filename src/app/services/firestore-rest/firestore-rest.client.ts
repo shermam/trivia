@@ -202,7 +202,14 @@ export class FirestoreRestClient {
    * cannot already exist (the `{window}-{slot}` session and report slots) or
    * rewrites a leaderboard entry's complete key set. Sending the mask is the
    * unambiguous half of the API rather than a bet on what an absent mask
-   * means. A future *partial* write would have to decide this on purpose.
+   * means.
+   *
+   * **The first genuinely partial write now exists**:
+   * `FirebaseService.setQuestionStatus` sends `status` alone, and relies on
+   * exactly this behaviour to leave the rest of the question as its author
+   * wrote it. `firestore.rules` requires it, too — the moderation rule
+   * permits a write that affects no key but `status`, so a full-document
+   * replace would be refused as well as wrong.
    */
   async setDocument(
     documentPath: string,

@@ -1,0 +1,168 @@
+<div class="min-h-screen bg-slate-50 dark:bg-slate-950 px-4 sm:px-6 py-10 sm:py-14">
+  <div class="max-w-3xl mx-auto">
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
+    >
+      <app-icon name="arrow-left" [size]="15" />
+      Back to game
+    </a>
+
+    <h1
+      class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-2"
+    >
+      Review queue
+    </h1>
+
+    @if (!reviewerService.isResolved()) {
+      <p class="text-slate-500 dark:text-slate-400" role="status">Checking your access…</p>
+    } @else if (!reviewerService.isReviewer()) {
+      <p class="text-slate-500 dark:text-slate-400">
+        This page is for question reviewers. If you think you should have access, ask the site
+        owner.
+      </p>
+    } @else {
+      <p class="text-slate-500 dark:text-slate-400 mb-8">
+        Questions players have contributed to the shared bank. Rejecting one stops it being served
+        in games; it is not deleted.
+      </p>
+
+      <!-- Grouped controls need the role and the label, or the group's purpose
+           is never conveyed (CLAUDE.md §4.5). Nothing audits a missing one. -->
+      <h2 id="review-filter-label" class="sr-only">Filter by status</h2>
+      <div
+        role="radiogroup"
+        aria-labelledby="review-filter-label"
+        class="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1 mb-6"
+      >
+        @for (tab of tabs; track tab.status) {
+          <button
+            type="button"
+            role="radio"
+            [attr.aria-checked]="activeStatus() === tab.status"
+            (click)="select(tab.status)"
+            class="px-4 py-1.5 text-sm font-semibold rounded-lg transition-colors"
+            [class.bg-emerald-600]="activeStatus() === tab.status"
+            [class.text-white]="activeStatus() === tab.status"
+            [class.text-slate-600]="activeStatus() !== tab.status"
+            [class.dark:text-slate-300]="activeStatus() !== tab.status"
+          >
+            {{ tab.label }}
+          </button>
+        }
+      </div>
+
+      <!-- Every async outcome on this page is announced. The list mutates as a
+           decision removes a row, which is silent to assistive tech otherwise. -->
+      <p role="status" class="sr-only">{{ actionResult() }}</p>
+
+      @if (actionError()) {
+        <p
+          role="alert"
+          class="mb-4 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+        >
+          {{ actionError() }}
+        </p>
+      }
+
+      @if (isLoading()) {
+        <p class="text-slate-500 dark:text-slate-400" role="status">Loading…</p>
+      } @else if (loadError()) {
+        <div
+          class="rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+        >
+          <p role="alert" class="mb-2">{{ loadError() }}</p>
+          <button type="button" (click)="load()" class="font-semibold hover:underline">
+            Try again
+          </button>
+        </div>
+      } @else if (questions().length === 0) {
+        <p class="text-slate-500 dark:text-slate-400" role="status">
+          Nothing {{ activeStatus() }} right now.
+        </p>
+      } @else {
+        <ul class="space-y-4">
+          <!-- Tracked by id, never by question text: two questions with the
+               same wording are still two questions (CLAUDE.md §4.4). -->
+          @for (question of questions(); track question.id) {
+            <li
+              class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+            >
+              <p class="font-semibold text-slate-900 dark:text-slate-50 mb-3">
+                {{ question.question }}
+              </p>
+
+              <ul class="space-y-1 mb-4 text-sm">
+                @for (answer of answersFor(question); track $index) {
+                  <li
+                    class="flex items-center gap-2"
+                    [class.text-emerald-700]="answer === question.correct_answer"
+                    [class.dark:text-emerald-400]="answer === question.correct_answer"
+                    [class.text-slate-600]="answer !== question.correct_answer"
+                    [class.dark:text-slate-400]="answer !== question.correct_answer"
+                  >
+                    @if (answer === question.correct_answer) {
+                      <app-icon name="circle-check-big" [size]="14" class="shrink-0" />
+                      <span class="sr-only">Correct answer:</span>
+                    } @else {
+                      <span aria-hidden="true" class="w-3.5 shrink-0"></span>
+                    }
+                    {{ answer }}
+                  </li>
+                }
+              </ul>
+
+              <dl class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <div class="flex gap-1">
+                  <dt>Category:</dt>
+                  <dd>{{ question.category }}</dd>
+                </div>
+                <div class="flex gap-1">
+                  <dt>Difficulty:</dt>
+                  <dd>{{ question.difficulty }}</dd>
+                </div>
+                <div class="flex gap-1">
+                  <dt>Submitted:</dt>
+                  <dd>{{ submittedAt(question) }}</dd>
+                </div>
+                <div class="flex gap-1">
+                  <dt>Author:</dt>
+                  <dd>{{ question.createdBy ?? 'Unattributed (predates attribution)' }}</dd>
+                </div>
+              </dl>
+
+              <div class="flex gap-2 mt-4">
+                @if (activeStatus() !== 'approved') {
+                  <button
+                    type="button"
+                    [disabled]="pendingActionId() === question.id"
+                    (click)="decide(question, 'approved')"
+                    class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                }
+                @if (activeStatus() !== 'rejected') {
+                  <button
+                    type="button"
+                    [disabled]="pendingActionId() === question.id"
+                    (click)="decide(question, 'rejected')"
+                    class="px-3 py-1.5 text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+
+        @if (isFull()) {
+          <p class="mt-6 text-xs text-slate-500 dark:text-slate-400">
+            Showing the first {{ pageSize }}. Review these and reload for more.
+          </p>
+        }
+      }
+    }
+  </div>
+</div>

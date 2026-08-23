@@ -146,22 +146,22 @@ A single Pro subscriber can submit questions in a loop; nothing bounds it. Defer
 
 ### 4. Review before publish
 
-**Size: L. Status: 🟡 in progress — split into three PRs, 4a done.**
+**Size: L. Status: 🟡 in progress — 4a, 4b-i and 4b-ii done; 4c remains.**
 
-| Sub-PR    | What                                                                                                                                                                                                                           | Status                                   |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
-| **4a**    | The `user_roles` register: rules, lockdown, rules tests, docs. Grants nothing — nothing reads it yet.                                                                                                                          | ✅ this PR                               |
-| **4b-i**  | The `status` field: allowlist widening, the client writing it, the three composite indexes, and the backfill script. Nothing reads the field, so nothing behaves differently.                                                  | ✅ this PR                               |
-| **4b-ii** | Reviewer capability: `isReviewer()`, reviewer-only reads of non-approved questions, reviewer-only approve/reject, the client read filter, and the review queue UI. Everything is still approved, so still no behaviour change. | ⬜ **blocked on the backfill being run** |
-| **4c**    | Flip new submissions to pending. Policy text in both documents, `LEGAL_LAST_UPDATED`, the contributor-facing "awaiting review" state, the `docs/known-gaps.md` strike.                                                         | ⬜ — the only one a user notices         |
+| Sub-PR    | What                                                                                                                                                                                                                                                                                                                                       | Status                           |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| **4a**    | The `user_roles` register: rules, lockdown, rules tests, docs. Grants nothing — nothing reads it yet.                                                                                                                                                                                                                                      | ✅ this PR                       |
+| **4b-i**  | The `status` field: allowlist widening, the client writing it, the three composite indexes, and the backfill script. Nothing reads the field, so nothing behaves differently.                                                                                                                                                              | ✅ this PR                       |
+| **4b-ii** | Reviewer capability: `isReviewer()`, reviewer-only approve/reject, the client read filter, `ReviewerService` and the `/review` queue. Submissions still publish immediately, so the Pending tab is empty — but **rejecting** an approved question now takes it out of games, which is the first in-app moderation action this app has had. | ✅ this PR                       |
+| **4c**    | Flip new submissions to pending, **and tighten the `custom_questions` read rule**. Policy text in both documents, `LEGAL_LAST_UPDATED`, the contributor-facing "awaiting review" state, the `docs/known-gaps.md` strike.                                                                                                                   | ⬜ — the only one a user notices |
 
 **Why split.** Each part is independently deployable and only the last changes behaviour, so the schema migration and the index changes — the two things most likely to go wrong — land with nothing else moving. 4a ships alone specifically so the register can be exercised in production, by hand, before any privilege depends on it.
 
 **4b turned into two PRs once the migration order was worked out, and the reason is a hard dependency on a human.** `scripts/backfill-question-status.mjs` has to run _between_ the PR that adds the field and the PR that starts filtering on it — a document with no `status` matches no equality filter, so filtering first makes every question predating the change vanish from the game. That is the whole bank, not a subset. Splitting there puts the manual step at a boundary where neither side is broken while it is pending, instead of inside one PR's deploy window.
 
-**Do not start 4b-ii until the backfill has been run against production** (§5).
+The backfill has been run against production, which is what unblocked 4b-ii.
 
-**Do not land 4c before the review queue UI exists.** The moment it lands, the Firestore console _is_ the queue and every contributor waits on the owner opening it. That is why the queue UI sits in 4b-ii rather than trailing 4c.
+**The review queue UI exists as of 4b-ii, which is what makes 4c landable.** Without it the Firestore console would be the queue and every contributor would wait on the owner opening it.
 
 #### Decisions taken (4a)
 
@@ -169,6 +169,13 @@ A single Pro subscriber can submit questions in a loop; nothing bounds it. Defer
 - **There is no `admin` role yet, and that is the design, not a gap.** `user_roles` has no client write path at all, so there is nothing for one to guard — no bootstrapping problem, no self-escalation path. Item 8 is what creates the need for one.
 - **Reviewer read access to `question_reports` is deliberately _not_ in 4a.** The Privacy Policy states that reports are "readable by nobody through the app". Opening them to reviewers is a real policy change and belongs with the PR that updates the text, not smuggled in alongside a rules register.
 - **`isReviewer()` is deferred to 4b-ii.** A rules helper that no rule calls cannot be mutation-tested, and an untestable security helper is worse than a later one.
+
+#### Decisions taken (4b-ii)
+
+- **The `custom_questions` read rule stays `if true` for one more release.** Tightening it is 4c's job. Rules are not filters, so `resource.data.status == 'approved' || isReviewer()` refuses the unfiltered query a browser cached from before this change still sends; shipping the client filter first means that when the rule does require it, only a client stale by two releases breaks. The residual cost — a rejected question stays readable to a direct query until 4c — is written up in `data-model.md`.
+- **A reviewer may change `status` and nothing else**, enforced with `affectedKeys().hasOnly(['status'])`. Editing a submission is item 6's job and belongs to the author, not to a moderator.
+- **Deletion stays console-only.** Stopping a question being served and erasing it are different powers.
+- **The queue query carries no `orderBy`**, so it needs no composite index; the page is sorted in the browser. The trade is a page boundary that is not strictly by age, against a whole class of D3 deploy risk.
 
 #### Decisions taken (4b-i)
 

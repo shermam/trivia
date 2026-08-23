@@ -86,3 +86,10 @@ export interface AccountState {
   questionExists: boolean;
   questionCreatedBy: string | null;
 }
+
+/** Grants (or explicitly withholds) the moderation role for one account. */
+export interface ReviewerSeed {
+  uid: string;
+  /** `false` is a distinct fixture from absent — it is the H6 shape. */
+  reviewer: boolean;
+}
