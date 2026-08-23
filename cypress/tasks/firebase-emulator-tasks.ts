@@ -108,10 +108,11 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
       await Promise.all(
         questions.map((q, index) => {
           const { id, ...doc } = q;
+          const seeded = { status: 'approved', ...doc };
           return firestore
             .collection('custom_questions')
             .doc(id ?? `seed-${index}`)
-            .set(doc);
+            .set(seeded);
         }),
       );
       return null;

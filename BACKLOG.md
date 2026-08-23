@@ -148,26 +148,37 @@ A single Pro subscriber can submit questions in a loop; nothing bounds it. Defer
 
 **Size: L. Status: 🟡 in progress — split into three PRs, 4a done.**
 
-| Sub-PR | What                                                                                                                                                                                                   | Status                           |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
-| **4a** | The `user_roles` register: rules, lockdown, rules tests, docs. Grants nothing — nothing reads it yet.                                                                                                  | ✅ this PR                       |
-| **4b** | The pending/approved representation, reviewer-only reads of non-approved questions, reviewer-only approve/reject, and the review queue UI. Everything existing stays approved, so no behaviour change. | ⬜                               |
-| **4c** | Flip new submissions to pending. Policy text in both documents, `LEGAL_LAST_UPDATED`, the contributor-facing "awaiting review" state, the `docs/known-gaps.md` strike.                                 | ⬜ — the only one a user notices |
+| Sub-PR    | What                                                                                                                                                                                                                           | Status                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| **4a**    | The `user_roles` register: rules, lockdown, rules tests, docs. Grants nothing — nothing reads it yet.                                                                                                                          | ✅ this PR                               |
+| **4b-i**  | The `status` field: allowlist widening, the client writing it, the three composite indexes, and the backfill script. Nothing reads the field, so nothing behaves differently.                                                  | ✅ this PR                               |
+| **4b-ii** | Reviewer capability: `isReviewer()`, reviewer-only reads of non-approved questions, reviewer-only approve/reject, the client read filter, and the review queue UI. Everything is still approved, so still no behaviour change. | ⬜ **blocked on the backfill being run** |
+| **4c**    | Flip new submissions to pending. Policy text in both documents, `LEGAL_LAST_UPDATED`, the contributor-facing "awaiting review" state, the `docs/known-gaps.md` strike.                                                         | ⬜ — the only one a user notices         |
 
 **Why split.** Each part is independently deployable and only the last changes behaviour, so the schema migration and the index changes — the two things most likely to go wrong — land with nothing else moving. 4a ships alone specifically so the register can be exercised in production, by hand, before any privilege depends on it.
 
-**Do not land 4c before the review queue UI exists.** The moment it lands, the Firestore console _is_ the queue and every contributor waits on the owner opening it. That is why the queue UI sits in 4b rather than trailing 4c.
+**4b turned into two PRs once the migration order was worked out, and the reason is a hard dependency on a human.** `scripts/backfill-question-status.mjs` has to run _between_ the PR that adds the field and the PR that starts filtering on it — a document with no `status` matches no equality filter, so filtering first makes every question predating the change vanish from the game. That is the whole bank, not a subset. Splitting there puts the manual step at a boundary where neither side is broken while it is pending, instead of inside one PR's deploy window.
+
+**Do not start 4b-ii until the backfill has been run against production** (§5).
+
+**Do not land 4c before the review queue UI exists.** The moment it lands, the Firestore console _is_ the queue and every contributor waits on the owner opening it. That is why the queue UI sits in 4b-ii rather than trailing 4c.
 
 #### Decisions taken (4a)
 
 - **A reviewer role, not an admin role**, and it is a **Firestore document, not a custom claim**. The Firebase console cannot set custom claims at all, and a claim revokes slowly — up to an hour of a token already issued, which A13 accepted for `stripeRole` on the recorded grounds that it gates nothing more valuable than adding a question. Approving other people's questions is more valuable than that, so the acceptance does not transfer. Full reasoning and the emulator probes behind it: `data-model.md` § `user_roles`.
 - **There is no `admin` role yet, and that is the design, not a gap.** `user_roles` has no client write path at all, so there is nothing for one to guard — no bootstrapping problem, no self-escalation path. Item 8 is what creates the need for one.
 - **Reviewer read access to `question_reports` is deliberately _not_ in 4a.** The Privacy Policy states that reports are "readable by nobody through the app". Opening them to reviewers is a real policy change and belongs with the PR that updates the text, not smuggled in alongside a rules register.
-- **`isReviewer()` is deferred to 4b.** A rules helper that no rule calls cannot be mutation-tested, and an untestable security helper is worse than a later one.
+- **`isReviewer()` is deferred to 4b-ii.** A rules helper that no rule calls cannot be mutation-tested, and an untestable security helper is worse than a later one.
 
-#### Still to decide (4b)
+#### Decisions taken (4b-i)
 
-**Status field vs. a separate `custom_questions_pending` collection.** The separate collection avoids the allowlist widening, the backfill and the index changes entirely — but approval would then mean writing into `custom_questions` on behalf of another user, which needs either a Cloud Function on the write path or a rules branch letting a reviewer create a document whose `createdBy` is not their own uid. That weakens `isValidCustomQuestion()`'s cleanest invariant. **Leaning to the status field**, where approval is a one-field update authored by the reviewer and `createdBy` stays immutable, at the cost of a one-off Admin SDK backfill and three new composite indexes: `getCustomQuestions` runs four filter shapes, and while `status` alone rides the automatic single-field index, `status+category`, `status+difficulty` and `status+category+difficulty` all need declaring.
+- **Status field, not a separate `custom_questions_pending` collection** — the fork below, now closed. The separate collection avoids the allowlist widening, the backfill and the index changes, but approval would mean writing into `custom_questions` on behalf of another user, which needs either a Cloud Function on the write path or a rules branch letting a reviewer create a document whose `createdBy` is not their own uid. That weakens `isValidCustomQuestion()`'s cleanest invariant. The status field keeps approval as a one-field update authored by the reviewer, with `createdBy` immutable.
+- **`status` is mandatory on create, and set by `FirebaseService` rather than by the caller.** Reasoning in `data-model.md` § `custom_questions`.
+- **The three composite indexes ship one PR before anything queries them.** The emulator cannot verify index configuration (D3) and index builds are asynchronous, so declaring them early means a mistake surfaces on a deploy where nothing depends on them yet.
+
+#### Was to decide (4b), now closed
+
+**Status field vs. a separate `custom_questions_pending` collection.** The separate collection avoids the allowlist widening, the backfill and the index changes entirely — but approval would then mean writing into `custom_questions` on behalf of another user, which needs either a Cloud Function on the write path or a rules branch letting a reviewer create a document whose `createdBy` is not their own uid. That weakens `isValidCustomQuestion()`'s cleanest invariant. **Decided: the status field**, where approval is a one-field update authored by the reviewer and `createdBy` stays immutable, at the cost of a one-off Admin SDK backfill and three new composite indexes: `getCustomQuestions` runs four filter shapes, and while `status` alone rides the automatic single-field index, `status+category`, `status+difficulty` and `status+category+difficulty` all need declaring.
 
 Today any fully authenticated Pro subscriber publishes straight into the shared question bank. H4 shipped the reporting half — submissions are attributed (`createdBy`) and any player can flag a question mid-game and file the report at game over — so abuse is actionable end-to-end, report → attributed author → console removal. What is missing is the step before publication.
 
@@ -295,6 +306,13 @@ Recorded so they are not silently re-proposed.
 ## 5. Blocked on a human
 
 These are not engineering work; they are in `AUDIT_REMEDIATION.md` §7 with full instructions. Repeated here because they are the things a session cannot do for itself:
+
+- **Run `scripts/backfill-question-status.mjs`** against `intellectura-3b26a`, now that item 4b-i has deployed. It stamps `status: 'approved'` onto every `custom_questions` document written before the field existed. **Item 4b-ii cannot start until this has run** — a document with no `status` matches no equality filter on it, so shipping the read filter first removes every pre-existing question from the game. Dry-run it first; it is idempotent, leaves documents that already carry a status alone, and touches no question content.
+
+  ```bash
+  GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json \
+    node scripts/backfill-question-status.mjs --project intellectura-3b26a --dry-run
+  ```
 
 - **Second run of the leaderboard migration** now that [#103](https://github.com/shermam/trivia/pull/103) has deployed — it sweeps up any score written into the old flat collection between the first run and the client switch going live. The script is idempotent and deletes nothing.
 - **Rotate the service-account key** used for that migration if it was pasted into a Codespaces secret.

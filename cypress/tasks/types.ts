@@ -13,6 +13,15 @@ export interface CustomQuestionSeed {
    * seed an unattributed question to stand in for one predating attribution.
    */
   createdBy?: string;
+  /**
+   * Moderation status. Defaults to `'approved'` in the seeding tasks, which is
+   * what every question in the real bank carries once
+   * `scripts/backfill-question-status.mjs` has run — a fixture without one
+   * would model a state that no longer exists. Overridable so a spec can seed
+   * a pending or rejected question once there is a reviewer to act on it
+   * (`BACKLOG.md` item 4b-ii).
+   */
+  status?: 'approved' | 'pending' | 'rejected';
   createdAt?: number;
 }
 

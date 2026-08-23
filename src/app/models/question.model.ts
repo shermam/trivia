@@ -93,6 +93,17 @@ export interface LeaderboardEntry {
   timeLimit: string;
 }
 
+/**
+ * Where a submitted question sits in moderation (`BACKLOG.md` item 4).
+ *
+ * Only `'approved'` is reachable today — `firestore.rules`' `statusOnSubmission()`
+ * accepts nothing else on create, and nothing can update a question at all.
+ * The other two are declared now because the field exists now, and because a
+ * union that grows later is a union every `switch` over it has to be revisited
+ * for.
+ */
+export type QuestionStatus = 'approved' | 'pending' | 'rejected';
+
 /** The question content itself, independent of who submitted it or when. */
 export interface CustomQuestionContent {
   category: string;
@@ -119,6 +130,15 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
   createdBy?: string;
   /** Epoch ms at submission. Absent on documents predating attribution. */
   createdAt?: number;
+  /**
+   * Moderation status. Optional here for the same reason `createdBy` is:
+   * documents written before the field existed do not have one until
+   * `scripts/backfill-question-status.mjs` has run over them. Unlike
+   * `createdBy`, this one *is* backfillable — every question already in the
+   * bank was published, so `'approved'` is the honest value rather than a
+   * guess — which is why it is a migration and not a permanent asymmetry.
+   */
+  status?: QuestionStatus;
 }
 
 /**
@@ -129,6 +149,21 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
 export interface NewCustomQuestionDoc extends CustomQuestionContent {
   createdBy: string;
   createdAt: number;
+}
+
+/**
+ * What actually reaches Firestore: {@link NewCustomQuestionDoc} plus the
+ * moderation status, which `FirebaseService.addCustomQuestion` supplies rather
+ * than the caller.
+ *
+ * Deliberately not part of `NewCustomQuestionDoc`. A submitter has no
+ * legitimate choice about the status of their own submission, so putting it on
+ * the caller's interface would be offering a decision that `firestore.rules`
+ * exists to refuse — and it would mean every call site changes when 4c flips
+ * the value, instead of one line in the service.
+ */
+export interface CustomQuestionWrite extends NewCustomQuestionDoc {
+  status: QuestionStatus;
 }
 
 export type QuestionReportReason = 'incorrect' | 'inappropriate' | 'spam' | 'other';

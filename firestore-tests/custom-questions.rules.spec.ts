@@ -254,6 +254,83 @@ describe('custom_questions: create — attribution cannot be spoofed', () => {
   });
 });
 
+describe('custom_questions: create — the moderation status (item 4b)', () => {
+  // The accept case for the value of the day. Paired with the rejects below so
+  // that 4c's flip from 'approved' to 'pending' cannot be a silent widening:
+  // whichever value is current, exactly one is accepted and the others are
+  // refused, so the flip has to move both halves in the diff.
+  it("accepts status 'approved', the only value statusOnSubmission() allows today", async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { status: 'approved' }),
+      }),
+    );
+  });
+
+  // This is the row that makes the field a migration rather than an optional
+  // extra. If a create with no status were accepted, a client cached from
+  // before the change would keep writing documents the backfill has already
+  // run past, and the read filter in 4b-ii would stop serving them.
+  it('rejects a document with no status at all', async () => {
+    const { status: _dropped, ...noStatus } = validQuestion('pro-user');
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), { uid: 'pro-user', payload: noStatus }),
+    );
+  });
+
+  // Self-approval in reverse: until 4c, a submitter must not be able to opt
+  // *into* the review queue either. One value, no choices.
+  it("rejects status 'pending' while submissions are still published immediately", async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { status: 'pending' }),
+      }),
+    );
+  });
+
+  it("rejects status 'rejected'", async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { status: 'rejected' }),
+      }),
+    );
+  });
+
+  it('rejects a status outside the union', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { status: 'banana' }),
+      }),
+    );
+  });
+
+  // Guards against a truthiness check: `data.status == 'approved'` is a string
+  // comparison and has to stay one.
+  it('rejects a non-string status', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { status: true }),
+      }),
+    );
+  });
+
+  // The allowlist was widened by exactly one key, not opened. A second new
+  // field is still refused, which is what keeps the A10 door shut.
+  it('rejects an extra field alongside a valid status', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { reviewedBy: 'someone' }),
+      }),
+    );
+  });
+});
+
 describe('custom_questions: update and delete are console-only', () => {
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {

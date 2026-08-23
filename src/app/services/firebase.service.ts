@@ -4,7 +4,9 @@ import {
   CustomQuestionDoc,
   Difficulty,
   LeaderboardEntry,
+  CustomQuestionWrite,
   NewCustomQuestionDoc,
+  QuestionStatus,
   NewQuestionReportDoc,
 } from '../models/question.model';
 import {
@@ -43,6 +45,17 @@ const FIRESTORE_TIMEOUT_MS = 10_000;
 const QUESTION_QUOTA_COLLECTION = 'custom_question_quota';
 const QUESTION_QUOTA_WINDOW_MS = 3_600_000;
 export const MAX_QUESTIONS_PER_HOUR = 20;
+
+/**
+ * The moderation status a submission is written with. Must equal
+ * `statusOnSubmission()` in `firestore.rules`, which accepts nothing else on
+ * create — if the two drift, every submission is refused, and the rules tests
+ * plus `firebase.service.spec.ts` both pin the value so they cannot.
+ *
+ * `BACKLOG.md` item 4c is what turns this into `'pending'`, together with the
+ * published policy text that currently promises the opposite.
+ */
+export const STATUS_ON_SUBMISSION: QuestionStatus = 'approved';
 
 /**
  * How many times to re-read the counter and try again when the batch is
@@ -267,7 +280,11 @@ export class FirebaseService {
             { path: quotaPath, data: { count: used + 1 } },
             {
               path: `${CUSTOM_QUESTIONS_COLLECTION}/${randomDocumentId()}`,
-              data: { ...question },
+              // `status` is set here rather than taken from the caller: a
+              // submitter has no legitimate say in whether their own
+              // submission is approved, and keeping it in one place means 4c's
+              // flip to 'pending' is a one-line change with one test to update.
+              data: { ...question, status: STATUS_ON_SUBMISSION } satisfies CustomQuestionWrite,
               mustNotExist: true,
             },
           ],

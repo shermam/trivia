@@ -84,6 +84,11 @@ export function validQuestion(createdBy: string, overrides: Record<string, unkno
     incorrect_answers: ['CO2', 'O2', 'NaCl'],
     createdBy,
     createdAt: Date.now(),
+    // Mandatory since the review-status migration, and the only value
+    // `statusOnSubmission()` accepts on create. It lives in the shared factory
+    // rather than in each test so that 4c's flip to 'pending' is one edit here
+    // — and so the tests that deliberately vary it have to say so.
+    status: 'approved',
     ...overrides,
   };
 }

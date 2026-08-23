@@ -200,11 +200,31 @@ service cloud.firestore {
       return 20;
     }
 
+    // The moderation status a newly submitted question is created with, and
+    // the only value `create` accepts.
+    //
+    // `'approved'` today, because this PR puts the field in place and changes
+    // nothing else: submissions are still published the instant they are
+    // written. `BACKLOG.md` item 4c is the one that turns this into
+    // `'pending'`, and it has to change `privacy-policy.component.html`,
+    // `terms-of-service.component.html` and `LEGAL_LAST_UPDATED` in the same
+    // PR, because "submissions are published immediately, without review" is
+    // the sentence that stops being true (`CLAUDE.md` §4.0).
+    //
+    // Named rather than inlined so that flip is one line here and one line in
+    // `firebase.service.ts`, and so the rules tests can pin *both* — the
+    // accept case for the value of the day and the reject case for the other,
+    // which is what makes the flip a visible diff rather than a silent
+    // widening.
+    function statusOnSubmission() {
+      return 'approved';
+    }
+
     function isValidCustomQuestion() {
       let data = request.resource.data;
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
-                 'incorrect_answers', 'createdBy', 'createdAt']
+                 'incorrect_answers', 'createdBy', 'createdAt', 'status']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
             && data.type in ['multiple', 'boolean']
@@ -234,7 +254,18 @@ service cloud.firestore {
             // contributions — neither is retrofittable, because no backfill
             // can invent an author for a document that never recorded one.
             && data.createdBy is string && data.createdBy == request.auth.uid
-            && isNearRequestTime(data.createdAt);
+            && isNearRequestTime(data.createdAt)
+            // Mandatory, not optional-if-present. An optional field would let
+            // a client cached from before this change keep writing documents
+            // with no status at all, which the backfill has already run past —
+            // so the collection would drift back out of the invariant it was
+            // just migrated into, silently, and the read filter in 4b-ii would
+            // stop serving those questions. Requiring it costs exactly one
+            // refused submission per stale client, surfaced by the form's
+            // existing error path and fixed by a reload. Same trade as the
+            // checkout-session schema change and the leaderboard retirement
+            // (`data-model.md` §3).
+            && data.status == statusOnSubmission();
     }
 
     // Moderation roles, granted by hand. Empty today: nothing reads it yet
