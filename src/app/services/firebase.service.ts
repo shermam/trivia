@@ -47,17 +47,26 @@ const QUESTION_QUOTA_WINDOW_MS = 3_600_000;
 export const MAX_QUESTIONS_PER_HOUR = 20;
 
 /**
+ * The only status a player is served. `getCustomQuestions` filters on it, and
+ * since item 4c `firestore.rules` refuses a read of `custom_questions` that
+ * does not — rules are not filters, so an unfiltered query is rejected rather
+ * than quietly trimmed.
+ */
+const STATUS_APPROVED: QuestionStatus = 'approved';
+
+/**
  * The moderation status a submission is written with. Must equal
  * `statusOnSubmission()` in `firestore.rules`, which accepts nothing else on
  * create — if the two drift, every submission is refused, and the rules tests
  * plus `firebase.service.spec.ts` both pin the value so they cannot.
  *
- * `BACKLOG.md` item 4c is what turns this into `'pending'`, together with the
- * published policy text that currently promises the opposite.
+ * `'pending'` as of item 4c: a contribution is stored but not served until a
+ * reviewer approves it. Deliberately no longer written as `STATUS_APPROVED` —
+ * the two had the same value for exactly one release and now mean different
+ * things, and aliasing them would make the next change to either one silently
+ * change the other.
  */
-const STATUS_APPROVED: QuestionStatus = 'approved';
-
-export const STATUS_ON_SUBMISSION: QuestionStatus = STATUS_APPROVED;
+export const STATUS_ON_SUBMISSION: QuestionStatus = 'pending';
 
 /**
  * How many times to re-read the counter and try again when the batch is

@@ -41,6 +41,37 @@ function seedQuestions() {
   ]);
 }
 
+/**
+ * Starts a **Custom** game. Not `cy.startGame`, which uses the Open Trivia
+ * source and never reads `custom_questions` at all — a negative assertion
+ * after that would hold no matter what the status filter did.
+ */
+function startCustomGame(): void {
+  cy.visit('/');
+  cy.wait('@categories');
+  cy.get('#amount').select('5');
+  cy.contains('label', 'Custom').click();
+  cy.contains('button', 'Start Game').click();
+  cy.location('pathname').should('eq', '/play');
+  cy.get('[data-cy="question-text"]').should('be.visible');
+}
+
+/**
+ * Acts on the queue row containing `text`.
+ *
+ * Scoped to the row and addressed by `data-cy` on purpose: `cy.contains(
+ * 'button', 'Approve')` matches the **"Approved" tab**, because contains() is
+ * a substring match and takes the first hit in DOM order. That shipped once
+ * and made a `should('not.exist')` pass for the wrong reason.
+ */
+function decideOn(text: string, decision: 'approve' | 'reject'): void {
+  cy.get('[data-cy="review-question"]')
+    .filter(`:contains("${text}")`)
+    .should('have.length', 1)
+    .find(`[data-cy="${decision}-question"]`)
+    .click();
+}
+
 describe('the review queue', () => {
   beforeEach(() => {
     cy.resetBackend();
@@ -130,6 +161,57 @@ describe('the review queue', () => {
     cy.contains('Is this question waiting for review?').should('not.exist');
   });
 
+  /**
+   * Item 4c end to end, and the only test that covers the whole promise: a
+   * contribution is stored, is *not* served, appears in the queue, and starts
+   * being served the moment it is approved.
+   *
+   * The rules half is covered by the rules suite and the service half by the
+   * unit specs, but neither can see the seam — that the status the client
+   * writes on submit is the same one the queue filters on, and that the game's
+   * query starts matching once a reviewer moves it.
+   */
+  it('takes a real submission through review and into a game', () => {
+    cy.createVerifiedUser({ ...REVIEWER, displayName: 'Rev' }).then(({ uid }) => {
+      cy.seedReviewer({ uid, reviewer: true });
+      cy.setProSubscription({ uid });
+    });
+    cy.visit('/');
+    cy.signInViaUi(REVIEWER.email, REVIEWER.password);
+
+    cy.visit('/add-question');
+    cy.get('#category').type('Astronomy');
+    cy.get('#question').type('Which planet has the Great Red Spot?');
+    cy.get('#correctAnswer').type('Jupiter');
+    cy.get('input[placeholder="Incorrect answer 1"]').type('Mars');
+    cy.get('input[placeholder="Incorrect answer 2"]').type('Venus');
+    cy.get('input[placeholder="Incorrect answer 3"]').type('Saturn');
+    cy.contains('button', 'Add Question').click();
+    cy.contains('submitted for review');
+
+    // Not served while pending — the whole point of the feature. Exactly one
+    // question is approved at this moment, so the game is deterministic and
+    // the assertion below is about which question was served, not about which
+    // of several happened to come up first.
+    startCustomGame();
+    cy.contains('Is this question already live?').should('be.visible');
+    cy.contains('Which planet has the Great Red Spot?').should('not.exist');
+
+    cy.visit('/review');
+    cy.contains('Which planet has the Great Red Spot?').should('be.visible');
+    decideOn('Great Red Spot', 'approve');
+
+    // Reject the one that was already live, so that again exactly one question
+    // is approved. That keeps the next game deterministic *and* proves the
+    // other half in the same breath: rejecting takes a question out of play.
+    cy.get('[data-cy="review-tab"][data-status="approved"]').click();
+    decideOn('already live', 'reject');
+
+    startCustomGame();
+    cy.contains('Which planet has the Great Red Spot?').should('be.visible');
+    cy.contains('Is this question already live?').should('not.exist');
+  });
+
   it('never serves an unapproved question to a player', () => {
     // The client half of review-before-publish. The rule is still open for one
     // release, so this filter is the only thing keeping a pending question out
@@ -138,12 +220,7 @@ describe('the review queue', () => {
     // It has to be a **Custom** game. `cy.startGame` uses the Open Trivia
     // source, which never touches `custom_questions` at all, so the negative
     // assertion below would hold no matter what the filter did.
-    cy.visit('/');
-    cy.wait('@categories');
-    cy.get('#amount').select('5');
-    cy.contains('label', 'Custom').click();
-    cy.contains('button', 'Start Game').click();
-    cy.location('pathname').should('eq', '/play');
+    startCustomGame();
 
     // The positive control, and the reason this test is not vacuous: the
     // approved question really is being served from the bank. Without it a

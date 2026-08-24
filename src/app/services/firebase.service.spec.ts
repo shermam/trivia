@@ -691,18 +691,21 @@ describe('FirebaseService.addCustomQuestion (item 3: the hourly quota)', () => {
     expect(doc.fields['createdAt']).toEqual({ integerValue: '1755000000000' });
   });
 
-  it('stamps the moderation status the rules demand, without being asked to', async () => {
-    // `status` is not on `NewCustomQuestionDoc` — the caller does not supply
-    // it and must not be able to. This asserts the service adds it, and pins
-    // the value against `statusOnSubmission()` in `firestore.rules`: if the
-    // two ever drift, every submission is refused in production, and nothing
-    // else in either suite would say so.
+  it('submits for review rather than publishing, and does not ask the caller', async () => {
+    // Two things at once, and both matter. `status` is not on
+    // `NewCustomQuestionDoc`, so the caller cannot choose it — a submitter
+    // approving their own question is the failure this feature exists to
+    // prevent, and `firestore.rules` refuses it independently.
+    //
+    // And the value is pinned against `statusOnSubmission()` in
+    // `firestore.rules`: if the two ever drift, every submission is refused in
+    // production and nothing else in either suite would say so.
     const { service, writes } = setup([]);
 
     await service.addCustomQuestion(question());
 
     const doc = writes.find((w) => w.path.startsWith('custom_questions/'))!;
-    expect(doc.fields['status']).toEqual({ stringValue: 'approved' });
+    expect(doc.fields['status']).toEqual({ stringValue: 'pending' });
   });
 
   it('increments the counter from whatever the hour already holds', async () => {

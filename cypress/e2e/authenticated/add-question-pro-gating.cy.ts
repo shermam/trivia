@@ -70,6 +70,10 @@ describe('add-question Pro gating', () => {
     cy.get('input[placeholder="Incorrect answer 3"]').type('Saturn');
     cy.contains('button', 'Add Question').click();
 
-    cy.contains('Thanks! Your question was added to the bank.');
+    // Not "added to the bank" any more (item 4c): a submission is stored and
+    // queued for review, and the copy has to say so or the app is promising
+    // something the rules refuse to do.
+    cy.contains('Thanks! Your question has been submitted for review.');
+    cy.contains('once a reviewer has approved it');
   });
 });
