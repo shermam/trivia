@@ -36,13 +36,20 @@ describe('the top bar on a phone', () => {
       .then(($brand) => {
         const rect = $brand[0].getBoundingClientRect();
         const brandCentre = rect.x + rect.width / 2;
-        expect(brandCentre).to.be.closeTo(MOBILE.width / 2, 1);
+        // Against `clientWidth`, not the viewport width passed to
+        // `cy.viewport`. A classic scrollbar takes layout space, so the two
+        // differ by its width — this first read 187.5 against an expected 195,
+        // which is exactly half a 15px scrollbar and not an off-centre brand.
+        // `clientWidth` is the layout viewport, which is what the grid centres
+        // within and therefore what "centred" has to mean here.
+        const layoutCentre = Cypress.$('html')[0].clientWidth / 2;
+        expect(brandCentre).to.be.closeTo(layoutCentre, 1);
       });
   });
 
   it('does not overflow horizontally', () => {
     cy.document().then((doc) => {
-      expect(doc.documentElement.scrollWidth).to.be.at.most(MOBILE.width);
+      expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth);
     });
   });
 
@@ -84,8 +91,13 @@ describe('the top bar on a phone', () => {
   });
 
   it('closes when the backdrop is tapped', () => {
+    // A plain centre click, with no `force`. That is the point of the overlay
+    // being a flex row: an `inset-0` backdrop has its own centre underneath the
+    // panel, and Cypress refuses to click an element whose centre is covered.
+    // Forcing it would have hidden a genuine overlap on the one element whose
+    // entire job is to be tappable.
     cy.get('[data-cy="nav-menu-trigger"]').click();
-    cy.get('[data-cy="nav-menu-backdrop"]').click('right');
+    cy.get('[data-cy="nav-menu-backdrop"]').click();
 
     cy.get('[data-cy="nav-menu-panel"]').should('not.exist');
   });

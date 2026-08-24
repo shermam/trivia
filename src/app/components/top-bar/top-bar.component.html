@@ -172,16 +172,19 @@
   in on open and back to the hamburger on close (`CLAUDE.md` §4.5).
 -->
 @if (isNavOpen()) {
-  <div class="fixed inset-0 z-50 sm:hidden">
-    <!-- Decorative: the same dismissal is available from the close button and
-         from Escape, so a screen reader gains nothing from a second control. -->
-    <div
-      class="absolute inset-0 bg-slate-900/40"
-      aria-hidden="true"
-      data-cy="nav-menu-backdrop"
-      (click)="closeNav()"
-    ></div>
-
+  <!--
+    A flex row — panel, then backdrop filling the rest — rather than a
+    full-bleed backdrop with the panel laid over it.
+    
+    The panel is opaque, so the dim behind it was never visible and the two
+    render identically. What changes is that the backdrop now occupies exactly
+    the region a tap can reach: an `inset-0` backdrop has its own centre buried
+    under the panel, which Cypress reads as "covered by another element" and
+    refuses to click. Reaching for `{force: true}` there would have suppressed
+    the check rather than the overlap, on the one interaction whose whole point
+    is being clickable.
+  -->
+  <div class="fixed inset-0 z-50 flex sm:hidden">
     <div
       #navPanel
       [id]="navPanelId"
@@ -189,7 +192,7 @@
       aria-label="Site menu"
       tabindex="-1"
       data-cy="nav-menu-panel"
-      class="absolute left-0 top-0 flex h-full w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none"
+      class="flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none"
     >
       <div class="mb-2 flex items-center justify-between">
         <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Menu</span>
@@ -240,5 +243,14 @@
         {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
       </button>
     </div>
+
+    <!-- Decorative: the same dismissal is on the close button and on Escape,
+         so a screen reader gains nothing from a third control. -->
+    <div
+      class="flex-1 bg-slate-900/40"
+      aria-hidden="true"
+      data-cy="nav-menu-backdrop"
+      (click)="closeNav()"
+    ></div>
   </div>
 }
