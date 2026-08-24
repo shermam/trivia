@@ -84,6 +84,8 @@ Two consequences worth being explicit about:
 
 **Rejection was already the first in-app moderation action this app had** (4b-ii): before it, acting on an abuse report meant deleting the document by hand in the console. Approval is the other half — the report → attributed author → removal loop and the contribute → review → publish loop now both close inside the product.
 
+**Changing this value has a deploy window, and it is unavoidable.** `create` demands exact agreement between the client and the rule, so for as long as a browser holds a bundle from before the change it sends the old status and is refused — one submission, the form's existing error, fixed by a reload. The read path avoided this by shipping the client filter a release early (see **Read** above); the write path cannot use the same trick, because the transitional rule would have to accept **both** `'approved'` and `'pending'`, and accepting `'approved'` is precisely the self-approval this feature exists to prevent. A brief refusal for stale clients is the cheaper of the two, and it is the same trade `custom_questions` already made when `status` became mandatory at all.
+
 **A question that is not approved is not deleted.** It stays stored, keeps its author, and simply is not served. That is what the published policy says, and it is what makes a rejection reversible: a reviewer can move it back.
 
 The field was added in its own PR (4b-i) because putting it in place is a migration and flipping it is not: widening an exact-key `hasOnly()` allowlist and backfilling every existing document is the risky half, and it was worth landing with nothing else moving.
