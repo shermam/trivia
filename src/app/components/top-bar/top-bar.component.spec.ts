@@ -43,8 +43,16 @@ function stubMatchMedia() {
   };
 }
 
-function setup(options: { isReviewer?: boolean } = {}) {
+interface AuthState {
+  user?: { displayName?: string; email?: string } | null;
+  authReady?: boolean;
+  isAnonymous?: boolean;
+  isFullyAuthenticated?: boolean;
+}
+
+function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
   const media = stubMatchMedia();
+  const auth = options.auth ?? {};
   TestBed.configureTestingModule({
     imports: [TopBarComponent],
     providers: [
@@ -60,10 +68,10 @@ function setup(options: { isReviewer?: boolean } = {}) {
       {
         provide: AuthService,
         useValue: {
-          user: signal(null),
-          authReady: signal(true),
-          isAnonymous: signal(true),
-          isFullyAuthenticated: signal(false),
+          user: signal(auth.user ?? null),
+          authReady: signal(auth.authReady ?? true),
+          isAnonymous: signal(auth.isAnonymous ?? true),
+          isFullyAuthenticated: signal(auth.isFullyAuthenticated ?? false),
         },
       },
       { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
@@ -85,6 +93,9 @@ function setup(options: { isReviewer?: boolean } = {}) {
     trigger: () => el('[data-cy="nav-menu-trigger"]') as HTMLButtonElement,
     panel: () => el('[data-cy="nav-menu-panel"]'),
     backdrop: () => el('[data-cy="nav-menu-backdrop"]'),
+    chip: () => el('[data-cy="auth-menu-trigger"]'),
+    chipText: () =>
+      (el('[data-cy="auth-menu-trigger"]').textContent ?? '').replace(/\s+/g, ' ').trim(),
     open: () => {
       (el('[data-cy="nav-menu-trigger"]') as HTMLButtonElement).click();
       fixture.detectChanges();
@@ -222,5 +233,80 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
     h.open();
 
     expect(h.fixture.nativeElement.querySelector('[data-cy="nav-menu-review-link"]')).toBeNull();
+  });
+});
+
+describe('TopBarComponent: the account chip while auth settles', () => {
+  /**
+   * **The regression test for a wrong-state flash.**
+   *
+   * `onAuthStateChanged` fires once with `null` and flips `authReady` before
+   * `signInAnonymously()` has delivered anybody, so this combination — ready,
+   * but no user — is a state the app really passes through on every cold load
+   * and again on every sign-out. The template used to branch on
+   * `isAnonymous()`, which is `false` for a null user, so it fell through to
+   * the signed-in arm and rendered the `initials()` fallback: a "?" avatar
+   * that looks like somebody is logged in. Measured in a browser as a real
+   * third box in the chip's load sequence.
+   */
+  it('shows the sign-in prompt when auth is ready but nobody is signed in yet', () => {
+    const h = setup({ auth: { authReady: true, user: null, isAnonymous: false } });
+
+    expect(h.chipText()).toContain('Sign in');
+    expect(h.chipText()).not.toContain('?');
+  });
+
+  it('shows the sign-in prompt for an anonymous session', () => {
+    const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
+
+    expect(h.chipText()).toContain('Sign in');
+  });
+
+  it('shows the account once somebody is really signed in', () => {
+    const h = setup({
+      auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
+    });
+
+    expect(h.chipText()).toContain('Ada Lovelace');
+    expect(h.chipText()).not.toContain('Sign in');
+  });
+
+  /**
+   * The placeholder has to be shaped like the chip it becomes, not the word
+   * "Loading…" on its own — that rendered 34px tall against 42px for every
+   * resolved state, so the chip changed height the instant auth settled.
+   * jsdom cannot measure that, so what is pinned here is the structure the
+   * height depends on: an avatar-sized circle and a space-occupying label.
+   */
+  it('renders a chip-shaped skeleton while auth is settling', () => {
+    const h = setup({ auth: { authReady: false } });
+
+    expect(h.chip().getAttribute('aria-busy')).toBe('true');
+    expect(h.chip().querySelector('.h-7.w-7')).not.toBeNull();
+    // `invisible`, not `hidden` — it is reserving width, so it must occupy space.
+    expect(h.chip().querySelector('.invisible')).not.toBeNull();
+    expect(h.chip().querySelector('.sr-only')?.textContent).toContain('Loading');
+  });
+
+  it('drops aria-busy once auth is ready', () => {
+    const h = setup({ auth: { authReady: true } });
+
+    expect(h.chip().getAttribute('aria-busy')).toBeNull();
+  });
+
+  /**
+   * `whitespace-nowrap` is what keeps "Sign in" on one line inside the
+   * `minmax(0,1fr)` grid track on a phone. Without it the chip renders 54px
+   * tall in a 64px bar — which shipped, because the mobile-nav spec measured
+   * width, overlap and centring but never height. jsdom does no layout, so the
+   * height itself is asserted in `mobile-nav.cy.ts`; this pins the mechanism.
+   */
+  it('forbids the sign-in label from wrapping', () => {
+    const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
+
+    const label = [...h.chip().querySelectorAll('span')].find(
+      (span) => span.textContent?.trim() === 'Sign in',
+    );
+    expect(label?.className).toContain('whitespace-nowrap');
   });
 });
