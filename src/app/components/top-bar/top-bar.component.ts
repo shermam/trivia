@@ -3,6 +3,8 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  Injector,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -112,11 +114,9 @@ export class TopBarComponent {
    * The same window opens again on sign-out, between the old user going and
    * the replacement anonymous session arriving.
    */
-  /**
-   * The chip's width last time it was measured, so a change can be animated
-   * from it. `null` until the first measurement.
-   */
-  private lastChipWidth: number | null = null;
+  private readonly injector = inject(Injector);
+  /** False until the chip has rendered real content at least once. */
+  private hasRenderedChip = false;
   private chipAnimationFrame: number | null = null;
   private chipTransitionCleanup: (() => void) | null = null;
 
@@ -258,21 +258,35 @@ export class TopBarComponent {
    * Animates the chip's width when its contents change size.
    *
    * **Why this cannot be done in CSS.** A transition animates a change to a
-   * *property*; this width change comes from the content changing while the
-   * property stays `width: auto`, so there is no property transition to hook.
-   * `interpolate-size: allow-keywords` does not help either — it lets `auto`
-   * be interpolated against a length, and here both the before and after
-   * computed values are `auto`. The only way is to measure both and drive the
-   * width explicitly, which is what this does: read the new width after
-   * render, put the old one back, and let a transition carry it to the new.
+   * *property*; this change comes from the content changing while the property
+   * stays `width: auto`, so there is no property transition to hook.
+   * `interpolate-size: allow-keywords` does not help either — it lets `auto` be
+   * interpolated against a length, and here both the before and after computed
+   * values are `auto`. The `max-width` trick only covers growth: clamping
+   * `width: auto` with an animated `max-width` can widen a box, but the chip
+   * *shrinks* below `sm` (the signed-in state is narrower than the skeleton),
+   * and shrinking needs a `max-width` equal to the final content width, which
+   * is the number nobody has. So the widths have to be measured.
+   *
+   * **The two halves are measured in different hooks, and that is the whole
+   * trick.** Angular runs a component's `effect()` with the *new* signal values
+   * but *before* refreshing the view, so the DOM inside the effect is still the
+   * previous render — which makes it exactly the right place to read the
+   * "from" of a FLIP. `afterNextRender` then runs once the view has been
+   * updated, which is the only place "to" is readable.
+   *
+   * Getting this wrong is not obvious from the outside: an earlier version
+   * measured both halves inside the effect and looked plausible in unit tests,
+   * because a stubbed `getBoundingClientRect` cannot tell the two renders
+   * apart. In a browser it animated the skeleton *appearing* (20px → 123px,
+   * from a first pass where the chip had no content yet) and left the
+   * transition that matters — the skeleton giving way to the account, 123px →
+   * 238px — completely unanimated.
    *
    * Writing `element.style.width` goes through CSSOM, which the CSP does not
-   * govern — unlike a `style="…"` attribute in a template, whose declarations
-   * would be silently dropped (`CLAUDE.md` §4.4).
-   *
-   * The app is zoneless (no zone.js, no polyfills entry), so the callbacks
-   * below trigger no change detection and need none: they touch the DOM
-   * directly and read no signals.
+   * govern, unlike a `style="…"` attribute in a template (`CLAUDE.md` §4.4).
+   * The app is zoneless, so none of these callbacks trigger change detection
+   * and none need to: they touch the DOM and read no signals.
    */
   private readonly chipWidthEffect = effect(() => {
     // Everything that changes the chip's contents, read so the effect re-runs.
@@ -286,40 +300,62 @@ export class TopBarComponent {
       return;
     }
 
-    const from = this.lastChipWidth;
-    // Clear any width left over from an animation still in flight, so the
-    // measurement below is of the content and not of where it had got to.
-    this.cancelChipWidthAnimation(element);
-    const to = element.getBoundingClientRect().width;
-    this.lastChipWidth = to;
-
-    // Nothing to animate on first paint, when the width is unchanged, or when
-    // the reader has asked for less motion.
-    if (from === null || Math.abs(from - to) < 1 || prefersReducedMotion()) {
+    // The very first pass renders before any branch has content — the chip
+    // measures as bare padding. Animating from that would be a growth
+    // animation on first paint that nothing asked for.
+    if (!this.hasRenderedChip) {
+      this.hasRenderedChip = true;
       return;
     }
 
-    element.style.width = `${from}px`;
-    element.style.transitionProperty = 'width';
-    element.style.transitionDuration = `${CHIP_WIDTH_TRANSITION_MS}ms`;
-    element.style.transitionTimingFunction = 'ease-out';
+    // Deliberately *not* cleared first: if an animation is already in flight,
+    // the width it has reached is where this one should start from. An earlier
+    // version cancelled and re-measured here, which meant a second content
+    // change arriving mid-animation — a sign-in immediately followed by the
+    // Pro claim landing, say — clipped the width back to its natural value,
+    // measured no change, and killed the animation outright.
+    const from = element.getBoundingClientRect().width;
 
-    this.chipAnimationFrame = requestAnimationFrame(() => {
-      this.chipAnimationFrame = null;
-      element.style.width = `${to}px`;
-    });
+    if (prefersReducedMotion()) {
+      this.cancelChipWidthAnimation(element);
+      return;
+    }
 
-    // `transitionend` alone is not enough: it never fires if the transition is
-    // interrupted or never starts, which would strand an explicit width on the
-    // chip and freeze it at that size for the rest of the session. The timer is
-    // the backstop, and whichever lands first tears the other down.
-    const onEnd = () => this.cancelChipWidthAnimation(element);
-    element.addEventListener('transitionend', onEnd);
-    const timer = setTimeout(onEnd, CHIP_WIDTH_TRANSITION_MS + 100);
-    this.chipTransitionCleanup = () => {
-      element.removeEventListener('transitionend', onEnd);
-      clearTimeout(timer);
-    };
+    afterNextRender(
+      () => {
+        // Drop any in-flight animation *now*, so the measurement below is of
+        // the content's natural width rather than wherever the transition had
+        // got to.
+        this.cancelChipWidthAnimation(element);
+        const to = element.getBoundingClientRect().width;
+        if (Math.abs(from - to) < 1) {
+          return;
+        }
+
+        element.style.width = `${from}px`;
+        element.style.transitionProperty = 'width';
+        element.style.transitionDuration = `${CHIP_WIDTH_TRANSITION_MS}ms`;
+        element.style.transitionTimingFunction = 'ease-out';
+
+        this.chipAnimationFrame = requestAnimationFrame(() => {
+          this.chipAnimationFrame = null;
+          element.style.width = `${to}px`;
+        });
+
+        // `transitionend` alone is not enough: it never fires if the transition
+        // is interrupted or never starts, which would strand an explicit width
+        // and freeze the chip at that size for the rest of the session. The
+        // timer is the backstop, and whichever lands first tears the other down.
+        const onEnd = () => this.cancelChipWidthAnimation(element);
+        element.addEventListener('transitionend', onEnd);
+        const timer = setTimeout(onEnd, CHIP_WIDTH_TRANSITION_MS + 100);
+        this.chipTransitionCleanup = () => {
+          element.removeEventListener('transitionend', onEnd);
+          clearTimeout(timer);
+        };
+      },
+      { injector: this.injector },
+    );
   });
 
   /** Returns the chip to `width: auto` and drops whatever was watching it. */

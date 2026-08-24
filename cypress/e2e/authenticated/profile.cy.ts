@@ -25,6 +25,43 @@ describe('authenticated profile management', () => {
   });
 
   /**
+   * The width animation, at the only layer that can see it.
+   *
+   * jsdom does no layout, so the unit suite can pin the preference gate, the
+   * no-op skip and the teardown but not the thing that actually broke: the
+   * animation measures "from" in an `effect()` (DOM still the previous render)
+   * and "to" in `afterNextRender` (DOM updated), and a stubbed
+   * `getBoundingClientRect` cannot tell those two renders apart. The first
+   * version measured both halves in the effect, passed every unit test, and in
+   * a browser animated the skeleton *appearing* while leaving the real
+   * transition unanimated.
+   *
+   * Signing in changes the chip's content for real, which is the same
+   * transition, so the inline width the animation sets has to appear. Cypress
+   * retries this assertion, and the transition lasts 220ms — comfortably
+   * longer than a retry interval — so it is not a race.
+   */
+  it('animates the account chip when signing in changes its width', () => {
+    cy.openAuthMenu();
+    cy.get('#displayName').clear().type('Bartholomew Featherstonehaugh');
+    cy.contains('button', 'Save').click();
+    cy.contains('Saved!');
+
+    // An inline width is only ever present while a transition is in flight —
+    // `cancelChipWidthAnimation` clears it on `transitionend`.
+    cy.get('[data-cy="auth-menu-trigger"]').should(($chip) => {
+      expect($chip[0].style.width, 'inline width during the transition').to.match(/^\d/);
+    });
+
+    // ...and it must not be stranded there, which is what the timer backstop
+    // exists for: `transitionend` never fires for a transition that is
+    // interrupted or never starts.
+    cy.get('[data-cy="auth-menu-trigger"]', { timeout: 10000 }).should(($chip) => {
+      expect($chip[0].style.width, 'inline width after the transition').to.equal('');
+    });
+  });
+
+  /**
    * The account chip is the only part of the top bar whose width the user
    * controls, and on a phone it was wide enough to run into the centred brand.
    * Below `sm` it now shows the avatar alone.

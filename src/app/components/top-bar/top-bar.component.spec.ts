@@ -329,70 +329,83 @@ describe('TopBarComponent: motion', () => {
    * Every animation in this app is gated on the reader's preference — the
    * convention lives in `src/app/motion.ts`, and `npm run motion:verify`
    * enforces it across templates. That script cannot see motion driven from
-   * TypeScript, so the chip's width animation is pinned here instead.
+   * TypeScript, so the chip's width animation is pinned here.
    *
-   * jsdom reports a zero box for everything, so the width is stubbed at the
-   * prototype — it has to be in place before the component's *first*
-   * measurement, which happens during `setup()`.
+   * **What these tests deliberately do NOT cover, and why.** The animation's
+   * whole subtlety is that it measures across a render boundary: "from" in an
+   * `effect()`, where Angular has updated the signals but not the DOM, and
+   * "to" in `afterNextRender`, where the DOM is new. jsdom does no layout, so
+   * every width here is a fiction, and no fiction models that boundary
+   * faithfully — a call-counting stub hands out two different numbers whether
+   * or not the reads straddle a render, so it passes against the broken
+   * version too, and a content-derived stub cannot represent an in-flight
+   * inline width. Both were tried.
+   *
+   * That correctness is verified where it is real: frame-by-frame in a browser
+   * (grow at 1024px, shrink at 390px, skipped under reduced motion), and
+   * guarded in `cypress/e2e/authenticated/profile.cy.ts`, which watches for the
+   * inline width appearing during a real sign-in. What is pinned below is
+   * everything else: the preference gate, the no-op skip, the first-paint
+   * guard and the teardown.
    */
-  function stubWidth(initial: number) {
-    let width = initial;
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
-      () => ({ width }) as DOMRect,
-    );
-    return (next: number) => {
-      width = next;
-    };
+  function stubWidths(...widths: number[]) {
+    let call = 0;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => {
+      const width = widths[Math.min(call, widths.length - 1)];
+      call++;
+      return { width } as DOMRect;
+    });
   }
 
-  it('animates the chip to its new width when the content changes size', () => {
-    const setWidth = stubWidth(120);
+  /** Drives the skeleton-to-account change and lets the render hooks settle. */
+  async function resolveAuth(h: ReturnType<typeof setup>) {
+    h.authStub.user.set({ displayName: 'Ada Lovelace' });
+    h.authStub.authReady.set(true);
+    h.authStub.isAnonymous.set(false);
+    h.fixture.detectChanges();
+    await h.fixture.whenStable();
+  }
+
+  it('starts a width transition when the chip changes size', async () => {
+    stubWidths(120, 40);
     const h = setup({ auth: { authReady: false } });
 
-    setWidth(40);
-    h.authStub.authReady.set(true);
-    h.fixture.detectChanges();
+    await resolveAuth(h);
 
-    // Pinned back to where it was, ready to transition to where it is going.
-    expect(h.chip().style.width).toBe('120px');
     expect(h.chip().style.transitionProperty).toBe('width');
+    expect(h.chip().style.width).not.toBe('');
   });
 
-  it('does not animate when the reader has asked for reduced motion', () => {
-    const setWidth = stubWidth(120);
+  it('does not animate when the reader has asked for reduced motion', async () => {
+    stubWidths(120, 40);
     const h = setup({ auth: { authReady: false }, reducedMotion: true });
 
-    setWidth(40);
-    h.authStub.authReady.set(true);
-    h.fixture.detectChanges();
+    await resolveAuth(h);
 
     expect(h.chip().style.width).toBe('');
     expect(h.chip().style.transitionProperty).toBe('');
   });
 
-  it('does not animate when the width has not actually changed', () => {
+  it('does not animate when the width has not actually changed', async () => {
     // The anonymous case, where the skeleton is deliberately the same size as
     // what replaces it. Animating a zero-width change would be 220ms of
     // nothing happening, slowly.
-    stubWidth(95);
+    stubWidths(95);
     const h = setup({ auth: { authReady: false } });
 
-    h.authStub.authReady.set(true);
-    h.fixture.detectChanges();
+    await resolveAuth(h);
 
     expect(h.chip().style.width).toBe('');
   });
 
-  it('leaves no inline width behind when the component is destroyed mid-animation', () => {
+  it('leaves no inline width behind when the component is destroyed mid-animation', async () => {
     // `CLAUDE.md` §4.4 — a frame request, a listener and a timer are all live
     // during the transition, and the teardown has to drop all three.
-    const setWidth = stubWidth(120);
+    stubWidths(120, 40);
     const h = setup({ auth: { authReady: false } });
+    await resolveAuth(h);
     const chip = h.chip();
-    setWidth(40);
-    h.authStub.authReady.set(true);
-    h.fixture.detectChanges();
-    expect(chip.style.width).toBe('120px');
+    expect(chip.style.width).not.toBe('');
 
     h.fixture.destroy();
 
