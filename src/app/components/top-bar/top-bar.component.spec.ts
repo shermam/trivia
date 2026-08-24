@@ -19,12 +19,19 @@ import { TopBarComponent } from './top-bar.component';
  * focus moving in and coming back, and the breakpoint teardown.
  */
 
-/** A controllable `matchMedia`, so a spec can drive a breakpoint crossing. */
-function stubMatchMedia() {
+/**
+ * A controllable `matchMedia`, so a spec can drive a breakpoint crossing and
+ * choose whether the reader has asked for reduced motion.
+ *
+ * Both queries go through the same stub because `TopBarComponent` asks for the
+ * breakpoint and `prefersReducedMotion()` asks for the preference, and jsdom
+ * implements neither.
+ */
+function stubMatchMedia(reducedMotion = false) {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
   window.matchMedia = (query: string) =>
     ({
-      matches: false,
+      matches: query.includes('prefers-reduced-motion') ? reducedMotion : false,
       media: query,
       onchange: null,
       addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => {
@@ -50,9 +57,15 @@ interface AuthState {
   isFullyAuthenticated?: boolean;
 }
 
-function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
-  const media = stubMatchMedia();
+function setup(options: { isReviewer?: boolean; auth?: AuthState; reducedMotion?: boolean } = {}) {
+  const media = stubMatchMedia(options.reducedMotion ?? false);
   const auth = options.auth ?? {};
+  const authStub = {
+    user: signal<AuthState['user']>(auth.user ?? null),
+    authReady: signal(auth.authReady ?? true),
+    isAnonymous: signal(auth.isAnonymous ?? true),
+    isFullyAuthenticated: signal(auth.isFullyAuthenticated ?? false),
+  };
   TestBed.configureTestingModule({
     imports: [TopBarComponent],
     providers: [
@@ -67,12 +80,7 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
       ]),
       {
         provide: AuthService,
-        useValue: {
-          user: signal(auth.user ?? null),
-          authReady: signal(auth.authReady ?? true),
-          isAnonymous: signal(auth.isAnonymous ?? true),
-          isFullyAuthenticated: signal(auth.isFullyAuthenticated ?? false),
-        },
+        useValue: authStub,
       },
       { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
       { provide: ThemeService, useValue: { currentTheme: signal('light'), toggle: vi.fn() } },
@@ -93,6 +101,7 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
     trigger: () => el('[data-cy="nav-menu-trigger"]') as HTMLButtonElement,
     panel: () => el('[data-cy="nav-menu-panel"]'),
     backdrop: () => el('[data-cy="nav-menu-backdrop"]'),
+    authStub,
     chip: () => el('[data-cy="auth-menu-trigger"]'),
     chipText: () =>
       (el('[data-cy="auth-menu-trigger"]').textContent ?? '').replace(/\s+/g, ' ').trim(),
@@ -283,8 +292,12 @@ describe('TopBarComponent: the account chip while auth settles', () => {
 
     expect(h.chip().getAttribute('aria-busy')).toBe('true');
     expect(h.chip().querySelector('.h-7.w-7')).not.toBeNull();
-    // `invisible`, not `hidden` — it is reserving width, so it must occupy space.
-    expect(h.chip().querySelector('.invisible')).not.toBeNull();
+    // A skeleton *bar*, not an empty gap: `text-transparent` hides the glyphs
+    // while the box keeps their metrics, so it both looks like a placeholder
+    // and reserves the exact width the resolved label will need.
+    const bar = h.chip().querySelector('.text-transparent');
+    expect(bar).not.toBeNull();
+    expect(bar?.textContent?.trim()).toBe('Sign in');
     expect(h.chip().querySelector('.sr-only')?.textContent).toContain('Loading');
   });
 
@@ -308,5 +321,82 @@ describe('TopBarComponent: the account chip while auth settles', () => {
       (span) => span.textContent?.trim() === 'Sign in',
     );
     expect(label?.className).toContain('whitespace-nowrap');
+  });
+});
+
+describe('TopBarComponent: motion', () => {
+  /**
+   * Every animation in this app is gated on the reader's preference — the
+   * convention lives in `src/app/motion.ts`, and `npm run motion:verify`
+   * enforces it across templates. That script cannot see motion driven from
+   * TypeScript, so the chip's width animation is pinned here instead.
+   *
+   * jsdom reports a zero box for everything, so the width is stubbed at the
+   * prototype — it has to be in place before the component's *first*
+   * measurement, which happens during `setup()`.
+   */
+  function stubWidth(initial: number) {
+    let width = initial;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+      () => ({ width }) as DOMRect,
+    );
+    return (next: number) => {
+      width = next;
+    };
+  }
+
+  it('animates the chip to its new width when the content changes size', () => {
+    const setWidth = stubWidth(120);
+    const h = setup({ auth: { authReady: false } });
+
+    setWidth(40);
+    h.authStub.authReady.set(true);
+    h.fixture.detectChanges();
+
+    // Pinned back to where it was, ready to transition to where it is going.
+    expect(h.chip().style.width).toBe('120px');
+    expect(h.chip().style.transitionProperty).toBe('width');
+  });
+
+  it('does not animate when the reader has asked for reduced motion', () => {
+    const setWidth = stubWidth(120);
+    const h = setup({ auth: { authReady: false }, reducedMotion: true });
+
+    setWidth(40);
+    h.authStub.authReady.set(true);
+    h.fixture.detectChanges();
+
+    expect(h.chip().style.width).toBe('');
+    expect(h.chip().style.transitionProperty).toBe('');
+  });
+
+  it('does not animate when the width has not actually changed', () => {
+    // The anonymous case, where the skeleton is deliberately the same size as
+    // what replaces it. Animating a zero-width change would be 220ms of
+    // nothing happening, slowly.
+    stubWidth(95);
+    const h = setup({ auth: { authReady: false } });
+
+    h.authStub.authReady.set(true);
+    h.fixture.detectChanges();
+
+    expect(h.chip().style.width).toBe('');
+  });
+
+  it('leaves no inline width behind when the component is destroyed mid-animation', () => {
+    // `CLAUDE.md` §4.4 — a frame request, a listener and a timer are all live
+    // during the transition, and the teardown has to drop all three.
+    const setWidth = stubWidth(120);
+    const h = setup({ auth: { authReady: false } });
+    const chip = h.chip();
+    setWidth(40);
+    h.authStub.authReady.set(true);
+    h.fixture.detectChanges();
+    expect(chip.style.width).toBe('120px');
+
+    h.fixture.destroy();
+
+    expect(chip.style.width).toBe('');
+    expect(chip.style.transitionProperty).toBe('');
   });
 });

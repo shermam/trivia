@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { prefersReducedMotion } from '../../motion';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { ReviewerService } from '../../services/reviewer.service';
@@ -26,6 +27,13 @@ import { AuthMenuComponent } from './auth-menu.component';
  * touching any routed screen. Owns only the trigger button + dropdown shell;
  * AuthMenuComponent owns everything auth-state-dependent.
  */
+/**
+ * How long the account chip takes to settle into its new width. Short enough
+ * that it reads as the chip resolving rather than as an animation in its own
+ * right; long enough to be a movement rather than a jump.
+ */
+const CHIP_WIDTH_TRANSITION_MS = 220;
+
 @Component({
   selector: 'app-top-bar',
   standalone: true,
@@ -65,6 +73,7 @@ export class TopBarComponent {
 
   private readonly menuPanel = viewChild<ElementRef<HTMLElement>>('menuPanel');
   private readonly menuTrigger = viewChild<ElementRef<HTMLElement>>('menuTrigger');
+  private readonly accountChip = viewChild<ElementRef<HTMLElement>>('accountChip');
   private readonly navPanel = viewChild<ElementRef<HTMLElement>>('navPanel');
   private readonly navTrigger = viewChild<ElementRef<HTMLElement>>('navTrigger');
   private wasNavOpen = false;
@@ -103,6 +112,14 @@ export class TopBarComponent {
    * The same window opens again on sign-out, between the old user going and
    * the replacement anonymous session arriving.
    */
+  /**
+   * The chip's width last time it was measured, so a change can be animated
+   * from it. `null` until the first measurement.
+   */
+  private lastChipWidth: number | null = null;
+  private chipAnimationFrame: number | null = null;
+  private chipTransitionCleanup: (() => void) | null = null;
+
   protected readonly showsRealAccount = computed(
     () => this.authService.user() !== null && !this.authService.isAnonymous(),
   );
@@ -167,6 +184,13 @@ export class TopBarComponent {
       document.removeEventListener('click', onDocumentClick, true);
       document.removeEventListener('keydown', onDocumentKeydown);
       wideEnoughForFullNav.removeEventListener('change', onBreakpointChange);
+      // The chip's width animation owns a frame request, a listener and a
+      // timer; a component torn down mid-animation must not leave any of them
+      // (`CLAUDE.md` §4.4).
+      const chip = this.accountChip()?.nativeElement;
+      if (chip) {
+        this.cancelChipWidthAnimation(chip);
+      }
     });
 
     // Focus follows the menu: into the panel when it opens, back where it came
@@ -229,6 +253,88 @@ export class TopBarComponent {
 
     this.wasNavOpen = isOpen;
   });
+
+  /**
+   * Animates the chip's width when its contents change size.
+   *
+   * **Why this cannot be done in CSS.** A transition animates a change to a
+   * *property*; this width change comes from the content changing while the
+   * property stays `width: auto`, so there is no property transition to hook.
+   * `interpolate-size: allow-keywords` does not help either — it lets `auto`
+   * be interpolated against a length, and here both the before and after
+   * computed values are `auto`. The only way is to measure both and drive the
+   * width explicitly, which is what this does: read the new width after
+   * render, put the old one back, and let a transition carry it to the new.
+   *
+   * Writing `element.style.width` goes through CSSOM, which the CSP does not
+   * govern — unlike a `style="…"` attribute in a template, whose declarations
+   * would be silently dropped (`CLAUDE.md` §4.4).
+   *
+   * The app is zoneless (no zone.js, no polyfills entry), so the callbacks
+   * below trigger no change detection and need none: they touch the DOM
+   * directly and read no signals.
+   */
+  private readonly chipWidthEffect = effect(() => {
+    // Everything that changes the chip's contents, read so the effect re-runs.
+    this.authService.authReady();
+    this.authService.user();
+    this.subscriptionService.isProUser();
+    this.showsRealAccount();
+
+    const element = this.accountChip()?.nativeElement;
+    if (!element) {
+      return;
+    }
+
+    const from = this.lastChipWidth;
+    // Clear any width left over from an animation still in flight, so the
+    // measurement below is of the content and not of where it had got to.
+    this.cancelChipWidthAnimation(element);
+    const to = element.getBoundingClientRect().width;
+    this.lastChipWidth = to;
+
+    // Nothing to animate on first paint, when the width is unchanged, or when
+    // the reader has asked for less motion.
+    if (from === null || Math.abs(from - to) < 1 || prefersReducedMotion()) {
+      return;
+    }
+
+    element.style.width = `${from}px`;
+    element.style.transitionProperty = 'width';
+    element.style.transitionDuration = `${CHIP_WIDTH_TRANSITION_MS}ms`;
+    element.style.transitionTimingFunction = 'ease-out';
+
+    this.chipAnimationFrame = requestAnimationFrame(() => {
+      this.chipAnimationFrame = null;
+      element.style.width = `${to}px`;
+    });
+
+    // `transitionend` alone is not enough: it never fires if the transition is
+    // interrupted or never starts, which would strand an explicit width on the
+    // chip and freeze it at that size for the rest of the session. The timer is
+    // the backstop, and whichever lands first tears the other down.
+    const onEnd = () => this.cancelChipWidthAnimation(element);
+    element.addEventListener('transitionend', onEnd);
+    const timer = setTimeout(onEnd, CHIP_WIDTH_TRANSITION_MS + 100);
+    this.chipTransitionCleanup = () => {
+      element.removeEventListener('transitionend', onEnd);
+      clearTimeout(timer);
+    };
+  });
+
+  /** Returns the chip to `width: auto` and drops whatever was watching it. */
+  private cancelChipWidthAnimation(element: HTMLElement): void {
+    if (this.chipAnimationFrame !== null) {
+      cancelAnimationFrame(this.chipAnimationFrame);
+      this.chipAnimationFrame = null;
+    }
+    this.chipTransitionCleanup?.();
+    this.chipTransitionCleanup = null;
+    element.style.width = '';
+    element.style.transitionProperty = '';
+    element.style.transitionDuration = '';
+    element.style.transitionTimingFunction = '';
+  }
 
   protected toggleNav(): void {
     this.isNavOpenSignal.update((open) => !open);

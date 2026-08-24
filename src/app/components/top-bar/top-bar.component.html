@@ -81,6 +81,7 @@
       <div class="relative">
         <button
           #menuTrigger
+          #accountChip
           type="button"
           data-cy="auth-menu-trigger"
           (click)="toggleMenu()"
@@ -107,12 +108,21 @@
             -->
             <span
               aria-hidden="true"
-              class="flex h-7 w-7 animate-pulse items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700"
+              class="h-7 w-7 shrink-0 rounded-full bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
             ></span>
             <span class="sr-only">Loading&hellip;</span>
-            <!-- Reserves exactly the width "Sign in" will occupy. `invisible`,
-                 not `hidden`: it has to take up space to do its job. -->
-            <span aria-hidden="true" class="invisible whitespace-nowrap text-sm font-medium"
+            <!--
+              A skeleton bar rather than an `invisible` span, so the gap does
+              not read as an empty chip. It still has to reserve exactly the
+              width "Sign in" will occupy, so the text is kept and sized
+              normally — `text-transparent` hides the glyphs while the box
+              keeps their metrics. Deriving the width from the real string is
+              what makes the placeholder and the resolved chip the same size; a
+              hand-picked `w-16` would be a number to keep in step by hand.
+            -->
+            <span
+              aria-hidden="true"
+              class="rounded bg-slate-200 text-sm font-medium whitespace-nowrap text-transparent motion-safe:animate-pulse dark:bg-slate-700"
               >Sign in</span
             >
           } @else if (!showsRealAccount()) {

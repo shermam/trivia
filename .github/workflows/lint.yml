@@ -96,3 +96,12 @@ jobs:
       # the page once, uncontrolled, and OAuth is not in the e2e suite.
       - name: Verify the CSP covers the service worker's re-fetches
         run: npm run csp:verify
+
+      # Fails on an `animate-*` utility that is not gated on
+      # `prefers-reduced-motion`. This is invisible to everyone who does not
+      # have the OS setting switched on — it looks perfect to the author, the
+      # reviewer, Lighthouse and the e2e suite — which is exactly why it is a
+      # check and not a convention. The first animation in this app shipped
+      # ungated and nothing noticed. Scope and reasoning: `src/app/motion.ts`.
+      - name: Verify animations respect prefers-reduced-motion
+        run: npm run motion:verify
