@@ -6,6 +6,7 @@ import {
   computed,
   effect,
   inject,
+  signal,
   viewChild,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
@@ -51,8 +52,22 @@ export class TopBarComponent {
   /** Ties the trigger's `aria-controls` to the panel it opens. Only one top bar exists. */
   protected readonly panelId = 'auth-menu-panel';
 
+  /**
+   * The site-navigation drawer, shown only below the `sm` breakpoint.
+   *
+   * A local signal rather than a service, unlike `AuthMenuStateService`: that
+   * one exists because game-over opens the auth menu from the middle of the
+   * page, and nothing outside this component opens this drawer.
+   */
+  private readonly isNavOpenSignal = signal(false);
+  protected readonly isNavOpen = this.isNavOpenSignal.asReadonly();
+  protected readonly navPanelId = 'site-nav-panel';
+
   private readonly menuPanel = viewChild<ElementRef<HTMLElement>>('menuPanel');
   private readonly menuTrigger = viewChild<ElementRef<HTMLElement>>('menuTrigger');
+  private readonly navPanel = viewChild<ElementRef<HTMLElement>>('navPanel');
+  private readonly navTrigger = viewChild<ElementRef<HTMLElement>>('navTrigger');
+  private wasNavOpen = false;
 
   /**
    * Whatever had focus when the menu opened, so it can be given back on close.
@@ -93,15 +108,43 @@ export class TopBarComponent {
     // wherever focus happens to be, including the moment before focus has
     // moved into the panel, and after a click has taken it back out.
     const onDocumentKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && this.isMenuOpen()) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      if (this.isMenuOpen()) {
         this.authMenuState.close();
+      }
+      if (this.isNavOpenSignal()) {
+        this.closeNav();
       }
     };
     document.addEventListener('keydown', onDocumentKeydown);
 
+    /**
+     * The drawer only exists below `sm`, so widening past it — rotating a
+     * phone, or dragging a desktop window wider — has to close it.
+     *
+     * Without this the panel is unmounted by its own `sm:hidden` while focus is
+     * still inside it, which drops focus to `<body>` and leaves `aria-expanded`
+     * reading `true` on a trigger that is no longer visible. Closing it
+     * properly is what returns focus to something real.
+     *
+     * `640px` is Tailwind's `sm`, and the two have to agree — the class in the
+     * template is what actually hides the drawer, and this is what tidies up
+     * after it.
+     */
+    const wideEnoughForFullNav = window.matchMedia('(min-width: 640px)');
+    const onBreakpointChange = (event: MediaQueryListEvent) => {
+      if (event.matches && this.isNavOpenSignal()) {
+        this.closeNav();
+      }
+    };
+    wideEnoughForFullNav.addEventListener('change', onBreakpointChange);
+
     inject(DestroyRef).onDestroy(() => {
       document.removeEventListener('click', onDocumentClick, true);
       document.removeEventListener('keydown', onDocumentKeydown);
+      wideEnoughForFullNav.removeEventListener('change', onBreakpointChange);
     });
 
     // Focus follows the menu: into the panel when it opens, back where it came
@@ -140,6 +183,37 @@ export class TopBarComponent {
 
       this.wasMenuOpen = isOpen;
     });
+  }
+
+  /**
+   * Focus follows the drawer, same contract as the auth menu above (G2,
+   * `CLAUDE.md` §4.5): into the panel on open, back to the trigger on close.
+   *
+   * Simpler than the auth menu's version because the drawer has exactly one
+   * opener — the hamburger — so there is no "wherever it was opened from" to
+   * remember.
+   */
+  private readonly navFocusEffect = effect(() => {
+    const isOpen = this.isNavOpen();
+    const panel = this.navPanel();
+
+    if (isOpen && panel) {
+      panel.nativeElement.focus();
+    }
+
+    if (!isOpen && this.wasNavOpen) {
+      this.navTrigger()?.nativeElement.focus();
+    }
+
+    this.wasNavOpen = isOpen;
+  });
+
+  protected toggleNav(): void {
+    this.isNavOpenSignal.update((open) => !open);
+  }
+
+  protected closeNav(): void {
+    this.isNavOpenSignal.set(false);
   }
 
   protected toggleMenu(): void {

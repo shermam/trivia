@@ -21,7 +21,8 @@ export type IconName =
   | 'moon'
   | 'wifi-off'
   | 'flag'
-  | 'flag-filled';
+  | 'flag-filled'
+  | 'menu';
 
 /**
  * Inline brand/UI icon set, sourced from lucide-static (ISC license) — kept
@@ -90,6 +91,11 @@ export type IconName =
         @case ('x') {
           <path d="M18 6 6 18" />
           <path d="m6 6 12 12" />
+        }
+        @case ('menu') {
+          <path d="M4 6h16" />
+          <path d="M4 12h16" />
+          <path d="M4 18h16" />
         }
         @case ('trophy') {
           <path d="M10 14.66V17a1 1 0 0 1-1 1 2 2 0 0 0-2 2v2" />
