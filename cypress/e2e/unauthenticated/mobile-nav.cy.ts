@@ -71,6 +71,21 @@ describe('the top bar on a phone', () => {
     });
   });
 
+  /**
+   * **The assertion this file was missing.** It measured the chip's width, its
+   * overlap with the brand and the brand's centring — and never its height. So
+   * "Sign in" wrapping to two lines inside the `minmax(0,1fr)` grid track,
+   * rendering the chip 54px tall in a 64px bar, shipped green.
+   *
+   * A single line is 42px. 46 leaves room for a font-metric wobble and still
+   * fails outright on a second line.
+   */
+  it('keeps the account chip to a single line', () => {
+    cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
+      expect($chip[0].getBoundingClientRect().height).to.be.at.most(46);
+    });
+  });
+
   it('opens a drawer holding the links the bar dropped', () => {
     cy.get('[data-cy="nav-menu-trigger"]').click();
 

@@ -85,6 +85,28 @@ export class TopBarComponent {
     () => !this.authService.isAnonymous() && !this.authService.isFullyAuthenticated(),
   );
 
+  /**
+   * Whether the chip should show a real account rather than the "Sign in" call
+   * to action.
+   *
+   * **Not simply `!isAnonymous()`,** which was the bug. `isAnonymous()` is
+   * `user()?.isAnonymous ?? false`, so it is `false` when there is no user at
+   * all — and there is a real window where that happens with `authReady()`
+   * already true: `onAuthStateChanged` fires once with `null` and flips
+   * `authReady`, and only then does `signInAnonymously()` deliver the
+   * anonymous user. For those frames the template fell through to the
+   * signed-in branch and rendered the `initials()` fallback, so the chip
+   * flashed a "?" avatar as though somebody were logged in. That is exactly
+   * the wrong-state flash the `authReady()` gate exists to prevent (see
+   * `docs/app.md`), reintroduced one branch further down.
+   *
+   * The same window opens again on sign-out, between the old user going and
+   * the replacement anonymous session arriving.
+   */
+  protected readonly showsRealAccount = computed(
+    () => this.authService.user() !== null && !this.authService.isAnonymous(),
+  );
+
   protected readonly initials = computed(() => {
     const user = this.authService.user();
     const source = user?.displayName || user?.email || '';
