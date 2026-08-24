@@ -4,7 +4,17 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import {
   asAnonymous,
@@ -33,13 +43,64 @@ const questions = (ctx: RulesTestContext) => collection(ctx.firestore(), 'custom
 const question = (ctx: RulesTestContext, id: string) =>
   doc(ctx.firestore(), 'custom_questions', id);
 
-describe('custom_questions: read', () => {
-  it('is public — the game must work before anyone signs in', async () => {
-    await assertSucceeds(getDocs(questions(asSignedOut(env))));
+describe('custom_questions: read — approved is public, the rest is reviewers only', () => {
+  const approvedOnly = (ctx: RulesTestContext) =>
+    query(questions(ctx), where('status', '==', 'approved'));
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'live'),
+        validQuestion('author', { status: 'approved' }),
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'waiting'),
+        validQuestion('author', { status: 'pending' }),
+      );
+    });
   });
 
-  it('is readable by an anonymous player', async () => {
-    await assertSucceeds(getDocs(questions(asAnonymous(env, 'anon'))));
+  it('serves approved questions to a signed-out visitor — the game must work before anyone signs in', async () => {
+    await assertSucceeds(getDocs(approvedOnly(asSignedOut(env))));
+  });
+
+  it('serves approved questions to an anonymous player', async () => {
+    await assertSucceeds(getDocs(approvedOnly(asAnonymous(env, 'anon'))));
+  });
+
+  /**
+   * **Rules are not filters.** This is the row that says so, and the reason
+   * `getCustomQuestions` started sending the filter a release before this rule
+   * started requiring it: an unfiltered query is *refused outright*, not
+   * quietly trimmed to the approved subset. A browser cached from before 4b-ii
+   * therefore fails here rather than showing fewer questions.
+   */
+  it('refuses an unfiltered query, rather than trimming it', async () => {
+    await assertFails(getDocs(questions(asSignedOut(env))));
+  });
+
+  it('refuses a query for pending questions from a player', async () => {
+    await assertFails(
+      getDocs(query(questions(asAnonymous(env, 'anon')), where('status', '==', 'pending'))),
+    );
+  });
+
+  it('refuses a direct read of a pending question by id', async () => {
+    await assertFails(
+      getDoc(doc(asAnonymous(env, 'anon').firestore(), 'custom_questions', 'waiting')),
+    );
+  });
+
+  it('lets a reviewer read a pending question', async () => {
+    await grantReviewer(env, 'rev');
+    await assertSucceeds(
+      getDoc(doc(asVerifiedPassword(env, 'rev').firestore(), 'custom_questions', 'waiting')),
+    );
+  });
+
+  it('lets a reviewer run the unfiltered query a player cannot', async () => {
+    await grantReviewer(env, 'rev');
+    await assertSucceeds(getDocs(questions(asVerifiedPassword(env, 'rev'))));
   });
 });
 
@@ -255,16 +316,16 @@ describe('custom_questions: create — attribution cannot be spoofed', () => {
   });
 });
 
-describe('custom_questions: create — the moderation status (item 4b)', () => {
-  // The accept case for the value of the day. Paired with the rejects below so
-  // that 4c's flip from 'approved' to 'pending' cannot be a silent widening:
-  // whichever value is current, exactly one is accepted and the others are
-  // refused, so the flip has to move both halves in the diff.
-  it("accepts status 'approved', the only value statusOnSubmission() allows today", async () => {
+describe('custom_questions: create — the moderation status', () => {
+  // The accept case, paired with the rejects below so that changing the value
+  // can never be a silent widening: exactly one status is accepted on create
+  // and the other two are refused, so a change has to move both halves in the
+  // diff. It worked — flipping 'approved' to 'pending' broke twelve tests.
+  it("accepts status 'pending', the only value statusOnSubmission() allows", async () => {
     await assertSucceeds(
       submitQuestion(asPro(env, 'pro-user'), {
         uid: 'pro-user',
-        payload: validQuestion('pro-user', { status: 'approved' }),
+        payload: validQuestion('pro-user', { status: 'pending' }),
       }),
     );
   });
@@ -280,13 +341,14 @@ describe('custom_questions: create — the moderation status (item 4b)', () => {
     );
   });
 
-  // Self-approval in reverse: until 4c, a submitter must not be able to opt
-  // *into* the review queue either. One value, no choices.
-  it("rejects status 'pending' while submissions are still published immediately", async () => {
+  // **The row that makes review-before-publish real.** A submitter must not be
+  // able to approve their own contribution; if this ever passes, the whole
+  // feature is decorative.
+  it("rejects status 'approved' — a submitter cannot approve their own question", async () => {
     await assertFails(
       submitQuestion(asPro(env, 'pro-user'), {
         uid: 'pro-user',
-        payload: validQuestion('pro-user', { status: 'pending' }),
+        payload: validQuestion('pro-user', { status: 'approved' }),
       }),
     );
   });

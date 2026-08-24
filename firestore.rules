@@ -221,21 +221,19 @@ service cloud.firestore {
     // The moderation status a newly submitted question is created with, and
     // the only value `create` accepts.
     //
-    // `'approved'` today, because this PR puts the field in place and changes
-    // nothing else: submissions are still published the instant they are
-    // written. `BACKLOG.md` item 4c is the one that turns this into
-    // `'pending'`, and it has to change `privacy-policy.component.html`,
-    // `terms-of-service.component.html` and `LEGAL_LAST_UPDATED` in the same
-    // PR, because "submissions are published immediately, without review" is
-    // the sentence that stops being true (`CLAUDE.md` §4.0).
+    // `'pending'` as of item 4c: a submission is stored but not served until a
+    // reviewer approves it. The published policy text changed in the same PR,
+    // because "submissions are published immediately, without review" was the
+    // sentence this falsified (`CLAUDE.md` §4.0).
     //
-    // Named rather than inlined so that flip is one line here and one line in
-    // `firebase.service.ts`, and so the rules tests can pin *both* — the
-    // accept case for the value of the day and the reject case for the other,
-    // which is what makes the flip a visible diff rather than a silent
-    // widening.
+    // Still named rather than inlined. Keeping it as one function is what let
+    // the flip be a single line here and a single line in
+    // `firebase.service.ts`, and what let the rules tests pin *both* halves —
+    // the accept case for the current value and the reject case for the
+    // others — so the change showed up as ten failing tests rather than as a
+    // silent widening.
     function statusOnSubmission() {
-      return 'approved';
+      return 'pending';
     }
 
     function isValidCustomQuestion() {
@@ -361,25 +359,29 @@ service cloud.firestore {
     // subject to schema validation above; editing/removing an existing one
     // is console-only.
     match /custom_questions/{questionId} {
-      // Still open, deliberately, and it is the one thing 4c must change.
+      // Approved questions are public; anything else is reviewers only.
       //
-      // The client stopped serving anything but `status == 'approved'` in this
-      // PR, but the *rule* is left open for one release, because tightening it
-      // to `resource.data.status == 'approved' || isReviewer()` refuses the
-      // unfiltered query a browser cached from before this change still sends
-      // — rules are not filters. Shipping the filter first means that by the
-      // time the rule requires it, only a client stale by two releases breaks
-      // rather than every client at once. Same ordering principle as declaring
-      // the composite indexes one PR before the query that needs them.
+      // **Rules are not filters**, so this does not quietly hide unapproved
+      // questions from an unfiltered query — it *refuses* the query outright.
+      // Every client read must therefore carry `where('status','==','approved')`,
+      // which `getCustomQuestions` has sent since 4b-ii, one release before
+      // this rule started requiring it. That ordering was the point: a browser
+      // cached from before 4b-ii is refused here, so deferring the tightening
+      // by a release means only a client stale by *two* releases breaks rather
+      // than every client at once. `TriviaService` falls back to the offline
+      // pool when the fetch throws, so even that client degrades to cached
+      // questions rather than to nothing.
       //
-      // What this costs in the meantime: a question a reviewer has rejected
-      // stays readable to anyone who queries without the filter. It is not a
-      // new exposure — the question was public before it was rejected, and it
-      // was public for the whole of its life before this feature existed — but
-      // it does mean rejection is a *serving* decision until 4c, not a
-      // concealment one. Content that must actually disappear is still a
-      // console deletion, exactly as it was.
-      allow read: if true;
+      // `||` and not `&&`, and in this order: the language short-circuits, so
+      // a player reading an approved question never triggers the `user_roles`
+      // lookup. Only a read of something unapproved pays for it.
+      //
+      // A document with no `status` at all is refused by this rule (the field
+      // access errors, which denies). That is correct and no longer reachable:
+      // `scripts/backfill-question-status.mjs` stamped every document that
+      // predated the field, and `isValidCustomQuestion()` has required it on
+      // create since 4b-i, so there is no window in which one could exist.
+      allow read: if resource.data.status == 'approved' || isReviewer();
 
       allow create: if isRealAuthedUser()
                     && isProUser()
