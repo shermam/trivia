@@ -34,6 +34,7 @@ Sticky header, present on every screen except in **embed mode**.
   - The display name truncates at ~5.5rem below `sm` (~10rem above), so a long one cannot push the bar into a horizontal scroll.
 - **Nav drawer** (`< 640px` only): left slide-out panel, full viewport height, 18rem wide (max 80%), over a 40%-black backdrop. Holds a "MENU" label and a close (✕) button, then "Review" (reviewers only), "Pricing", and a **"Dark mode" / "Light mode"** button with a sun/moon icon. Following a link closes it; toggling the theme deliberately does not, since the page recolours around you and you may want to change back.
 - **Pricing nav link**: text link "Pricing" → `/pricing`, next to the account trigger at `sm` and above; in the drawer below it.
+- **Account trigger below `sm`: the avatar alone.** The display name and PRO badge are `sr-only` rather than removed — they were the widest thing in the bar and ran into the centred brand, but taking them out of the DOM would leave the button announced as a single letter. A screen reader still reads "B Bartholomew Featherstonehaugh PRO"; the chip measures ~64px instead of ~200px. The anonymous state keeps its visible "Sign in" text, which is short and is a call to action rather than a label.
 - **Account trigger** (pill button, top-right, bordered): its content depends on auth state (see §0.1 States below); chevron-down icon on the right that rotates 180° when the dropdown is open.
   - Opens/closes the **Auth Menu** dropdown (`AuthMenuComponent`), anchored top-right below the trigger.
 

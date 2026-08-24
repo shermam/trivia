@@ -53,6 +53,24 @@ describe('the top bar on a phone', () => {
     });
   });
 
+  /**
+   * The account chip is the widest thing in the bar and the only part whose
+   * width is user-controlled, so it is the one that can push into the brand.
+   * A signed-in chip is covered in `authenticated/`; this pins the anonymous
+   * one, which is the state every first-time visitor sees.
+   */
+  it('keeps the account chip clear of the brand', () => {
+    cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
+      cy.get('header a[href="/"]')
+        .first()
+        .then(($brand) => {
+          const brand = $brand[0].getBoundingClientRect();
+          const chip = $chip[0].getBoundingClientRect();
+          expect(brand.x + brand.width).to.be.at.most(chip.x);
+        });
+    });
+  });
+
   it('opens a drawer holding the links the bar dropped', () => {
     cy.get('[data-cy="nav-menu-trigger"]').click();
 
