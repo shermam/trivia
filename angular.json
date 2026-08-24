@@ -130,7 +130,8 @@
               "branches": 57,
               "functions": 56,
               "lines": 54
-            }
+            },
+            "setupFiles": ["src/test-setup.ts"]
           }
         },
         "lint": {

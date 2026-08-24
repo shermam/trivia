@@ -37,6 +37,7 @@ Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
 | 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | ⬜     |
 | 7   | [Recover from a wedged service worker](#7-recover-from-a-wedged-service-worker)                 | S    | ⬜     |
 | 8   | [In-app role management](#8-in-app-role-management)                                             | M    | ⬜     |
+| 9   | [Show the user's real avatar](#9-show-the-users-real-avatar)                                    | S    | ⬜     |
 
 ### Why this order
 
@@ -292,6 +293,27 @@ This item is the point at which that changes, and the cost of changing it is the
 - **Provenance becomes worth having** once grants are not hand-typed: `grantedBy`, `grantedAt`. The collection has no exact-key `hasOnly()` allowlist precisely so those can be added later without a migration — but note that adding a client write path is what makes an allowlist necessary in the first place, so this item both adds the fields and adds the constraint that would have blocked them.
 
 **Watch out for:** the read rule. `allow list: if false` is what keeps the set of moderators unenumerable, and a management screen wants exactly that list. Widening it for an admin is legitimate; widening it by reflex to `allow read` is not — see the mutation note in `data-model.md`, where that specific mistake survives every test in the file but one.
+
+---
+
+### 9. Show the user's real avatar
+
+**Size: S. Status: ⬜ — nice-to-have.**
+
+The account chip shows a coloured circle with the first letter of the display name (or email). Firebase Auth already hands us `user.photoURL` for OAuth accounts — Google populates it — so a real avatar is mostly a matter of rendering it when present and keeping the initial as the fallback.
+
+Queued when the chip collapsed to the avatar alone on mobile ([#124](https://github.com/shermam/trivia/pull/124)). That change makes this more worthwhile than it was: below `sm` the avatar is now the _entire_ account affordance, so a real face is doing more work than it used to.
+
+**The trap here is the CSP, and it will not be obvious.** `firebase.json` sets `img-src 'self'`, so `https://lh3.googleusercontent.com/...` is refused outright — the image simply does not render, and unlike a broken URL there is no 404 to notice. Whatever host is added has to go into `img-src` **and** through `scripts/verify-csp.mjs`, which checks that every subresource origin is also re-fetchable by the service worker (`docs/ci-cd.md` §4.1).
+
+Worth deciding rather than assuming, because it is the reason this is not simply a one-liner:
+
+- **Hotlinking Google's CDN** is the cheap version, and it widens the CSP to a third-party host and tells that host every time one of our pages renders. This app self-hosts its fonts specifically to avoid that shape of thing.
+- **Mirroring the image** into Cloud Storage at sign-in keeps `img-src 'self'`, and adds a bucket, a Cloud Function, storage rules and a copy of someone's face that account deletion then has to remember to erase — which drags in `functions/src/account.ts` and the Privacy Policy's retention list.
+
+The initial-based avatar is a perfectly good answer in the meantime, which is why this is an S and sits at the bottom.
+
+**Watch out for:** an avatar is personal data. If it is mirrored, the Privacy Policy's "what we store" table and the deletion path both change, and `CLAUDE.md` §4.0 applies.
 
 ---
 

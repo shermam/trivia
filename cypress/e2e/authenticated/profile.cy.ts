@@ -24,6 +24,43 @@ describe('authenticated profile management', () => {
     cy.get('header').contains('Ada Lovelace');
   });
 
+  /**
+   * The account chip is the only part of the top bar whose width the user
+   * controls, and on a phone it was wide enough to run into the centred brand.
+   * Below `sm` it now shows the avatar alone.
+   *
+   * Both halves are asserted on purpose. `sr-only` rather than `hidden` is
+   * what keeps the name in the button's accessible name — a trigger announced
+   * as the single letter "B" would be a worse bug than the overlap, and an
+   * invisible one.
+   */
+  it('collapses the account chip to the avatar on a phone, keeping the name for screen readers', () => {
+    const longName = 'Bartholomew Featherstonehaugh';
+    cy.openAuthMenu();
+    cy.get('#displayName').clear().type(longName);
+    cy.contains('button', 'Save').click();
+    cy.contains('Saved!');
+    cy.get('body').type('{esc}');
+
+    cy.viewport(390, 780);
+
+    cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
+      expect($chip[0].getBoundingClientRect().width).to.be.lessThan(100);
+    });
+
+    // textContent, not visibility — the point is that it is still there.
+    cy.get('[data-cy="auth-menu-trigger"]').should('contain.text', longName);
+
+    cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
+      cy.get('header a[href="/"]')
+        .first()
+        .then(($brand) => {
+          const brand = $brand[0].getBoundingClientRect();
+          expect(brand.x + brand.width).to.be.at.most($chip[0].getBoundingClientRect().x);
+        });
+    });
+  });
+
   it('signs out back to an anonymous session without flashing the verify-email prompt', () => {
     cy.openAuthMenu();
 

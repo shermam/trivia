@@ -1,7 +1,41 @@
 <header
   class="sticky top-0 z-50 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-900/8 dark:border-white/10"
 >
-  <div class="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+  <!--
+    Two layouts, one DOM. Below `sm` this is a three-column grid — hamburger,
+    centred brand, account — because the bar had grown to five items and the
+    Review link (visible only to reviewers) made it worse for exactly the
+    people who need the bar most. From `sm` up it is the original flex row.
+
+    A grid rather than `justify-between` on mobile, and specifically
+    `minmax(0,1fr) auto minmax(0,1fr)`: the brand sits in a centre track with
+    two side tracks forced to *equal* width, which is the only arrangement that
+    puts it at the true centre of the bar whatever the side items weigh. The
+    first attempt was `auto 1fr auto` with the brand centred inside the middle
+    track, and measuring it in a browser showed the brand 21px left of centre —
+    that centres it between the two side items, not in the bar, and the account
+    chip is much wider than the hamburger. Plain `1fr` is not enough either: it
+    is `minmax(auto,1fr)`, so a track grows past its share to fit its content
+    and the symmetry quietly breaks the moment a display name gets long. The
+    `minmax(0,…)` is what makes the account chip truncate instead.
+  -->
+  <div
+    class="max-w-5xl mx-auto px-4 sm:px-6 h-16 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:flex sm:justify-between sm:gap-0"
+  >
+    <button
+      #navTrigger
+      type="button"
+      data-cy="nav-menu-trigger"
+      (click)="toggleNav()"
+      [attr.aria-expanded]="isNavOpen()"
+      aria-haspopup="dialog"
+      [attr.aria-controls]="isNavOpen() ? navPanelId : null"
+      aria-label="Site menu"
+      class="flex h-9 w-9 shrink-0 items-center justify-center justify-self-start rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors sm:hidden"
+    >
+      <app-icon name="menu" [size]="18" />
+    </button>
+
     <a routerLink="/" class="flex items-center gap-2">
       <app-logo [size]="32" class="text-emerald-600" />
       <span class="font-extrabold text-emerald-600 dark:text-emerald-400 text-lg tracking-tight"
@@ -9,12 +43,18 @@
       >
     </a>
 
-    <div class="flex items-center gap-6">
+    <div class="flex min-w-0 items-center gap-6 justify-self-end">
+      <!--
+        Hidden rather than moved: these three are the same elements the drawer
+        offers below `sm`, and duplicating them into two always-rendered copies
+        would mean two sets of ids, two things to keep in step, and — for the
+        theme toggle — two controls claiming the same `aria-label`.
+      -->
       @if (reviewerService.isReviewer()) {
         <a
           routerLink="/review"
           data-cy="review-queue-link"
-          class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
+          class="hidden sm:inline text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
         >
           Review
         </a>
@@ -22,7 +62,7 @@
 
       <a
         routerLink="/pricing"
-        class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
+        class="hidden sm:inline text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
       >
         Pricing
       </a>
@@ -33,7 +73,7 @@
         [attr.aria-label]="
           themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
         "
-        class="flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+        class="hidden sm:flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
       >
         <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
       </button>
@@ -47,7 +87,7 @@
           [attr.aria-expanded]="isMenuOpen()"
           aria-haspopup="dialog"
           [attr.aria-controls]="isMenuOpen() ? panelId : null"
-          class="flex items-center gap-2 rounded-full pl-1.5 pr-3 py-1.5 border border-slate-900/10 dark:border-white/10 transition-colors"
+          class="flex min-w-0 items-center gap-2 rounded-full pl-1.5 pr-1.5 sm:pr-3 py-1.5 border border-slate-900/10 dark:border-white/10 transition-colors"
           [ngClass]="isMenuOpen() ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'"
           [class.shadow-[0_0_0_3px_rgba(5,150,105,0.12)]]="isMenuOpen()"
         >
@@ -70,9 +110,18 @@
                 ></span>
               }
             </span>
-            <span class="flex items-center gap-1.5 min-w-0">
+            <!--
+              `sr-only`, not `hidden`. Below `sm` the chip shows the avatar
+              alone — the name and the PRO badge were the widest thing in the
+              bar and pushed it into the brand — but removing them from the
+              DOM would leave the button's accessible name as a single letter.
+              `sr-only` takes them out of the layout (they are absolutely
+              positioned, so they are not flex items and contribute no gap)
+              while a screen reader still reads "S Sherman PRO".
+            -->
+            <span class="flex min-w-0 items-center gap-1.5 sr-only sm:not-sr-only sm:flex">
               <span
-                class="text-sm font-medium text-slate-900 dark:text-slate-50 max-w-[10rem] truncate"
+                class="text-sm font-medium text-slate-900 dark:text-slate-50 max-w-[5.5rem] sm:max-w-[10rem] truncate"
               >
                 {{ authService.user()?.displayName || authService.user()?.email }}
               </span>
@@ -118,3 +167,99 @@
     </div>
   </div>
 </header>
+
+<!--
+  Outside `<header>`, and that is load-bearing rather than tidiness. The header
+  carries `backdrop-blur-md`, and a `backdrop-filter` ancestor becomes the
+  containing block for `position: fixed` descendants — so a drawer rendered
+  inside it would be clipped to the header's 4rem box instead of covering the
+  viewport, silently and only at runtime.
+
+  `dialog` without `aria-modal`, matching the auth menu above: nothing here
+  traps focus or inerts the page, so claiming a modal would be a promise the
+  markup does not keep. Escape and the backdrop both close it, and focus goes
+  in on open and back to the hamburger on close (`CLAUDE.md` §4.5).
+-->
+@if (isNavOpen()) {
+  <!--
+    A flex row — panel, then backdrop filling the rest — rather than a
+    full-bleed backdrop with the panel laid over it.
+    
+    The panel is opaque, so the dim behind it was never visible and the two
+    render identically. What changes is that the backdrop now occupies exactly
+    the region a tap can reach: an `inset-0` backdrop has its own centre buried
+    under the panel, which Cypress reads as "covered by another element" and
+    refuses to click. Reaching for `{force: true}` there would have suppressed
+    the check rather than the overlap, on the one interaction whose whole point
+    is being clickable.
+  -->
+  <div class="fixed inset-0 z-50 flex sm:hidden">
+    <div
+      #navPanel
+      [id]="navPanelId"
+      role="dialog"
+      aria-label="Site menu"
+      tabindex="-1"
+      data-cy="nav-menu-panel"
+      class="flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none"
+    >
+      <div class="mb-2 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Menu</span>
+        <button
+          type="button"
+          (click)="closeNav()"
+          aria-label="Close menu"
+          data-cy="nav-menu-close"
+          class="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
+        >
+          <app-icon name="x" [size]="16" />
+        </button>
+      </div>
+
+      @if (reviewerService.isReviewer()) {
+        <a
+          routerLink="/review"
+          (click)="closeNav()"
+          data-cy="nav-menu-review-link"
+          class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+        >
+          Review
+        </a>
+      }
+
+      <a
+        routerLink="/pricing"
+        (click)="closeNav()"
+        data-cy="nav-menu-pricing-link"
+        class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+      >
+        Pricing
+      </a>
+
+      <!-- Deliberately does *not* close the drawer: the whole page changes
+           colour, and shutting the panel would hide the control you would use
+           to change your mind. -->
+      <button
+        type="button"
+        (click)="toggleTheme()"
+        data-cy="nav-menu-theme-toggle"
+        [attr.aria-label]="
+          themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+        "
+        class="mt-1 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+      >
+        <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
+        {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
+      </button>
+    </div>
+
+    <!-- Decorative: the same dismissal is on the close button and on Escape,
+         so a screen reader gains nothing from a third control. -->
+    <div
+      class="flex-1 bg-slate-900/40"
+      aria-hidden="true"
+      data-cy="nav-menu-backdrop"
+      (click)="closeNav()"
+    ></div>
+  </div>
+}
