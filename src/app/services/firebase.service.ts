@@ -55,7 +55,9 @@ export const MAX_QUESTIONS_PER_HOUR = 20;
  * `BACKLOG.md` item 4c is what turns this into `'pending'`, together with the
  * published policy text that currently promises the opposite.
  */
-export const STATUS_ON_SUBMISSION: QuestionStatus = 'approved';
+const STATUS_APPROVED: QuestionStatus = 'approved';
+
+export const STATUS_ON_SUBMISSION: QuestionStatus = STATUS_APPROVED;
 
 /**
  * How many times to re-read the counter and try again when the batch is
@@ -67,6 +69,24 @@ export const STATUS_ON_SUBMISSION: QuestionStatus = 'approved';
  * bounded.
  */
 const QUOTA_WRITE_ATTEMPTS = 3;
+
+/**
+ * How many questions one page of the review queue holds.
+ *
+ * A `where`-and-`limit` pair is mandatory, not a nicety (`CLAUDE.md` §4.1):
+ * an unbounded read of this collection is billed per document and grows with
+ * other people's contributions.
+ *
+ * Deliberately **no `orderBy`**, so the query rides the automatic single-field
+ * index on `status` and needs no composite — the page is sorted by `createdAt`
+ * in the browser instead. The consequence is honest and small: with more
+ * pending questions than fit on a page, the *page boundary* is by document ID
+ * rather than by age, so a page is not globally the oldest N. Every question
+ * is still reachable and still gets reviewed, because reviewing one removes it
+ * from the queue and the next arrives. Trading a composite index — and D3's
+ * whole class of deploy risk — for that is the right way round.
+ */
+export const REVIEW_PAGE_SIZE = 50;
 
 /**
  * Every `{window}-{slot}` document ID was refused. Usually that means the
@@ -210,6 +230,14 @@ export class FirebaseService {
     }
 
     const filters: RestFieldFilter[] = [
+      // Players are served approved questions and nothing else. This is the
+      // client half of review-before-publish; the *rule* stays open for one
+      // more release so a browser cached from before this change is not
+      // refused outright (see the `custom_questions` read rule). Until 4c
+      // every question is approved anyway, so this filter changes no result
+      // today — what it does is get the query shape, and the three composite
+      // indexes it needs, into production ahead of the rule that requires it.
+      { field: 'status', op: 'EQUAL' as const, value: STATUS_APPROVED },
       ...(category ? [{ field: 'category', op: 'EQUAL' as const, value: category }] : []),
       ...(difficulty ? [{ field: 'difficulty', op: 'EQUAL' as const, value: difficulty }] : []),
     ];
@@ -242,6 +270,59 @@ export class FirebaseService {
       id: doc.id,
       ...asDocumentData<CustomQuestionDoc>(doc.data),
     }));
+  }
+
+  /**
+   * One page of the review queue: questions in a given moderation status.
+   *
+   * Reviewer-only in practice — `firestore.rules` will not let anyone else act
+   * on the result — but deliberately *not* gated here. A client-side check is
+   * UX, never authority (`CLAUDE.md` §4.2), and adding one would only mean a
+   * non-reviewer sees an empty page instead of a page they cannot act on.
+   *
+   * Sorted newest-last by `createdAt` in the browser rather than by the query,
+   * so no composite index is needed — see {@link REVIEW_PAGE_SIZE}. Documents
+   * predating attribution have no `createdAt` and sort last, which is the
+   * honest place for "we do not know when this arrived".
+   */
+  getQuestionsByStatus(
+    status: QuestionStatus,
+    limit = REVIEW_PAGE_SIZE,
+  ): Observable<(CustomQuestionDoc & { id: string })[]> {
+    return defer(async () => {
+      const docs = await this.rest.runQuery(
+        {
+          collectionPath: CUSTOM_QUESTIONS_COLLECTION,
+          where: [{ field: 'status', op: 'EQUAL', value: status }],
+          limit,
+        },
+        { timeoutMs: FIRESTORE_TIMEOUT_MS },
+      );
+
+      return docs
+        .map((doc) => ({ id: doc.id, ...asDocumentData<CustomQuestionDoc>(doc.data) }))
+        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    });
+  }
+
+  /**
+   * Moves a question between moderation statuses.
+   *
+   * **This is the app's first genuinely partial write**, and the note on
+   * `FirestoreRestClient.setDocument` said the day one arrived it would have to
+   * decide on purpose. It has: the `updateMask` covers `status` alone, so this
+   * is a patch and every other field is left exactly as the author wrote it.
+   * A full-document replace would be wrong twice over — it would drop whatever
+   * the reviewer's client did not happen to know about, and `firestore.rules`
+   * refuses it anyway, because the moderation rule allows a write that affects
+   * no key but `status`.
+   */
+  async setQuestionStatus(questionId: string, status: QuestionStatus): Promise<void> {
+    await this.rest.setDocument(
+      `${CUSTOM_QUESTIONS_COLLECTION}/${questionId}`,
+      { status },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
+    );
   }
 
   /**

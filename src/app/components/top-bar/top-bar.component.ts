@@ -12,6 +12,7 @@ import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { ReviewerService } from '../../services/reviewer.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { ThemeService } from '../../services/theme.service';
 import { IconComponent } from '../icon/icon.component';
@@ -37,6 +38,12 @@ export class TopBarComponent {
   protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly themeService = inject(ThemeService);
+  /**
+   * Decides whether to show the review link, and nothing else. Rendering it
+   * is a convenience; `firestore.rules` is what makes the page's buttons
+   * work or not (`CLAUDE.md` §4.2).
+   */
+  protected readonly reviewerService = inject(ReviewerService);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
 
   protected readonly isMenuOpen = this.authMenuState.isOpen;

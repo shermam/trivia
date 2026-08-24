@@ -4,7 +4,7 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { collection, doc, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, writeBatch } from 'firebase/firestore';
 
 const FIRESTORE_EMULATOR_HOST = '127.0.0.1';
 const FIRESTORE_EMULATOR_PORT = 8080;
@@ -68,6 +68,21 @@ export const asWrongRole = (env: RulesTestEnvironment, uid: string): RulesTestCo
 
 export const asSignedOut = (env: RulesTestEnvironment): RulesTestContext =>
   env.unauthenticatedContext();
+
+/**
+ * Grants the moderation role, the only way it can be granted: with rules
+ * disabled. `user_roles` has no client write path at all, which is the point
+ * of the collection rather than a testing inconvenience.
+ */
+export async function grantReviewer(
+  env: RulesTestEnvironment,
+  uid: string,
+  reviewer = true,
+): Promise<void> {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'user_roles', uid), { reviewer });
+  });
+}
 
 /**
  * A schema-valid `custom_questions` document; spread over it to build invalid

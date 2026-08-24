@@ -10,6 +10,16 @@
     </a>
 
     <div class="flex items-center gap-6">
+      @if (reviewerService.isReviewer()) {
+        <a
+          routerLink="/review"
+          data-cy="review-queue-link"
+          class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
+        >
+          Review
+        </a>
+      }
+
       <a
         routerLink="/pricing"
         class="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"

@@ -23,6 +23,24 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.stripeRole == 'pro';
     }
 
+    // Whether the caller holds the moderation role, read from the `user_roles`
+    // register below. A document rather than a custom claim so that revoking it
+    // takes effect on the very next request — the full reasoning, and the four
+    // emulator probes the design rests on, are on the `user_roles` match block.
+    //
+    // Always write this as the *right* operand of `||`. The language
+    // short-circuits, so `<public condition> || isReviewer()` costs nothing for
+    // the callers who satisfy the public condition, and one billed document
+    // read for the reviewers who do not. Leading with it would bill every
+    // player on every request for a lookup that almost always returns nothing.
+    //
+    // A caller with no role document denies rather than erroring open — probed,
+    // not assumed, and pinned by a test.
+    function isReviewer() {
+      return request.auth != null
+             && get(/databases/$(database)/documents/user_roles/$(request.auth.uid)).data.reviewer == true;
+    }
+
     // Bounds on a client-supplied epoch-ms timestamp: it must sit close to
     // when the server actually saw the request. Generous on the past side for
     // a slow connection or a clock a few minutes behind, tight on the future
@@ -343,12 +361,54 @@ service cloud.firestore {
     // subject to schema validation above; editing/removing an existing one
     // is console-only.
     match /custom_questions/{questionId} {
+      // Still open, deliberately, and it is the one thing 4c must change.
+      //
+      // The client stopped serving anything but `status == 'approved'` in this
+      // PR, but the *rule* is left open for one release, because tightening it
+      // to `resource.data.status == 'approved' || isReviewer()` refuses the
+      // unfiltered query a browser cached from before this change still sends
+      // — rules are not filters. Shipping the filter first means that by the
+      // time the rule requires it, only a client stale by two releases breaks
+      // rather than every client at once. Same ordering principle as declaring
+      // the composite indexes one PR before the query that needs them.
+      //
+      // What this costs in the meantime: a question a reviewer has rejected
+      // stays readable to anyone who queries without the filter. It is not a
+      // new exposure — the question was public before it was rejected, and it
+      // was public for the whole of its life before this feature existed — but
+      // it does mean rejection is a *serving* decision until 4c, not a
+      // concealment one. Content that must actually disappear is still a
+      // console deletion, exactly as it was.
       allow read: if true;
+
       allow create: if isRealAuthedUser()
                     && isProUser()
                     && isValidCustomQuestion()
                     && withinQuestionQuota();
-      allow update, delete: if false;
+
+      // Moderation: a reviewer may move a question between statuses and may
+      // change nothing else about it.
+      //
+      // `affectedKeys().hasOnly(['status'])` is what makes that true, and it is
+      // doing more work than it looks. It stops a reviewer editing the question
+      // text (that is item 6's job, for the author, and a moderator quietly
+      // rewriting somebody's submission is a different feature nobody asked
+      // for), stops `createdBy` being rewritten to steal or disown authorship,
+      // and stops new fields being introduced outside the `hasOnly()` allowlist
+      // that `create` enforces — an allowlist `update` would otherwise sail
+      // straight past, since `isValidCustomQuestion()` only guards creates.
+      //
+      // Note the status is *not* required to differ. A no-op write is harmless,
+      // and demanding a change would make an idempotent retry fail — the client
+      // cannot always know whether the write that timed out actually landed.
+      allow update: if isReviewer()
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['status'])
+                    && request.resource.data.status in ['approved', 'pending', 'rejected'];
+
+      // Deletion stays console-only. A reviewer can stop a question being
+      // served; erasing it is a different power, and nothing yet needs it.
+      allow delete: if false;
     }
 
     // The per-hour submission counter, and the only reason a question write is

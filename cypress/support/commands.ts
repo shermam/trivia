@@ -6,6 +6,7 @@ import type {
   LeaderboardSeed,
   ProSubscriptionSeed,
   QuestionReportRecord,
+  ReviewerSeed,
   VerifiedUserSeed,
 } from '../tasks/types';
 
@@ -52,6 +53,8 @@ declare global {
       signInFromGameOver(email: string, password: string): Chainable<null>;
       /** Creates an already-email-verified user directly in the Auth emulator. */
       createVerifiedUser(seed: VerifiedUserSeed): Chainable<{ uid: string }>;
+      /** Grants the `user_roles` moderation role — Admin SDK only, as in production. */
+      seedReviewer(seed: ReviewerSeed): Chainable<null>;
       /** Writes documents straight into `custom_questions`, bypassing Firestore rules. */
       seedCustomQuestions(questions: CustomQuestionSeed[]): Chainable<null>;
       /** Writes a single `leaderboard/{uid}` document, bypassing Firestore rules. */
@@ -190,6 +193,10 @@ Cypress.Commands.add('createVerifiedUser', (seed: VerifiedUserSeed) => {
 
 Cypress.Commands.add('seedCustomQuestions', (questions: CustomQuestionSeed[]) => {
   cy.task('seedCustomQuestions', questions);
+});
+
+Cypress.Commands.add('seedReviewer', (seed: ReviewerSeed) => {
+  cy.task('seedReviewer', seed);
 });
 
 Cypress.Commands.add('seedLeaderboardEntry', (entry: LeaderboardSeed) => {

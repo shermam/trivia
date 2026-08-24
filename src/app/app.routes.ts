@@ -38,6 +38,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'review',
+    title: 'Review queue',
+    loadComponent: () =>
+      import('./components/review-queue/review-queue.component').then(
+        (m) => m.ReviewQueueComponent,
+      ),
+  },
+  {
     path: 'pricing',
     title: 'Pricing',
     loadComponent: () =>

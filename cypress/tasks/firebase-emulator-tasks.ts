@@ -7,6 +7,7 @@ import {
   CustomQuestionSeed,
   LeaderboardSeed,
   ProSubscriptionSeed,
+  ReviewerSeed,
   QuestionReportRecord,
   VerifiedUserSeed,
 } from './types';
@@ -85,6 +86,7 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         ),
         deleteCollection(firestore.collection('custom_questions')),
         deleteCollection(firestore.collection('question_reports')),
+        deleteCollection(firestore.collection('user_roles')),
         // `recursiveDelete` (not the plain `deleteCollection` helper above)
         // because each `customers/{uid}` doc owns subcollections
         // (`subscriptions`, `checkout_sessions`, `payments`) that a
@@ -102,6 +104,16 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         emailVerified: true,
       });
       return { uid: user.uid };
+    },
+
+    /**
+     * Grants the moderation role. Through the Admin SDK because that is the
+     * only way it can be granted at all — `user_roles` has no client write
+     * path, by design (`docs/data-model.md` § `user_roles`).
+     */
+    async seedReviewer({ uid, reviewer }: ReviewerSeed) {
+      await firestore.doc(`user_roles/${uid}`).set({ reviewer });
+      return null;
     },
 
     async seedCustomQuestions(questions: CustomQuestionSeed[]) {
