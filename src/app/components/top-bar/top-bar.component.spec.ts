@@ -354,7 +354,7 @@ describe('TopBarComponent: the chip label region', () => {
    * The CSS version is different in kind, not just in mechanism. The browser
    * owns the interpolation and Angular's entire contribution is one class on
    * one element, so what jsdom sees *is* the behaviour: `max-w-0` means
-   * collapsed, `max-w-20` means open. No layout required, no fiction.
+   * collapsed, `max-w-16` means open. No layout required, no fiction.
    *
    * **What jsdom still cannot tell you, and it cost a CI round trip.** These
    * assertions are about which class is set, not about what it does. The first
@@ -379,7 +379,7 @@ describe('TopBarComponent: the chip label region', () => {
   it('opens the label region once there is a sign-in prompt to show', () => {
     const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
 
-    expect(labelRegion(h).className).toContain('max-w-20');
+    expect(labelRegion(h).className).toContain('max-w-16');
     expect(labelRegion(h).className).not.toContain('max-w-0');
   });
 

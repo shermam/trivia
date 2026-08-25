@@ -86,6 +86,35 @@ describe('the top bar on a phone', () => {
     });
   });
 
+  /**
+   * The account chip's label animates by transitioning `max-width` from `0` to
+   * a cap, so the cap is a number the label has to stay under — and a label
+   * wider than its cap is not clipped for the length of the animation, it is
+   * clipped **forever**.
+   *
+   * That makes the cap a silent failure by construction: "Sign in" would simply
+   * render as "Sign i" and nothing else in the suite would notice. The cap is
+   * deliberately tight (4rem against a 53.4px label) because the ratio of label
+   * to cap is the fraction of the transition that is visible, so this is the
+   * assertion that pays for choosing timing over slack.
+   *
+   * `scrollWidth` against `clientWidth` rather than a fixed number, so it keeps
+   * working if the font, the copy or the root font size changes — which is the
+   * whole point, since those are exactly what would move the label past the cap.
+   */
+  it('shows the whole sign-in label, uncut by the animation cap', () => {
+    cy.get('[data-cy="auth-menu-trigger"] span.overflow-hidden').should(($region) => {
+      const region = $region[0];
+      expect(region.scrollWidth, 'label overflowing its max-width cap').to.be.at.most(
+        region.clientWidth,
+      );
+      // ...and it must not be collapsed either: signed out is the one state
+      // whose label is supposed to be visible, so a passing overflow check on a
+      // zero-width region would be vacuous.
+      expect(region.clientWidth, 'label region width').to.be.greaterThan(0);
+    });
+  });
+
   it('opens a drawer holding the links the bar dropped', () => {
     cy.get('[data-cy="nav-menu-trigger"]').click();
 

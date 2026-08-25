@@ -161,25 +161,33 @@
             label *appearing* — the same failure mode as the JavaScript version
             this replaced.
 
-            **The cost of `max-width` is timing**, and the duration is set to
-            pay it. Motion stops the instant the cap passes the content width,
-            so with a 5rem cap and a 53.4px label the movement occupies 53.4/80
-            = 67% of the transition. Hence `450ms` rather than `300ms`: that
-            buys ~285ms of actual movement (measured: 17 animated frames) and
-            leaves a dead tail nothing can see, because nothing is moving in
-            it. The alternative — a tighter cap — trades that invisible tail
-            for a visible failure, since a label wider than the cap is clipped
-            permanently. `ease-linear` for the same reason: `ease-out` would
-            spend most of its distance before the cap is reached and then stop
-            dead.
+            **The cost of `max-width` is timing, and the cap and duration are
+            chosen together to pay it.** Motion stops the instant the cap
+            passes the content width, so the ratio of label to cap *is* the
+            fraction of the transition you can see. With `ease-out` that bites
+            harder than it looks, because the curve spends its distance early:
+            measured against a 53.4px label, a 5rem cap finished at 150ms of a
+            450ms transition — 33%, nine frames, over before it registered.
+
+            Hence a 4rem cap and `600ms`, measured at 300ms of real movement
+            across 18 frames. The cap is the part that needed checking rather
+            than assuming, since a label wider than its cap is clipped
+            *permanently* — a real failure traded for an invisible one. The
+            4rem headroom survives the cases that would break it: every generic
+            fallback face is **narrower** than the shipped one (sans 50.8px,
+            serif 48.1px against 53.4px), and a larger root font scales the cap
+            with the text (at 125%, 66.7px against an 80px cap), so the ratio
+            holds rather than drifting. `mobile-nav.cy.ts` asserts the label is
+            not clipped, so if that ever stops being true it fails loudly
+            instead of silently cutting a word in half.
 
             `sm:max-w-none` above the breakpoint, because a long display name
             is far wider than any cap that would animate well — and desktop is
             not supposed to move anyway.
           -->
           <span
-            class="overflow-hidden motion-safe:transition-[max-width] motion-safe:duration-[450ms] ease-linear"
-            [ngClass]="showsLabel() ? 'max-w-20 sm:max-w-none' : 'max-w-0 sm:max-w-none'"
+            class="overflow-hidden motion-safe:transition-[max-width] motion-safe:duration-600 ease-out"
+            [ngClass]="showsLabel() ? 'max-w-16 sm:max-w-none' : 'max-w-0 sm:max-w-none'"
           >
             @if (!authService.authReady()) {
               <!--
