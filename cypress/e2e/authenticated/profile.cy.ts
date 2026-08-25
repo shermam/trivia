@@ -21,6 +21,9 @@ describe('authenticated profile management', () => {
     cy.get('#displayName').clear().type('Ada Lovelace');
     cy.contains('button', 'Save').click();
 
+    // `contains` matches textContent, which is the right check now that the
+    // name is `sr-only` in the chip: it is the button's accessible name rather
+    // than something a sighted user reads off the bar.
     cy.get('header').contains('Ada Lovelace');
   });
 
@@ -63,15 +66,21 @@ describe('authenticated profile management', () => {
 
   /**
    * The account chip is the only part of the top bar whose width the user
-   * controls, and on a phone it was wide enough to run into the centred brand.
-   * Below `sm` it now shows the avatar alone.
+   * controls, and it now shows the avatar alone at **every** viewport.
+   *
+   * On a phone that started as an overlap fix — a long name ran into the
+   * centred brand. On a desktop it is a layout-shift fix, and the two things
+   * it removes arrive separately: the display name when auth resolves, then
+   * the PRO badge a beat later when the Stripe claim does. Measured at 1024px
+   * against a 123.4px skeleton, a short name landed the chip at 104.4px, a
+   * short name with PRO at 144px, and this 29-character name at 277.5px.
    *
    * Both halves are asserted on purpose. `sr-only` rather than `hidden` is
    * what keeps the name in the button's accessible name — a trigger announced
-   * as the single letter "B" would be a worse bug than the overlap, and an
+   * as the single letter "B" would be a worse bug than the shift, and an
    * invisible one.
    */
-  it('collapses the account chip to the avatar on a phone, keeping the name for screen readers', () => {
+  it('collapses the account chip to the avatar at every viewport, keeping the name for screen readers', () => {
     const longName = 'Bartholomew Featherstonehaugh';
     cy.openAuthMenu();
     cy.get('#displayName').clear().type(longName);
@@ -118,6 +127,41 @@ describe('authenticated profile management', () => {
           expect(brand.x + brand.width).to.be.at.most($chip[0].getBoundingClientRect().x);
         });
     });
+
+    // ...and the same at desktop width, which is the shift this change exists
+    // to remove. The label region carrying zero width is the whole mechanism:
+    // there is nothing rendered that could arrive late and resize the chip.
+    cy.viewport(1024, 780);
+
+    cy.get('[data-cy="auth-menu-trigger"] span.overflow-hidden').should(($region) => {
+      expect($region[0].getBoundingClientRect().width, 'desktop label region').to.equal(0);
+    });
+
+    cy.get('[data-cy="auth-menu-trigger"]').should(($chip) => {
+      const chip = $chip[0];
+      const styles = getComputedStyle(chip);
+      const box = (value: string) => parseFloat(value);
+      const avatar = chip.querySelector('.h-7') as HTMLElement;
+      const chevron = chip.querySelector('app-icon') as HTMLElement;
+      // Avatar + chevron + the chevron's own gap + the button's padding and
+      // border. Derived rather than hard-coded, so it keeps meaning if any of
+      // those change; what it pins is that the label contributes nothing.
+      const expected =
+        avatar.getBoundingClientRect().width +
+        chevron.getBoundingClientRect().width +
+        box(getComputedStyle(chevron).marginLeft) +
+        box(styles.paddingLeft) +
+        box(styles.paddingRight) +
+        box(styles.borderLeftWidth) +
+        box(styles.borderRightWidth);
+
+      expect(chip.getBoundingClientRect().width, 'desktop chip width').to.be.closeTo(expected, 0.5);
+    });
+
+    // The name is still there for a screen reader at this width too — the
+    // desktop chip used to be the one place it was visible, so this is the
+    // assertion that stops it being dropped rather than hidden.
+    cy.get('[data-cy="auth-menu-trigger"]').should('contain.text', longName);
   });
 
   it('signs out back to an anonymous session without flashing the verify-email prompt', () => {
