@@ -25,33 +25,39 @@ describe('authenticated profile management', () => {
   });
 
   /**
-   * The width animation, at the only layer that can see it.
+   * The width animation, at the only layer that can see it — and the layer
+   * that caught it being wrong.
    *
-   * The unit suite pins the classes; whether those classes *mean* anything is a
-   * browser question. Two things can go wrong without a single unit test
-   * noticing: Tailwind can fail to emit an arbitrary variant, in which case
-   * `motion-safe:transition-[grid-template-columns]` is a class that matches no
-   * rule; and the `0fr` track can fail to reach zero, which is what happens the
-   * moment the grid item stops being `overflow-hidden`, because a grid item
-   * with visible overflow has a content-based automatic minimum size.
+   * The unit suite pins which class is set; whether that class *does* anything
+   * is a browser question, and the first version of this animation failed it.
+   * It used `grid-template-columns: 0fr` -> `1fr`, which is the technique every
+   * accordion recipe reaches for. Every unit test passed. In a real browser the
+   * `0fr` track never collapsed: an `fr` track only collapses when the grid
+   * container has a width of its own to divide up, and every box in this chip
+   * is shrink-to-fit, so the container was sized *from* the track's content and
+   * the `fr` filled exactly that. Measured at 53.36px for both `0fr` and `1fr`,
+   * and an inline `style="grid-template-columns:0fr"` did the same.
    *
-   * Both are asserted from resolved styles rather than by watching an
-   * animation. Catching a 300ms transition mid-flight is a race; the start and
-   * end states are not.
+   * These two assertions are what failed then and pass now. Both are read from
+   * *resolved* styles at rest rather than by watching an animation, because
+   * catching a 450ms transition mid-flight is a race and its start and end
+   * states are not.
    */
-  it('wires the chip label region for a width transition that can reach zero', () => {
+  it('collapses the chip label region to nothing, and can animate it', () => {
     cy.viewport(390, 780);
 
-    cy.get('[data-cy="auth-menu-trigger"] .grid').then(($region) => {
+    cy.get('[data-cy="auth-menu-trigger"] span.overflow-hidden').should(($region) => {
       const styles = getComputedStyle($region[0]);
 
-      // The class has to resolve to an actual declaration. Cypress runs with no
-      // motion preference, so `motion-safe:` is live here.
-      expect(styles.transitionProperty, 'transition-property').to.contain('grid-template-columns');
+      // Signed in, on a phone: fully collapsed. `0px` rather than some small
+      // residue is the whole point — see the width assertion below.
+      expect(styles.maxWidth, 'collapsed max-width').to.equal('0px');
+      expect($region[0].getBoundingClientRect().width, 'collapsed region width').to.equal(0);
 
-      // Signed in, on a phone: the track is collapsed, and `0px` rather than
-      // some small residue is the whole point — see the width assertion below.
-      expect(styles.gridTemplateColumns, 'collapsed track').to.equal('0px');
+      // And the class has to resolve to a real declaration: Tailwind can fail
+      // to emit an arbitrary variant, leaving a class that matches no rule.
+      // Cypress runs with no motion preference, so `motion-safe:` is live here.
+      expect(styles.transitionProperty, 'transition-property').to.contain('max-width');
     });
   });
 

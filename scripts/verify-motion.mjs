@@ -50,7 +50,7 @@ const MOVEMENT_PATTERNS = [
   // `animate-none` is the opt-out and is not motion.
   /(?<!:)\banimate-(?!none\b)[a-z][a-z0-9-]*/g,
   // Arbitrary-property transitions of anything that changes layout, e.g.
-  // `transition-[grid-template-columns]` on the account chip's label region.
+  // `transition-[max-width]` on the account chip's label region.
   // Deliberately not every `transition-[…]`: see the note above about the quiz
   // timer's `stroke-dashoffset`, which animates without reflowing anything.
   /(?<!:)\btransition-\[[^\]]*\b(?:grid-template|width|height|margin|padding|inset|top|right|bottom|left|translate|transform|flex-basis|gap)[^\]]*\]/g,

@@ -353,30 +353,34 @@ describe('TopBarComponent: the chip label region', () => {
    *
    * The CSS version is different in kind, not just in mechanism. The browser
    * owns the interpolation and Angular's entire contribution is one class on
-   * one element, so what jsdom sees *is* the behaviour: `grid-cols-[0fr]`
-   * means collapsed, `grid-cols-[1fr]` means open. No layout required, no
-   * fiction.
+   * one element, so what jsdom sees *is* the behaviour: `max-w-0` means
+   * collapsed, `max-w-20` means open. No layout required, no fiction.
    *
-   * The widths those classes resolve to are still a browser question, and
-   * `profile.cy.ts` asks it there.
+   * **What jsdom still cannot tell you, and it cost a CI round trip.** These
+   * assertions are about which class is set, not about what it does. The first
+   * version of this animation used `grid-template-columns: 0fr` -> `1fr`, every
+   * test here passed against it, and in a real browser the `0fr` track did not
+   * collapse at all — an `fr` track only collapses when the grid container has
+   * a width of its own to divide, and every box in this chip is shrink-to-fit.
+   * `profile.cy.ts` is what asks whether the class *means* anything.
    */
   const labelRegion = (h: ReturnType<typeof setup>) =>
-    h.chip().querySelector('.grid') as HTMLElement;
+    h.chip().querySelector('span.overflow-hidden') as HTMLElement;
 
   it('keeps the label region collapsed on a phone while auth settles', () => {
     const h = setup({ auth: { authReady: false } });
 
     // Collapsed below `sm`, open from `sm` up: on a desktop there is room for
     // the skeleton bar in every state, so nothing needs to move.
-    expect(labelRegion(h).className).toContain('grid-cols-[0fr]');
-    expect(labelRegion(h).className).toContain('sm:grid-cols-[1fr]');
+    expect(labelRegion(h).className).toContain('max-w-0');
+    expect(labelRegion(h).className).toContain('sm:max-w-none');
   });
 
   it('opens the label region once there is a sign-in prompt to show', () => {
     const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
 
-    expect(labelRegion(h).className).toContain('grid-cols-[1fr]');
-    expect(labelRegion(h).className).not.toContain('grid-cols-[0fr]');
+    expect(labelRegion(h).className).toContain('max-w-20');
+    expect(labelRegion(h).className).not.toContain('max-w-0');
   });
 
   /**
@@ -384,19 +388,19 @@ describe('TopBarComponent: the chip label region', () => {
    * simply `authReady()`.
    *
    * A returning player's chip is avatar-only on a phone, which is the same
-   * width as the skeleton it replaces — so holding the track at `0fr` here is
-   * what makes their chip resolve without moving. Leaving it at `1fr` and
-   * relying on the label's `sr-only` is not equivalent: measured in Chromium
-   * that still left 8px of wrapper margin in the track, so the chip landed at
-   * 50px against the 42px it is supposed to match.
+   * width as the skeleton it replaces — so collapsing the region here is what
+   * makes their chip resolve without moving. Relying on the label's `sr-only`
+   * instead is not equivalent: measured in Chromium that still left 8px of
+   * wrapper margin in flow, so the chip landed at 50px against the 42px it is
+   * supposed to match. That shipped to CI and failed there.
    */
   it('keeps the label region collapsed on a phone for a signed-in account', () => {
     const h = setup({
       auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
     });
 
-    expect(labelRegion(h).className).toContain('grid-cols-[0fr]');
-    expect(labelRegion(h).className).toContain('sm:grid-cols-[1fr]');
+    expect(labelRegion(h).className).toContain('max-w-0');
+    expect(labelRegion(h).className).toContain('sm:max-w-none');
   });
 
   /**
@@ -434,7 +438,7 @@ describe('TopBarComponent: the chip label region', () => {
   it("gates the transition on the reader's motion preference", () => {
     const h = setup({ auth: { authReady: false } });
 
-    expect(labelRegion(h).className).toContain('motion-safe:transition-[grid-template-columns]');
+    expect(labelRegion(h).className).toContain('motion-safe:transition-[max-width]');
   });
 
   /**
