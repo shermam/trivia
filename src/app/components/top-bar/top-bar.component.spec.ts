@@ -20,18 +20,19 @@ import { TopBarComponent } from './top-bar.component';
  */
 
 /**
- * A controllable `matchMedia`, so a spec can drive a breakpoint crossing and
- * choose whether the reader has asked for reduced motion.
+ * A controllable `matchMedia`, so a spec can drive a breakpoint crossing.
  *
- * Both queries go through the same stub because `TopBarComponent` asks for the
- * breakpoint and `prefersReducedMotion()` asks for the preference, and jsdom
- * implements neither.
+ * jsdom does not implement `matchMedia` at all; `src/test-setup.ts` shims it
+ * globally so nothing throws, and this replaces the shim where a test needs to
+ * *fire* a change. The component's only query is Tailwind's `sm` breakpoint —
+ * the reduced-motion preference is now read by CSS (`motion-safe:`) rather
+ * than by TypeScript, so there is nothing here to drive for it.
  */
-function stubMatchMedia(reducedMotion = false) {
+function stubMatchMedia() {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
   window.matchMedia = (query: string) =>
     ({
-      matches: query.includes('prefers-reduced-motion') ? reducedMotion : false,
+      matches: false,
       media: query,
       onchange: null,
       addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => {
@@ -57,8 +58,8 @@ interface AuthState {
   isFullyAuthenticated?: boolean;
 }
 
-function setup(options: { isReviewer?: boolean; auth?: AuthState; reducedMotion?: boolean } = {}) {
-  const media = stubMatchMedia(options.reducedMotion ?? false);
+function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
+  const media = stubMatchMedia();
   const auth = options.auth ?? {};
   const authStub = {
     user: signal<AuthState['user']>(auth.user ?? null),
@@ -245,6 +246,24 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
   });
 });
 
+/**
+ * The "Sign in" label itself, not one of the wrappers around it.
+ *
+ * `textContent` matches every ancestor too, and the label now sits two spans
+ * deep inside the collapsing grid region — so a plain `.find()` on the text
+ * returns the outermost wrapper and quietly asserts against the wrong
+ * element's classes. Requiring no element children picks the leaf.
+ */
+function signInLabel(h: ReturnType<typeof setup>): HTMLElement {
+  const label = [...h.chip().querySelectorAll('span')].find(
+    (span) => span.childElementCount === 0 && span.textContent?.trim() === 'Sign in',
+  );
+  if (!label) {
+    throw new Error('no "Sign in" label in the chip');
+  }
+  return label as HTMLElement;
+}
+
 describe('TopBarComponent: the account chip while auth settles', () => {
   /**
    * **The regression test for a wrong-state flash.**
@@ -317,99 +336,118 @@ describe('TopBarComponent: the account chip while auth settles', () => {
   it('forbids the sign-in label from wrapping', () => {
     const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
 
-    const label = [...h.chip().querySelectorAll('span')].find(
-      (span) => span.textContent?.trim() === 'Sign in',
-    );
-    expect(label?.className).toContain('whitespace-nowrap');
+    expect(signInLabel(h).className).toContain('whitespace-nowrap');
   });
 });
 
-describe('TopBarComponent: motion', () => {
+describe('TopBarComponent: the chip label region', () => {
   /**
-   * Every animation in this app is gated on the reader's preference — the
-   * convention lives in `src/app/motion.ts`, and `npm run motion:verify`
-   * enforces it across templates. That script cannot see motion driven from
-   * TypeScript, so the chip's width animation is pinned here.
+   * The account chip's width animation, at the layer that can actually see it.
    *
-   * **What these tests deliberately do NOT cover, and why.** The animation's
-   * whole subtlety is that it measures across a render boundary: "from" in an
-   * `effect()`, where Angular has updated the signals but not the DOM, and
-   * "to" in `afterNextRender`, where the DOM is new. jsdom does no layout, so
-   * every width here is a fiction, and no fiction models that boundary
-   * faithfully — a call-counting stub hands out two different numbers whether
-   * or not the reads straddle a render, so it passes against the broken
-   * version too, and a content-derived stub cannot represent an in-flight
-   * inline width. Both were tried.
+   * It used to be a FLIP in TypeScript — measure before, measure after, set an
+   * inline width — and jsdom could not test it honestly at all: with no layout
+   * every width is a fiction, a call-counting stub passes against the broken
+   * version, and nothing models the render boundary the whole thing turned on.
+   * The tests that stood here said so at length and then pinned the
+   * scaffolding around the animation rather than the animation.
    *
-   * That correctness is verified where it is real: frame-by-frame in a browser
-   * (grow at 1024px, shrink at 390px, skipped under reduced motion), and
-   * guarded in `cypress/e2e/authenticated/profile.cy.ts`, which watches for the
-   * inline width appearing during a real sign-in. What is pinned below is
-   * everything else: the preference gate, the no-op skip, the first-paint
-   * guard and the teardown.
+   * The CSS version is different in kind, not just in mechanism. The browser
+   * owns the interpolation and Angular's entire contribution is one class on
+   * one element, so what jsdom sees *is* the behaviour: `grid-cols-[0fr]`
+   * means collapsed, `grid-cols-[1fr]` means open. No layout required, no
+   * fiction.
+   *
+   * The widths those classes resolve to are still a browser question, and
+   * `profile.cy.ts` asks it there.
    */
-  function stubWidths(...widths: number[]) {
-    let call = 0;
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => {
-      const width = widths[Math.min(call, widths.length - 1)];
-      call++;
-      return { width } as DOMRect;
-    });
-  }
+  const labelRegion = (h: ReturnType<typeof setup>) =>
+    h.chip().querySelector('.grid') as HTMLElement;
 
-  /** Drives the skeleton-to-account change and lets the render hooks settle. */
-  async function resolveAuth(h: ReturnType<typeof setup>) {
+  it('keeps the label region collapsed on a phone while auth settles', () => {
+    const h = setup({ auth: { authReady: false } });
+
+    // Collapsed below `sm`, open from `sm` up: on a desktop there is room for
+    // the skeleton bar in every state, so nothing needs to move.
+    expect(labelRegion(h).className).toContain('grid-cols-[0fr]');
+    expect(labelRegion(h).className).toContain('sm:grid-cols-[1fr]');
+  });
+
+  it('opens the label region once there is a sign-in prompt to show', () => {
+    const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
+
+    expect(labelRegion(h).className).toContain('grid-cols-[1fr]');
+    expect(labelRegion(h).className).not.toContain('grid-cols-[0fr]');
+  });
+
+  /**
+   * The state that must *not* animate, and the reason `showsLabel()` is not
+   * simply `authReady()`.
+   *
+   * A returning player's chip is avatar-only on a phone, which is the same
+   * width as the skeleton it replaces — so holding the track at `0fr` here is
+   * what makes their chip resolve without moving. Leaving it at `1fr` and
+   * relying on the label's `sr-only` is not equivalent: measured in Chromium
+   * that still left 8px of wrapper margin in the track, so the chip landed at
+   * 50px against the 42px it is supposed to match.
+   */
+  it('keeps the label region collapsed on a phone for a signed-in account', () => {
+    const h = setup({
+      auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
+    });
+
+    expect(labelRegion(h).className).toContain('grid-cols-[0fr]');
+    expect(labelRegion(h).className).toContain('sm:grid-cols-[1fr]');
+  });
+
+  /**
+   * The element has to survive the branch change, or there is no transition.
+   *
+   * A CSS transition animates a property changing on an element that is still
+   * there. If the label region were inside the `@if`, Angular would destroy it
+   * and create a new one with `grid-cols-[1fr]` already applied, and the
+   * browser would have nothing to interpolate from — the exact failure that
+   * makes this look correct in review and do nothing in a browser.
+   */
+  it('reuses the same label-region element across the auth transition', () => {
+    const h = setup({ auth: { authReady: false } });
+    const regionBefore = labelRegion(h);
+    // The avatar *is* inside the `@if`, so it is the control: it proves this
+    // test can see a recreation at all. Without it, `toBe` would pass just as
+    // happily against a template where nothing re-rendered.
+    const avatarBefore = h.chip().querySelector('.h-7');
+
     h.authStub.user.set({ displayName: 'Ada Lovelace' });
     h.authStub.authReady.set(true);
     h.authStub.isAnonymous.set(false);
     h.fixture.detectChanges();
-    await h.fixture.whenStable();
-  }
 
-  it('starts a width transition when the chip changes size', async () => {
-    stubWidths(120, 40);
-    const h = setup({ auth: { authReady: false } });
-
-    await resolveAuth(h);
-
-    expect(h.chip().style.transitionProperty).toBe('width');
-    expect(h.chip().style.width).not.toBe('');
+    expect(h.chip().querySelector('.h-7')).not.toBe(avatarBefore);
+    expect(labelRegion(h)).toBe(regionBefore);
   });
 
-  it('does not animate when the reader has asked for reduced motion', async () => {
-    stubWidths(120, 40);
-    const h = setup({ auth: { authReady: false }, reducedMotion: true });
-
-    await resolveAuth(h);
-
-    expect(h.chip().style.width).toBe('');
-    expect(h.chip().style.transitionProperty).toBe('');
-  });
-
-  it('does not animate when the width has not actually changed', async () => {
-    // The anonymous case, where the skeleton is deliberately the same size as
-    // what replaces it. Animating a zero-width change would be 220ms of
-    // nothing happening, slowly.
-    stubWidths(95);
+  /**
+   * `npm run motion:verify` enforces the `motion-safe:` gate across templates,
+   * so this is not the guard against forgetting it — it is the guard against
+   * the transition being dropped or moved off this element, which the script
+   * would report as a clean pass.
+   */
+  it("gates the transition on the reader's motion preference", () => {
     const h = setup({ auth: { authReady: false } });
 
-    await resolveAuth(h);
-
-    expect(h.chip().style.width).toBe('');
+    expect(labelRegion(h).className).toContain('motion-safe:transition-[grid-template-columns]');
   });
 
-  it('leaves no inline width behind when the component is destroyed mid-animation', async () => {
-    // `CLAUDE.md` §4.4 — a frame request, a listener and a timer are all live
-    // during the transition, and the teardown has to drop all three.
-    stubWidths(120, 40);
-    const h = setup({ auth: { authReady: false } });
-    await resolveAuth(h);
-    const chip = h.chip();
-    expect(chip.style.width).not.toBe('');
+  /**
+   * The gap between the avatar and the label belongs to the label, and this is
+   * the assertion that keeps it there. Put it back on the button as `gap-2`
+   * and the collapsed chip is 8px wider than the avatar it is meant to equal —
+   * which reads as a chip that is slightly the wrong shape rather than as a
+   * bug, and no measurement in the unit suite would notice.
+   */
+  it('carries the avatar gap inside the collapsing region, not on the button', () => {
+    const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
 
-    h.fixture.destroy();
-
-    expect(chip.style.width).toBe('');
-    expect(chip.style.transitionProperty).toBe('');
+    expect(h.chip().className).not.toMatch(/(^|\s)gap-\d/);
+    expect(signInLabel(h).className).toContain('ml-2');
   });
 });

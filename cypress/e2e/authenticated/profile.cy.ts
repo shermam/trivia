@@ -27,37 +27,31 @@ describe('authenticated profile management', () => {
   /**
    * The width animation, at the only layer that can see it.
    *
-   * jsdom does no layout, so the unit suite can pin the preference gate, the
-   * no-op skip and the teardown but not the thing that actually broke: the
-   * animation measures "from" in an `effect()` (DOM still the previous render)
-   * and "to" in `afterNextRender` (DOM updated), and a stubbed
-   * `getBoundingClientRect` cannot tell those two renders apart. The first
-   * version measured both halves in the effect, passed every unit test, and in
-   * a browser animated the skeleton *appearing* while leaving the real
-   * transition unanimated.
+   * The unit suite pins the classes; whether those classes *mean* anything is a
+   * browser question. Two things can go wrong without a single unit test
+   * noticing: Tailwind can fail to emit an arbitrary variant, in which case
+   * `motion-safe:transition-[grid-template-columns]` is a class that matches no
+   * rule; and the `0fr` track can fail to reach zero, which is what happens the
+   * moment the grid item stops being `overflow-hidden`, because a grid item
+   * with visible overflow has a content-based automatic minimum size.
    *
-   * Signing in changes the chip's content for real, which is the same
-   * transition, so the inline width the animation sets has to appear. Cypress
-   * retries this assertion, and the transition lasts 220ms — comfortably
-   * longer than a retry interval — so it is not a race.
+   * Both are asserted from resolved styles rather than by watching an
+   * animation. Catching a 300ms transition mid-flight is a race; the start and
+   * end states are not.
    */
-  it('animates the account chip when signing in changes its width', () => {
-    cy.openAuthMenu();
-    cy.get('#displayName').clear().type('Bartholomew Featherstonehaugh');
-    cy.contains('button', 'Save').click();
-    cy.contains('Saved!');
+  it('wires the chip label region for a width transition that can reach zero', () => {
+    cy.viewport(390, 780);
 
-    // An inline width is only ever present while a transition is in flight —
-    // `cancelChipWidthAnimation` clears it on `transitionend`.
-    cy.get('[data-cy="auth-menu-trigger"]').should(($chip) => {
-      expect($chip[0].style.width, 'inline width during the transition').to.match(/^\d/);
-    });
+    cy.get('[data-cy="auth-menu-trigger"] .grid').then(($region) => {
+      const styles = getComputedStyle($region[0]);
 
-    // ...and it must not be stranded there, which is what the timer backstop
-    // exists for: `transitionend` never fires for a transition that is
-    // interrupted or never starts.
-    cy.get('[data-cy="auth-menu-trigger"]', { timeout: 10000 }).should(($chip) => {
-      expect($chip[0].style.width, 'inline width after the transition').to.equal('');
+      // The class has to resolve to an actual declaration. Cypress runs with no
+      // motion preference, so `motion-safe:` is live here.
+      expect(styles.transitionProperty, 'transition-property').to.contain('grid-template-columns');
+
+      // Signed in, on a phone: the track is collapsed, and `0px` rather than
+      // some small residue is the whole point — see the width assertion below.
+      expect(styles.gridTemplateColumns, 'collapsed track').to.equal('0px');
     });
   });
 
@@ -81,8 +75,30 @@ describe('authenticated profile management', () => {
 
     cy.viewport(390, 780);
 
+    // Derived from the DOM rather than hard-coded, and *exact* rather than a
+    // bound: the collapsed chip has to be the avatar plus the button's own
+    // padding and border and nothing else. A loose `lessThan(100)` passed
+    // happily against the version where the label region kept 8px of wrapper
+    // margin — the chip was 50px where it should have been 42px, which reads
+    // as slightly the wrong shape rather than as a bug. That 42px is also the
+    // width the skeleton state collapses to, so this is what makes the
+    // sign-in animation start from the same place a signed-in chip ends at.
     cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
-      expect($chip[0].getBoundingClientRect().width).to.be.lessThan(100);
+      const chip = $chip[0];
+      const styles = getComputedStyle(chip);
+      const avatar = chip.querySelector('.h-7') as HTMLElement;
+      const box = (value: string) => parseFloat(value);
+      const expected =
+        avatar.getBoundingClientRect().width +
+        box(styles.paddingLeft) +
+        box(styles.paddingRight) +
+        box(styles.borderLeftWidth) +
+        box(styles.borderRightWidth);
+
+      expect(chip.getBoundingClientRect().width, 'collapsed chip width').to.be.closeTo(
+        expected,
+        0.5,
+      );
     });
 
     // textContent, not visibility — the point is that it is still there.

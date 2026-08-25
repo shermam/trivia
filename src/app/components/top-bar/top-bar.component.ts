@@ -3,8 +3,6 @@ import {
   Component,
   DestroyRef,
   ElementRef,
-  Injector,
-  afterNextRender,
   computed,
   effect,
   inject,
@@ -13,7 +11,6 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { prefersReducedMotion } from '../../motion';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { ReviewerService } from '../../services/reviewer.service';
@@ -29,13 +26,6 @@ import { AuthMenuComponent } from './auth-menu.component';
  * touching any routed screen. Owns only the trigger button + dropdown shell;
  * AuthMenuComponent owns everything auth-state-dependent.
  */
-/**
- * How long the account chip takes to settle into its new width. Short enough
- * that it reads as the chip resolving rather than as an animation in its own
- * right; long enough to be a movement rather than a jump.
- */
-const CHIP_WIDTH_TRANSITION_MS = 220;
-
 @Component({
   selector: 'app-top-bar',
   standalone: true,
@@ -75,7 +65,6 @@ export class TopBarComponent {
 
   private readonly menuPanel = viewChild<ElementRef<HTMLElement>>('menuPanel');
   private readonly menuTrigger = viewChild<ElementRef<HTMLElement>>('menuTrigger');
-  private readonly accountChip = viewChild<ElementRef<HTMLElement>>('accountChip');
   private readonly navPanel = viewChild<ElementRef<HTMLElement>>('navPanel');
   private readonly navTrigger = viewChild<ElementRef<HTMLElement>>('navTrigger');
   private wasNavOpen = false;
@@ -114,14 +103,32 @@ export class TopBarComponent {
    * The same window opens again on sign-out, between the old user going and
    * the replacement anonymous session arriving.
    */
-  private readonly injector = inject(Injector);
-  /** False until the chip has rendered real content at least once. */
-  private hasRenderedChip = false;
-  private chipAnimationFrame: number | null = null;
-  private chipTransitionCleanup: (() => void) | null = null;
-
   protected readonly showsRealAccount = computed(
     () => this.authService.user() !== null && !this.authService.isAnonymous(),
+  );
+
+  /**
+   * Whether the chip's label region takes up space on a phone.
+   *
+   * True for exactly one state — signed out, auth settled — and that is the
+   * whole design. The chip has two widths below `sm`: avatar-only (42px) and
+   * avatar-plus-"Sign in". Everything else collapses to the first, so the
+   * label region's `grid-template-columns` transition only ever *widens*, and
+   * it fires precisely when there is something to say.
+   *
+   * The product reading is the reason to prefer it over animating in both
+   * directions. A returning player's chip resolves to their avatar without
+   * moving, which is what you want when the next thing they do is start a
+   * game. A signed-out player's chip grows a "Sign in" affordance in the
+   * corner of their eye, which is the one moment the bar has something to
+   * offer them.
+   *
+   * Desktop is unaffected: from `sm` up the track is always `1fr`, because
+   * there is room for the label in every state and the skeleton is already
+   * sized to the string it becomes.
+   */
+  protected readonly showsLabel = computed(
+    () => this.authService.authReady() && !this.showsRealAccount(),
   );
 
   protected readonly initials = computed(() => {
@@ -184,13 +191,6 @@ export class TopBarComponent {
       document.removeEventListener('click', onDocumentClick, true);
       document.removeEventListener('keydown', onDocumentKeydown);
       wideEnoughForFullNav.removeEventListener('change', onBreakpointChange);
-      // The chip's width animation owns a frame request, a listener and a
-      // timer; a component torn down mid-animation must not leave any of them
-      // (`CLAUDE.md` §4.4).
-      const chip = this.accountChip()?.nativeElement;
-      if (chip) {
-        this.cancelChipWidthAnimation(chip);
-      }
     });
 
     // Focus follows the menu: into the panel when it opens, back where it came
@@ -253,124 +253,6 @@ export class TopBarComponent {
 
     this.wasNavOpen = isOpen;
   });
-
-  /**
-   * Animates the chip's width when its contents change size.
-   *
-   * **Why this cannot be done in CSS.** A transition animates a change to a
-   * *property*; this change comes from the content changing while the property
-   * stays `width: auto`, so there is no property transition to hook.
-   * `interpolate-size: allow-keywords` does not help either — it lets `auto` be
-   * interpolated against a length, and here both the before and after computed
-   * values are `auto`. The `max-width` trick only covers growth: clamping
-   * `width: auto` with an animated `max-width` can widen a box, but the chip
-   * *shrinks* below `sm` (the signed-in state is narrower than the skeleton),
-   * and shrinking needs a `max-width` equal to the final content width, which
-   * is the number nobody has. So the widths have to be measured.
-   *
-   * **The two halves are measured in different hooks, and that is the whole
-   * trick.** Angular runs a component's `effect()` with the *new* signal values
-   * but *before* refreshing the view, so the DOM inside the effect is still the
-   * previous render — which makes it exactly the right place to read the
-   * "from" of a FLIP. `afterNextRender` then runs once the view has been
-   * updated, which is the only place "to" is readable.
-   *
-   * Getting this wrong is not obvious from the outside: an earlier version
-   * measured both halves inside the effect and looked plausible in unit tests,
-   * because a stubbed `getBoundingClientRect` cannot tell the two renders
-   * apart. In a browser it animated the skeleton *appearing* (20px → 123px,
-   * from a first pass where the chip had no content yet) and left the
-   * transition that matters — the skeleton giving way to the account, 123px →
-   * 238px — completely unanimated.
-   *
-   * Writing `element.style.width` goes through CSSOM, which the CSP does not
-   * govern, unlike a `style="…"` attribute in a template (`CLAUDE.md` §4.4).
-   * The app is zoneless, so none of these callbacks trigger change detection
-   * and none need to: they touch the DOM and read no signals.
-   */
-  private readonly chipWidthEffect = effect(() => {
-    // Everything that changes the chip's contents, read so the effect re-runs.
-    this.authService.authReady();
-    this.authService.user();
-    this.subscriptionService.isProUser();
-    this.showsRealAccount();
-
-    const element = this.accountChip()?.nativeElement;
-    if (!element) {
-      return;
-    }
-
-    // The very first pass renders before any branch has content — the chip
-    // measures as bare padding. Animating from that would be a growth
-    // animation on first paint that nothing asked for.
-    if (!this.hasRenderedChip) {
-      this.hasRenderedChip = true;
-      return;
-    }
-
-    // Deliberately *not* cleared first: if an animation is already in flight,
-    // the width it has reached is where this one should start from. An earlier
-    // version cancelled and re-measured here, which meant a second content
-    // change arriving mid-animation — a sign-in immediately followed by the
-    // Pro claim landing, say — clipped the width back to its natural value,
-    // measured no change, and killed the animation outright.
-    const from = element.getBoundingClientRect().width;
-
-    if (prefersReducedMotion()) {
-      this.cancelChipWidthAnimation(element);
-      return;
-    }
-
-    afterNextRender(
-      () => {
-        // Drop any in-flight animation *now*, so the measurement below is of
-        // the content's natural width rather than wherever the transition had
-        // got to.
-        this.cancelChipWidthAnimation(element);
-        const to = element.getBoundingClientRect().width;
-        if (Math.abs(from - to) < 1) {
-          return;
-        }
-
-        element.style.width = `${from}px`;
-        element.style.transitionProperty = 'width';
-        element.style.transitionDuration = `${CHIP_WIDTH_TRANSITION_MS}ms`;
-        element.style.transitionTimingFunction = 'ease-out';
-
-        this.chipAnimationFrame = requestAnimationFrame(() => {
-          this.chipAnimationFrame = null;
-          element.style.width = `${to}px`;
-        });
-
-        // `transitionend` alone is not enough: it never fires if the transition
-        // is interrupted or never starts, which would strand an explicit width
-        // and freeze the chip at that size for the rest of the session. The
-        // timer is the backstop, and whichever lands first tears the other down.
-        const onEnd = () => this.cancelChipWidthAnimation(element);
-        element.addEventListener('transitionend', onEnd);
-        const timer = setTimeout(onEnd, CHIP_WIDTH_TRANSITION_MS + 100);
-        this.chipTransitionCleanup = () => {
-          element.removeEventListener('transitionend', onEnd);
-          clearTimeout(timer);
-        };
-      },
-      { injector: this.injector },
-    );
-  });
-
-  /** Returns the chip to `width: auto` and drops whatever was watching it. */
-  private cancelChipWidthAnimation(element: HTMLElement): void {
-    if (this.chipAnimationFrame !== null) {
-      cancelAnimationFrame(this.chipAnimationFrame);
-      this.chipAnimationFrame = null;
-    }
-    this.chipTransitionCleanup?.();
-    this.chipTransitionCleanup = null;
-    element.style.width = '';
-    element.style.transitionProperty = '';
-    element.style.transitionDuration = '';
-    element.style.transitionTimingFunction = '';
-  }
 
   protected toggleNav(): void {
     this.isNavOpenSignal.update((open) => !open);

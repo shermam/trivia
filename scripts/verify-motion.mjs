@@ -5,8 +5,15 @@ import { globSync } from 'node:fs';
  * Fails when a template animates something without gating it on the reader's
  * motion preference.
  *
- * **Why a script and not a paragraph.** The rule in `src/app/motion.ts` is the
- * kind that decays: it is invisible to anyone who does not have "reduce
+ * **The convention, in one line: motion is opt-out by default.** Anything that
+ * moves, scales or loops is gated on the reader not having asked for less of
+ * it — Tailwind's `motion-safe:` variant in a template, or a
+ * `matchMedia('(prefers-reduced-motion: reduce)')` check for motion driven
+ * from TypeScript. This file is where that rule lives, because it is also what
+ * enforces it; a convention documented somewhere other than its check is a
+ * convention with two places to drift.
+ *
+ * **Why a script and not a paragraph.** The rule is the kind that decays: it is invisible to anyone who does not have "reduce
  * motion" switched on, so a missing `motion-safe:` looks perfect to whoever
  * added it, to the reviewer, to Lighthouse and to the e2e suite. That is not
  * hypothetical here — the very first animation in this app shipped ungated
@@ -21,10 +28,19 @@ import { globSync } from 'node:fs';
  * animate `background-color` and `box-shadow` on hover) are not motion, and
  * sweeping them in would bury the real rule under noise nobody reads.
  *
- * A wider rule would need to understand *what* a transition animates, which
- * means resolving Tailwind's utilities to declarations — far more machinery
- * than the risk warrants. If a transform-based movement is ever added in a
- * template, add it to MOVEMENT_PATTERNS below.
+ * The one class of transition that *is* swept in is a `transition-[…]` naming
+ * a property that changes layout — `width`, `height`, `grid-template-columns`
+ * and friends. Those move everything around them, which is the thing the
+ * preference is about, and reaching for an arbitrary property is already a
+ * deliberate act rather than a default. The distinction is load-bearing rather
+ * than tidy: the quiz timer's `transition-[stroke-dashoffset]` sweeps a ring
+ * continuously for fifteen seconds and is correctly *not* an offence, because
+ * it repaints inside a fixed box and nothing on the page shifts.
+ *
+ * A wider rule would need to understand *what* a transition animates in the
+ * general case, which means resolving Tailwind's utilities to declarations —
+ * far more machinery than the risk warrants. If a transform-based movement is
+ * ever added in a template, add it to MOVEMENT_PATTERNS below.
  */
 
 /** Utilities that produce looping or translating motion. */
@@ -33,6 +49,11 @@ const MOVEMENT_PATTERNS = [
   // animate-ping, and any custom `animate-<name>` from a @theme block.
   // `animate-none` is the opt-out and is not motion.
   /(?<!:)\banimate-(?!none\b)[a-z][a-z0-9-]*/g,
+  // Arbitrary-property transitions of anything that changes layout, e.g.
+  // `transition-[grid-template-columns]` on the account chip's label region.
+  // Deliberately not every `transition-[…]`: see the note above about the quiz
+  // timer's `stroke-dashoffset`, which animates without reflowing anything.
+  /(?<!:)\btransition-\[[^\]]*\b(?:grid-template|width|height|margin|padding|inset|top|right|bottom|left|translate|transform|flex-basis|gap)[^\]]*\]/g,
 ];
 
 /** The variant that gates a utility on `prefers-reduced-motion: no-preference`. */
@@ -74,9 +95,10 @@ if (offences.length > 0) {
     console.error(`    ${file}:${line}  ${token}`);
   }
   console.error(
-    `\n  Prefix each with \`${SAFE_VARIANT}\` (or use \`prefersReducedMotion()\` from` +
-      ' `src/app/motion.ts` if the movement is driven from TypeScript).' +
-      '\n  The rule and its scope are documented in `src/app/motion.ts`.\n',
+    `\n  Prefix each with \`${SAFE_VARIANT}\` (or check` +
+      " `matchMedia('(prefers-reduced-motion: reduce)')` if the movement is" +
+      ' driven from TypeScript).\n  The rule and its scope are documented at the' +
+      ' top of this file.\n',
   );
   process.exit(1);
 }

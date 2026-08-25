@@ -102,6 +102,6 @@ jobs:
       # have the OS setting switched on — it looks perfect to the author, the
       # reviewer, Lighthouse and the e2e suite — which is exactly why it is a
       # check and not a convention. The first animation in this app shipped
-      # ungated and nothing noticed. Scope and reasoning: `src/app/motion.ts`.
+      # ungated and nothing noticed. Scope and reasoning: `scripts/verify-motion.mjs`.
       - name: Verify animations respect prefers-reduced-motion
         run: npm run motion:verify
