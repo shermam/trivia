@@ -195,6 +195,33 @@ export class AuthService {
         });
         return { auth, authModule };
       });
+
+      // **Never cache a rejected promise** (`CLAUDE.md` §4.4). Without this,
+      // one failed dynamic import of `firebase/auth` — or one runtime-config
+      // fetch that times out — is memoised for the life of the tab: every
+      // later call reuses the rejection, so `onAuthStateChanged` is never
+      // registered, `authReadySignal` is never set, and auth is permanently
+      // dead. `FirebaseAppService.getApp()` and
+      // `SubscriptionService.getProPriceId()` both already clear on failure;
+      // this one was missed.
+      this.authPromise.catch(() => {
+        this.authPromise = null;
+
+        // And *say so*, rather than leaving `authReady()` false forever.
+        //
+        // It is only ever set from inside the `onAuthStateChanged` callback
+        // above, which now will never run — so the account chip would sit on
+        // its loading skeleton indefinitely, pulsing at a user whose auth is
+        // never coming. "Ready, and nobody is signed in" is the true statement
+        // once the attempt has failed, and `showsRealAccount()` renders that
+        // as the "Sign in" prompt: an affordance that retries on click, rather
+        // than a spinner that cannot.
+        //
+        // Note this widens what `authReady()` asserts, from "auth resolved" to
+        // "we know the answer, and the answer may be nobody". Everything
+        // gating on it wants the second meaning — see `docs/app.md`.
+        this.authReadySignal.set(true);
+      });
     }
     return this.authPromise;
   }

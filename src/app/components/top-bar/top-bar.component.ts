@@ -107,6 +107,30 @@ export class TopBarComponent {
     () => this.authService.user() !== null && !this.authService.isAnonymous(),
   );
 
+  /**
+   * Whether the chip's label region takes up space on a phone.
+   *
+   * True for exactly one state — signed out, auth settled — and that is the
+   * whole design. The chip has two widths below `sm`: avatar-only (42px) and
+   * avatar-plus-"Sign in". Everything else collapses to the first, so the
+   * label region's `grid-template-columns` transition only ever *widens*, and
+   * it fires precisely when there is something to say.
+   *
+   * The product reading is the reason to prefer it over animating in both
+   * directions. A returning player's chip resolves to their avatar without
+   * moving, which is what you want when the next thing they do is start a
+   * game. A signed-out player's chip grows a "Sign in" affordance in the
+   * corner of their eye, which is the one moment the bar has something to
+   * offer them.
+   *
+   * Desktop is unaffected: from `sm` up the track is always `1fr`, because
+   * there is room for the label in every state and the skeleton is already
+   * sized to the string it becomes.
+   */
+  protected readonly showsLabel = computed(
+    () => this.authService.authReady() && !this.showsRealAccount(),
+  );
+
   protected readonly initials = computed(() => {
     const user = this.authService.user();
     const source = user?.displayName || user?.email || '';

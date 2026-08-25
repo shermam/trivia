@@ -151,6 +151,7 @@ npm run rules:test        # firestore.rules unit suite (Vitest) against the Fire
 npm run e2e            # functions:build, then Cypress e2e suite (headless) against the Firebase Emulator Suite (incl. Functions)
 npm run e2e:open       # same, but with the interactive Cypress runner
 npm run e2e:preview    # scoped Cypress suite against a real deployed preview (needs PREVIEW_URL + GOOGLE_APPLICATION_CREDENTIALS)
+npm run motion:verify  # fails on an animation not gated on prefers-reduced-motion
 npm run lighthouse     # build:prod, then Lighthouse CI against a local static server
 npm run firebase:emulate  # build:prod, functions:build, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore,functions

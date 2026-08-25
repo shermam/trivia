@@ -79,6 +79,13 @@
       </button>
 
       <div class="relative">
+        <!--
+          No `gap-2` on the button, deliberately. The gap belongs to the label,
+          and the label collapses — see the grid region below. A gap declared
+          here would survive the collapse and leave the "avatar only" chip 8px
+          wider than the avatar, which is precisely the number the whole
+          animation is built on.
+        -->
         <button
           #menuTrigger
           type="button"
@@ -88,7 +95,7 @@
           aria-haspopup="dialog"
           [attr.aria-controls]="isMenuOpen() ? panelId : null"
           [attr.aria-busy]="!authService.authReady() ? 'true' : null"
-          class="flex min-w-0 items-center gap-2 rounded-full pl-1.5 pr-1.5 sm:pr-3 py-1.5 border border-slate-900/10 dark:border-white/10 transition-colors"
+          class="flex min-w-0 items-center rounded-full pl-1.5 pr-1.5 sm:pr-3 py-1.5 border border-slate-900/10 dark:border-white/10 transition-colors"
           [ngClass]="isMenuOpen() ? 'bg-slate-50 dark:bg-slate-800' : 'bg-white dark:bg-slate-900'"
           [class.shadow-[0_0_0_3px_rgba(5,150,105,0.12)]]="isMenuOpen()"
         >
@@ -97,9 +104,7 @@
               A skeleton shaped like the chip it becomes, not the words
               "Loading…". The text version was 34px tall against 42px for every
               resolved state, so the chip changed height the moment auth
-              settled — and the placeholder is deliberately the *anonymous*
-              shape, because that is what a first load almost always resolves
-              to, which makes the common case change size not at all.
+              settled.
 
               The label is `sr-only` rather than absent: the button still has to
               announce something, and "Loading…" is the honest thing for it to
@@ -107,33 +112,17 @@
             -->
             <span
               aria-hidden="true"
-              class="flex h-7 w-7 animate-pulse items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700"
+              class="h-7 w-7 shrink-0 rounded-full bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
             ></span>
             <span class="sr-only">Loading&hellip;</span>
-            <!-- Reserves exactly the width "Sign in" will occupy. `invisible`,
-                 not `hidden`: it has to take up space to do its job. -->
-            <span aria-hidden="true" class="invisible whitespace-nowrap text-sm font-medium"
-              >Sign in</span
-            >
           } @else if (!showsRealAccount()) {
             <span
-              class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm"
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm"
               >&#128100;</span
-            >
-            <!--
-              `whitespace-nowrap` is load-bearing. Below `sm` the chip sits in a
-              `minmax(0,1fr)` grid track narrower than its natural width, so
-              without this "Sign in" wraps to two lines and the chip renders
-              54px tall inside a 64px bar. It shipped that way and nothing
-              caught it, because the mobile-nav spec measured width, overlap and
-              centring but never height.
-            -->
-            <span class="whitespace-nowrap text-sm font-medium text-slate-700 dark:text-slate-300"
-              >Sign in</span
             >
           } @else {
             <span
-              class="relative flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 text-white text-xs font-bold"
+              class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-white text-xs font-bold"
             >
               {{ initials() }}
               @if (needsVerification()) {
@@ -142,39 +131,146 @@
                 ></span>
               }
             </span>
-            <!--
-              `sr-only`, not `hidden`. Below `sm` the chip shows the avatar
-              alone — the name and the PRO badge were the widest thing in the
-              bar and pushed it into the brand — but removing them from the
-              DOM would leave the button's accessible name as a single letter.
-              `sr-only` takes them out of the layout (they are absolutely
-              positioned, so they are not flex items and contribute no gap)
-              while a screen reader still reads "S Sherman PRO".
-            -->
-            <span class="flex min-w-0 items-center gap-1.5 sr-only sm:not-sr-only sm:flex">
-              <span
-                class="text-sm font-medium text-slate-900 dark:text-slate-50 max-w-[5.5rem] sm:max-w-[10rem] truncate"
-              >
-                {{ authService.user()?.displayName || authService.user()?.email }}
-              </span>
-              @if (subscriptionService.isProUser()) {
-                <span
-                  class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
-                  >PRO</span
-                >
-              }
-            </span>
           }
+
+          <!--
+            The label region, and the reason it lives *outside* the branches
+            above: it is the element whose width animates, so it has to be the
+            same element before and after auth resolves. A transition animates a
+            change to a property on a surviving element; swap the element and
+            there is nothing to transition from.
+
+            **A content-driven width cannot be transitioned directly**, because
+            the change comes from the content while `width` stays `auto` — so
+            what animates is `max-width`, from `0` to a cap, with the label
+            clipped behind it and wiping into view. `overflow-hidden` is what
+            makes the collapsed state 0 wide rather than merely capped.
+
+            **`grid-template-columns: 0fr` → `1fr` was tried first and does not
+            work here** — worth recording, because it is the technique every
+            accordion recipe reaches for and it fails silently. An `fr` track
+            only collapses when the grid container has a width of its own to
+            divide up. Every box in this chain is shrink-to-fit, so the
+            container is sized *from* the track's own max-content and the `fr`
+            then fills exactly that: measured in the real bar, `0fr` left the
+            track at 53.36px, identical to `1fr`, and an inline
+            `style="grid-template-columns:0fr"` did the same. It survived
+            review and a standalone probe (where the ancestor chain differed
+            and it really did collapse) and was only caught by measuring the
+            actual component. What looked like a working animation was the
+            label *appearing* — the same failure mode as the JavaScript version
+            this replaced.
+
+            **The cost of `max-width` is timing, and the cap and duration are
+            chosen together to pay it.** Motion stops the instant the cap
+            passes the content width, so the ratio of label to cap *is* the
+            fraction of the transition you can see. With `ease-out` that bites
+            harder than it looks, because the curve spends its distance early:
+            measured against a 53.4px label, a 5rem cap finished at 150ms of a
+            450ms transition — 33%, nine frames, over before it registered.
+
+            Hence a 4rem cap and `600ms`, measured at 300ms of real movement
+            across 18 frames. The cap is the part that needed checking rather
+            than assuming, since a label wider than its cap is clipped
+            *permanently* — a real failure traded for an invisible one. The
+            4rem headroom survives the cases that would break it: every generic
+            fallback face is **narrower** than the shipped one (sans 50.8px,
+            serif 48.1px against 53.4px), and a larger root font scales the cap
+            with the text (at 125%, 66.7px against an 80px cap), so the ratio
+            holds rather than drifting. `mobile-nav.cy.ts` asserts the label is
+            not clipped, so if that ever stops being true it fails loudly
+            instead of silently cutting a word in half.
+
+            `sm:max-w-none` above the breakpoint, because a long display name
+            is far wider than any cap that would animate well — and desktop is
+            not supposed to move anyway.
+          -->
+          <span
+            class="overflow-hidden motion-safe:transition-[max-width] motion-safe:duration-600 ease-out"
+            [ngClass]="showsLabel() ? 'max-w-16 sm:max-w-none' : 'max-w-0 sm:max-w-none'"
+          >
+            @if (!authService.authReady()) {
+              <!--
+                  A skeleton bar rather than an `invisible` span, so the gap
+                  does not read as an empty chip. It reserves exactly the width
+                  "Sign in" will occupy — the text is kept and sized normally,
+                  and `text-transparent` hides the glyphs while the box keeps
+                  their metrics. Deriving the width from the real string is what
+                  makes the placeholder and the resolved chip the same size on
+                  desktop; a hand-picked `w-16` would be a number to keep in
+                  step by hand.
+
+                  Below `sm` the region holding it is `max-w-0`, so on a phone
+                  the bar is clipped away entirely and the pulsing avatar is the
+                  whole skeleton. That is the trade the animation costs: the
+                  chip cannot both show a full-width placeholder and grow into
+                  one.
+                -->
+              <span
+                aria-hidden="true"
+                class="ml-2 block rounded bg-slate-200 text-sm font-medium whitespace-nowrap text-transparent motion-safe:animate-pulse dark:bg-slate-700"
+                >Sign in</span
+              >
+            } @else if (!showsRealAccount()) {
+              <!--
+                  `whitespace-nowrap` is load-bearing. Below `sm` the chip sits
+                  in a `minmax(0,1fr)` grid track narrower than its natural
+                  width, so without this "Sign in" wraps to two lines and the
+                  chip renders 54px tall inside a 64px bar. It shipped that way
+                  and nothing caught it, because the mobile-nav spec measured
+                  width, overlap and centring but never height.
+                -->
+              <span
+                class="ml-2 block whitespace-nowrap text-sm font-medium text-slate-700 dark:text-slate-300"
+                >Sign in</span
+              >
+            } @else {
+              <!--
+                  `sr-only`, not `hidden`. Below `sm` the chip shows the avatar
+                  alone — the name and the PRO badge were the widest thing in
+                  the bar and pushed it into the brand — but removing them from
+                  the DOM would leave the button's accessible name as a single
+                  letter. `sr-only` takes them out of the layout while a screen
+                  reader still reads "S Sherman PRO".
+
+                  `showsLabel()` also collapses the region to `max-w-0` here,
+                  and both are needed. `sr-only` keeps the name out of the
+                  layout, but its `ml-2` wrapper is still in flow, so on its own
+                  it left the signed-in chip 8px wider than the avatar-only
+                  state it has to match exactly. That 8px is the difference
+                  between the animation starting where a resolved chip ends and
+                  starting slightly past it.
+                -->
+              <span class="ml-2 block">
+                <span class="flex min-w-0 items-center gap-1.5 sr-only sm:not-sr-only sm:flex">
+                  <span
+                    class="text-sm font-medium text-slate-900 dark:text-slate-50 max-w-[5.5rem] sm:max-w-[10rem] truncate"
+                  >
+                    {{ authService.user()?.displayName || authService.user()?.email }}
+                  </span>
+                  @if (subscriptionService.isProUser()) {
+                    <span
+                      class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                      >PRO</span
+                    >
+                  }
+                </span>
+              </span>
+            }
+          </span>
+
           <!--
             Hidden below `sm`, which is what buys "Sign in" the room to stay on
             one line inside its grid track. It is decorative — the svg is
             `aria-hidden` and the trigger already carries `aria-expanded` — so
-            dropping it on a phone costs an affordance, not information.
+            dropping it on a phone costs an affordance, not information. Its
+            own `sm:ml-2` rather than a gap on the button, for the reason given
+            at the top of this block.
           -->
           <app-icon
             name="chevron-down"
             [size]="14"
-            class="hidden sm:block text-slate-500 dark:text-slate-400 transition-transform"
+            class="hidden sm:block sm:ml-2 text-slate-500 dark:text-slate-400 transition-transform"
             [class.rotate-180]="isMenuOpen()"
           />
         </button>

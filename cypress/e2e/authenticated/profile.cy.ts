@@ -25,6 +25,43 @@ describe('authenticated profile management', () => {
   });
 
   /**
+   * The width animation, at the only layer that can see it — and the layer
+   * that caught it being wrong.
+   *
+   * The unit suite pins which class is set; whether that class *does* anything
+   * is a browser question, and the first version of this animation failed it.
+   * It used `grid-template-columns: 0fr` -> `1fr`, which is the technique every
+   * accordion recipe reaches for. Every unit test passed. In a real browser the
+   * `0fr` track never collapsed: an `fr` track only collapses when the grid
+   * container has a width of its own to divide up, and every box in this chip
+   * is shrink-to-fit, so the container was sized *from* the track's content and
+   * the `fr` filled exactly that. Measured at 53.36px for both `0fr` and `1fr`,
+   * and an inline `style="grid-template-columns:0fr"` did the same.
+   *
+   * These two assertions are what failed then and pass now. Both are read from
+   * *resolved* styles at rest rather than by watching an animation, because
+   * catching a 450ms transition mid-flight is a race and its start and end
+   * states are not.
+   */
+  it('collapses the chip label region to nothing, and can animate it', () => {
+    cy.viewport(390, 780);
+
+    cy.get('[data-cy="auth-menu-trigger"] span.overflow-hidden').should(($region) => {
+      const styles = getComputedStyle($region[0]);
+
+      // Signed in, on a phone: fully collapsed. `0px` rather than some small
+      // residue is the whole point — see the width assertion below.
+      expect(styles.maxWidth, 'collapsed max-width').to.equal('0px');
+      expect($region[0].getBoundingClientRect().width, 'collapsed region width').to.equal(0);
+
+      // And the class has to resolve to a real declaration: Tailwind can fail
+      // to emit an arbitrary variant, leaving a class that matches no rule.
+      // Cypress runs with no motion preference, so `motion-safe:` is live here.
+      expect(styles.transitionProperty, 'transition-property').to.contain('max-width');
+    });
+  });
+
+  /**
    * The account chip is the only part of the top bar whose width the user
    * controls, and on a phone it was wide enough to run into the centred brand.
    * Below `sm` it now shows the avatar alone.
@@ -44,8 +81,30 @@ describe('authenticated profile management', () => {
 
     cy.viewport(390, 780);
 
+    // Derived from the DOM rather than hard-coded, and *exact* rather than a
+    // bound: the collapsed chip has to be the avatar plus the button's own
+    // padding and border and nothing else. A loose `lessThan(100)` passed
+    // happily against the version where the label region kept 8px of wrapper
+    // margin — the chip was 50px where it should have been 42px, which reads
+    // as slightly the wrong shape rather than as a bug. That 42px is also the
+    // width the skeleton state collapses to, so this is what makes the
+    // sign-in animation start from the same place a signed-in chip ends at.
     cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
-      expect($chip[0].getBoundingClientRect().width).to.be.lessThan(100);
+      const chip = $chip[0];
+      const styles = getComputedStyle(chip);
+      const avatar = chip.querySelector('.h-7') as HTMLElement;
+      const box = (value: string) => parseFloat(value);
+      const expected =
+        avatar.getBoundingClientRect().width +
+        box(styles.paddingLeft) +
+        box(styles.paddingRight) +
+        box(styles.borderLeftWidth) +
+        box(styles.borderRightWidth);
+
+      expect(chip.getBoundingClientRect().width, 'collapsed chip width').to.be.closeTo(
+        expected,
+        0.5,
+      );
     });
 
     // textContent, not visibility — the point is that it is still there.

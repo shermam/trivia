@@ -241,17 +241,24 @@ function fakeUser(overrides: Partial<FakeUser> = {}): FakeUser {
   return { isAnonymous: false, emailVerified: true, providerData: [], ...overrides };
 }
 
-function setup(options: { appUnreachable?: boolean } = {}) {
+function setup(options: { appUnreachable?: boolean; failFirstAttempts?: number } = {}) {
   h.reset();
+  let remainingFailures = options.failFirstAttempts ?? 0;
   TestBed.configureTestingModule({
     providers: [
       {
         provide: FirebaseAppService,
         useValue: {
-          getApp: () =>
-            options.appUnreachable
-              ? Promise.reject(new Error('config fetch failed'))
-              : Promise.resolve({}),
+          getApp: () => {
+            if (options.appUnreachable) {
+              return Promise.reject(new Error('config fetch failed'));
+            }
+            if (remainingFailures > 0) {
+              remainingFailures--;
+              return Promise.reject(new Error('transient config fetch failure'));
+            }
+            return Promise.resolve({});
+          },
         },
       },
     ],
@@ -288,6 +295,54 @@ describe('AuthService anonymous bootstrap', () => {
   it('swallows every failure, because bootstrap calls it without a catch', async () => {
     const service = setup({ appUnreachable: true });
     await expect(service.ensureSignedIn()).resolves.toBeUndefined();
+  });
+});
+
+describe('AuthService: a failed bootstrap must not poison the session', () => {
+  /**
+   * `CLAUDE.md` §4.4 — **never cache a rejected promise.** `getAuth()`
+   * memoised `this.authPromise` with no `.catch` clearing it, so a single
+   * failed dynamic import of `firebase/auth`, or one runtime-config fetch that
+   * timed out, was reused for the life of the tab. Every later call got the
+   * same rejection back.
+   *
+   * `FirebaseAppService.getApp()` and `SubscriptionService.getProPriceId()`
+   * both already cleared on failure and both cite the rule; this one was
+   * simply missed.
+   */
+  it('retries after a transient failure instead of reusing the rejection', async () => {
+    const service = setup({ failFirstAttempts: 1 });
+
+    await service.ensureSignedIn();
+    await settle();
+    expect(h.state.calls).not.toContain('signInAnonymously');
+
+    // A second attempt has to reach the network again, not replay the failure.
+    await service.ensureSignedIn();
+    await settle();
+
+    expect(h.state.calls).toContain('signInAnonymously');
+    expect(service.authReady()).toBe(true);
+  });
+
+  /**
+   * `authReadySignal` is only ever set from inside the `onAuthStateChanged`
+   * callback, which never registers when the bootstrap fails — so
+   * `authReady()` stayed false forever and the account chip sat on its loading
+   * skeleton indefinitely, pulsing at a user whose auth was never coming.
+   *
+   * "Ready, and nobody is signed in" is the true statement once the attempt
+   * has failed, and the top bar renders that as a "Sign in" prompt: something
+   * that retries when clicked, rather than a spinner that cannot.
+   */
+  it('reports itself ready even when auth can never load', async () => {
+    const service = setup({ appUnreachable: true });
+
+    await service.ensureSignedIn();
+    await settle();
+
+    expect(service.authReady()).toBe(true);
+    expect(service.user()).toBeNull();
   });
 });
 

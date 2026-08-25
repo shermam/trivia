@@ -33,6 +33,7 @@
     "icons:build": "node scripts/make-maskable-icons.mjs",
     "icons:verify": "node scripts/verify-icons.mjs",
     "csp:verify": "node scripts/verify-csp.mjs",
+    "motion:verify": "node scripts/verify-motion.mjs",
     "sw:stamp": "node scripts/stamp-service-worker.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
