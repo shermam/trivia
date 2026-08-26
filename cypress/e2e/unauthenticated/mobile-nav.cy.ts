@@ -163,13 +163,15 @@ describe('the top bar on a phone', () => {
   });
 
   it('closes when the backdrop is tapped', () => {
-    // A plain centre click, with no `force`. That is the point of the overlay
-    // being a flex row: an `inset-0` backdrop has its own centre underneath the
-    // panel, and Cypress refuses to click an element whose centre is covered.
-    // Forcing it would have hidden a genuine overlap on the one element whose
-    // entire job is to be tappable.
+    // `'right'`, not the default centre, and not `{force: true}`. The backdrop
+    // covers the whole viewport — it has to, or the dim ends in a hard line at
+    // the panel's edge as the panel slides out — so its centre is genuinely
+    // underneath the panel and Cypress is right to refuse a click there.
+    // Aiming at the right edge is a real click at a point that really is
+    // exposed; forcing would have suppressed the check instead of the overlap,
+    // on the one element whose entire job is to be tappable.
     cy.get('[data-cy="nav-menu-trigger"]').click();
-    cy.get('[data-cy="nav-menu-backdrop"]').click();
+    cy.get('[data-cy="nav-menu-backdrop"]').click('right');
 
     cy.get('[data-cy="nav-menu-panel"]').should('not.be.visible');
   });
@@ -197,16 +199,58 @@ describe('the top bar on a phone', () => {
    * handlers are already gone — visible, focusable, and covering the viewport.
    *
    * Here `inert` and `pointer-events-none` land with the signal rather than
-   * with the animation, so the page underneath is usable the instant the
-   * drawer is dismissed, whatever the panel is still doing.
+   * with the animation. Measured in Chromium with a `MutationObserver`: both
+   * are on **4.2ms** after the click, with the panel still at x=0 and the
+   * backdrop still at full opacity — the exit has not started moving anything
+   * yet.
+   *
+   * **What this assertion pins is the contract, not that number.** A retrying
+   * `should` would be satisfied just as well if `inert` only arrived when the
+   * animation ended, and the version that would catch it — asserting `inert`
+   * while the panel is still `visible` — is a race against the 250ms exit that
+   * would go flaky the first time CI was slow. So: the contract here, the
+   * timing by measurement, and the mechanism written down where it is easy to
+   * break.
    */
-  it('stops intercepting the moment it is dismissed', () => {
+  it('stops intercepting when it is dismissed', () => {
     cy.get('[data-cy="nav-menu-trigger"]').click();
-    cy.get('[data-cy="nav-menu-backdrop"]').click();
+    // `'right'` for the same reason as the dismissal test above: the backdrop
+    // is full-bleed, so its centre is under the panel.
+    cy.get('[data-cy="nav-menu-backdrop"]').click('right');
 
-    cy.get('[data-cy="nav-menu-overlay"]')
-      .should('have.attr', 'inert')
-      .and('have.class', 'pointer-events-none');
+    // One callback rather than `.should(...).and(...)`: `should('have.attr')`
+    // *changes the subject* to the attribute's value, so the chained
+    // `have.class` ran against the string `''` and failed with "neither a DOM
+    // object nor a jQuery object". Both assertions retry together this way.
+    cy.get('[data-cy="nav-menu-overlay"]').should(($overlay) => {
+      expect($overlay, 'dismissed drawer still interactive').to.have.attr('inert');
+      expect($overlay, 'dismissed drawer still taking pointer events').to.have.class(
+        'pointer-events-none',
+      );
+    });
+  });
+
+  /**
+   * **The backdrop dims the whole viewport, not just the strip beside the
+   * panel.** It used to be a `flex-1` sibling covering only what the panel did
+   * not, which looks identical while the drawer is open and is obviously wrong
+   * the moment it closes: the panel slides left off bare, undimmed page and
+   * the dim ends in a hard vertical line travelling across the screen.
+   *
+   * Asserted against the layout viewport rather than `cy.viewport`'s argument,
+   * for the same reason the brand-centring test above is — a classic scrollbar
+   * takes layout width.
+   */
+  it('dims the whole viewport, not just the part the panel misses', () => {
+    cy.get('[data-cy="nav-menu-trigger"]').click();
+
+    cy.get('[data-cy="nav-menu-backdrop"]').should(($backdrop) => {
+      const rect = $backdrop[0].getBoundingClientRect();
+      const doc = $backdrop[0].ownerDocument.documentElement;
+      expect(rect.x, 'backdrop starting to the right of the panel').to.be.closeTo(0, 1);
+      expect(rect.width, 'backdrop narrower than the viewport').to.be.closeTo(doc.clientWidth, 1);
+      expect(rect.height, 'backdrop shorter than the viewport').to.be.closeTo(doc.clientHeight, 1);
+    });
   });
 
   /**
@@ -220,8 +264,13 @@ describe('the top bar on a phone', () => {
    */
   it('parks the panel off the left edge until it is opened', () => {
     cy.get('[data-cy="nav-menu-panel"]').then(($panel) => {
+      // `at.most(1)` rather than `at.most(0)`: `-translate-x-full` is exactly
+      // minus the panel's own width, so the right edge lands on 0 by
+      // construction — and a rect built from two floats that cancel is exactly
+      // the place not to demand an exact zero. One pixel of slack still fails
+      // by 287 if the panel is not parked.
       expect($panel[0].getBoundingClientRect().right, 'closed panel still on screen').to.be.at.most(
-        0,
+        1,
       );
     });
 

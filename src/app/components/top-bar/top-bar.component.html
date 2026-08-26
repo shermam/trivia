@@ -261,6 +261,7 @@
           <div
             #menuPanel
             [id]="panelId"
+            data-cy="auth-menu-panel"
             role="dialog"
             aria-label="Account menu"
             tabindex="-1"
@@ -347,17 +348,37 @@
   [attr.inert]="isNavOpen() ? null : ''"
 >
   <!--
-    A flex row — panel, then backdrop filling the rest — rather than a
-    full-bleed backdrop with the panel laid over it.
+    Full-bleed, and behind the panel rather than beside it.
 
-    The panel is opaque, so the dim behind it was never visible and the two
-    render identically. What changes is that the backdrop now occupies exactly
-    the region a tap can reach: an `inset-0` backdrop has its own centre buried
-    under the panel, which Cypress reads as "covered by another element" and
-    refuses to click. Reaching for `{force: true}` there would have suppressed
-    the check rather than the overlap, on the one interaction whose whole point
-    is being clickable.
+    It began as `flex-1` — a flex sibling filling only the strip the panel does
+    not cover — because an `inset-0` backdrop has its own centre buried under
+    the panel, which Cypress reads as "covered by another element" and refuses
+    to click. That was solving the test's problem and creating the user's: with
+    nothing behind the panel, sliding the panel out uncovers bare page, and the
+    dim ends in a hard vertical line that tracks the panel's edge across the
+    screen for the length of the exit. The whole viewport has to be dimmed for
+    the fade to read as a fade. The e2e click is aimed at the backdrop's right
+    edge instead, which is genuinely uncovered — a real click at a real point,
+    not `{force: true}` suppressing the check.
+
+    `absolute` takes it out of the flex flow, so the panel is the only flex
+    item and still stretches to full height. Both are positioned with `z-index:
+    auto`, so paint order is DOM order: backdrop first, panel over it.
+
+    Decorative — the same dismissal is on the close button and on Escape, so a
+    screen reader gains nothing from a third control. It fades rather than
+    sliding, because it does not move; gated on `motion-safe:` all the same, so
+    the reduced-motion path is a plain instant open and close rather than a
+    half-animated one.
   -->
+  <div
+    class="absolute inset-0 bg-slate-900/40 motion-safe:transition-opacity motion-safe:duration-250"
+    [ngClass]="isNavOpen() ? 'opacity-100' : 'opacity-0'"
+    aria-hidden="true"
+    data-cy="nav-menu-backdrop"
+    (click)="closeNav()"
+  ></div>
+
   <div
     #navPanel
     [id]="navPanelId"
@@ -365,7 +386,7 @@
     aria-label="Site menu"
     tabindex="-1"
     data-cy="nav-menu-panel"
-    class="flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none motion-safe:transition-transform motion-safe:duration-250 ease-out"
+    class="relative flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none motion-safe:transition-transform motion-safe:duration-250 ease-out"
     [ngClass]="isNavOpen() ? 'translate-x-0' : '-translate-x-full'"
   >
     <div class="mb-2 flex items-center justify-between">
@@ -417,21 +438,4 @@
       {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
     </button>
   </div>
-
-  <!--
-    Decorative: the same dismissal is on the close button and on Escape, so a
-    screen reader gains nothing from a third control.
-
-    It fades rather than sliding, because it does not move — the panel slides
-    out from under it and the dim it casts over the rest of the page simply
-    lifts. Gated on `motion-safe:` all the same, so the reduced-motion path is
-    a plain instant open and close rather than a half-animated one.
-  -->
-  <div
-    class="flex-1 bg-slate-900/40 motion-safe:transition-opacity motion-safe:duration-250"
-    [ngClass]="isNavOpen() ? 'opacity-100' : 'opacity-0'"
-    aria-hidden="true"
-    data-cy="nav-menu-backdrop"
-    (click)="closeNav()"
-  ></div>
 </div>

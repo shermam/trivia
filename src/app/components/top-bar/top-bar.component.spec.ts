@@ -162,6 +162,25 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
   });
 
   /**
+   * The panel has to paint *over* the backdrop, and the only thing arranging
+   * that is DOM order: both are positioned with `z-index: auto`, so the later
+   * sibling wins.
+   *
+   * Worth a test because reversing them is a one-line edit with a symptom that
+   * points somewhere else — a translucent sheet over the whole drawer, and an
+   * e2e click landing on the backdrop when it was aimed at a link. jsdom has no
+   * layout and no paint, but it does have sibling order, which is the whole
+   * mechanism here.
+   */
+  it('paints the panel over the backdrop by putting it second', () => {
+    const h = setup();
+    const order = [...h.overlay().children].map((child) => child.getAttribute('data-cy'));
+
+    expect(order).toContain('nav-menu-backdrop');
+    expect(order.indexOf('nav-menu-panel')).toBeGreaterThan(order.indexOf('nav-menu-backdrop'));
+  });
+
+  /**
    * **The one asymmetry in the animation, and the reason focus works.** The
    * wrapper's `visibility` transition is what holds the drawer on screen for
    * the length of the exit, and it is listed on the *closed* class list only,
