@@ -12,6 +12,12 @@ Related documents:
 
 ---
 
+> ### 📌 Retired as a queue — 26 August 2026
+>
+> Work is now picked from the roadmap repo (`shermam/trivia-project`), which is the single source of what to build next. **This file is kept for its per-item analysis, not as a list of what to do** — the roadmap specs reference that analysis rather than duplicating it, and several of the decisions recorded below (why a counter cannot live in `firestore.rules`, why the reviewer role is a document and not a claim) are the reasoning behind features that have not been built yet.
+>
+> Items 1–4 shipped. The remaining open items were migrated: **5** → `FEAT-042`, **7** → `FEAT-043`, **8** → `FEAT-044`, **6** folded into `FEAT-007`, **9** into `FEAT-038`.
+
 ## 1. Working rules
 
 **`AUDIT_REMEDIATION.md` §3 applies unchanged** — one PR per item, branch fresh off `main`, rebase rather than merge, risk-scoped verification per `CLAUDE.md` §3a with the commands named in the PR body, rules changes ship mutation-tested rules tests, new CI checks get their own workflow.
