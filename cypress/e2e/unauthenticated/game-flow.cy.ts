@@ -30,6 +30,49 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.location('pathname').should('eq', '/');
   });
 
+  /**
+   * The result banner must not move the card, at the only layer that can see
+   * it.
+   *
+   * The card is vertically centred (`min-h-screen flex items-center`), so a
+   * banner that appears on answering does not push the page down — it makes
+   * the card taller and centring lifts the whole thing by half of that.
+   * Measured before the space was reserved: the card jumped 43px at 390x1000
+   * and 37px at 1024x900, right as the reader's eye went to the answer they
+   * had just picked.
+   *
+   * **The viewport height is the whole test.** At 390x700 and 1024x800 the
+   * same bug measured exactly 0px, because below a certain height the card
+   * already overflows its container and is pinned to the top — so a check at a
+   * convenient size would have called this fixed while it was broken. 1000px
+   * is deliberately tall enough to leave centring some slack to spend.
+   */
+  it('does not move the card when the result banner appears', () => {
+    cy.viewport(1024, 1000);
+    cy.startGame(5);
+
+    cy.get('[data-cy="result-banner"]').should('exist');
+
+    cy.get('.max-w-xl')
+      .first()
+      .then(($card) => {
+        const before = $card[0].getBoundingClientRect();
+
+        cy.contains('button', CORRECT_ANSWERS[0]).click();
+
+        // Read after the answer has actually registered, so this cannot pass by
+        // measuring twice before anything changed.
+        cy.get('[data-cy="result-status"]').should('contain.text', 'Correct');
+        cy.get('.max-w-xl')
+          .first()
+          .should(($after) => {
+            const after = $after[0].getBoundingClientRect();
+            expect(after.height, 'card height').to.be.closeTo(before.height, 0.5);
+            expect(after.top, 'card top').to.be.closeTo(before.top, 0.5);
+          });
+      });
+  });
+
   it('only credits score for correct answers', () => {
     cy.startGame(5);
 

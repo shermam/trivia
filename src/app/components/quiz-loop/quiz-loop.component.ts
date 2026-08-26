@@ -99,22 +99,53 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * this has to stand alone without the colour or the icon that give the visual
    * version half its meaning.
    */
-  protected readonly resultAnnouncement = computed(() => {
-    if (!this.isAnswered()) {
-      return '';
+  /**
+   * Which of the three result banners applies, as one value rather than a
+   * chain of conditions repeated per branch.
+   *
+   * The template needs this three times over — the banners are stacked so the
+   * reserved space is the tallest of them — and re-deriving `selectedAnswer()
+   * === null` in each would be three chances to get one wrong.
+   */
+  protected readonly resultKind = computed<'none' | 'correct' | 'timeout' | 'incorrect'>(() => {
+    if (!this.isAnswered() || !this.gameController.currentQuestion()) {
+      return 'none';
     }
+    const selected = this.selectedAnswer();
+    if (selected?.isCorrect) {
+      return 'correct';
+    }
+    // Distinct from a wrong answer: `null` means the timer ran out with
+    // nothing chosen, which is a different sentence and a different icon.
+    return selected === null ? 'timeout' : 'incorrect';
+  });
+
+  /**
+   * What a screen reader hears, which is deliberately *not* what the banner
+   * says any more.
+   *
+   * The visible banner used to name the correct answer, and that is what made
+   * its height depend on the question: a long answer wrapped to a second line.
+   * Sighted users do not need it spelled out — the correct option is already
+   * the only one with an emerald border while every other option is dimmed to
+   * 60% — but that highlight is a purely visual cue, so the announcement keeps
+   * the answer in words.
+   */
+  protected readonly resultAnnouncement = computed(() => {
     const question = this.gameController.currentQuestion();
     if (!question) {
       return '';
     }
-    const selected = this.selectedAnswer();
-    if (selected?.isCorrect) {
-      return 'Correct.';
+    switch (this.resultKind()) {
+      case 'correct':
+        return 'Correct.';
+      case 'timeout':
+        return `Time's up. The correct answer was ${question.correct_answer}.`;
+      case 'incorrect':
+        return `Incorrect. The correct answer is ${question.correct_answer}.`;
+      default:
+        return '';
     }
-    if (selected === null) {
-      return `Time's up. The correct answer was ${question.correct_answer}.`;
-    }
-    return `Incorrect. The correct answer is ${question.correct_answer}.`;
   });
 
   protected readonly timerRingOffset = computed(() => {

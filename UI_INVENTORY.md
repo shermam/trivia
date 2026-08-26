@@ -156,7 +156,9 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
   - Difficulty badge (grey pill, uppercase, e.g. "MEDIUM")
 - **Question text** (large, bold heading)
 - **Answer grid**: 2-column grid (stacks to 1 column on small screens) of answer buttons, one per `all_answers` entry (2 for true/false, 4 for multiple-choice); each button has a leading letter badge (A/B/C/D by position) plus the answer text
-- **Result feedback banner** (appears only once the question is answered/revealed, below the answer grid): a colored strip with an emoji and a message derived from the outcome — see States
+- **Result feedback banner** (below the answer grid): a coloured strip with an emoji and one of three fixed messages — 🎉 "Correct! Well done.", ⏰ "Time's up!", ❌ "Incorrect." Its space is **reserved from the first render**, empty until there is a result, because the card is vertically centred and a banner that appeared on answering lifted the whole card by half its height (measured at 43px on a 390×1000 phone, 37px at 1024×900). All three messages are stacked in one grid cell so the reserved height is the tallest of them rather than a hard-coded guess.
+  - The messages deliberately **do not name the correct answer**, which is what used to make the banner's height depend on the question — a long answer wrapped to a second line. On screen it is redundant: the correct option keeps an emerald border and badge while every other option drops to 60% opacity. They also carry no pointer to that highlight ("the answer is highlighted", "see the green answer"), because every such phrasing wraps at 320px and the reserved space would then cost a permanent second line on every phone.
+  - `aria-hidden`, because the permanent `role="status"` region is the accessible channel and **does** speak the answer in full.
 
 ### States
 
@@ -167,7 +169,7 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 | **Timer hits 0 (no answer chosen)** | Locks at 0                                | Auto-submits a "no answer" — same as an incorrect answer, no option highlighted green except the correct one                                                                                       |
 | **Answer selected — correct**       | frozen                                    | Selected/correct button (and its letter badge) turns **green**; all other buttons disabled                                                                                                         |
 | **Answer selected — incorrect**     | frozen                                    | Chosen button (and its letter badge) turns **red**; the actual correct answer turns **green**; all remaining (non-chosen, non-correct) buttons dim to 60% opacity, grey text; all buttons disabled |
-| **Post-answer delay (2s)**          | —                                         | Result banner + colors stay visible for 2 seconds before auto-advancing                                                                                                                            |
+| **Post-answer delay (2s)**          | —                                         | Result banner + colors stay visible for 2 seconds before auto-advancing (the banner's box was already occupying its space before the answer, so nothing moves)                                     |
 | **Advance**                         | —                                         | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over`                                                              |
 
 Score only increments on a correct, non-timed-out answer.
