@@ -202,36 +202,71 @@
           {{ resultAnnouncement() }}
         </p>
 
-        @if (isAnswered()) {
-          @if (selectedAnswer()?.isCorrect) {
-            <div
-              class="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3"
+        <!--
+          The result banner, and it is rendered *always* — empty until there is
+          a result — for the same reason the live region above is.
+
+          **The card is vertically centred** (`min-h-screen flex items-center`),
+          so a banner that appears on answering does not push the page down; it
+          makes the card taller and centring lifts the whole thing by half of
+          that. Measured before this changed: the card jumped 43px at 390x1000
+          and 37px at 1024x900, right as the reader's eye went to the answer
+          they had just picked. It measured 0 at 390x700 and 1024x800, which is
+          the trap — below a certain height the card already overflows and is
+          pinned, so the bug is invisible at exactly the sizes a quick check
+          uses.
+
+          **The three banners are stacked in one grid cell**, all in
+          `col-start-1 row-start-1`, so the reserved height is the tallest of
+          them whatever the copy says. A single hard-coded `min-h` would be a
+          number to re-measure every time the wording changed, and picking it
+          too small brings the shift back a line at a time.
+
+          `aria-hidden`, because the `role="status"` region above is the
+          accessible channel for this and says the same thing. Without it a
+          screen reader would meet all three messages in the DOM, and today it
+          already hears the result twice.
+        -->
+        <div class="mt-5 grid" aria-hidden="true" data-cy="result-banner">
+          <div
+            class="col-start-1 row-start-1 flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3"
+            [class.invisible]="resultKind() !== 'correct'"
+          >
+            <span class="text-lg">&#127881;</span>
+            <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300"
+              >Correct! Well done.</span
             >
-              <span class="text-lg">&#127881;</span>
-              <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300"
-                >Correct! Well done.</span
-              >
-            </div>
-          } @else if (selectedAnswer() === null) {
-            <div
-              class="mt-5 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
-            >
-              <span class="text-lg">&#9200;</span>
-              <span class="text-sm font-semibold text-red-800 dark:text-red-300"
-                >Time's up! The answer was {{ question.correct_answer }}.</span
-              >
-            </div>
-          } @else {
-            <div
-              class="mt-5 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
-            >
-              <span class="text-lg">&#10060;</span>
-              <span class="text-sm font-semibold text-red-800 dark:text-red-300"
-                >Incorrect. The correct answer is {{ question.correct_answer }}.</span
-              >
-            </div>
-          }
-        }
+          </div>
+          <!--
+            No answer text in any of these, and no pointer to it either. Naming
+            the answer is what made the banner's height depend on the question —
+            a long one wrapped onto a second line — and it is redundant on
+            screen: the correct option keeps an emerald border and badge while
+            every other option drops to 60% opacity.
+
+            The wording is this terse on purpose. Every phrasing that adds a
+            hint — "the answer is highlighted", "see the green answer" — wraps
+            to two lines at 320px, and because the space is reserved that costs
+            a permanent 12px of empty box on every phone, to explain something
+            the highlight already says. `resultAnnouncement()` still speaks the
+            answer in full, because that highlight is the one thing a screen
+            reader cannot see.
+          -->
+          <div
+            class="col-start-1 row-start-1 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
+            [class.invisible]="resultKind() !== 'timeout'"
+          >
+            <span class="text-lg">&#9200;</span>
+            <span class="text-sm font-semibold text-red-800 dark:text-red-300">Time's up!</span>
+          </div>
+          <div
+            class="col-start-1 row-start-1 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
+            [class.invisible]="resultKind() !== 'incorrect'"
+          >
+            <span class="text-lg">&#10060;</span>
+            <span class="text-sm font-semibold text-red-800 dark:text-red-300">Incorrect.</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>

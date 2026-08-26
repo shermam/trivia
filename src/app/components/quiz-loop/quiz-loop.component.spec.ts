@@ -251,6 +251,112 @@ describe('QuizLoopComponent — result announcement (G3)', () => {
   });
 });
 
+describe('QuizLoopComponent: the result banner', () => {
+  const banner = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-cy="result-banner"]',
+    ) as HTMLElement;
+
+  /** The messages that are actually on screen — the rest are `invisible`. */
+  const visibleMessages = (fixture: ReturnType<typeof setup>['fixture']) =>
+    [...banner(fixture).children]
+      .filter((child) => !child.className.includes('invisible'))
+      .map((child) => (child.textContent ?? '').replace(/\s+/g, ' ').trim());
+
+  /**
+   * The banner has to occupy its space *before* there is a result, because the
+   * card is vertically centred: a banner that appears on answering makes the
+   * card taller and centring lifts the whole thing by half of that. Measured
+   * before this changed, the card jumped 43px at 390x1000 and 37px at 1024x900
+   * — right as the reader looked at the answer they had just picked.
+   *
+   * jsdom does no layout, so the height itself is asserted in
+   * `game-flow.cy.ts`. What is pinned here is the structure it depends on: the
+   * container exists from the first render, and it is never the thing that
+   * gets added.
+   */
+  it('reserves the banner space before any answer is given', () => {
+    const { fixture } = setup();
+
+    expect(banner(fixture)).not.toBeNull();
+    expect(visibleMessages(fixture)).toEqual([]);
+    fixture.destroy();
+  });
+
+  it('shows exactly one message once an answer lands', () => {
+    const { fixture } = setup();
+    const question = TestBed.inject(GameControllerService).currentQuestion()!;
+
+    clickAnswer(fixture, question.all_answers.find((a) => a.isCorrect)!.text);
+
+    expect(visibleMessages(fixture)).toEqual(['🎉Correct! Well done.']);
+    fixture.destroy();
+  });
+
+  /**
+   * The reserved height is the tallest of the three, which only works because
+   * all three are in the DOM at once, stacked in one grid cell. A single
+   * hard-coded `min-h` would be a number to re-measure whenever the wording
+   * changed — and too small a guess brings the shift back a line at a time.
+   */
+  it('keeps all three messages mounted so the tallest reserves the space', () => {
+    const { fixture } = setup();
+
+    expect(banner(fixture).children.length).toBe(3);
+    fixture.destroy();
+  });
+
+  /**
+   * The visible banner must not name the answer. That is what made its height
+   * depend on the question — a long answer wrapped to a second line — and it
+   * is redundant next to the emerald highlight on the correct option.
+   */
+  it('never names the correct answer on screen, only in the announcement', () => {
+    const { fixture } = setup();
+    const question = TestBed.inject(GameControllerService).currentQuestion()!;
+
+    clickAnswer(fixture, question.all_answers.find((a) => !a.isCorrect)!.text);
+
+    const announcement = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-cy="result-status"]',
+    );
+    expect(banner(fixture).textContent).not.toContain(question.correct_answer);
+    expect(announcement?.textContent).toContain(question.correct_answer);
+    fixture.destroy();
+  });
+
+  /**
+   * `aria-hidden` because the `role="status"` region says the same thing and is
+   * the accessible channel for it. Without it a screen reader would meet all
+   * three stacked messages in the DOM — and even before they were stacked, it
+   * heard the result twice.
+   */
+  it('hides the visual banner from assistive tech, which has the live region', () => {
+    const { fixture } = setup();
+
+    expect(banner(fixture).getAttribute('aria-hidden')).toBe('true');
+    fixture.destroy();
+  });
+
+  /**
+   * A timeout is not a wrong answer: different icon, different sentence, and
+   * `selectedAnswer()` is `null` rather than a losing option. Collapsing the
+   * two is the mistake `resultKind()` exists to make hard.
+   */
+  it('distinguishes a timeout from a wrong answer', () => {
+    let now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { fixture } = setup();
+
+    now += 16_000;
+    vi.advanceTimersByTime(250);
+    fixture.detectChanges();
+
+    expect(visibleMessages(fixture)).toEqual(["⏰Time's up!"]);
+    fixture.destroy();
+  });
+});
+
 /** Clicks the option whose visible text matches, the way a player would. */
 function clickAnswer(fixture: ReturnType<typeof setup>['fixture'], text: string): void {
   const buttons = Array.from(
