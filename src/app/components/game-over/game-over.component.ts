@@ -84,6 +84,70 @@ export class GameOverComponent implements OnInit {
   protected readonly leaderboardError = signal<string | null>(null);
 
   /**
+   * How many rows the board is, in every state.
+   *
+   * The same number is the `limit` passed to `getTopScores`, and that is the
+   * point: the board's height is known before its contents are, so there is
+   * no reason for it to be one line while loading and ten rows afterwards.
+   * Filling the gap with placeholder rows keeps the card the same size from
+   * first paint, and a game-over screen resolving under the reader's eyes is
+   * the worst possible moment to move the page.
+   */
+  protected readonly LEADERBOARD_SIZE = 10;
+
+  /**
+   * The rows that exist only to hold space open — one per slot the board has
+   * not filled, and all ten while it is still loading.
+   *
+   * An array rather than a count because `@for` needs something to iterate;
+   * its contents are never read.
+   */
+  protected readonly fillerRows = computed(() =>
+    Array.from(
+      {
+        length: this.isLoadingLeaderboard()
+          ? 0
+          : Math.max(0, this.LEADERBOARD_SIZE - this.leaderboard().length),
+      },
+      (_, index) => index,
+    ),
+  );
+
+  /** All ten rows, pulsing, while the fetch is in flight. */
+  protected readonly skeletonRows = Array.from({ length: 10 }, (_, index) => index);
+
+  /**
+   * The one-line message that replaces the board's contents, or null when the
+   * board has rows to show.
+   *
+   * It is laid *over* the reserved rows rather than instead of them, so an
+   * empty board and a full one are the same height.
+   */
+  protected readonly leaderboardMessage = computed(() => {
+    if (this.isLoadingLeaderboard()) {
+      return null;
+    }
+    if (this.leaderboardError()) {
+      return this.leaderboardError();
+    }
+    return this.leaderboard().length === 0 ? 'No scores yet. Be the first!' : null;
+  });
+
+  /**
+   * What a screen reader is told about the board's state, since the skeleton
+   * and filler rows are `aria-hidden` decoration.
+   *
+   * Rendered always so the region exists before its text changes (G3), the
+   * same contract as the quiz's result announcement.
+   */
+  protected readonly leaderboardStatus = computed(() => {
+    if (this.isLoadingLeaderboard()) {
+      return 'Loading leaderboard\u2026';
+    }
+    return this.leaderboardMessage() ?? '';
+  });
+
+  /**
    * The community questions this game actually served — the only ones a
    * player can report (finding H4). Open Trivia DB questions aren't ours to
    * moderate, so they get no report affordance and the whole section

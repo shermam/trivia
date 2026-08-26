@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { ApplicationRef, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { of } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import {
   GameConfig,
   LeaderboardEntry,
@@ -745,6 +745,169 @@ describe('GameOverComponent flagged questions and the report dialog', () => {
     const focused = document.activeElement as HTMLElement | null;
     expect(focused?.id).toBe('report-panel-q-custom-1');
     expect(focused?.closest('[data-cy="report-dialog"]')).not.toBeNull();
+  });
+});
+
+/**
+ * The board holds its height, because ten is known before the data is.
+ *
+ * It used to be one line of "Loading leaderboard…" that became up to ten rows.
+ * Measured against the compiled stylesheet, that is a **508px** jump — 68px to
+ * 576px — landing exactly as a player reads their final score.
+ *
+ * jsdom does no layout, so the heights themselves are measured in a browser
+ * (all three row kinds are 72px; every board configuration is 576px). What is
+ * pinned here is the invariant those measurements rest on: **ten rows, always,
+ * whatever the state.**
+ */
+describe('GameOverComponent — the leaderboard holds its height', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const BOARD_SIZE = 10;
+
+  function renderBoard(
+    topScores: LeaderboardEntry[],
+    options: { fail?: boolean; pending?: boolean } = {},
+  ) {
+    const getTopScores = vi.fn(() => {
+      if (options.pending) {
+        // Never settles, so the loading state is a state the test can look at
+        // rather than a race it has to win. `of(...)` resolves synchronously.
+        return NEVER;
+      }
+      return options.fail ? throwError(() => new Error('nope')) : of(topScores);
+    });
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(7),
+            totalQuestions: signal(10),
+            percentage: signal(70),
+            questions: signal([]),
+            config: signal(makeConfig(15)),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isFullyAuthenticated: signal(true),
+            isAnonymous: signal(false),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore: vi.fn().mockResolvedValue(undefined),
+            getTopScores,
+            getLeaderboardEntry: vi.fn().mockResolvedValue(null),
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    return { fixture, host: fixture.nativeElement as HTMLElement };
+  }
+
+  const entry = (n: number): LeaderboardEntry =>
+    makeEntry({ uid: `u${n}`, name: `Player ${n}`, score: 10 - n, percentage: (10 - n) * 10 });
+
+  /**
+   * Every box that holds a row's worth of height, whatever is inside it:
+   * real entries, skeletons, and fillers alike.
+   *
+   * The `:not(...)` matters — the skeleton wrapper is itself an `aria-hidden`
+   * direct child, so without it the loading state counts eleven.
+   */
+  const rowCount = (host: HTMLElement) => {
+    const body = host.querySelector('[data-cy="leaderboard-body"]')!;
+    return (
+      body.querySelectorAll('li').length +
+      body.querySelectorAll('[data-cy="leaderboard-skeleton"] > div').length +
+      body.querySelectorAll(
+        ':scope > div[aria-hidden="true"]:not([data-cy="leaderboard-skeleton"])',
+      ).length
+    );
+  };
+
+  it('shows ten skeleton rows while the fetch is in flight', () => {
+    const { host } = renderBoard([], { pending: true });
+
+    expect(host.querySelectorAll('[data-cy="leaderboard-skeleton"] > div').length).toBe(BOARD_SIZE);
+    expect(rowCount(host)).toBe(BOARD_SIZE);
+    // No real rows yet, and nothing claiming the board is empty.
+    expect(host.querySelectorAll('[data-cy="leaderboard-body"] li').length).toBe(0);
+    expect(host.querySelector('[data-cy="leaderboard-message"]')).toBeNull();
+    expect(host.querySelector('[data-cy="leaderboard-status"]')?.textContent).toContain('Loading');
+  });
+
+  it('pads a partial board out to ten rows', async () => {
+    const { fixture, host } = renderBoard([entry(1), entry(2), entry(3)]);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(host.querySelectorAll('[data-cy="leaderboard-body"] li').length).toBe(3);
+    expect(rowCount(host)).toBe(BOARD_SIZE);
+  });
+
+  it('adds no padding to a full board', async () => {
+    const { fixture, host } = renderBoard(Array.from({ length: 10 }, (_, i) => entry(i)));
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(host.querySelectorAll('[data-cy="leaderboard-body"] li').length).toBe(BOARD_SIZE);
+    expect(rowCount(host)).toBe(BOARD_SIZE);
+  });
+
+  /**
+   * The empty and failed boards keep their height too, with the message laid
+   * *over* the reserved rows. Replacing the rows with the message instead would
+   * put the shift back for exactly the players who see it — a first-ever game,
+   * or a Firestore hiccup.
+   */
+  it('keeps the height when there are no scores, and says so', async () => {
+    const { fixture, host } = renderBoard([]);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(rowCount(host)).toBe(BOARD_SIZE);
+    expect(host.querySelector('[data-cy="leaderboard-message"]')?.textContent).toContain(
+      'No scores yet',
+    );
+  });
+
+  it('keeps the height when the fetch fails, and says so', async () => {
+    const { fixture, host } = renderBoard([], { fail: true });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(rowCount(host)).toBe(BOARD_SIZE);
+    expect(host.querySelector('[data-cy="leaderboard-message"]')?.textContent).toContain(
+      'Could not load the leaderboard',
+    );
+  });
+
+  /**
+   * The placeholder rows are pixels, not content: a screen reader meeting ten
+   * blank list items would be worse than the shift. `leaderboardStatus()` is
+   * what carries their meaning into words.
+   */
+  it('keeps the placeholder rows out of the accessibility tree', async () => {
+    const { fixture, host } = renderBoard([entry(1)]);
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const fillers = host.querySelectorAll('[data-cy="leaderboard-body"] > div[aria-hidden="true"]');
+    expect(fillers.length).toBe(BOARD_SIZE - 1);
+    expect(host.querySelector('[data-cy="leaderboard-status"]')).not.toBeNull();
   });
 });
 

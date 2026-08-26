@@ -212,12 +212,14 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 
 ### States — Leaderboard list
 
-| State          | Content                                                                     |
-| -------------- | --------------------------------------------------------------------------- |
-| **Loading**    | Grey text: "Loading leaderboard…"                                           |
-| **Load error** | Red inline error: "Could not load the leaderboard. Please try again later." |
-| **Empty**      | Grey text: "No scores yet. Be the first!"                                   |
-| **Loaded**     | Ranked list (1–10), refreshed automatically after a successful save         |
+**The board is ten rows tall in every state**, because ten is known before the data is — it is the `limit` passed to `getTopScores`. It used to be one line while loading that became up to ten rows, a **508px** jump (68px → 576px) landing exactly as a player reads their final score. Three kinds of row, all built from the same box so their heights cannot drift apart: real entries, pulsing skeletons, and invisible fillers for slots the board has not reached. Only the entries are in the accessibility tree; the other two are `aria-hidden` decoration, with an `sr-only` `role="status"` region carrying their meaning in words.
+
+| State          | Content                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Loading**    | **Ten pulsing skeleton rows** (rank pill, avatar circle, name bar, score bar); `sr-only` status reads "Loading leaderboard…" |
+| **Load error** | Red message "Could not load the leaderboard. Please try again later.", centred **over** ten reserved rows                    |
+| **Empty**      | Grey message "No scores yet. Be the first!", centred **over** ten reserved rows                                              |
+| **Loaded**     | Ranked list (1–10), refreshed automatically after a successful save; any unfilled slots become invisible filler rows         |
 
 ---
 
