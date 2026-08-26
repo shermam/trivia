@@ -73,6 +73,51 @@ describe('anonymous game flow (open_trivia source)', () => {
       });
   });
 
+  /**
+   * The leaderboard holds its height across the fetch, at the only layer that
+   * can see it.
+   *
+   * It used to be a single line of "Loading leaderboard…" that became up to ten
+   * rows. Measured against the compiled stylesheet that is a **508px** jump —
+   * 68px to 576px — landing exactly as a player reads their final score. Ten is
+   * known before the data is (it is the `limit` passed to `getTopScores`), so
+   * the board is ten rows in every state: real entries, then filler rows for
+   * the slots the board has not reached.
+   *
+   * The height is captured while the skeleton is still up and compared after
+   * the rows arrive, rather than asserting a fixed number — a hard-coded 576
+   * would need re-measuring every time a row's padding changed, and would pass
+   * for the wrong reason if both states drifted together.
+   */
+  it('does not resize the leaderboard when the scores arrive', () => {
+    cy.startGame(5);
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+    cy.location('pathname').should('eq', '/game-over');
+
+    // Captured while the placeholders are still on screen.
+    cy.get('[data-cy="leaderboard-skeleton"]').should('exist');
+    cy.get('[data-cy="leaderboard-body"]').then(($body) => {
+      const whileLoading = $body[0].getBoundingClientRect().height;
+
+      cy.get('[data-cy="leaderboard-skeleton"]').should('not.exist');
+
+      cy.get('[data-cy="leaderboard-body"]').should(($loaded) => {
+        expect($loaded[0].getBoundingClientRect().height, 'leaderboard height').to.be.closeTo(
+          whileLoading,
+          0.5,
+        );
+
+        // Ten row-height boxes, whatever mix of entries and fillers they are.
+        const rows = $loaded[0].querySelectorAll(
+          'li, :scope > div[aria-hidden="true"]:not([data-cy="leaderboard-skeleton"])',
+        );
+        expect(rows.length, 'leaderboard rows').to.equal(10);
+      });
+    });
+  });
+
   it('only credits score for correct answers', () => {
     cy.startGame(5);
 

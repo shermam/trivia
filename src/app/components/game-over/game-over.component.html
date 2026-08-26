@@ -166,83 +166,148 @@
         </h2>
       </div>
 
-      @if (isLoadingLeaderboard()) {
-        <p class="text-slate-500 dark:text-slate-400 text-sm px-6 py-4">
-          Loading leaderboard&hellip;
-        </p>
-      } @else if (leaderboardError()) {
-        <p class="text-sm text-red-700 dark:text-red-300 px-6 py-4">
-          {{ leaderboardError() }}
-        </p>
-      } @else if (leaderboard().length === 0) {
-        <p class="text-slate-500 dark:text-slate-400 text-sm px-6 py-4">
-          No scores yet. Be the first!
-        </p>
-      } @else {
-        <ol class="py-2">
-          @for (entry of leaderboard(); track entry.id; let i = $index) {
-            <li
-              class="flex items-center gap-3.5 px-6 py-2.5"
-              [class.bg-emerald-50]="entry.uid === authService.user()?.uid"
-              [class.dark:bg-emerald-500/10]="entry.uid === authService.user()?.uid"
-              [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
-              [class.border-emerald-600]="entry.uid === authService.user()?.uid"
-            >
-              <span
-                class="w-7 text-center shrink-0"
-                [class.text-lg]="i < 3"
-                [class.text-sm]="i >= 3"
-                [class.font-bold]="i >= 3"
-                [class.text-slate-400]="i >= 3"
-                [class.dark:text-slate-500]="i >= 3"
-              >
-                @if (i === 0) {
-                  &#129351;
-                } @else if (i === 1) {
-                  &#129352;
-                } @else if (i === 2) {
-                  &#129353;
-                } @else {
-                  #{{ i + 1 }}
-                }
-              </span>
+      <!--
+        The board is ten rows tall in every state, because ten is known before
+        the data is — it is the `limit` passed to `getTopScores`. It used to be
+        a single line of "Loading leaderboard…" that became up to ten rows, so
+        the card grew by roughly half a screen at the exact moment a player is
+        reading their score.
 
-              <span
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                [class.bg-emerald-700]="entry.uid === authService.user()?.uid"
-                [class.bg-slate-500]="entry.uid !== authService.user()?.uid"
-              >
-                {{ initialsFor(entry.name) }}
-              </span>
+        Three kinds of row, all built from the same box so their heights cannot
+        drift apart: real entries in the `<ol>`, pulsing skeletons while the
+        fetch is in flight, and invisible fillers for slots the board has not
+        reached. Only the first is in the accessibility tree — the other two are
+        `aria-hidden` decoration, and `leaderboardStatus()` says in words what
+        they say in pixels.
+      -->
+      <div class="relative py-2" data-cy="leaderboard-body">
+        <p role="status" aria-live="polite" class="sr-only" data-cy="leaderboard-status">
+          {{ leaderboardStatus() }}
+        </p>
 
-              <span class="flex-1 min-w-0">
+        @if (isLoadingLeaderboard()) {
+          <div aria-hidden="true" data-cy="leaderboard-skeleton">
+            @for (row of skeletonRows; track row) {
+              <div class="flex items-center gap-3.5 px-6 py-2.5">
                 <span
-                  class="font-medium text-slate-900 dark:text-slate-50 truncate"
-                  [class.font-bold]="entry.uid === authService.user()?.uid"
+                  class="h-4 w-7 shrink-0 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                ></span>
+                <span
+                  class="h-9 w-9 shrink-0 rounded-full bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                ></span>
+                <span
+                  class="h-4 flex-1 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                ></span>
+                <span
+                  class="h-4 w-24 shrink-0 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                ></span>
+              </div>
+            }
+          </div>
+        } @else {
+          <ol>
+            <!--
+            Tracked by `uid`, not `id`. `id` is optional on `LeaderboardEntry`,
+            so any path that ever omits it hands `@for` the same `undefined`
+            key for every row — the duplicate-key failure `CLAUDE.md` §4.4 is
+            about. `uid` is the entry's Firestore document id and there is one
+            entry per user per board, so it is both always present and unique.
+          -->
+            @for (entry of leaderboard(); track entry.uid; let i = $index) {
+              <li
+                class="flex items-center gap-3.5 px-6 py-2.5"
+                [class.bg-emerald-50]="entry.uid === authService.user()?.uid"
+                [class.dark:bg-emerald-500/10]="entry.uid === authService.user()?.uid"
+                [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
+                [class.border-emerald-600]="entry.uid === authService.user()?.uid"
+              >
+                <span
+                  class="w-7 text-center shrink-0"
+                  [class.text-lg]="i < 3"
+                  [class.text-sm]="i >= 3"
+                  [class.font-bold]="i >= 3"
+                  [class.text-slate-400]="i >= 3"
+                  [class.dark:text-slate-500]="i >= 3"
+                >
+                  @if (i === 0) {
+                    &#129351;
+                  } @else if (i === 1) {
+                    &#129352;
+                  } @else if (i === 2) {
+                    &#129353;
+                  } @else {
+                    #{{ i + 1 }}
+                  }
+                </span>
+
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                  [class.bg-emerald-700]="entry.uid === authService.user()?.uid"
+                  [class.bg-slate-500]="entry.uid !== authService.user()?.uid"
+                >
+                  {{ initialsFor(entry.name) }}
+                </span>
+
+                <span class="flex-1 min-w-0">
+                  <span
+                    class="font-medium text-slate-900 dark:text-slate-50 truncate"
+                    [class.font-bold]="entry.uid === authService.user()?.uid"
+                    [class.text-emerald-600]="entry.uid === authService.user()?.uid"
+                    [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
+                  >
+                    {{ entry.name }}
+                  </span>
+                  @if (entry.uid === authService.user()?.uid) {
+                    <span
+                      class="ml-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                      >YOU</span
+                    >
+                  }
+                </span>
+
+                <span
+                  class="text-sm font-bold text-slate-900 dark:text-slate-50"
                   [class.text-emerald-600]="entry.uid === authService.user()?.uid"
                   [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
                 >
-                  {{ entry.name }}
+                  {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
                 </span>
-                @if (entry.uid === authService.user()?.uid) {
-                  <span
-                    class="ml-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
-                    >YOU</span
-                  >
-                }
-              </span>
+              </li>
+            }
+          </ol>
 
-              <span
-                class="text-sm font-bold text-slate-900 dark:text-slate-50"
-                [class.text-emerald-600]="entry.uid === authService.user()?.uid"
-                [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
-              >
-                {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
-              </span>
-            </li>
+          <!--
+            One per slot the board has not reached. Same box as a real row and
+            the same 36px avatar-sized spacer inside it, so the height is
+            identical by construction rather than by a matching `h-` guess.
+          -->
+          @for (row of fillerRows(); track row) {
+            <div aria-hidden="true" class="flex items-center gap-3.5 px-6 py-2.5">
+              <span class="h-9 w-9"></span>
+            </div>
           }
-        </ol>
-      }
+        }
+
+        <!--
+          Laid over the reserved rows rather than replacing them, so an empty
+          board, a failed one and a full one are all the same height. It is
+          real information, so unlike the rows behind it this is not
+          `aria-hidden` — though `leaderboardStatus()` carries the same words
+          into the live region for the case where it appears after a wait.
+        -->
+        @if (leaderboardMessage(); as message) {
+          <p
+            class="absolute inset-0 flex items-center justify-center px-6 text-center text-sm"
+            [class.text-slate-500]="!leaderboardError()"
+            [class.dark:text-slate-400]="!leaderboardError()"
+            [class.text-red-700]="leaderboardError()"
+            [class.dark:text-red-300]="leaderboardError()"
+            data-cy="leaderboard-message"
+          >
+            {{ message }}
+          </p>
+        }
+      </div>
     </div>
 
     <!-- Rendered always and outside every conditional section: a report can
