@@ -18,6 +18,17 @@ const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 
 describe('auth menu accessibility (G1, G2)', () => {
   const trigger = () => cy.get('[data-cy="auth-menu-trigger"]');
+  /**
+   * **By `data-cy`, never by the ARIA role.** This spec addressed the panel by
+   * its role, and that worked for exactly as long as the auth menu was the
+   * only dialog in the document. The nav drawer is now permanently mounted —
+   * hidden and `inert`, so assistive tech never sees it, but very much present
+   * to a selector — and a `should('not.exist')` on the role became impossible
+   * to satisfy. Note which half broke: the `should('exist')` calls went on
+   * passing, vacuously, against the wrong element, exactly as `cy.contains`
+   * does in `CLAUDE.md` §4.6. Address the thing you mean.
+   */
+  const panel = () => cy.get('[data-cy="auth-menu-panel"]');
 
   beforeEach(() => {
     cy.stubOpenTrivia();
@@ -47,27 +58,32 @@ describe('auth menu accessibility (G1, G2)', () => {
   it('moves focus into the panel when it opens', () => {
     trigger().click();
 
-    // Not merely "something is focused" — focus must be inside the panel, which
-    // is what stops a keyboard user having to tab the whole page to reach it.
-    cy.focused().should('have.attr', 'role', 'dialog');
+    // Not merely "something is focused" — focus must be inside *this* panel,
+    // which is what stops a keyboard user having to tab the whole page to
+    // reach it. The `data-cy` matters as much as the role: there is a second
+    // `role="dialog"` in the document now, so the role alone could pass on the
+    // wrong element.
+    cy.focused()
+      .should('have.attr', 'role', 'dialog')
+      .and('have.attr', 'data-cy', 'auth-menu-panel');
   });
 
   it('closes on Escape and gives focus back to the trigger', () => {
     trigger().click();
-    cy.get('[role="dialog"]').should('exist');
+    panel().should('exist');
 
     cy.get('body').type('{esc}');
 
-    cy.get('[role="dialog"]').should('not.exist');
+    panel().should('not.exist');
     trigger().should('have.attr', 'aria-expanded', 'false');
     cy.focused().should('have.attr', 'data-cy', 'auth-menu-trigger');
   });
 
   it('gives focus back when closed with the panel’s own close button', () => {
     trigger().click();
-    cy.get('[role="dialog"]').find('button[aria-label="Close"]').click();
+    panel().find('button[aria-label="Close"]').click();
 
-    cy.get('[role="dialog"]').should('not.exist');
+    panel().should('not.exist');
     cy.focused().should('have.attr', 'data-cy', 'auth-menu-trigger');
   });
 
@@ -84,11 +100,11 @@ describe('auth menu accessibility (G1, G2)', () => {
     // By data-cy, not by text: the top bar's own trigger also reads "Sign in"
     // for an anonymous visitor, and it comes first in the DOM.
     cy.get('[data-cy="open-sign-in"]').click();
-    cy.get('[role="dialog"]').should('exist');
+    panel().should('exist');
 
     cy.get('body').type('{esc}');
 
-    cy.get('[role="dialog"]').should('not.exist');
+    panel().should('not.exist');
     // Back to game-over's own button, not the top bar's trigger.
     cy.focused().should('have.attr', 'data-cy', 'open-sign-in');
   });

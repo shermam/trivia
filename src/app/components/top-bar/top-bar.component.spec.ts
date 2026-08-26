@@ -101,7 +101,21 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolea
     media,
     trigger: () => el('[data-cy="nav-menu-trigger"]') as HTMLButtonElement,
     panel: () => el('[data-cy="nav-menu-panel"]'),
+    overlay: () => el('[data-cy="nav-menu-overlay"]'),
     backdrop: () => el('[data-cy="nav-menu-backdrop"]'),
+    /**
+     * "Closed" is no longer "absent". The drawer is in the DOM at all times so
+     * that it can transition on the way out as well as in, so every assertion
+     * that used to read `expect(panel()).toBeNull()` reads this instead.
+     *
+     * `inert` is the thing asserted rather than the `invisible` class, because
+     * it is the attribute that carries the *meaning* — not focusable, not in
+     * the accessibility tree, not clickable — while the class is one of three
+     * implementation details behind it. jsdom parses `inert` without enforcing
+     * any of that, which is exactly why the enforcement is asserted in
+     * `mobile-nav.cy.ts` and only the wiring is asserted here.
+     */
+    isOpen: () => el('[data-cy="nav-menu-overlay"]').getAttribute('inert') === null,
     authStub,
     chip: () => el('[data-cy="auth-menu-trigger"]'),
     chipText: () =>
@@ -122,11 +136,93 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
   it('starts closed, and says so on the trigger', () => {
     const h = setup();
 
-    expect(h.panel()).toBeNull();
+    expect(h.isOpen()).toBe(false);
     expect(h.trigger().getAttribute('aria-expanded')).toBe('false');
-    // Nothing to point at while there is no panel — a dangling `aria-controls`
-    // names an element that is not in the document.
-    expect(h.trigger().getAttribute('aria-controls')).toBeNull();
+    // Constant, not conditional. It used to be dropped while the drawer was
+    // closed, because back then the panel genuinely was not in the document
+    // and a dangling `aria-controls` names nothing. The panel is always there
+    // now, so the trigger can always name it — which is what a disclosure is
+    // supposed to do.
+    expect(h.trigger().getAttribute('aria-controls')).toBe(h.panel().id);
+  });
+
+  /**
+   * The drawer renders closed rather than not rendering, and that is a real
+   * behavioural claim rather than a detail: it is what allows the exit
+   * transition to play, and it is also what would put a stack of tabbable
+   * links and a `role="dialog"` on every page if `inert` were ever dropped.
+   */
+  it('keeps the closed drawer in the DOM, and inert', () => {
+    const h = setup();
+
+    expect(h.panel()).not.toBeNull();
+    expect(h.overlay().getAttribute('inert')).toBe('');
+    expect(h.overlay().className).toContain('invisible');
+    expect(h.overlay().className).toContain('pointer-events-none');
+  });
+
+  /**
+   * The panel has to paint *over* the backdrop, and the only thing arranging
+   * that is DOM order: both are positioned with `z-index: auto`, so the later
+   * sibling wins.
+   *
+   * Worth a test because reversing them is a one-line edit with a symptom that
+   * points somewhere else — a translucent sheet over the whole drawer, and an
+   * e2e click landing on the backdrop when it was aimed at a link. jsdom has no
+   * layout and no paint, but it does have sibling order, which is the whole
+   * mechanism here.
+   */
+  it('paints the panel over the backdrop by putting it second', () => {
+    const h = setup();
+    const order = [...h.overlay().children].map((child) => child.getAttribute('data-cy'));
+
+    expect(order).toContain('nav-menu-backdrop');
+    expect(order.indexOf('nav-menu-panel')).toBeGreaterThan(order.indexOf('nav-menu-backdrop'));
+  });
+
+  /**
+   * **The one asymmetry in the animation, and the reason focus works.** The
+   * wrapper's `visibility` transition is what holds the drawer on screen for
+   * the length of the exit, and it is listed on the *closed* class list only,
+   * because a CSS transition takes its properties from the after-change style.
+   *
+   * Applied in both directions it also delays `visibility` becoming `visible`
+   * on the way *in*: for the first frame the transition sits at progress 0 and
+   * `visibility` still computes to `hidden`, so the `focus()` that runs in that
+   * same frame silently does nothing and the drawer opens with focus stranded
+   * on the hamburger. Measured, not reasoned — a reduced-motion browser, which
+   * has no transition to sit at progress 0, focused the panel correctly while a
+   * normal one did not.
+   */
+  it('holds the drawer on screen while it closes, and never while it opens', () => {
+    const h = setup();
+    const holdsVisibility = () => h.overlay().className.includes('transition-[visibility]');
+
+    expect(holdsVisibility(), 'closed drawer should transition its visibility').toBe(true);
+
+    h.open();
+
+    expect(holdsVisibility(), 'open drawer must not delay becoming visible').toBe(false);
+  });
+
+  /**
+   * Three elements transition on the same gesture — the wrapper's
+   * `visibility`, the panel's `transform`, the backdrop's `opacity` — and the
+   * wrapper's is the one that ends the exit by hiding everything. If a child
+   * ever outlasts it, the drawer disappears mid-slide.
+   *
+   * Pinned as one number in three places rather than as a specific number:
+   * changing the timing is fine, changing it in only two of the three is the
+   * bug.
+   */
+  it('gives the wrapper, the panel and the backdrop the same duration', () => {
+    const h = setup();
+    const duration = (element: HTMLElement) =>
+      /motion-safe:duration-(\d+)/.exec(element.className)?.[1];
+
+    expect(duration(h.overlay())).toBeDefined();
+    expect(duration(h.panel())).toBe(duration(h.overlay()));
+    expect(duration(h.backdrop())).toBe(duration(h.overlay()));
   });
 
   it('opens on click and points the trigger at the panel', () => {
@@ -134,7 +230,7 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
 
     h.open();
 
-    expect(h.panel()).not.toBeNull();
+    expect(h.isOpen()).toBe(true);
     expect(h.trigger().getAttribute('aria-expanded')).toBe('true');
     expect(h.trigger().getAttribute('aria-controls')).toBe(h.panel().id);
     expect(h.panel().getAttribute('role')).toBe('dialog');
@@ -156,7 +252,7 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     h.fixture.detectChanges();
 
-    expect(h.panel()).toBeNull();
+    expect(h.isOpen()).toBe(false);
     expect(document.activeElement).toBe(h.trigger());
   });
 
@@ -167,7 +263,7 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
     h.backdrop().click();
     h.fixture.detectChanges();
 
-    expect(h.panel()).toBeNull();
+    expect(h.isOpen()).toBe(false);
   });
 
   it('closes when a link inside it is followed', () => {
@@ -180,7 +276,7 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
     ).click();
     h.fixture.detectChanges();
 
-    expect(h.panel()).toBeNull();
+    expect(h.isOpen()).toBe(false);
   });
 
   it('stays open when the theme is toggled from inside it', () => {
@@ -194,7 +290,7 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
     ).click();
     h.fixture.detectChanges();
 
-    expect(h.panel()).not.toBeNull();
+    expect(h.isOpen()).toBe(true);
   });
 
   /**
@@ -210,7 +306,7 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
     h.media.widen();
     h.fixture.detectChanges();
 
-    expect(h.panel()).toBeNull();
+    expect(h.isOpen()).toBe(false);
     expect(h.trigger().getAttribute('aria-expanded')).toBe('false');
   });
 
