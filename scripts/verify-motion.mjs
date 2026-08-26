@@ -24,8 +24,8 @@ import { globSync } from 'node:fs';
  * **Scope is movement, deliberately narrow.** `animate-*` utilities are the
  * target because they loop, which is the case `prefers-reduced-motion` exists
  * for and the case WCAG 2.2.2 speaks to. Colour and shadow transitions
- * (`transition-colors`, and the `transition-all` on several buttons, which
- * animate `background-color` and `box-shadow` on hover) are not motion, and
+ * (`transition-colors`, and the `transition-all` on several buttons, which is
+ * mostly `background-color` and `box-shadow` on hover) are not motion, and
  * sweeping them in would bury the real rule under noise nobody reads.
  *
  * The one class of transition that *is* swept in is a `transition-[…]` naming
@@ -41,6 +41,21 @@ import { globSync } from 'node:fs';
  * general case, which means resolving Tailwind's utilities to declarations —
  * far more machinery than the risk warrants. If a transform-based movement is
  * ever added in a template, add it to MOVEMENT_PATTERNS below.
+ *
+ * **`transition-transform` is swept in, and was added the day something used
+ * it** — the nav drawer, which slides a 288px panel across a phone screen and
+ * is exactly the movement the preference exists for. It is worth noting that
+ * the note above ("add it when it happens") is the only reason this rule is
+ * here: nothing would have failed without it, and the drawer would have
+ * shipped ungated the same way `animate-pulse` did.
+ *
+ * **What is deliberately still out of scope:** the 2px `hover:-translate-y-0.5`
+ * lift on the two primary CTAs (`game-setup`, and the same pattern under
+ * `transition-all`). Hover-triggered, self-reverting, two pixels, and it moves
+ * nothing else on the page — the preference is about vestibular triggers, not
+ * about every transform on the page. Matching it would also mean telling
+ * `translate-y-0.5` apart from the `disabled:hover:translate-y-0` that exists
+ * to cancel it, which is a lot of regex for a movement nobody would notice.
  */
 
 /** Utilities that produce looping or translating motion. */
@@ -54,6 +69,11 @@ const MOVEMENT_PATTERNS = [
   // Deliberately not every `transition-[…]`: see the note above about the quiz
   // timer's `stroke-dashoffset`, which animates without reflowing anything.
   /(?<!:)\btransition-\[[^\]]*\b(?:grid-template|width|height|margin|padding|inset|top|right|bottom|left|translate|transform|flex-basis|gap)[^\]]*\]/g,
+  // Tailwind's named transform transition, e.g. the nav drawer's slide. Not an
+  // arbitrary property, so the pattern above cannot see it; and a transform is
+  // movement by definition, which is more than can be said for `transition-all`
+  // on a button.
+  /(?<!:)\btransition-transform\b/g,
 ];
 
 /** The variant that gates a utility on `prefers-reduced-motion: no-preference`. */

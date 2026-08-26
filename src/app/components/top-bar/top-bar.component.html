@@ -29,7 +29,7 @@
       (click)="toggleNav()"
       [attr.aria-expanded]="isNavOpen()"
       aria-haspopup="dialog"
-      [attr.aria-controls]="isNavOpen() ? navPanelId : null"
+      [attr.aria-controls]="navPanelId"
       aria-label="Site menu"
       class="flex h-9 w-9 shrink-0 items-center justify-center justify-self-start rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors sm:hidden"
     >
@@ -242,7 +242,7 @@
           <app-icon
             name="chevron-down"
             [size]="14"
-            class="hidden sm:block sm:ml-2 text-slate-500 dark:text-slate-400 transition-transform"
+            class="hidden sm:block sm:ml-2 text-slate-500 dark:text-slate-400 motion-safe:transition-transform"
             [class.rotate-180]="isMenuOpen()"
           />
         </button>
@@ -285,12 +285,71 @@
   traps focus or inerts the page, so claiming a modal would be a promise the
   markup does not keep. Escape and the backdrop both close it, and focus goes
   in on open and back to the hamburger on close (`CLAUDE.md` §4.5).
+
+  **Always in the DOM, hidden rather than absent — and that is what makes the
+  slide possible.** This used to be an `@if`, which can only ever animate in
+  one direction: a CSS transition needs the element to still be there while it
+  plays, and `@if` removes it the instant the signal flips. Angular's
+  `animate.leave` is the framework's answer to that and was rejected, because
+  it defers the *DOM* removal while tearing the component's view down
+  synchronously — leaving a visible, focusable, tappable copy of the drawer on
+  screen with its `(click)` bindings already gone. A corpse that still takes
+  taps is a worse bug than a drawer that shuts without a transition.
+
+  So the drawer is hidden instead, by three things bound to the same signal,
+  each doing a job the others do not:
+
+  - **`invisible` (`visibility: hidden`), not `hidden` (`display: none`).**
+    Only the former keeps the box laid out, and a transition cannot start from
+    a style the element does not have. `visibility` is also the one property
+    whose interpolation is defined to favour `visible` — every value strictly
+    between the two endpoints is `visible` — so a plain transition on it holds
+    the drawer on screen for the whole exit and drops it exactly at the end.
+    That *is* the close animation: no timer, no callback, nothing to tear down.
+  - **`inert`** takes the closed drawer out of the tab order, out of the
+    accessibility tree and out of find-in-page. It earns its place despite
+    `visibility: hidden` doing most of that, because the drawer is genuinely
+    visible for the 250ms of the exit, which is precisely the window where a
+    stray Tab could land inside a panel on its way out.
+  - **`pointer-events-none`** for that same window. A hidden box is not
+    hit-tested; a fading one covering the whole viewport very much is.
+
+  Focus-on-open therefore depends on `inert` being off the element before
+  anything calls `focus()`, and it was not: a plain `effect()` runs ahead of
+  the bindings it reads. That is why the focus effect in the component is an
+  `afterRenderEffect` — the full trace is in the comment on it. jsdom parses
+  `inert` and enforces nothing, so `mobile-nav.cy.ts` is where this is checked.
+
+  **The `visibility` transition is part of the closed class list only, and
+  that asymmetry is load-bearing.** A CSS transition reads its properties from
+  the *after-change* style, so listing it only on the closed state means it
+  applies when hiding and not when showing — which is all it was ever for. Put
+  it on both and opening breaks in a way that is very easy to miss: for the
+  first frame after the class comes off, the transition is at progress 0 and
+  `visibility` still computes to `hidden`, so the `focus()` that runs in the
+  same frame is a silent no-op and the drawer opens with focus left on the
+  hamburger. That is not a deduction — it shipped that way for one commit, and
+  the difference was visible in the measurements as a reduced-motion browser
+  focusing the panel correctly while a normal one did not.
+
+  The three durations are one number in three places and have to stay that
+  way: the wrapper's `visibility` is what ends the exit, so anything longer
+  inside it gets cut off mid-slide.
 -->
-@if (isNavOpen()) {
+<div
+  data-cy="nav-menu-overlay"
+  class="fixed inset-0 z-50 flex sm:hidden"
+  [ngClass]="
+    isNavOpen()
+      ? ''
+      : 'invisible pointer-events-none motion-safe:transition-[visibility] motion-safe:duration-250'
+  "
+  [attr.inert]="isNavOpen() ? null : ''"
+>
   <!--
     A flex row — panel, then backdrop filling the rest — rather than a
     full-bleed backdrop with the panel laid over it.
-    
+
     The panel is opaque, so the dim behind it was never visible and the two
     render identically. What changes is that the backdrop now occupies exactly
     the region a tap can reach: an `inset-0` backdrop has its own centre buried
@@ -299,73 +358,80 @@
     the check rather than the overlap, on the one interaction whose whole point
     is being clickable.
   -->
-  <div class="fixed inset-0 z-50 flex sm:hidden">
-    <div
-      #navPanel
-      [id]="navPanelId"
-      role="dialog"
-      aria-label="Site menu"
-      tabindex="-1"
-      data-cy="nav-menu-panel"
-      class="flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none"
-    >
-      <div class="mb-2 flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Menu</span>
-        <button
-          type="button"
-          (click)="closeNav()"
-          aria-label="Close menu"
-          data-cy="nav-menu-close"
-          class="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
-        >
-          <app-icon name="x" [size]="16" />
-        </button>
-      </div>
-
-      @if (reviewerService.isReviewer()) {
-        <a
-          routerLink="/review"
-          (click)="closeNav()"
-          data-cy="nav-menu-review-link"
-          class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
-        >
-          Review
-        </a>
-      }
-
-      <a
-        routerLink="/pricing"
-        (click)="closeNav()"
-        data-cy="nav-menu-pricing-link"
-        class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
-      >
-        Pricing
-      </a>
-
-      <!-- Deliberately does *not* close the drawer: the whole page changes
-           colour, and shutting the panel would hide the control you would use
-           to change your mind. -->
+  <div
+    #navPanel
+    [id]="navPanelId"
+    role="dialog"
+    aria-label="Site menu"
+    tabindex="-1"
+    data-cy="nav-menu-panel"
+    class="flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none motion-safe:transition-transform motion-safe:duration-250 ease-out"
+    [ngClass]="isNavOpen() ? 'translate-x-0' : '-translate-x-full'"
+  >
+    <div class="mb-2 flex items-center justify-between">
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Menu</span>
       <button
         type="button"
-        (click)="toggleTheme()"
-        data-cy="nav-menu-theme-toggle"
-        [attr.aria-label]="
-          themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
-        "
-        class="mt-1 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+        (click)="closeNav()"
+        aria-label="Close menu"
+        data-cy="nav-menu-close"
+        class="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
       >
-        <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
-        {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
+        <app-icon name="x" [size]="16" />
       </button>
     </div>
 
-    <!-- Decorative: the same dismissal is on the close button and on Escape,
-         so a screen reader gains nothing from a third control. -->
-    <div
-      class="flex-1 bg-slate-900/40"
-      aria-hidden="true"
-      data-cy="nav-menu-backdrop"
+    @if (reviewerService.isReviewer()) {
+      <a
+        routerLink="/review"
+        (click)="closeNav()"
+        data-cy="nav-menu-review-link"
+        class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+      >
+        Review
+      </a>
+    }
+
+    <a
+      routerLink="/pricing"
       (click)="closeNav()"
-    ></div>
+      data-cy="nav-menu-pricing-link"
+      class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+    >
+      Pricing
+    </a>
+
+    <!-- Deliberately does *not* close the drawer: the whole page changes
+         colour, and shutting the panel would hide the control you would use
+         to change your mind. -->
+    <button
+      type="button"
+      (click)="toggleTheme()"
+      data-cy="nav-menu-theme-toggle"
+      [attr.aria-label]="
+        themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+      "
+      class="mt-1 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+    >
+      <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
+      {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
+    </button>
   </div>
-}
+
+  <!--
+    Decorative: the same dismissal is on the close button and on Escape, so a
+    screen reader gains nothing from a third control.
+
+    It fades rather than sliding, because it does not move — the panel slides
+    out from under it and the dim it casts over the rest of the page simply
+    lifts. Gated on `motion-safe:` all the same, so the reduced-motion path is
+    a plain instant open and close rather than a half-animated one.
+  -->
+  <div
+    class="flex-1 bg-slate-900/40 motion-safe:transition-opacity motion-safe:duration-250"
+    [ngClass]="isNavOpen() ? 'opacity-100' : 'opacity-0'"
+    aria-hidden="true"
+    data-cy="nav-menu-backdrop"
+    (click)="closeNav()"
+  ></div>
+</div>

@@ -3,6 +3,7 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  afterRenderEffect,
   computed,
   effect,
   inject,
@@ -243,8 +244,37 @@ export class TopBarComponent {
    * Simpler than the auth menu's version because the drawer has exactly one
    * opener — the hamburger — so there is no "wherever it was opened from" to
    * remember.
+   *
+   * **`afterRenderEffect`, not `effect` — and that is a bug fix, not a
+   * preference.** A plain `effect()` runs *before* the bindings it depends on
+   * reach the DOM. Instrumenting `focus`, `setAttribute` and `classList` in
+   * Chromium on the click that opens the drawer gives the order outright:
+   *
+   * ```
+   * 1  focus(nav-menu-panel)        inert: true   invisible: true
+   * 2  removeAttribute(inert)
+   * 3  classList.remove(invisible)
+   * 4  classList.remove(pointer-events-none)
+   * ```
+   *
+   * `focus()` on an element that is still `inert` and still
+   * `visibility: hidden` is a silent no-op, so the drawer opened with focus
+   * left on the hamburger — a keyboard user tabbing from there walks the whole
+   * page to reach a panel already on screen.
+   *
+   * **This worked right up until the drawer stopped being an `@if`, and for a
+   * reason worth knowing.** The effect reads `navPanel()`, a `viewChild`
+   * signal. While the panel was created and destroyed on open, that signal
+   * changed *after* the view was built, which forced a second run of the
+   * effect at a point when the DOM was already correct. The ordering was
+   * always wrong; a freshly-resolved `viewChild` was accidentally covering for
+   * it. Making the panel permanent removed the accident and left the bug.
+   *
+   * Nothing in jsdom enforces `inert` or `visibility`, so the unit spec's
+   * focus assertions pass either way. `mobile-nav.cy.ts` is where this is
+   * actually checked.
    */
-  private readonly navFocusEffect = effect(() => {
+  private readonly navFocusEffect = afterRenderEffect(() => {
     const isOpen = this.isNavOpen();
     const panel = this.navPanel();
 

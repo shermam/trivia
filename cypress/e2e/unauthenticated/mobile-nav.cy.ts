@@ -6,6 +6,12 @@
  * elements are *visible* at which width, because that is decided entirely by
  * Tailwind classes and jsdom does not do layout. This spec runs at real
  * viewports, which is the only place those classes mean anything.
+ *
+ * Since the drawer became an always-mounted overlay that slides rather than an
+ * `@if` that appears, this is also the only place two of its guarantees can be
+ * checked at all. jsdom parses `inert` and enforces none of it, so "closed
+ * means unfocusable and untappable" is a browser-only assertion; and the slide
+ * itself is a transform, which jsdom has no opinion about.
  */
 
 const MOBILE = { width: 390, height: 780 };
@@ -139,7 +145,11 @@ describe('the top bar on a phone', () => {
     cy.get('[data-cy="nav-menu-pricing-link"]').click();
 
     cy.location('pathname').should('eq', '/pricing');
-    cy.get('[data-cy="nav-menu-panel"]').should('not.exist');
+    // `not.be.visible`, not `not.exist`: the drawer stays in the document so
+    // it can transition on the way out. Cypress retries the assertion, so this
+    // also quietly requires the exit to actually finish rather than leaving a
+    // permanently visible panel over the page it just navigated to.
+    cy.get('[data-cy="nav-menu-panel"]').should('not.be.visible');
   });
 
   it('closes on Escape and returns focus to the hamburger', () => {
@@ -148,7 +158,7 @@ describe('the top bar on a phone', () => {
 
     cy.get('body').type('{esc}');
 
-    cy.get('[data-cy="nav-menu-panel"]').should('not.exist');
+    cy.get('[data-cy="nav-menu-panel"]').should('not.be.visible');
     cy.focused().should('have.attr', 'data-cy', 'nav-menu-trigger');
   });
 
@@ -161,7 +171,93 @@ describe('the top bar on a phone', () => {
     cy.get('[data-cy="nav-menu-trigger"]').click();
     cy.get('[data-cy="nav-menu-backdrop"]').click();
 
-    cy.get('[data-cy="nav-menu-panel"]').should('not.exist');
+    cy.get('[data-cy="nav-menu-panel"]').should('not.be.visible');
+  });
+
+  /**
+   * The drawer is in the DOM on every page load now, closed. Everything that
+   * makes "closed" mean closed — no tab stop, nothing in the accessibility
+   * tree, nothing hit-tested — rides on `inert` and `pointer-events-none`, and
+   * jsdom enforces neither, so this is the only place it can be checked.
+   */
+  it('leaves nothing tappable behind while it is closed', () => {
+    cy.get('[data-cy="nav-menu-overlay"]').should('have.attr', 'inert');
+
+    cy.document().then((doc) => {
+      const overlay = doc.querySelector('[data-cy="nav-menu-overlay"]');
+      const hit = doc.elementFromPoint(20, doc.documentElement.clientHeight / 2);
+      expect(overlay?.contains(hit), 'the closed drawer swallowing a tap').to.equal(false);
+    });
+  });
+
+  /**
+   * **The reason this design was chosen over `animate.leave`.** Angular's
+   * version defers the DOM removal but tears the view down synchronously, so
+   * for the length of the exit there is a drawer on screen whose `(click)`
+   * handlers are already gone — visible, focusable, and covering the viewport.
+   *
+   * Here `inert` and `pointer-events-none` land with the signal rather than
+   * with the animation, so the page underneath is usable the instant the
+   * drawer is dismissed, whatever the panel is still doing.
+   */
+  it('stops intercepting the moment it is dismissed', () => {
+    cy.get('[data-cy="nav-menu-trigger"]').click();
+    cy.get('[data-cy="nav-menu-backdrop"]').click();
+
+    cy.get('[data-cy="nav-menu-overlay"]')
+      .should('have.attr', 'inert')
+      .and('have.class', 'pointer-events-none');
+  });
+
+  /**
+   * The slide itself. Closed, the panel is parked entirely off the left edge by
+   * `-translate-x-full`; open, it rests against it.
+   *
+   * Measured rather than asserted on the class, because `-translate-x-full`
+   * only parks the panel off-screen if the panel is the thing being translated
+   * and its width is what "full" resolves against — a wrapper picking up the
+   * class instead would read as present and move nothing.
+   */
+  it('parks the panel off the left edge until it is opened', () => {
+    cy.get('[data-cy="nav-menu-panel"]').then(($panel) => {
+      expect($panel[0].getBoundingClientRect().right, 'closed panel still on screen').to.be.at.most(
+        0,
+      );
+    });
+
+    cy.get('[data-cy="nav-menu-trigger"]').click();
+
+    cy.get('[data-cy="nav-menu-panel"]').should(($panel) => {
+      expect($panel[0].getBoundingClientRect().x, 'open panel not at the left edge').to.be.closeTo(
+        0,
+        1,
+      );
+    });
+  });
+
+  /**
+   * **Focus-on-open is what the always-mounted drawer actually broke, twice.**
+   * The panel sits in a subtree that is `inert` and `visibility: hidden` until
+   * the drawer opens, and `focus()` on an element in either state is a silent
+   * no-op — so opening it now depends on both of those being genuinely gone by
+   * the time focus moves, which they were not:
+   *
+   * 1. A plain `effect()` runs *before* its bindings reach the DOM. It had
+   *    always run in the wrong order; a `viewChild` resolving late used to
+   *    force a second run once the DOM was right, and making the panel
+   *    permanent removed that accident. Fixed with `afterRenderEffect`.
+   * 2. With the `visibility` transition applied in both directions, the first
+   *    frame after opening sits at progress 0 where `visibility` still computes
+   *    to `hidden`. Fixed by transitioning it only on the way out.
+   *
+   * Both failed *silently*, and neither is visible to the unit spec, which
+   * asserts the same thing and passes either way because jsdom enforces
+   * neither attribute. This is the assertion with teeth.
+   */
+  it('moves focus into the panel on open, past the inert it just dropped', () => {
+    cy.get('[data-cy="nav-menu-trigger"]').click();
+
+    cy.focused().should('have.attr', 'data-cy', 'nav-menu-panel');
   });
 });
 
