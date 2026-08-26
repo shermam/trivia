@@ -108,24 +108,29 @@ export class TopBarComponent {
   );
 
   /**
-   * Whether the chip's label region takes up space on a phone.
+   * Whether the chip shows a visible label at all.
    *
    * True for exactly one state — signed out, auth settled — and that is the
-   * whole design. The chip has two widths below `sm`: avatar-only (42px) and
-   * avatar-plus-"Sign in". Everything else collapses to the first, so the
-   * label region's `grid-template-columns` transition only ever *widens*, and
-   * it fires precisely when there is something to say.
+   * whole design. The chip has two widths: avatar-only (70px with the chevron,
+   * 42px without it below `sm`) and avatar-plus-"Sign in". Loading and
+   * signed-in are both the first, so a returning player's chip resolves
+   * **without moving at any viewport**, and the transition only ever widens,
+   * firing precisely when the bar has something to offer.
    *
-   * The product reading is the reason to prefer it over animating in both
-   * directions. A returning player's chip resolves to their avatar without
-   * moving, which is what you want when the next thing they do is start a
-   * game. A signed-out player's chip grows a "Sign in" affordance in the
-   * corner of their eye, which is the one moment the bar has something to
-   * offer them.
+   * **This used to be a phone-only rule and the desktop exception was the
+   * bug.** Above `sm` the chip kept the display name and the PRO badge, which
+   * made its width a function of two things that arrive late and separately:
+   * the name (a short one shrank the chip 19px, a long one grew it 154px) and
+   * then the Pro claim a beat later (+20.6px). Every signed-in desktop load
+   * shifted the bar twice. Reserving space for them instead was measured and
+   * rejected: a slot sized to the "Sign in" string fits four characters plus an
+   * ellipsis, and a slot sized to the widest name leaves a signed-out user
+   * looking at 150px of nothing.
    *
-   * Desktop is unaffected: from `sm` up the track is always `1fr`, because
-   * there is room for the label in every state and the skeleton is already
-   * sized to the string it becomes.
+   * So the name and badge are `sr-only` everywhere and the chip is the avatar.
+   * Identity is one click away in the auth menu, which already shows both; the
+   * accessible name still reads "S Sherman PRO"; and paid status is an
+   * `emerald-400` ring on the avatar, which is a box-shadow and therefore free.
    */
   protected readonly showsLabel = computed(
     () => this.authService.authReady() && !this.showsRealAccount(),

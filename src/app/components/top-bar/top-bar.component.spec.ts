@@ -58,7 +58,7 @@ interface AuthState {
   isFullyAuthenticated?: boolean;
 }
 
-function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
+function setup(options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolean } = {}) {
   const media = stubMatchMedia();
   const auth = options.auth ?? {};
   const authStub = {
@@ -83,7 +83,7 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState } = {}) {
         provide: AuthService,
         useValue: authStub,
       },
-      { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
+      { provide: SubscriptionService, useValue: { isProUser: signal(options.isPro ?? false) } },
       { provide: ThemeService, useValue: { currentTheme: signal('light'), toggle: vi.fn() } },
       {
         provide: ReviewerService,
@@ -300,24 +300,27 @@ describe('TopBarComponent: the account chip while auth settles', () => {
   });
 
   /**
-   * The placeholder has to be shaped like the chip it becomes, not the word
-   * "Loading…" on its own — that rendered 34px tall against 42px for every
-   * resolved state, so the chip changed height the instant auth settled.
-   * jsdom cannot measure that, so what is pinned here is the structure the
-   * height depends on: an avatar-sized circle and a space-occupying label.
+   * The placeholder is the pulsing avatar and nothing else, because the chip
+   * it resolves into is the avatar and nothing else.
+   *
+   * It used to carry a skeleton *bar* sized to the string "Sign in", which was
+   * right when the resolved chip still showed a name: the word "Loading…" on
+   * its own rendered 34px tall against 42px, so the chip changed height the
+   * instant auth settled. The bar fixed that and reserved the anonymous
+   * width. Now that the resolved chip is avatar-only, a bar would reserve
+   * width for something that never arrives — reintroducing the shift it was
+   * added to remove, in the opposite direction.
    */
-  it('renders a chip-shaped skeleton while auth is settling', () => {
+  it('renders an avatar-shaped skeleton while auth is settling', () => {
     const h = setup({ auth: { authReady: false } });
 
     expect(h.chip().getAttribute('aria-busy')).toBe('true');
     expect(h.chip().querySelector('.h-7.w-7')).not.toBeNull();
-    // A skeleton *bar*, not an empty gap: `text-transparent` hides the glyphs
-    // while the box keeps their metrics, so it both looks like a placeholder
-    // and reserves the exact width the resolved label will need.
-    const bar = h.chip().querySelector('.text-transparent');
-    expect(bar).not.toBeNull();
-    expect(bar?.textContent?.trim()).toBe('Sign in');
     expect(h.chip().querySelector('.sr-only')?.textContent).toContain('Loading');
+    // No width-reserving bar, and no stray label text that would land in the
+    // button's accessible name while it is still announcing "Loading…".
+    expect(h.chip().querySelector('.text-transparent')).toBeNull();
+    expect(h.chipText()).not.toContain('Sign in');
   });
 
   it('drops aria-busy once auth is ready', () => {
@@ -367,13 +370,16 @@ describe('TopBarComponent: the chip label region', () => {
   const labelRegion = (h: ReturnType<typeof setup>) =>
     h.chip().querySelector('span.overflow-hidden') as HTMLElement;
 
-  it('keeps the label region collapsed on a phone while auth settles', () => {
+  it('keeps the label region collapsed at every viewport while auth settles', () => {
     const h = setup({ auth: { authReady: false } });
 
-    // Collapsed below `sm`, open from `sm` up: on a desktop there is room for
-    // the skeleton bar in every state, so nothing needs to move.
+    // No `sm:` escape hatch any more. It used to reopen the region above the
+    // breakpoint so a desktop chip could show the display name, and that
+    // exception *was* the remaining layout shift: the name and the PRO badge
+    // both arrive late and separately, so every signed-in desktop load moved
+    // the bar twice.
     expect(labelRegion(h).className).toContain('max-w-0');
-    expect(labelRegion(h).className).toContain('sm:max-w-none');
+    expect(labelRegion(h).className).not.toContain('sm:max-w-none');
   });
 
   it('opens the label region once there is a sign-in prompt to show', () => {
@@ -394,13 +400,13 @@ describe('TopBarComponent: the chip label region', () => {
    * wrapper margin in flow, so the chip landed at 50px against the 42px it is
    * supposed to match. That shipped to CI and failed there.
    */
-  it('keeps the label region collapsed on a phone for a signed-in account', () => {
+  it('keeps the label region collapsed at every viewport for a signed-in account', () => {
     const h = setup({
       auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
     });
 
     expect(labelRegion(h).className).toContain('max-w-0');
-    expect(labelRegion(h).className).toContain('sm:max-w-none');
+    expect(labelRegion(h).className).not.toContain('sm:max-w-none');
   });
 
   /**
@@ -427,6 +433,64 @@ describe('TopBarComponent: the chip label region', () => {
 
     expect(h.chip().querySelector('.h-7')).not.toBe(avatarBefore);
     expect(labelRegion(h)).toBe(regionBefore);
+  });
+
+  /**
+   * Paid status has to survive the name leaving the chip, and it has to cost
+   * nothing in width — a badge is what made the chip shift a *second* time,
+   * 20.6px, a beat after the name when the Stripe claim resolved.
+   *
+   * A `ring` is a box-shadow, so it paints outside the avatar's box without
+   * participating in layout at all. Asserting the badge is gone matters as
+   * much as asserting the ring is there: bringing it back would reintroduce
+   * exactly the shift this change removes.
+   */
+  it('marks a Pro account with a ring rather than a width-changing badge', () => {
+    const pro = setup({
+      auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
+      isPro: true,
+    });
+
+    const avatar = pro.chip().querySelector('.h-7.w-7') as HTMLElement;
+    expect(avatar.className).toContain('ring-2');
+    expect(pro.chipText()).toContain('PRO');
+    // The badge element itself — a bordered pill in the flex row — must not
+    // come back. Its text lives in the `sr-only` name instead.
+    expect(pro.chip().querySelector('.bg-emerald-100')).toBeNull();
+  });
+
+  it('leaves the ring off an account without Pro', () => {
+    const free = setup({
+      auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
+      isPro: false,
+    });
+
+    const avatar = free.chip().querySelector('.h-7.w-7') as HTMLElement;
+    expect(avatar.className).not.toContain('ring-2');
+    expect(free.chipText()).not.toContain('PRO');
+  });
+
+  /**
+   * The accessible name must not live inside the region that collapses to zero
+   * width, because with the name no longer rendered it is the only thing
+   * stopping the trigger announcing as the single letter "A".
+   *
+   * Chromium exposes clipped text either way — that was measured against the
+   * built app, not assumed — but a zero-width `overflow: hidden` box is
+   * exactly the shape engines disagree about, which is why `sr-only` uses 1px
+   * rather than 0. Keeping it outside the clip means no animation state can
+   * affect it.
+   */
+  it('keeps the accessible name outside the collapsing region', () => {
+    const h = setup({
+      auth: { authReady: true, user: { displayName: 'Ada Lovelace' }, isAnonymous: false },
+    });
+
+    const srOnly = [...h.chip().querySelectorAll('.sr-only')].find((el) =>
+      el.textContent?.includes('Ada Lovelace'),
+    );
+    expect(srOnly, 'sr-only name').toBeDefined();
+    expect(labelRegion(h).contains(srOnly!), 'name is inside the clipped region').toBe(false);
   });
 
   /**

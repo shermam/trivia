@@ -177,6 +177,23 @@ describe('the top bar on a wide screen', () => {
     cy.get('[data-cy="nav-menu-trigger"]').should('not.be.visible');
   });
 
+  /**
+   * The same cap guard as on a phone, at the width where it used not to apply.
+   *
+   * The label region was uncapped above `sm` until the chip stopped showing a
+   * display name; now every viewport shares one rule and one 4rem cap, so the
+   * clipping risk exists here too and is checked here too.
+   */
+  it('shows the whole sign-in label, uncut by the animation cap', () => {
+    cy.get('[data-cy="auth-menu-trigger"] span.overflow-hidden').should(($region) => {
+      const region = $region[0];
+      expect(region.scrollWidth, 'label overflowing its max-width cap').to.be.at.most(
+        region.clientWidth,
+      );
+      expect(region.clientWidth, 'label region width').to.be.greaterThan(0);
+    });
+  });
+
   it('keeps the brand on the left, where it has always been', () => {
     cy.get('header a[href="/"]')
       .first()
