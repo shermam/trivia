@@ -90,6 +90,7 @@ function setup(options: {
         provide: AuthService,
         useValue: {
           user: signal({ uid: 'player-1', displayName: 'Ada' }),
+          isAnonymous: signal(false),
           isFullyAuthenticated: signal(true),
           resendVerificationEmail: () => Promise.resolve(),
         },
@@ -1042,5 +1043,202 @@ describe('GameOverComponent — per-board leaderboards', () => {
     fixture.detectChanges();
 
     expect(getTopScores).toHaveBeenCalledWith('15', 10);
+  });
+});
+
+/**
+ * **The card between the score and the leaderboard, and the bug it shipped
+ * with.** Before auth answers, `user()` is `null`; `isAnonymous()` is
+ * `user()?.isAnonymous ?? false`, so it reads `false`; and the old
+ * `@else if (isAnonymous())` chain therefore fell straight through to its
+ * "signed in but unverified" arm. A signed-out visitor was told to verify an
+ * email they had never given us, and then watched it change to "sign in" a
+ * moment later.
+ *
+ * The chain is now one computed, which is the point: an ordering bug inside a
+ * template `@if`/`@else if` cannot be reached by a test, and this one can.
+ */
+describe('GameOverComponent: which face of the score card shows', () => {
+  function cardSetup(auth: { user: unknown; isAnonymous: boolean; isFullyAuthenticated: boolean }) {
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(7),
+            totalQuestions: signal(10),
+            percentage: signal(70),
+            questions: signal([]),
+            config: signal(makeConfig()),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal(auth.user),
+            isAnonymous: signal(auth.isAnonymous),
+            isFullyAuthenticated: signal(auth.isFullyAuthenticated),
+            resendVerificationEmail: () => Promise.resolve(),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore: vi.fn(),
+            getLeaderboardEntry: () => Promise.resolve(null),
+            getTopScores: () => NEVER,
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+
+    const fixture = TestBed.createComponent(GameOverComponent);
+    const component = fixture.componentInstance as unknown as {
+      scoreAction: () => string;
+      hasSaved: { set: (value: boolean) => void };
+      saveError: { set: (value: string | null) => void };
+    };
+    fixture.detectChanges();
+    return { fixture, component };
+  }
+
+  const el = (fixture: { nativeElement: HTMLElement }, selector: string) =>
+    fixture.nativeElement.querySelector(selector) as HTMLElement;
+
+  /**
+   * The regression test. `authReady` is not even consulted — the predicate
+   * asserts a positive fact (`user() !== null && !isAnonymous()`) rather than
+   * the absence of a negative, so "nothing has happened yet" and "signed out"
+   * are the same answer by construction rather than by a second condition
+   * somebody has to remember to add.
+   */
+  it('prompts sign-in, not verification, before auth has answered', () => {
+    const { component } = cardSetup({
+      user: null,
+      isAnonymous: false,
+      isFullyAuthenticated: false,
+    });
+
+    expect(component.scoreAction()).toBe('signIn');
+  });
+
+  // The same window reopens on every sign-out, between the old user going and
+  // the replacement anonymous session arriving — so this is not a cold-start
+  // curiosity.
+  it('prompts sign-in in the gap between sign-out and the new anonymous session', () => {
+    const { component } = cardSetup({
+      user: null,
+      isAnonymous: false,
+      isFullyAuthenticated: true,
+    });
+
+    expect(component.scoreAction()).toBe('signIn');
+  });
+
+  it('prompts sign-in for an anonymous session', () => {
+    const { component } = cardSetup({
+      user: { uid: 'anon-1' },
+      isAnonymous: true,
+      isFullyAuthenticated: false,
+    });
+
+    expect(component.scoreAction()).toBe('signIn');
+  });
+
+  it('asks a real but unverified account to verify', () => {
+    const { component } = cardSetup({
+      user: { uid: 'player-1' },
+      isAnonymous: false,
+      isFullyAuthenticated: false,
+    });
+
+    expect(component.scoreAction()).toBe('verify');
+  });
+
+  it('offers the save form to a fully authenticated account', () => {
+    const { component } = cardSetup({
+      user: { uid: 'player-1' },
+      isAnonymous: false,
+      isFullyAuthenticated: true,
+    });
+
+    expect(component.scoreAction()).toBe('save');
+  });
+
+  it('shows the confirmation once a save has landed', () => {
+    const { component, fixture } = cardSetup({
+      user: { uid: 'player-1' },
+      isAnonymous: false,
+      isFullyAuthenticated: true,
+    });
+
+    component.hasSaved.set(true);
+    fixture.detectChanges();
+
+    expect(component.scoreAction()).toBe('saved');
+  });
+
+  it('shows the failure when a save landed with an error', () => {
+    const { component, fixture } = cardSetup({
+      user: { uid: 'player-1' },
+      isAnonymous: false,
+      isFullyAuthenticated: true,
+    });
+
+    component.hasSaved.set(true);
+    component.saveError.set('Something went wrong.');
+    fixture.detectChanges();
+
+    expect(component.scoreAction()).toBe('saveFailed');
+  });
+
+  /**
+   * The other half of the fix: the faces are stacked in one grid cell so the
+   * card's height cannot depend on its state. jsdom has no layout, so it
+   * cannot check the heights — `game-flow.cy.ts` does that at 390px wide.
+   * What it *can* check is the mechanism the heights rest on: every face
+   * present, exactly one of them not `invisible`.
+   */
+  it('renders every face, with exactly one visible', () => {
+    const { fixture } = cardSetup({
+      user: null,
+      isAnonymous: false,
+      isFullyAuthenticated: false,
+    });
+
+    const faces = [...el(fixture, '[data-cy="score-action"]').children];
+
+    expect(faces.map((face) => face.getAttribute('data-cy'))).toEqual([
+      'score-saved',
+      'score-save-failed',
+      'score-sign-in',
+      'score-verify',
+      'score-save',
+    ]);
+    const visible = faces.filter((face) => !face.classList.contains('invisible'));
+    expect(visible.map((face) => face.getAttribute('data-cy'))).toEqual(['score-sign-in']);
+  });
+
+  /**
+   * `invisible` is `visibility: hidden`, which keeps the box — that is what
+   * reserves the height — while taking it out of the tab order and the
+   * accessibility tree. The save form is the one that matters: an anonymous
+   * visitor must not be able to tab into a form `firestore.rules` will reject.
+   */
+  it('keeps the save form out of reach while it is hidden', () => {
+    const { fixture } = cardSetup({
+      user: { uid: 'anon-1' },
+      isAnonymous: true,
+      isFullyAuthenticated: false,
+    });
+
+    const form = el(fixture, '[data-cy="score-save"]');
+    expect(form.classList.contains('invisible')).toBe(true);
+    expect(form.querySelector('input[name="playerName"]')).not.toBeNull();
   });
 });

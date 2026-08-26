@@ -41,6 +41,16 @@ function initialsFor(name: string): string {
   return initials || '?';
 }
 
+/**
+ * The five faces of the card between the score summary and the leaderboard.
+ *
+ * They are enumerated rather than derived in the template because all five are
+ * laid out together in one grid cell — see the template — so "which one is
+ * showing" and "which ones reserve the height" are separate questions, and only
+ * the first is a decision.
+ */
+type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save';
+
 @Component({
   selector: 'app-game-over',
   standalone: true,
@@ -386,6 +396,49 @@ export class GameOverComponent implements OnInit {
     }
     const index = this.leaderboard().findIndex((entry) => entry.uid === uid);
     return index === -1 ? null : index + 1;
+  });
+
+  /**
+   * Whether there is a real, settled account behind this game — as opposed to
+   * an anonymous session, or auth that has not answered yet.
+   *
+   * **`user() !== null` is the load-bearing half, and its absence was the
+   * bug.** `isAnonymous()` is `user()?.isAnonymous ?? false`, so it reads
+   * `false` when there is no user *at all* — which is true for every frame
+   * before `onAuthStateChanged` fires, and again in the window after it fires
+   * with `null` and before `signInAnonymously()` delivers a session. The old
+   * `@else if (isAnonymous())` chain therefore fell straight through to its
+   * "signed in but unverified" arm and told a signed-out visitor to verify an
+   * email they had never given us. Same defect, same shape, as the account
+   * chip's `?` avatar flash (`docs/app.md` §1).
+   *
+   * The fix is not another condition; it is asserting a positive fact instead
+   * of the absence of a negative (`CLAUDE.md` §4.4).
+   */
+  protected readonly showsRealAccount = computed(
+    () => this.authService.user() !== null && !this.authService.isAnonymous(),
+  );
+
+  /**
+   * Which of the card's five faces to show, as one pure decision rather than a
+   * template `@if`/`@else if` chain.
+   *
+   * Written this way for two reasons. It is unit-testable in isolation, which
+   * a chain of template conditions is not — and the flash above was a defect
+   * *in the ordering of that chain*, which is precisely the thing a test could
+   * not reach. And it makes the default explicit: everything that is not
+   * positively known to be a real signed-in account resolves to `'signIn'`,
+   * including "auth has not answered yet", which is the least alarming of the
+   * three and the one a first-time visitor almost always ends up in anyway.
+   */
+  protected readonly scoreAction = computed<ScoreAction>(() => {
+    if (this.hasSaved()) {
+      return this.saveError() ? 'saveFailed' : 'saved';
+    }
+    if (!this.showsRealAccount()) {
+      return 'signIn';
+    }
+    return this.authService.isFullyAuthenticated() ? 'save' : 'verify';
   });
 
   ngOnInit(): void {
