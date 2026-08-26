@@ -5,7 +5,6 @@ import {
   ElementRef,
   afterRenderEffect,
   computed,
-  effect,
   inject,
   signal,
   viewChild,
