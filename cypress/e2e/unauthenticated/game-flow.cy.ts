@@ -2,6 +2,14 @@ import questionsFixture from '../../fixtures/open-trivia-questions.json';
 
 const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 
+/**
+ * How long the leaderboard query is held open so its loading state is
+ * observable. Comfortably longer than Cypress's 50ms retry interval and than
+ * the ~35ms the skeleton lives for unaided, and short enough to cost the suite
+ * nothing that matters.
+ */
+const LEADERBOARD_HOLD_MS = 500;
+
 describe('anonymous game flow (open_trivia source)', () => {
   it('plays a full game, tracks score, and offers to sign in to save it', () => {
     cy.startGame(5);
@@ -140,8 +148,40 @@ describe('anonymous game flow (open_trivia source)', () => {
    * the rows arrive, rather than asserting a fixed number — a hard-coded 576
    * would need re-measuring every time a row's padding changed, and would pass
    * for the wrong reason if both states drifted together.
+   *
+   * **The loading state has to be held open, or catching it is a coin flip.**
+   * `isLoadingLeaderboard` flips the moment `getTopScores` resolves, and
+   * against the local Firestore emulator that is fast: instrumented in
+   * Chromium with a `MutationObserver`, the skeleton's real lifetime is
+   * **30–38ms**, against a Cypress retry interval of 50ms. So the assertion
+   * below was never testing the leaderboard — it was testing whether a poll
+   * happened to land inside a window narrower than the gap between polls. It
+   * failed that way twice on `main` before this intercept existed (runs
+   * 33018692994 and 33095985892), both times with the same
+   * "Expected to find element: `[data-cy="leaderboard-skeleton"]`".
+   *
+   * Holding the response makes the loading state deterministic rather than
+   * lucky. **It does not weaken anything**: the assertions are unchanged, the
+   * fetch is real, and the board still has to hold its height across a real
+   * load — the delay only guarantees there is a loading state to measure.
+   * Measured with the hold in place: 576px loading, 576px loaded.
+   *
+   * Note this is emulator-specific in origin but applied unconditionally. The
+   * preview suite runs the same spec against a real project, where network
+   * latency made the window wide enough that it never failed — but a fix that
+   * only works where the bug happens to be visible is one environment away
+   * from being no fix at all.
    */
   it('does not resize the leaderboard when the scores arrive', () => {
+    // Host-agnostic on purpose: emulator and production Firestore differ in
+    // origin but not in this path. `req.continue` is a passthrough, so the
+    // real response is still what the board renders.
+    cy.intercept({ method: 'POST', url: /\/leaderboards\/[^/]+:runQuery/ }, (req) => {
+      req.continue((res) => {
+        res.setDelay(LEADERBOARD_HOLD_MS);
+      });
+    }).as('topScores');
+
     cy.startGame(5);
     CORRECT_ANSWERS.forEach((answer) => {
       cy.answerQuestion(answer);
@@ -153,6 +193,7 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.get('[data-cy="leaderboard-body"]').then(($body) => {
       const whileLoading = $body[0].getBoundingClientRect().height;
 
+      cy.wait('@topScores');
       cy.get('[data-cy="leaderboard-skeleton"]').should('not.exist');
 
       cy.get('[data-cy="leaderboard-body"]').should(($loaded) => {
