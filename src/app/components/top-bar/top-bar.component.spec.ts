@@ -615,3 +615,72 @@ describe('TopBarComponent: the chip label region', () => {
     expect(signInLabel(h).className).toContain('ml-2');
   });
 });
+
+/**
+ * **Giving focus back when the auth menu closes, to an opener that may no
+ * longer be able to take it.**
+ *
+ * The menu is not only opened from the top bar — game-over's "Sign in to save
+ * this score" opens the same panel — so closing it returns focus to whatever
+ * opened it. That opener is routinely taken away by the very action that
+ * closed the menu, and *how* it is taken away changed: game-over's prompt used
+ * to be removed from the DOM when auth resolved, and is now one of five faces
+ * stacked in a grid cell, so it stays connected and goes `visibility: hidden`
+ * instead. `isConnected` alone stopped being the right question, and asking
+ * `focus()` anyway is silent — focus lands on `<body>` and the keyboard user
+ * loses their place with nothing logged anywhere.
+ *
+ * jsdom implements neither `checkVisibility` (so these exercise the
+ * `getComputedStyle` fallback arm, not the branch a browser takes) nor the
+ * refusal itself (`focus()` on a hidden element works here). Both are why the
+ * end-to-end version of this lives in `sign-in-save-score.cy.ts`.
+ */
+describe('TopBarComponent: focus returning to the opener', () => {
+  function openFromExternalTrigger(hide: 'hidden' | 'detached' | 'none') {
+    const h = setup();
+    const opener = document.createElement('button');
+    opener.setAttribute('data-cy', 'external-opener');
+    document.body.appendChild(opener);
+    opener.focus();
+
+    TestBed.inject(AuthMenuStateService).open();
+    h.fixture.detectChanges();
+
+    if (hide === 'hidden') {
+      opener.style.visibility = 'hidden';
+    } else if (hide === 'detached') {
+      opener.remove();
+    }
+
+    TestBed.inject(AuthMenuStateService).close();
+    h.fixture.detectChanges();
+
+    const activeCy =
+      document.activeElement?.getAttribute('data-cy') ?? document.activeElement?.tagName;
+    opener.remove();
+    return { activeCy, trigger: h.chip() };
+  }
+
+  it('returns focus to the opener that is still usable', () => {
+    const { activeCy } = openFromExternalTrigger('none');
+
+    expect(activeCy).toBe('external-opener');
+  });
+
+  it('falls back to the trigger when the opener has left the DOM', () => {
+    const { activeCy } = openFromExternalTrigger('detached');
+
+    expect(activeCy).toBe('auth-menu-trigger');
+  });
+
+  /**
+   * The case the score card introduced. Without the visibility check this
+   * lands on `<body>` in a real browser — and in jsdom it would land on the
+   * hidden opener, which is just as wrong and is what this asserts against.
+   */
+  it('falls back to the trigger when the opener is still there but hidden', () => {
+    const { activeCy } = openFromExternalTrigger('hidden');
+
+    expect(activeCy).toBe('auth-menu-trigger');
+  });
+});

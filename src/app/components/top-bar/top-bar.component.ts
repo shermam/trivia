@@ -5,7 +5,6 @@ import {
   ElementRef,
   afterRenderEffect,
   computed,
-  effect,
   inject,
   signal,
   viewChild,
@@ -20,6 +19,29 @@ import { ThemeService } from '../../services/theme.service';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 import { AuthMenuComponent } from './auth-menu.component';
+
+/**
+ * Whether `focus()` on this element would actually move focus.
+ *
+ * It silently does nothing — no exception, no return value — on a detached
+ * node, on `display: none`, and on `visibility: hidden` (`CLAUDE.md` §4.4).
+ * Asking anyway does not leave focus where it was: it drops to `<body>`.
+ *
+ * `checkVisibility` answers all three in one call, but **its default ignores
+ * the `visibility` property**, which is the one that matters here — hence the
+ * explicit option. The `getComputedStyle` arm is for engines without it; it is
+ * a weaker check (it misses a `display: none` ancestor) and is deliberately
+ * the fallback rather than the implementation.
+ */
+function canReceiveFocus(element: HTMLElement | null): element is HTMLElement {
+  if (!element?.isConnected) {
+    return false;
+  }
+  if (typeof element.checkVisibility === 'function') {
+    return element.checkVisibility({ visibilityProperty: true });
+  }
+  return getComputedStyle(element).visibility !== 'hidden';
+}
 
 /**
  * Global top bar: sits above `<router-outlet>` in app.html as a sibling, not
@@ -204,7 +226,16 @@ export class TopBarComponent {
     // the trigger — so a keyboard user tabs *through the whole page* to reach a
     // panel that is already on screen — and closing it drops focus to
     // `<body>`, losing their place entirely.
-    effect(() => {
+    //
+    // **`afterRenderEffect`, for the same reason the drawer's is** — a plain
+    // `effect()` runs before the bindings it depends on reach the DOM, so the
+    // restore below inspected the *previous* frame's opener. That is not a
+    // theoretical concern here: it is why the `isConnected` check underneath
+    // never actually worked. Traced in Chromium on `main`, signing in from
+    // game-over gave `in:open-sign-in` followed immediately by
+    // `out:open-sign-in->null` — focus was handed to an opener that Angular
+    // was about to take away in the same tick, and landed on `<body>`.
+    afterRenderEffect(() => {
       const isOpen = this.isMenuOpen();
       const panel = this.menuPanel();
 
@@ -222,11 +253,15 @@ export class TopBarComponent {
       if (!isOpen && this.wasMenuOpen) {
         const restoreTo = this.previouslyFocused ?? this.menuTrigger()?.nativeElement ?? null;
         this.previouslyFocused = null;
-        // Only if it is still in the document: the opener can have been removed
-        // by the very action that closed the menu (signing in re-renders
-        // game-over's prompt), and focusing a detached node silently sends
-        // focus to `<body>`.
-        if (restoreTo?.isConnected) {
+        // Only if focus can actually land there — the opener is routinely
+        // taken away by the very action that closed the menu. Signing in from
+        // game-over's "Sign in to save this score" is the case that exercises
+        // this, and it changed shape: that prompt used to be *removed* from
+        // the DOM when auth resolved, and is now one of five faces stacked in
+        // a grid cell, so it stays connected and turns `visibility: hidden`
+        // instead. Both send focus to `<body>` silently if you ask for it, so
+        // both have to fall back to the trigger.
+        if (canReceiveFocus(restoreTo)) {
           restoreTo.focus();
         } else {
           this.menuTrigger()?.nativeElement.focus();

@@ -22,8 +22,15 @@ describe('anonymous game flow (open_trivia source)', () => {
 
     // Anonymous players can view the leaderboard but are prompted to sign in
     // instead of getting a save-score form.
-    cy.contains('Sign in to save this score to the leaderboard.');
-    cy.contains('form', 'Save Score').should('not.exist');
+    //
+    // `be.visible` / `not.be.visible` rather than exists / does not exist: the
+    // card's five faces all live in one grid cell so that its height cannot
+    // change with its state, which means every face is in the DOM at all
+    // times. `not.exist` would now fail outright, and — the half worth
+    // watching — a bare `cy.contains` would go on *passing vacuously* against
+    // a face nobody can see (`CLAUDE.md` §4.6).
+    cy.contains('Sign in to save this score to the leaderboard.').should('be.visible');
+    cy.contains('form', 'Save Score').should('not.be.visible');
     cy.contains('Top 10 — 15-second games');
 
     cy.contains('button', 'Play Again').click();
@@ -71,6 +78,51 @@ describe('anonymous game flow (open_trivia source)', () => {
             expect(after.top, 'card top').to.be.closeTo(before.top, 0.5);
           });
       });
+  });
+
+  /**
+   * Every face of the score card is the same height, which is what stops the
+   * page moving when auth resolves.
+   *
+   * The card has five states — sign in, verify, save, saved, save failed — and
+   * which one shows is decided by auth arriving. Measured before the fix at
+   * 390x1000: sign-in 146px, verify 148px, save form 192px. So a returning
+   * player who could actually save watched the leaderboard drop **46px** the
+   * moment auth resolved, and a signed-out one was shown the verify prompt
+   * first and then the sign-in prompt, for a 2px twitch on top of being told
+   * about a problem they did not have.
+   *
+   * **390 wide is the whole test.** At 1024 the same three measured 122 / 124 /
+   * 120 — a 4px spread — because the save form only stacks its input above its
+   * button below `sm`. Checking this at a desktop viewport would have called it
+   * near enough while a phone was moving half a card.
+   *
+   * Asserted face-by-face against the cell rather than by driving the app
+   * through all five states: they share one grid cell, so equal face heights
+   * *is* the property. It also means an anonymous game — the cheapest thing
+   * this suite can set up — can prove something about the signed-in states.
+   */
+  it('gives every face of the score card the same height', () => {
+    cy.viewport(390, 1000);
+    cy.startGame(5);
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+    cy.location('pathname').should('eq', '/game-over');
+
+    cy.get('[data-cy="score-action"]').should(($card) => {
+      const cell = $card[0].getBoundingClientRect().height;
+      const faces = [...$card[0].children];
+
+      expect(faces.length, 'faces stacked in the cell').to.equal(5);
+      expect(cell, 'card collapsed').to.be.greaterThan(0);
+      faces.forEach((face) => {
+        expect(
+          face.getBoundingClientRect().height,
+          `face ${face.getAttribute('data-cy')} differs from the reserved height`,
+        ).to.be.closeTo(cell, 0.5);
+      });
+    });
   });
 
   /**

@@ -48,18 +48,42 @@
       </div>
     </div>
 
-    @if (hasSaved()) {
-      @if (saveError()) {
-        <div
-          class="flex items-start gap-2.5 text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl px-5 py-4"
-        >
-          <app-icon name="triangle-alert" [size]="18" class="shrink-0 mt-0.5" />
-          <p>{{ saveError() }}</p>
-        </div>
-      } @else {
-        <div
-          class="flex items-start gap-2.5 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl px-5 py-4"
-        >
+    <!--
+      **One grid cell, five faces.** Every child below sits in
+      `col-start-1 row-start-1`, so the cell is as tall as the tallest of them
+      and the card's height does not depend on which one is showing. Only
+      `invisible` moves.
+
+      This is the "reserve the space" technique from `CLAUDE.md` §4.4, and the
+      reason it is a stack rather than a `min-h-*` is that the number is not
+      ours to pick: it is whatever the save form measures at the current
+      viewport, font and copy, which changes under all three. Measured before
+      the change, at 390x1000: sign-in 146px, verify 148px, save form 192px —
+      so a returning player who could actually save watched the leaderboard
+      drop 46px the moment auth resolved, on the screen where they are reading
+      their score. At 1024x900 the same three are 122 / 124 / 120, which is
+      why a check at one convenient window size would have called this fixed.
+
+      The shorter faces are `justify-center` inside the reserved height, so the
+      slack reads as a roomier card rather than as a gap under the button.
+
+      `invisible` (`visibility: hidden`) and not `hidden`: the hidden faces
+      have to keep their boxes for the cell to be sized by them. It also takes
+      them out of the accessibility tree and out of the tab order, which
+      matters most for the save form — an anonymous visitor must not be able to
+      tab into a form `firestore.rules` will reject. `game-flow.cy.ts` asserts
+      exactly that.
+    -->
+    <div class="grid" data-cy="score-action">
+      <!-- saved: the confirmation. In the stack rather than replacing it, so
+           saving does not yank the leaderboard up by ~100px at the moment the
+           player's own entry appears in it. -->
+      <div
+        class="col-start-1 row-start-1 flex flex-col justify-center text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl px-5 py-4"
+        [class.invisible]="scoreAction() !== 'saved'"
+        data-cy="score-saved"
+      >
+        <div class="flex items-start gap-2.5">
           <app-icon name="circle-check-big" [size]="18" class="shrink-0 mt-0.5" />
           <div>
             <p class="font-semibold">Score saved to the leaderboard!</p>
@@ -70,10 +94,32 @@
             }
           </div>
         </div>
-      }
-    } @else if (authService.isAnonymous()) {
+      </div>
+
+      <!-- saveFailed: the save ran and came back with something to say. -->
       <div
-        class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
+        class="col-start-1 row-start-1 flex flex-col justify-center text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl px-5 py-4"
+        [class.invisible]="scoreAction() !== 'saveFailed'"
+        data-cy="score-save-failed"
+      >
+        <div class="flex items-start gap-2.5">
+          <app-icon name="triangle-alert" [size]="18" class="shrink-0 mt-0.5" />
+          <p>{{ saveError() }}</p>
+        </div>
+      </div>
+
+      <!--
+        signIn: **the default**, and deliberately so. It covers anonymous
+        sessions, the frames before auth has answered at all, and the window
+        where `onAuthStateChanged` has fired with `null` but the anonymous
+        session has not landed yet. Of the three auth faces it is the only one
+        that is true of a visitor we know nothing about; telling that visitor
+        to verify an email was the defect this replaces.
+      -->
+      <div
+        class="col-start-1 row-start-1 flex flex-col justify-center text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
+        [class.invisible]="scoreAction() !== 'signIn'"
+        data-cy="score-sign-in"
       >
         <p class="text-slate-700 dark:text-slate-300 mb-3">
           Sign in to save this score to the leaderboard.
@@ -83,15 +129,18 @@
             type="button"
             data-cy="open-sign-in"
             (click)="openSignIn()"
-            class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
+            class="mx-auto rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
           >
             Sign in
           </button>
         }
       </div>
-    } @else if (!authService.isFullyAuthenticated()) {
+
+      <!-- verify: a real account that cannot write to the leaderboard yet. -->
       <div
-        class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
+        class="col-start-1 row-start-1 flex flex-col justify-center text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
+        [class.invisible]="scoreAction() !== 'verify'"
+        data-cy="score-verify"
       >
         <p class="text-slate-700 dark:text-slate-300 mb-3">
           Verify your email to save this score to the leaderboard.
@@ -99,14 +148,19 @@
         <button
           type="button"
           (click)="resendVerification()"
-          class="rounded-xl border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold px-5 py-2.5 transition-colors"
+          class="mx-auto rounded-xl border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold px-5 py-2.5 transition-colors"
         >
           Resend verification email
         </button>
       </div>
-    } @else {
+
+      <!-- save: the only face that can actually write, and the tallest, because
+           below `sm` the input and the button stack. It is what sets the
+           reserved height. -->
       <div
-        class="bg-emerald-100 dark:bg-emerald-500/15 rounded-2xl px-5 py-5 border border-emerald-600/15 dark:border-emerald-400/20"
+        class="col-start-1 row-start-1 flex flex-col justify-center bg-emerald-100 dark:bg-emerald-500/15 rounded-2xl px-5 py-5 border border-emerald-600/15 dark:border-emerald-400/20"
+        [class.invisible]="scoreAction() !== 'save'"
+        data-cy="score-save"
       >
         <p
           class="flex items-center gap-1.5 text-sm font-bold text-emerald-900 dark:text-emerald-200 mb-3"
@@ -138,7 +192,7 @@
           </button>
         </form>
       </div>
-    }
+    </div>
     @if (saveError() && !hasSaved()) {
       <p
         class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl px-4 py-3"
