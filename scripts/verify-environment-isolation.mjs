@@ -66,6 +66,21 @@ const NON_PRODUCTION_BUILDS = ['development', 'e2e', 'lighthouse', 'dev-project'
 /** Files a developer's machine can reach that must never name production. */
 const DEV_FACING_FILES = ['src/proxy.conf.json', 'package.json'];
 
+/**
+ * CI that writes to a Firebase project, and must write to the dev one.
+ *
+ * `firebase-preview.yml` seeded real Auth users, `custom_questions` documents
+ * and leaderboard rows into **production** on every PR, swept afterwards on a
+ * best-effort basis — the largest single exposure in the repo, and quiet
+ * because the sweep mostly worked. The tasks it drives now refuse to start
+ * without an explicit project id, and refuse the production one outright; this
+ * catches the other half, the workflow handing them a credential for it.
+ *
+ * `firebase-deploy.yml` is deliberately absent: deploying production to
+ * production is its entire job.
+ */
+const WRITING_WORKFLOWS = ['.github/workflows/firebase-preview.yml'];
+
 const offences = [];
 const fail = (where, what) => offences.push({ where, what });
 
@@ -103,6 +118,20 @@ for (const file of DEV_FACING_FILES) {
   const lines = source.split('\n').filter((line) => !/"firebase:deploy"/.test(line));
   if (lines.join('\n').includes(PRODUCTION_PROJECT_ID)) {
     fail(file, `names the production project (${PRODUCTION_PROJECT_ID})`);
+  }
+}
+
+// ---- 2b. no CI job that writes to Firebase names the production project ---
+for (const file of WRITING_WORKFLOWS) {
+  const source = readFileSync(file, 'utf8');
+  if (source.includes(PRODUCTION_PROJECT_ID)) {
+    fail(
+      file,
+      `names the production project (${PRODUCTION_PROJECT_ID}) — this workflow seeds and deletes real Auth users and Firestore documents with Admin-SDK credentials, on every PR`,
+    );
+  }
+  if (/FIREBASE_SERVICE_ACCOUNT_INTELLECTURA/.test(source)) {
+    fail(file, 'uses the production service-account secret');
   }
 }
 
@@ -173,5 +202,6 @@ if (offences.length > 0) {
 
 console.log(
   `✓ Environments: ${NON_PRODUCTION_BUILDS.length} non-production build(s) isolated, ` +
-    `${emulatorScripts.length} emulator script(s) pinned to a demo- project`,
+    `${emulatorScripts.length} emulator script(s) pinned to a demo- project, ` +
+    `${WRITING_WORKFLOWS.length} writing workflow(s) off production`,
 );
