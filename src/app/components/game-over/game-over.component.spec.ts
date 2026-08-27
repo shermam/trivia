@@ -5,6 +5,7 @@ import { NEVER, of, throwError } from 'rxjs';
 import {
   GameConfig,
   LeaderboardEntry,
+  PickedAnswerId,
   TimeLimitOption,
   TriviaQuestion,
 } from '../../models/question.model';
@@ -83,6 +84,7 @@ function setup(options: {
           questions: signal([]),
           config: signal(makeConfig(options.timeLimit)),
           flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+          answerHistory: signal<readonly PickedAnswerId[]>([]),
           resetGame: () => undefined,
         },
       },
@@ -267,6 +269,7 @@ function configureReporting(options: {
           flaggedQuestionIds: signal<ReadonlySet<string>>(
             new Set(options.flaggedIds ?? options.questions.map((q) => q.id)),
           ),
+          answerHistory: signal<readonly PickedAnswerId[]>([]),
           resetGame: () => undefined,
         },
       },
@@ -789,6 +792,7 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
             questions: signal([]),
             config: signal(makeConfig(15)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswerId[]>([]),
             resetGame: () => undefined,
           },
         },
@@ -937,6 +941,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             questions: signal([]),
             config: signal(makeConfig(timeLimit)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswerId[]>([]),
             resetGame: () => undefined,
           },
         },
@@ -1019,6 +1024,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             questions: signal([]),
             config: signal(null),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswerId[]>([]),
             resetGame: () => undefined,
           },
         },
@@ -1071,6 +1077,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
             questions: signal([]),
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswerId[]>([]),
             resetGame: () => undefined,
           },
         },
@@ -1240,5 +1247,258 @@ describe('GameOverComponent: which face of the score card shows', () => {
     const form = el(fixture, '[data-cy="score-save"]');
     expect(form.classList.contains('invisible')).toBe(true);
     expect(form.querySelector('input[name="playerName"]')).not.toBeNull();
+  });
+});
+
+/**
+ * `FEAT-001`. Rendered rather than signal-read throughout, because the whole
+ * feature is a rendering: `recap()` returning the right rows proves nothing
+ * about whether the panel opens, whether a timeout looks different from a
+ * wrong answer, or whether the correct answer is shown when it should be.
+ */
+describe('GameOverComponent answer recap (FEAT-001)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  /** Two options with distinct ids; `wrongText` differing lets the assertions tell them apart. */
+  function recapQuestion(id: string, overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
+    return makeTriviaQuestion({
+      id,
+      question: `${id} text?`,
+      category: 'History',
+      difficulty: 'medium',
+      correct_answer: `${id} right`,
+      incorrect_answers: [`${id} wrong`],
+      all_answers: [
+        { id: `${id}:right`, text: `${id} right`, isCorrect: true },
+        { id: `${id}:wrong`, text: `${id} wrong`, isCorrect: false },
+      ],
+      ...overrides,
+    });
+  }
+
+  function render(options: { questions: TriviaQuestion[]; answerHistory: PickedAnswerId[] }) {
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(1),
+            totalQuestions: signal(options.questions.length),
+            percentage: signal(50),
+            questions: signal(options.questions),
+            config: signal(makeConfig()),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswerId[]>(options.answerHistory),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isAnonymous: signal(false),
+            isFullyAuthenticated: signal(true),
+            resendVerificationEmail: () => Promise.resolve(),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore: vi.fn().mockResolvedValue(undefined),
+            getLeaderboardEntry: () => Promise.resolve(null),
+            getTopScores: () => of([]),
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const query = (selector: string) => host.querySelector<HTMLElement>(selector);
+    const queryAll = (selector: string) => Array.from(host.querySelectorAll<HTMLElement>(selector));
+    return {
+      fixture,
+      host,
+      query,
+      queryAll,
+      open() {
+        query('[data-cy="recap-toggle"]')?.click();
+        fixture.detectChanges();
+      },
+    };
+  }
+
+  const q0 = recapQuestion('q0');
+  const q1 = recapQuestion('q1');
+  const q2 = recapQuestion('q2');
+
+  it('summarises the round on the toggle, and starts collapsed', () => {
+    const { query } = render({
+      questions: [q0, q1, q2],
+      answerHistory: ['q0:right', 'q1:wrong', null],
+    });
+
+    const toggle = query('[data-cy="recap-toggle"]');
+    expect(toggle?.textContent).toContain('Review answers');
+    expect(toggle?.textContent).toContain('(1/3 correct)');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(query('[data-cy="recap-panel"]')).toBeNull();
+  });
+
+  it('expands and collapses on the toggle', () => {
+    const { query, queryAll, open } = render({
+      questions: [q0, q1, q2],
+      answerHistory: ['q0:right', 'q1:wrong', null],
+    });
+
+    open();
+    expect(query('[data-cy="recap-toggle"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(queryAll('[data-cy="recap-row"]')).toHaveLength(3);
+
+    open(); // toggling again
+    expect(query('[data-cy="recap-toggle"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(query('[data-cy="recap-panel"]')).toBeNull();
+  });
+
+  // The disclosure contract from `CLAUDE.md` §4.5: `aria-controls` has to name
+  // an element that actually exists once open, or it points at nothing.
+  it('points aria-controls at the panel it opens', () => {
+    const { query, open } = render({ questions: [q0], answerHistory: ['q0:right'] });
+    open();
+
+    const controls = query('[data-cy="recap-toggle"]')?.getAttribute('aria-controls');
+    expect(controls).toBeTruthy();
+    expect(query('[data-cy="recap-panel"]')?.id).toBe(controls);
+  });
+
+  // ...and deliberately *not* `aria-haspopup`: the panel expands in place, so
+  // announcing a popup would misdescribe it (§4.5's scoped exception).
+  it('does not claim to open a popup', () => {
+    const { query } = render({ questions: [q0], answerHistory: ['q0:right'] });
+
+    expect(query('[data-cy="recap-toggle"]')?.hasAttribute('aria-haspopup')).toBe(false);
+  });
+
+  it('renders every question with its number, text and badges', () => {
+    const { queryAll, open } = render({
+      questions: [q0, q1, q2],
+      answerHistory: ['q0:right', 'q1:wrong', null],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    expect(rows.map((row) => row.textContent?.trim().startsWith('1'))).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(rows[1].textContent).toContain('q1 text?');
+    expect(rows[1].textContent).toContain('History');
+    expect(rows[1].textContent).toContain('medium');
+  });
+
+  // A correct answer shows what was picked and nothing else — repeating the
+  // same string under "Correct answer" reads as a bug in the app.
+  it('shows a correct answer once, with no second line', () => {
+    const { queryAll, open } = render({ questions: [q0], answerHistory: ['q0:right'] });
+    open();
+
+    expect(queryAll('[data-cy="recap-picked"]')[0].textContent).toContain('q0 right');
+    expect(queryAll('[data-cy="recap-correct"]')).toHaveLength(0);
+  });
+
+  it('shows the correct answer alongside a wrong pick', () => {
+    const { queryAll, open } = render({ questions: [q1], answerHistory: ['q1:wrong'] });
+    open();
+
+    expect(queryAll('[data-cy="recap-picked"]')[0].textContent).toContain('q1 wrong');
+    expect(queryAll('[data-cy="recap-correct"]')[0].textContent).toContain('q1 right');
+  });
+
+  // The case the old `boolean` signature could not represent. A timeout scores
+  // the same as a wrong answer and has to *look* different, or the recap
+  // claims the player picked something they never saw.
+  it('marks a timeout as time expired rather than as a wrong answer', () => {
+    const { queryAll, open } = render({ questions: [q2], answerHistory: [null] });
+    open();
+
+    const row = queryAll('[data-cy="recap-row"]')[0];
+    expect(row.querySelector('[data-cy="recap-timed-out"]')).not.toBeNull();
+    expect(row.querySelector('[data-cy="recap-picked"]')?.textContent).toContain('No answer');
+    expect(row.querySelector('[data-cy="recap-correct"]')?.textContent).toContain('q2 right');
+  });
+
+  it('does not mark an answered question as timed out', () => {
+    const { queryAll, open } = render({ questions: [q0], answerHistory: ['q0:wrong'] });
+    open();
+
+    expect(
+      queryAll('[data-cy="recap-row"]')[0].querySelector('[data-cy="recap-timed-out"]'),
+    ).toBeNull();
+  });
+
+  // Identity is the id, never the text (`CLAUDE.md` §4.4). Two options sharing
+  // a string is exactly the data that made a wrong answer score as correct
+  // once already, and a text-matching recap would repeat it one screen later.
+  it('scores by id when two options carry the same text', () => {
+    const ambiguous = recapQuestion('amb', {
+      all_answers: [
+        { id: 'amb:right', text: 'Same', isCorrect: true },
+        { id: 'amb:wrong', text: 'Same', isCorrect: false },
+      ],
+    });
+    const { query, queryAll, open } = render({
+      questions: [ambiguous],
+      answerHistory: ['amb:wrong'],
+    });
+
+    expect(query('[data-cy="recap-toggle"]')?.textContent).toContain('(0/1 correct)');
+    open();
+    expect(queryAll('[data-cy="recap-correct"]')).toHaveLength(1);
+  });
+
+  /*
+   * The whole card is absent unless the history covers the round. A save
+   * written before this feature restores with none, and a recap built from it
+   * would read "Review answers (0/3 correct)" underneath a score card saying
+   * 2/3 — confidently wrong, which is worse than nothing at all.
+   */
+  it.each([
+    ['no history at all', [] as PickedAnswerId[]],
+    ['a partial history', ['q0:right'] as PickedAnswerId[]],
+  ])('renders no recap for %s', (_label, answerHistory) => {
+    const { query } = render({ questions: [q0, q1, q2], answerHistory });
+
+    expect(query('[data-cy="recap-card"]')).toBeNull();
+  });
+
+  /*
+   * A history *longer* than the round — the one input the length check catches
+   * that nothing else does, and the reason this test exists at all. Deleting
+   * `history.length !== questions.length` left the whole suite green until it
+   * was written: a *shorter* history yields `undefined` per missing entry,
+   * which the unresolvable-pick guard below already refuses, so every case
+   * covered above proved the wrong line. Here every entry resolves — there is
+   * simply one too many, and only the length comparison notices.
+   */
+  it('renders no recap for a history longer than the round', () => {
+    const { query } = render({ questions: [q0], answerHistory: ['q0:right', 'q1:right'] });
+
+    expect(query('[data-cy="recap-card"]')).toBeNull();
+  });
+
+  // Same all-or-nothing stance, for an id that names an option on a different
+  // question: it would render a plausible, wrong row rather than an obviously
+  // broken one, so the card goes rather than the row.
+  it("renders no recap when an entry names another question's option", () => {
+    const { query } = render({
+      questions: [q0, q1],
+      answerHistory: ['q1:right', 'q0:right'],
+    });
+
+    expect(query('[data-cy="recap-card"]')).toBeNull();
   });
 });

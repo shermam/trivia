@@ -315,7 +315,10 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
     this.selectedAnswer.set(answer);
     this.isAnswered.set(true);
-    this.gameController.registerAnswer(answer?.isCorrect === true);
+    // The whole answer, not `answer?.isCorrect`: only this call site knows
+    // *which* option was picked, and a timeout (`null`) is not the same thing
+    // as a wrong answer. The recap needs both.
+    this.gameController.registerAnswer(answer);
 
     this.advanceTimeoutHandle = setTimeout(() => this.goToNextQuestion(), ANSWER_DELAY_MS);
   }

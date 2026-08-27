@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { GameConfig, TriviaQuestion } from '../models/question.model';
+import { Answer, GameConfig, PickedAnswerId, TriviaQuestion } from '../models/question.model';
 import { giveUpAfter } from '../utils/give-up-after.util';
 import { GamePersistenceService } from './game-persistence.service';
 import { TriviaService } from './trivia.service';
@@ -59,6 +59,25 @@ export class GameControllerService {
    * silently drop it.
    */
   readonly flaggedQuestionIds = signal<ReadonlySet<string>>(new Set());
+
+  /**
+   * What the player picked, per question, in order — an answer id, or `null`
+   * for a timeout. Drives the game-over recap.
+   *
+   * Here rather than in the quiz component for the reasons `flaggedQuestionIds`
+   * is: it has to outlive the component that produces it, since the whole
+   * point is reading it on a different screen, and it belongs in the persisted
+   * snapshot because refreshing `/game-over` is a supported thing to do — the
+   * completed game is deliberately kept so the score survives, and a recap
+   * that vanished on reload while the score stayed would be the same defect
+   * one screen along.
+   *
+   * Positional, not keyed by question id: entry `i` answers question `i`. A map
+   * would be robust to reordering that cannot happen inside a round, and would
+   * lose the one property worth having — that a short history means an
+   * unfinished game rather than a question nobody answered.
+   */
+  readonly answerHistory = signal<readonly PickedAnswerId[]>([]);
 
   /** The single in-flight restore, so bootstrap and the guards await the same read. */
   private restorePromise: Promise<void> | null = null;
@@ -126,6 +145,7 @@ export class GameControllerService {
         score: this.score(),
         isComplete: this.isComplete(),
         flaggedQuestionIds: [...this.flaggedQuestionIds()],
+        answerHistory: [...this.answerHistory()],
       };
       this.enqueueWrite(() => this.persistence.save(snapshot));
     });
@@ -198,6 +218,7 @@ export class GameControllerService {
     this.score.set(saved.score);
     this.isComplete.set(saved.isComplete);
     this.flaggedQuestionIds.set(new Set(saved.flaggedQuestionIds));
+    this.answerHistory.set(saved.answerHistory);
   }
 
   /**
@@ -274,6 +295,10 @@ export class GameControllerService {
       // with "Questions you flagged" for a question the player never flagged
       // in this game.
       this.flaggedQuestionIds.set(new Set());
+      // Same reasoning, and the same two places: a leaked history is worse
+      // than a leaked flag, because the recap would show the previous game's
+      // answers underneath this game's score.
+      this.answerHistory.set([]);
       await this.router.navigateByUrl('/play');
     } catch {
       this.loadError.set('Failed to load questions. Please check your connection and try again.');
@@ -282,10 +307,19 @@ export class GameControllerService {
     }
   }
 
-  registerAnswer(isCorrect: boolean): void {
-    if (isCorrect) {
+  /**
+   * Records what the player picked — the whole answer, not just whether it was
+   * right.
+   *
+   * It took a `boolean` and threw the rest away, which made a timeout and a
+   * wrong answer indistinguishable the moment they left the quiz component.
+   * The recap has to tell them apart, and only the caller knows.
+   */
+  registerAnswer(answer: Answer | null): void {
+    if (answer?.isCorrect === true) {
       this.score.update((value) => value + 1);
     }
+    this.answerHistory.update((history) => [...history, answer?.id ?? null]);
   }
 
   advanceQuestion(): void {
@@ -310,5 +344,6 @@ export class GameControllerService {
     this.isComplete.set(false);
     this.loadError.set(null);
     this.flaggedQuestionIds.set(new Set());
+    this.answerHistory.set([]);
   }
 }

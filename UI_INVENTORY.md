@@ -197,6 +197,7 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 - **Save-score area** — content depends on auth state (see States below)
 - **Section heading**: "Top 10 Leaderboard" (with a medal icon)
 - **Leaderboard list** — content depends on load state (see States below); each row: rank (🥇/🥈/🥉 for top 3, "#N" otherwise), gradient avatar circle with the player's initials, name, "{{ score }} / {{ totalQuestions }} ({{ percentage }}%)". The current player's own row (matched by `uid`) is highlighted (indigo tint + left border) and tagged with a "YOU" badge, if present in the fetched top 10.
+- **"Review answers" card** (collapsible, collapsed by default) — header button reading "Review answers (X/N correct)" with a rotate icon and a chevron that flips on open. Expanded, it lists one row per question of the round: a numbered pill (emerald if the answer was right, red if not), the question text, category and difficulty badges, the player's pick with a check/cross/clock icon, and — only when the pick was wrong or the clock ran out — the correct answer on a second line with a check icon. A timed-out question also carries an amber "Time expired" badge. The whole card is absent unless the recorded answers cover the whole round.
 - **Button**: "Play Again" (full width, dark slate, reset icon) — resets all in-memory game state, navigates to `/`
 
 ### States — Save-score area
@@ -209,6 +210,17 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 | **Signed in but not fully authenticated** (unverified email)                              | Indigo info box: "Verify your email to save this score to the leaderboard." + **"Resend verification email" button**                                                                                                      |
 | **Fully authenticated, not yet saved**                                                    | Form: text input (placeholder "Enter your name", prefilled from profile display name, max 30 chars, required) + **"Save Score" button** (disabled while saving or while name is blank; label → "Saving…" while in flight) |
 | **Save failed** (generic)                                                                 | Red inline error: "Could not save your score. Please try again."                                                                                                                                                          |
+
+### States — Review answers card
+
+| State            | Content                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **No recap**     | The card does not render at all — no answers recorded for this round (e.g. a game restored from a save written before the feature existed) |
+| **Collapsed**    | Header button only; `aria-expanded="false"`, panel not in the DOM                                                                          |
+| **Expanded**     | Header button (`aria-expanded="true"`) plus the `<ol>` of question rows                                                                    |
+| **Row: right**   | Emerald number pill, emerald pick line with a check icon, no second line                                                                   |
+| **Row: wrong**   | Red number pill, red pick line with a cross icon, emerald "correct answer" line below it                                                   |
+| **Row: expired** | Red number pill, amber "Time expired" badge among the meta badges, grey "No answer" line with a clock icon, emerald correct-answer line    |
 
 ### States — Leaderboard list
 

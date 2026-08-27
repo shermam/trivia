@@ -132,7 +132,7 @@ describe('QuizLoopComponent — wall-clock countdown (B10)', () => {
 
     // A tick-counting timer would be at ~14s remaining and not have fired; the
     // wall-clock one sees the deadline long gone and auto-submits a no-answer.
-    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(false);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
   });
 
   it('does not expire before the deadline, however many ticks fire', () => {
@@ -165,7 +165,7 @@ describe('QuizLoopComponent — wall-clock countdown (B10)', () => {
     // which re-reads the clock and expires the question at once.
     document.dispatchEvent(new Event('visibilitychange'));
 
-    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(false);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
   });
 
   it('detaches the visibilitychange listener on destroy', () => {
@@ -539,7 +539,7 @@ describe('QuizLoopComponent — the adjustable timer (G7)', () => {
 
     now = START + 30_500;
     vi.advanceTimersByTime(250);
-    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(false);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
   });
 
   // A save written before the picker existed carries no limit, and every one
@@ -553,6 +553,6 @@ describe('QuizLoopComponent — the adjustable timer (G7)', () => {
 
     now = START + 15_500;
     vi.advanceTimersByTime(250);
-    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(false);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
   });
 });
