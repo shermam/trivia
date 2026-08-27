@@ -72,6 +72,7 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     score: 1,
     isComplete: false,
     flaggedQuestionIds: [],
+    answerHistory: [],
     ...overrides,
   };
 }
@@ -195,6 +196,80 @@ describe('GamePersistenceService (B8)', () => {
     const loaded = await service.load();
     expect(loaded).not.toBeNull();
     expect(loaded?.flaggedQuestionIds).toEqual(expected);
+  });
+
+  /*
+   * `answerHistory` (FEAT-001) — the recap's data, and additive for the same
+   * reason as `flaggedQuestionIds` and `timeLimit` before it: a version
+   * mismatch discards rather than migrates, so bumping would throw away every
+   * in-flight game on deploy to protect the *least* important field in the
+   * snapshot.
+   */
+  it('round-trips the answer history, timeouts included', async () => {
+    await service.save(makeGame({ answerHistory: ['q0:correct', null] }));
+
+    expect((await service.load())?.answerHistory).toEqual(['q0:correct', null]);
+  });
+
+  it('restores a record written before the answer history existed', async () => {
+    await putRaw(validRecord()); // validRecord() deliberately omits the field
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.answerHistory).toEqual([]);
+  });
+
+  /*
+   * Unlike the flags above, an unusable history is dropped **whole** rather
+   * than filtered, and that difference is the point: this array is positional,
+   * so removing one bad entry shifts every later answer onto the wrong
+   * question. The recap would then render the player picking things they never
+   * picked — confidently wrong, which is worse than absent.
+   *
+   * `validRecord()` holds a single question (`q0`), so index 1 is past the end
+   * and `q1:correct` names an option on a question this save doesn't contain.
+   */
+  it.each([
+    ['a non-array value', 'q0:correct'],
+    ['more answers than questions', ['q0:correct', null]],
+    ['an id belonging to no question in the save', ['q1:correct']],
+    ['a non-string, non-null entry', [42]],
+  ])('discards %s rather than filtering it', async (_label, stored) => {
+    await putRaw(validRecord({ answerHistory: stored }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull(); // the game itself survives
+    expect(loaded?.answerHistory).toEqual([]);
+  });
+
+  /*
+   * The clause that actually earns its keep. An id that exists in the game but
+   * on a *different* question passes any "is this a known answer id" check and
+   * produces a plausible, wrong recap rather than an obviously broken one — so
+   * the check is per-position, against that question's own options.
+   */
+  it("discards a history whose entry names another question's option", async () => {
+    await putRaw(
+      validRecord({
+        questions: [makeQuestion('q0'), makeQuestion('q1')],
+        answerHistory: ['q1:correct', 'q0:correct'], // both real ids, both on the wrong question
+      }),
+    );
+
+    expect((await service.load())?.answerHistory).toEqual([]);
+  });
+
+  // Shorter than the game is legitimate — it is a game still being played —
+  // and must survive, or every reload mid-round loses its history.
+  it('keeps a history shorter than the game, which is just an unfinished round', async () => {
+    await putRaw(
+      validRecord({
+        questions: [makeQuestion('q0'), makeQuestion('q1')],
+        answerHistory: ['q0:incorrect-0'],
+      }),
+    );
+
+    expect((await service.load())?.answerHistory).toEqual(['q0:incorrect-0']);
   });
 
   it('overwrites rather than accumulating — there is only ever one game', async () => {

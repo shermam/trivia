@@ -2,6 +2,14 @@ import questionsFixture from '../../fixtures/open-trivia-questions.json';
 
 const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 
+/**
+ * How long the leaderboard query is held open so its loading state is
+ * observable. Comfortably longer than Cypress's 50ms retry interval and than
+ * the ~35ms the skeleton lives for unaided, and short enough to cost the suite
+ * nothing that matters.
+ */
+const LEADERBOARD_HOLD_MS = 500;
+
 describe('anonymous game flow (open_trivia source)', () => {
   it('plays a full game, tracks score, and offers to sign in to save it', () => {
     cy.startGame(5);
@@ -140,8 +148,40 @@ describe('anonymous game flow (open_trivia source)', () => {
    * the rows arrive, rather than asserting a fixed number — a hard-coded 576
    * would need re-measuring every time a row's padding changed, and would pass
    * for the wrong reason if both states drifted together.
+   *
+   * **The loading state has to be held open, or catching it is a coin flip.**
+   * `isLoadingLeaderboard` flips the moment `getTopScores` resolves, and
+   * against the local Firestore emulator that is fast: instrumented in
+   * Chromium with a `MutationObserver`, the skeleton's real lifetime is
+   * **30–38ms**, against a Cypress retry interval of 50ms. So the assertion
+   * below was never testing the leaderboard — it was testing whether a poll
+   * happened to land inside a window narrower than the gap between polls. It
+   * failed that way twice on `main` before this intercept existed (runs
+   * 33018692994 and 33095985892), both times with the same
+   * "Expected to find element: `[data-cy="leaderboard-skeleton"]`".
+   *
+   * Holding the response makes the loading state deterministic rather than
+   * lucky. **It does not weaken anything**: the assertions are unchanged, the
+   * fetch is real, and the board still has to hold its height across a real
+   * load — the delay only guarantees there is a loading state to measure.
+   * Measured with the hold in place: 576px loading, 576px loaded.
+   *
+   * Note this is emulator-specific in origin but applied unconditionally. The
+   * preview suite runs the same spec against a real project, where network
+   * latency made the window wide enough that it never failed — but a fix that
+   * only works where the bug happens to be visible is one environment away
+   * from being no fix at all.
    */
   it('does not resize the leaderboard when the scores arrive', () => {
+    // Host-agnostic on purpose: emulator and production Firestore differ in
+    // origin but not in this path. `req.continue` is a passthrough, so the
+    // real response is still what the board renders.
+    cy.intercept({ method: 'POST', url: /\/leaderboards\/[^/]+:runQuery/ }, (req) => {
+      req.continue((res) => {
+        res.setDelay(LEADERBOARD_HOLD_MS);
+      });
+    }).as('topScores');
+
     cy.startGame(5);
     CORRECT_ANSWERS.forEach((answer) => {
       cy.answerQuestion(answer);
@@ -153,6 +193,7 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.get('[data-cy="leaderboard-body"]').then(($body) => {
       const whileLoading = $body[0].getBoundingClientRect().height;
 
+      cy.wait('@topScores');
       cy.get('[data-cy="leaderboard-skeleton"]').should('not.exist');
 
       cy.get('[data-cy="leaderboard-body"]').should(($loaded) => {
@@ -186,6 +227,64 @@ describe('anonymous game flow (open_trivia source)', () => {
 
     cy.location('pathname').should('eq', '/game-over');
     cy.contains(`${restCorrect.length} / ${CORRECT_ANSWERS.length}`);
+  });
+
+  /**
+   * `FEAT-001`. The recap is the one part of game-over built from state the
+   * player produced *on a different screen*, so the thing worth testing here
+   * is the handoff: five answers given at `/play`, five rows rendered at
+   * `/game-over`, each showing the option that was actually clicked.
+   *
+   * A wrong answer and a *correct* one, deliberately — the unit tests cover
+   * every branch, but only a real run proves the ids recorded during play are
+   * the same ids the recap resolves against afterwards, which is the whole
+   * mechanism and the part no stub can vouch for.
+   */
+  it('recaps every answer of the round, right and wrong alike', () => {
+    cy.startGame(5);
+
+    const wrongAnswer = questionsFixture.results[0].incorrect_answers[0];
+    cy.answerQuestion(wrongAnswer);
+    const [, ...restCorrect] = CORRECT_ANSWERS;
+    restCorrect.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+
+    cy.location('pathname').should('eq', '/game-over');
+
+    // Collapsed by default, and the header carries the tally.
+    cy.get('[data-cy="recap-toggle"]')
+      .should('contain', 'Review answers')
+      .and('contain', `(4/5 correct)`)
+      .and('have.attr', 'aria-expanded', 'false');
+    cy.get('[data-cy="recap-panel"]').should('not.exist');
+
+    cy.get('[data-cy="recap-toggle"]').click();
+    cy.get('[data-cy="recap-toggle"]').should('have.attr', 'aria-expanded', 'true');
+    cy.get('[data-cy="recap-row"]').should('have.length', 5);
+
+    // The missed question shows what was picked *and* what was right; the
+    // rest show only the pick, which is the same string either way.
+    cy.get('[data-cy="recap-row"]')
+      .first()
+      .within(() => {
+        cy.contains(questionsFixture.results[0].question);
+        cy.get('[data-cy="recap-picked"]').should('contain', wrongAnswer);
+        cy.get('[data-cy="recap-correct"]').should('contain', CORRECT_ANSWERS[0]);
+      });
+
+    cy.get('[data-cy="recap-row"]')
+      .eq(1)
+      .within(() => {
+        cy.get('[data-cy="recap-picked"]').should('contain', CORRECT_ANSWERS[1]);
+        cy.get('[data-cy="recap-correct"]').should('not.exist');
+      });
+
+    // Nothing timed out — every question was answered well inside 15s.
+    cy.get('[data-cy="recap-timed-out"]').should('not.exist');
+
+    cy.get('[data-cy="recap-toggle"]').click();
+    cy.get('[data-cy="recap-panel"]').should('not.exist');
   });
 });
 
