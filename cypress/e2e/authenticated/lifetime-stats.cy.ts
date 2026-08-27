@@ -43,17 +43,17 @@ describe('lifetime gameplay totals', () => {
     cy.startNewGame(5);
     playFullGame();
 
-    // Retried until the fire-and-forget callable lands — it is deliberately
-    // not awaited by the screen, so there is nothing in the DOM to wait on.
+    // `waitForGameplayStats` rather than a bare `.should()`: the call is
+    // fire-and-forget so nothing in the DOM changes when it lands, and
+    // `cy.task` is not a retrying query — an assertion chained onto it reads
+    // once. These three tests passed that way, and passing by luck is not the
+    // same as passing.
     cy.then(() => {
-      cy.inspectAccountState({ uid }).should((state) => {
-        expect(state.gameplayStats, 'stats document written').to.not.be.null;
-        expect(state.gameplayStats).to.include({
-          gamesPlayed: 1,
-          questionsAnswered: 5,
-          correctAnswers: 5,
-          bestStreak: 5,
-        });
+      cy.waitForGameplayStats(uid).should('include', {
+        gamesPlayed: 1,
+        questionsAnswered: 5,
+        correctAnswers: 5,
+        bestStreak: 5,
       });
     });
   });
@@ -77,21 +77,22 @@ describe('lifetime gameplay totals', () => {
     playFullGame();
 
     cy.then(() => {
-      cy.inspectAccountState({ uid }).should((state) => {
-        expect(state.gameplayStats).to.include({ gamesPlayed: 1 });
-      });
+      cy.waitForGameplayStats(uid).should('include', { gamesPlayed: 1 });
     });
 
     cy.reload();
     cy.location('pathname').should('eq', '/game-over');
     cy.contains('Game Over!');
 
+    // The reload's own call has to have been made and refused before this is
+    // meaningful, so give it the same window the first write got — otherwise
+    // "still 1" could just mean "the second call has not happened yet", which
+    // would pass against the very double-count this test exists to catch.
+    cy.wait(3000);
     cy.then(() => {
-      cy.inspectAccountState({ uid }).should((state) => {
-        expect(state.gameplayStats, 'still one game after a reload').to.include({
-          gamesPlayed: 1,
-          questionsAnswered: 5,
-        });
+      cy.waitForGameplayStats(uid).should('include', {
+        gamesPlayed: 1,
+        questionsAnswered: 5,
       });
     });
   });

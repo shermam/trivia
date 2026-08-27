@@ -206,6 +206,14 @@ export class AccountService {
     bestStreak: number;
   }): Promise<void> {
     try {
+      // **Before the call, not after.** The Functions SDK attaches whatever ID
+      // token exists at invocation time, and `auth.currentUser` is `null` for
+      // a moment after bootstrap even for an already-signed-in user — so a
+      // callable fired inside that window arrives unauthenticated and is
+      // refused with nothing to show for it. `/game-over` runs this from
+      // `ngOnInit`, and reloading `/game-over` is a supported flow, so without
+      // this a returning player's game is silently dropped from their totals.
+      await this.authService.whenAuthStateReady();
       const { functions, functionsModule } = await this.getFunctions();
       const callable = functionsModule.httpsCallable(functions, 'recordGameResult', {
         timeout: RECORD_GAME_TIMEOUT_MS,

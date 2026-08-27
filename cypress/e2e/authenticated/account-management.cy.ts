@@ -60,10 +60,12 @@ describe('account management: export and deletion', () => {
       cy.answerQuestion(answer);
     });
     cy.location('pathname').should('eq', '/game-over');
+    // Waits for the write rather than reading once: the call is
+    // fire-and-forget, and `cy.task` is not a retrying query, so a bare
+    // `.should()` here asserts against a single read that can easily precede
+    // the callable landing. See `waitForGameplayStats`.
     cy.then(() => {
-      cy.inspectAccountState({ uid }).should((state) => {
-        expect(state.gameplayStats, 'stats exist before deletion').to.not.be.null;
-      });
+      cy.waitForGameplayStats(uid);
     });
 
     cy.openAuthMenu();
