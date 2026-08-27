@@ -131,20 +131,60 @@ introduced by hand, below.
 9. **Point a Stripe test webhook** at the dev project's `stripeWebhook`
    function URL.
 
+### 3.2a What is enabled in `trivimind-dev`, and what is not
+
+**Auth providers: Anonymous, Email/Password and Google.** Production offers
+eight; the other five — Facebook, GitHub, Microsoft, Apple, Twitter/X, Yahoo —
+are not enabled here.
+
+**That is sufficient for CI and insufficient for one kind of manual check**, so
+it is worth being precise about which:
+
+- The preview e2e suite needs **Anonymous** (every visitor gets an anonymous
+  uid on load) and **Email/Password** (`sign-in-save-score.cy.ts`,
+  `profile.cy.ts`). Both enabled. `service-worker-oauth-origins.cy.ts` looks
+  like a third requirement and is not: it checks that the CSP and the service
+  worker leave `apis.google.com` reachable, and never performs a sign-in.
+- **Validating a change to the "more sign-in options" disclosure cannot be done
+  on dev.** Those five providers will fail with `auth/operation-not-allowed`.
+  A green dev run says nothing about them — which is the failure mode a dev
+  environment is supposed to remove, so it is written here rather than
+  discovered.
+
+**Preview channels and OAuth.** Firebase Auth authorises
+`trivimind-dev.web.app` and `trivimind-dev.firebaseapp.com` automatically, but
+a preview channel is `trivimind-dev--pr-<n>-<hash>.web.app`, which is not
+covered and cannot be pre-authorised — the authorised-domains list takes no
+wildcards. So **Google sign-in does not work on a preview channel** without
+adding that specific domain by hand. This is pre-existing (it was equally true
+of production previews) and does not affect CI, which signs in with
+email/password.
+
+**Stripe on dev is real, in test mode.** `functions/.env.trivimind-dev` is
+deliberately absent: without it `STRIPE_MOCK_CHECKOUT` is unset, so dev calls
+the real Stripe API with the test-mode key rather than the deterministic fake
+the emulator and e2e use. That is the fidelity choice — dev is where a
+checkout change gets validated against Stripe itself. Add the file only if you
+want dev to stop talking to Stripe.
+
+**Checkout redirects need no maintenance.** `isAllowedRedirectOrigin` derives
+the allowed origins from the project id, so `trivimind-dev.web.app`,
+`trivimind-dev.firebaseapp.com` and every `trivimind-dev--*.web.app` preview
+channel are allowed automatically. `CUSTOM_APP_ORIGINS` is only the custom
+domain, which dev does not have.
+
 ### 3.3 Repoint CI (the part with the real exposure)
 
-10. **Issue a service-account key** for `trivimind-dev` (Project settings →
+10. ✅ **Issue a service-account key** for `trivimind-dev` (Project settings →
     Service accounts → Generate new private key) and add it to the repository's
-    GitHub Actions secrets as `FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV`. Only
-    `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` exists today.
-11. **Repoint the preview workflow.** `firebase-preview.yml` deploys a preview
-    channel and runs Cypress against it, and
-    `cypress/tasks/firebase-preview-tasks.ts` hard-codes
-    `const PROJECT_ID = 'intellectura-3b26a'`. On **every PR** it creates real
-    Auth users, real `custom_questions` documents and real leaderboard entries
-    in production, and sweeps them afterwards on a best-effort basis. This is
-    the largest single exposure left, and it is a code change plus the secret
-    from step 10 — it is why that step matters more than it looks.
+    GitHub Actions secrets as `FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV`.
+11. ✅ **Repoint the preview workflow** — done in code, not by hand. All three
+    jobs (deploy, e2e, cleanup) now use `trivimind-dev` and the secret from
+    step 10, and `cypress/tasks/firebase-preview-tasks.ts` takes the project
+    from `FIREBASE_PREVIEW_PROJECT_ID` with **no default** — it throws if the
+    variable is missing, and throws again if it is set to production, because
+    those tasks hold Admin-SDK credentials and bypass `firestore.rules`.
+    `npm run env:verify` fails if the workflow ever names production again.
 12. **Leave `e2e.yml` and `lighthouse.yml` alone.** They already run under
     `demo-trivia-app-e2e` on emulators and hold no credential. The spec's claim
     that "CI runs against production credentials" was wrong about these two and
@@ -162,8 +202,13 @@ counterpart.
 
 ## 4. Still open after this
 
-- **`firebase-preview.yml` writes to production on every PR** (steps 10–11).
-  Blocked on the service-account secret, not on code.
-- **`functions/.env.trivimind-dev`** — the dev project has no env file, so it
-  gets the production defaults. If it should mock Stripe rather than use test
-  mode, that is where it goes.
+- **Five auth providers are not enabled on dev** (§3.2a). Nothing is broken by
+  it; a change to those sign-in paths simply cannot be validated here.
+- **Google sign-in does not work on a preview channel** (§3.2a), because the
+  channel domain cannot be pre-authorised. Pre-existing, and unrelated to which
+  project the channel lives in.
+- **Nothing else.** `npm run env:verify` covers the parts that can regress
+  silently: a non-production build inheriting the production environment, a
+  dev-facing file or a writing workflow naming the production project, an
+  emulator id losing its `demo-` prefix, an emulator script losing its
+  `--project`.

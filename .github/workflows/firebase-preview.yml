@@ -2,9 +2,22 @@ name: Deploy Preview Channel
 
 # Every PR targeting main gets its own ephemeral Firebase Hosting preview
 # channel (pr-<number>), so changes can be reviewed on a live URL — and
-# smoke-tested end-to-end against the real project — before merge, instead
-# of only finding out after they've already gone to production (see
+# smoke-tested end-to-end against a real Firebase project — before merge,
+# instead of only finding out after they've already gone to production (see
 # firebase-deploy.yml, which is merge-to-deploy only).
+#
+# **That project is `trivimind-dev`, and until FEAT-012 it was production.**
+# Not read-only, either: the Cypress tasks here create real Auth users, real
+# `custom_questions` documents and real `leaderboards/{limit}/entries` rows,
+# swept afterwards by a best-effort `finalCleanup` — on every PR, from any
+# contributor whose PR a maintainer approved for workflow runs. It was the
+# single largest production exposure in the repo, and it was invisible because
+# the sweep mostly worked.
+#
+# `trivimind-dev` runs the same production build against the same rules, the
+# same indexes and the same `firebase.json` headers, so what the preview
+# validates is unchanged; what changed is whose data it writes to.
+# `npm run env:verify` fails if this file names the production project again.
 #
 # The `E2E (preview)` job is meant to be a required status check on `main`
 # (branch protection), so a PR can't be merged — and therefore can't trigger
@@ -78,8 +91,8 @@ jobs:
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}'
-          projectId: intellectura-3b26a
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}'
+          projectId: trivimind-dev
           channelId: 'pr-${{ github.event.pull_request.number }}'
           expires: 7d
 
@@ -136,8 +149,13 @@ jobs:
       - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          # Read by `cypress/tasks/firebase-preview-tasks.ts`, which refuses to
+          # start without it rather than defaulting to anything. There is no
+          # value it could safely default *to*: the only obvious one is the
+          # project it used to be hard-coded to.
+          FIREBASE_PREVIEW_PROJECT_ID: trivimind-dev
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           npm run e2e:preview
@@ -174,7 +192,7 @@ jobs:
 
       - name: Delete this PR's preview channel
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
           CHANNEL: pr-${{ github.event.pull_request.number }}
         # A missing channel is a success, not a failure: the deploy may have been
@@ -187,7 +205,7 @@ jobs:
           set -euo pipefail
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           if npx --yes firebase-tools@14 hosting:channel:delete "$CHANNEL" \
-              --project intellectura-3b26a --force 2>&1 | tee /tmp/channel-delete.log; then
+              --project trivimind-dev --force 2>&1 | tee /tmp/channel-delete.log; then
             echo "Deleted preview channel $CHANNEL."
           elif grep -qiE 'not found|does not exist' /tmp/channel-delete.log; then
             echo "No preview channel $CHANNEL to delete — nothing to do."

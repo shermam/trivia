@@ -3,10 +3,45 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { CustomQuestionSeed, LEADERBOARD_BOARDS, LeaderboardSeed, VerifiedUserSeed } from './types';
 
-const PROJECT_ID = 'intellectura-3b26a';
+/**
+ * The project these tasks write to, from the environment rather than from a
+ * constant — and with **no default**, because there is no value it could
+ * safely default to.
+ *
+ * It was `intellectura-3b26a`, hard-coded, which meant every PR seeded real
+ * Auth users, real `custom_questions` documents and real leaderboard rows into
+ * **production** and swept them afterwards on a best-effort basis. A default
+ * would preserve exactly that failure mode: silently correct-looking, and
+ * pointed at the wrong database. Throwing is the point.
+ *
+ * The production id is rejected outright rather than merely not defaulted to.
+ * These tasks hold Admin-SDK credentials and bypass `firestore.rules`
+ * entirely, so "someone set the variable to production" is a mistake worth
+ * refusing rather than obeying.
+ */
+const PRODUCTION_PROJECT_ID = 'intellectura-3b26a';
+
+function previewProjectId(): string {
+  const projectId = process.env['FIREBASE_PREVIEW_PROJECT_ID'];
+  if (!projectId) {
+    throw new Error(
+      'FIREBASE_PREVIEW_PROJECT_ID is not set. The preview tasks write to a real Firebase ' +
+        'project with Admin-SDK credentials, so they will not guess which one. Set it in ' +
+        '.github/workflows/firebase-preview.yml (or your shell, for a local run).',
+    );
+  }
+  if (projectId === PRODUCTION_PROJECT_ID) {
+    throw new Error(
+      `FIREBASE_PREVIEW_PROJECT_ID is set to the production project (${PRODUCTION_PROJECT_ID}). ` +
+        'These tasks seed and delete Auth users and Firestore documents directly, bypassing ' +
+        'firestore.rules. Point them at trivimind-dev.',
+    );
+  }
+  return projectId;
+}
 
 /**
- * Unlike firebase-emulator-tasks.ts, this file talks to the REAL project —
+ * Unlike firebase-emulator-tasks.ts, this file talks to a REAL project —
  * `FIRESTORE_EMULATOR_HOST`/`FIREBASE_AUTH_EMULATOR_HOST` are deliberately
  * never set here. Credentials come from `GOOGLE_APPLICATION_CREDENTIALS`
  * (the same deploy service-account key CI already writes to a temp file for
@@ -18,7 +53,7 @@ function getAdminApp(): App {
   if (existing) {
     return existing;
   }
-  return initializeApp({ projectId: PROJECT_ID });
+  return initializeApp({ projectId: previewProjectId() });
 }
 
 /**
