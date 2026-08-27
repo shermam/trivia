@@ -15,6 +15,12 @@
  */
 
 const MOBILE = { width: 390, height: 780 };
+/**
+ * The narrowest width the app supports, and the one the 390px suite below was
+ * quietly standing in for. `iPhone SE (1st gen)` is 320 CSS px, and so is any
+ * desktop window dragged that narrow.
+ */
+const NARROW = { width: 320, height: 780 };
 const DESKTOP = { width: 1024, height: 800 };
 
 describe('the top bar on a phone', () => {
@@ -307,6 +313,75 @@ describe('the top bar on a phone', () => {
     cy.get('[data-cy="nav-menu-trigger"]').click();
 
     cy.focused().should('have.attr', 'data-cy', 'nav-menu-panel');
+  });
+});
+
+/**
+ * **The same bar at 320px, because 390 was hiding a real defect.**
+ *
+ * `keeps the account chip clear of the brand` has been in this file all along
+ * and passed throughout — at 390, where the brand clears the chip by 23px. At
+ * 320 it did not clear it at all: measured on production, the brand's right
+ * edge reached 220.34 against a chip starting at 208.64, so the wordmark
+ * "Trivimind" rendered **underneath** the account button by 11.7px. The chip
+ * in question is the signed-out one, the widest state, which is what a
+ * first-time visitor sees.
+ *
+ * The arithmetic is why one viewport could not stand in for the other. The
+ * brand is centred in the *bar*, so its right edge is `W/2 + brandWidth/2`,
+ * while the chip is right-aligned at `W - padding - chipWidth`. Clearance is
+ * therefore `W/2 - 171.7` — a function of the viewport that goes negative
+ * below ~343px and grows from there. A single wide-enough width can never
+ * fail, and tells you nothing about the widths that can.
+ */
+describe('the top bar at its narrowest', () => {
+  beforeEach(() => {
+    cy.stubOpenTrivia();
+    cy.viewport(NARROW.width, NARROW.height);
+    cy.visit('/');
+  });
+
+  it('keeps the account chip clear of the brand', () => {
+    cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
+      cy.get('header a[href="/"]')
+        .first()
+        .then(($brand) => {
+          expect(
+            $brand[0].getBoundingClientRect().right,
+            'the brand running under the account chip',
+          ).to.be.at.most($chip[0].getBoundingClientRect().x);
+        });
+    });
+  });
+
+  /**
+   * The brand shrinks here rather than disappearing, and both halves of that
+   * matter: something has to give at this width, and what was chosen to give
+   * was size, not the name or the chip's "Sign in" label.
+   */
+  it('still shows the whole wordmark', () => {
+    cy.get('header a[href="/"]').first().should('be.visible').and('contain.text', 'Trivimind');
+  });
+
+  it('does not overflow horizontally', () => {
+    cy.document().then((doc) => {
+      expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth);
+    });
+  });
+
+  it('centres the brand in the bar', () => {
+    cy.get('header a[href="/"]')
+      .first()
+      .then(($brand) => {
+        const rect = $brand[0].getBoundingClientRect();
+        expect(rect.x + rect.width / 2).to.be.closeTo(Cypress.$('html')[0].clientWidth / 2, 1);
+      });
+  });
+
+  it('keeps the account chip to a single line', () => {
+    cy.get('[data-cy="auth-menu-trigger"]').then(($chip) => {
+      expect($chip[0].getBoundingClientRect().height).to.be.at.most(46);
+    });
   });
 });
 
