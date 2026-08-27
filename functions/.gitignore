@@ -16,6 +16,7 @@
 # need real Stripe credentials — see src/stripe-client.ts. The root
 # .gitignore's blanket `.env.*` rule would otherwise catch this file too.
 !.env.demo-trivia-app-e2e
+!.env.demo-trivimind-local
 
 # `.secret.local` used to be committed (as the emulator's placeholder
 # fallback for `defineSecret()` values) and no longer is — a tracked file

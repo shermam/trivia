@@ -19,6 +19,7 @@ import { ThemeService } from '../../services/theme.service';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 import { AuthMenuComponent } from './auth-menu.component';
+import { environment } from '../../../environments/environment';
 
 /**
  * Whether `focus()` on this element would actually move focus.
@@ -69,6 +70,22 @@ export class TopBarComponent {
    */
   protected readonly reviewerService = inject(ReviewerService);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
+
+  /**
+   * "EMULATOR" or "DEV", or empty in production — see
+   * `src/environments/environment.ts` for why the label exists at all.
+   *
+   * A plain field, not a signal: it is fixed at build time by which
+   * environment file was substituted, and nothing can change it while the app
+   * is running.
+   *
+   * It renders in **no** e2e or Lighthouse build, because `environment.e2e.ts`
+   * sets it empty. That is deliberate on both counts: those builds' layout
+   * assertions measure the top bar to the pixel, and a badge would move them
+   * without saying anything true about production. The unit spec covers it
+   * instead, which is the layer that can vary the environment.
+   */
+  protected readonly environmentLabel = environment.environmentLabel;
 
   protected readonly isMenuOpen = this.authMenuState.isOpen;
 

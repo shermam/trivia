@@ -7,6 +7,7 @@ import { ReviewerService } from '../../services/reviewer.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { ThemeService } from '../../services/theme.service';
 import { TopBarComponent } from './top-bar.component';
+import { environment } from '../../../environments/environment';
 
 /**
  * The mobile navigation drawer.
@@ -682,5 +683,72 @@ describe('TopBarComponent: focus returning to the opener', () => {
     const { activeCy } = openFromExternalTrigger('hidden');
 
     expect(activeCy).toBe('auth-menu-trigger');
+  });
+});
+
+/**
+ * The environment badge.
+ *
+ * It is the only thing on screen that distinguishes `trivimind-dev` from
+ * production, because that project deliberately runs the same production
+ * build against the same rules and the same headers — identical is the point,
+ * and identical is why the badge has to exist (`FEAT-012`).
+ *
+ * Unit-level rather than e2e, and that is not a fallback: `environment.e2e.ts`
+ * sets the label empty precisely so the badge never renders in an e2e or
+ * Lighthouse build, where it would move a top bar that several specs measure
+ * to the pixel. This is the only layer that can vary the environment at all.
+ *
+ * **The suite builds against `environment.ts`**, so the default rendering
+ * here is the production one and the label has to be set to see a badge at
+ * all. That is pinned rather than inherited, and the reason is worth knowing
+ * before touching build configurations: `@angular/build:unit-test` defaults
+ * its `buildTarget` to `::development`, so adding a `fileReplacements` there
+ * silently moved what the whole unit suite compiles against and put twenty-odd
+ * specs red at once — their `fetch` fakes are written against the production
+ * REST URL shape. `angular.json` now has a `test` build configuration that
+ * keeps `environment.ts`.
+ */
+describe('TopBarComponent: the environment badge', () => {
+  const badge = (fixture: { nativeElement: HTMLElement }) =>
+    fixture.nativeElement.querySelector('[data-cy="environment-badge"]') as HTMLElement | null;
+
+  const originalLabel = environment.environmentLabel;
+  afterEach(() => {
+    environment.environmentLabel = originalLabel;
+  });
+
+  it('names the environment it is running against', () => {
+    environment.environmentLabel = 'DEV';
+
+    const h = setup();
+
+    expect(badge(h.fixture)?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Environment: DEV');
+  });
+
+  /**
+   * Absent, not blank. An empty pill would still paint a box and still take
+   * width in the brand link — the one place in the bar where a few extra
+   * pixels push the account chip toward the hamburger on a phone.
+   */
+  it('renders nothing at all in production, rather than an empty pill', () => {
+    environment.environmentLabel = '';
+
+    const h = setup();
+
+    expect(badge(h.fixture)).toBeNull();
+    expect(h.fixture.nativeElement.querySelector('.bg-amber-400')).toBeNull();
+  });
+
+  /**
+   * The label is announced with its meaning. "DEV" alone is a three-letter
+   * shout with no context; the `sr-only` prefix is what makes it a sentence.
+   */
+  it('says what the label means, for a screen reader', () => {
+    environment.environmentLabel = 'EMULATOR';
+
+    const h = setup();
+
+    expect(badge(h.fixture)?.querySelector('.sr-only')?.textContent).toContain('Environment');
   });
 });

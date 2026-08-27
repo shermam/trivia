@@ -7,6 +7,11 @@
 export const environment = {
   production: false,
   useEmulators: true,
+  emulatorProjectId: 'demo-trivia-app-e2e',
+  // Empty on purpose: a badge here would change the top bar's width and
+  // perturb the layout assertions in `mobile-nav.cy.ts`, and the Lighthouse
+  // build substitutes this file too.
+  environmentLabel: '',
   // Off here (unlike environment.ts/environment.development.ts): the background prefetch
   // fires its own opentdb.com/custom_questions requests on a timer independent of any
   // single test, so it can race Cypress's `cy.wait('@questions')` intercepts (see

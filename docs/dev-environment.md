@@ -1,0 +1,160 @@
+# The development environment
+
+**Read this when:** you are setting up a machine to work on the app, or you are
+doing the one-time `trivimind-dev` Firebase setup in §3.
+
+Three environments, and the difference between them is which backend they talk
+to. `FEAT-012`.
+
+|                | Backend                                            | Built from                   | How you get it                                                                                        |
+| -------------- | -------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Local**      | Firebase emulators, project `demo-trivimind-local` | `environment.development.ts` | `npm start`                                                                                           |
+| **Dev**        | The real `trivimind-dev` Firebase project          | `environment.dev.ts`         | `npm run firebase:deploy:dev`, or `npm run start:dev-project` to drive it from a local Angular server |
+| **Production** | `intellectura-3b26a`                               | `environment.ts`             | `npm run firebase:deploy`                                                                             |
+
+---
+
+## 1. Why this exists: `npm start` used to run against production
+
+Not a hypothetical, and not a near miss. Until `FEAT-012`:
+
+- `ng serve` defaults to the `development` build configuration, which carried
+  **no `fileReplacements`** — so it loaded `environment.ts`: `production: true`,
+  `useEmulators: false`.
+- `FirebaseAppService` therefore fetched `/__/firebase/init.json`, and
+  `src/proxy.conf.json` forwarded that to `https://intellectura-3b26a.web.app`.
+- So the local dev server initialised Firebase against **the real project**.
+  Every sign-in while poking at a feature, every question submitted to try the
+  form, every score saved, went to production.
+- `src/environments/environment.development.ts` existed the whole time, never
+  substituted, looking exactly like the thing that prevented it.
+
+Nothing was red, and nothing could be: the app worked. That is the problem —
+it worked against the users' database. Two more of the same shape:
+
+- `npm run firebase:emulate` passed no `--project`, so Firebase resolved
+  `.firebaserc`'s default — the production id. Not a `demo-` prefix, so
+  `isDemoProject()` was false and the **mock-checkout gate (audit A7) was off**
+  in local emulator runs.
+- `firebase-preview.yml` still writes production data on every PR; see §4.
+
+`scripts/verify-environment-isolation.mjs` (`npm run env:verify`, part of the
+required `lint` check) is what stops all three coming back.
+
+## 2. Working locally
+
+```bash
+npm start
+```
+
+Starts the Auth, Firestore and Functions emulators under
+`demo-trivimind-local` and runs `ng serve` inside them, so the dev server
+cannot reach a real backend even if the proxy were misconfigured — with
+`useEmulators` set, the runtime-config fetch never happens at all.
+
+Two details that will otherwise cost you an hour:
+
+- **Emulator data is namespaced per project id.** `environment.development.ts`'s
+  `emulatorProjectId` and the `--project` in the `start` script have to match.
+  A mismatch is not an error; it is an empty database. `npm run env:verify`
+  checks they agree.
+- **The local project is not the e2e project.** `npm run e2e` runs under
+  `demo-trivia-app-e2e` and wipes state between specs. Sharing one id would let
+  a test run empty the data you were developing against.
+
+`npm run firebase:emulate` is the other local mode: a full **production** build
+served by the Hosting emulator, for exercising the service worker, the CSP
+headers and the real `init.json` path. Also pinned to `demo-trivimind-local`.
+
+## 3. Setting up `trivimind-dev` — the manual steps
+
+**These need a human.** Everything above ships without them; nothing below can
+be done from the repo.
+
+The guiding principle throughout: **make it a faithful copy.** The whole value
+of a dev project is that a change validated there has been validated against
+the thing that will run it, so every difference from production is a hole in
+that guarantee. The build is already identical — `dev-project` is the
+production configuration plus one substitution, and `environment.production` is
+read nowhere in `src/` — so the only differences that can creep in are the ones
+introduced by hand, below.
+
+### 3.1 The project
+
+1. **Create the project.** Done: `trivimind-dev`.
+2. **Blaze plan.** Done. Cloud Functions require it; Spark cannot deploy them
+   at all, so a Spark dev project could not validate anything touching
+   `functions/`.
+3. **Set a budget alert** — Cloud Console → Billing → Budgets & alerts. A dev
+   project should cost approximately nothing, and the alert is what tells you
+   when "approximately" stops being true. Pay-as-you-go with no ceiling is the
+   one part of this setup that can surprise you.
+
+### 3.2 Bring it to parity with production
+
+4. **Enable the same services**: Authentication, Firestore, Hosting, Functions.
+5. **Enable the same sign-in providers.** Production offers Google,
+   email/password, Facebook, GitHub, Microsoft, Apple, Twitter/X and Yahoo
+   (`docs/app.md` §1). Each OAuth provider needs its own client id/secret and
+   its own redirect URI on the dev domain — this is the step most likely to be
+   half-done, and a provider that works in production and 400s in dev makes dev
+   _less_ trustworthy than no dev at all. If you only do some, write down which.
+6. **Add the dev domain to Auth → Settings → Authorised domains.**
+7. **Deploy rules, indexes and functions:**
+   ```bash
+   npm run firebase:deploy:dev
+   ```
+   This builds the `dev-project` configuration and deploys `hosting`,
+   `firestore` and `functions` from the same files production uses — so the
+   rules, the indexes and the `firebase.json` headers (CSP included) are the
+   same by construction rather than by discipline.
+8. **Stripe test mode.** Create the Pro product and price in Stripe's _test_
+   mode, and set the price's `firebaseRole` metadata to `pro` — the claim the
+   app gates on comes from that metadata, and an active subscription without it
+   grants nothing (audit H6). Then set the dev project's secrets:
+   ```bash
+   firebase functions:secrets:set STRIPE_SECRET_KEY --project trivimind-dev
+   firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project trivimind-dev
+   ```
+   Use the **test-mode** key. The livemode assertion derives which Stripe it is
+   talking to from the key itself, not from the project name (audit §4.3), so a
+   test key here is not merely safe — it is what makes the check correct.
+9. **Point a Stripe test webhook** at the dev project's `stripeWebhook`
+   function URL.
+
+### 3.3 Repoint CI (the part with the real exposure)
+
+10. **Issue a service-account key** for `trivimind-dev` (Project settings →
+    Service accounts → Generate new private key) and add it to the repository's
+    GitHub Actions secrets as `FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV`. Only
+    `FIREBASE_SERVICE_ACCOUNT_INTELLECTURA_3B26A` exists today.
+11. **Repoint the preview workflow.** `firebase-preview.yml` deploys a preview
+    channel and runs Cypress against it, and
+    `cypress/tasks/firebase-preview-tasks.ts` hard-codes
+    `const PROJECT_ID = 'intellectura-3b26a'`. On **every PR** it creates real
+    Auth users, real `custom_questions` documents and real leaderboard entries
+    in production, and sweeps them afterwards on a best-effort basis. This is
+    the largest single exposure left, and it is a code change plus the secret
+    from step 10 — it is why that step matters more than it looks.
+12. **Leave `e2e.yml` and `lighthouse.yml` alone.** They already run under
+    `demo-trivia-app-e2e` on emulators and hold no credential. The spec's claim
+    that "CI runs against production credentials" was wrong about these two and
+    understated the preview job.
+13. **Decide what the smoke test may touch.** `scripts/smoke-test.mjs` currently
+    only GETs routes and POSTs an unauthenticated `deleteAccount` expecting a
+    401 — read-only and safe against production. Keep it that way, or point it
+    at dev; do not let it grow a write while still aimed at production.
+
+### 3.4 What stays production-only
+
+Deliberately, so the list is short and known: `firebase:deploy`, `.firebaserc`'s
+default project, and the smoke test's target. Everything else has a dev
+counterpart.
+
+## 4. Still open after this
+
+- **`firebase-preview.yml` writes to production on every PR** (steps 10–11).
+  Blocked on the service-account secret, not on code.
+- **`functions/.env.trivimind-dev`** — the dev project has no env file, so it
+  gets the production defaults. If it should mock Stripe rather than use test
+  mode, that is where it goes.

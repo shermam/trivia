@@ -4,13 +4,22 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 
 ## Development server
 
-To start a local development server, run:
-
 ```bash
-ng serve
+npm start
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+Starts the Firebase emulators (Auth, Firestore, Functions) under
+`demo-trivimind-local` and runs `ng serve` inside them, then open
+`http://localhost:4200/`. The app reloads whenever you modify a source file,
+and a **EMULATOR** badge in the top bar tells you which backend you are on.
+
+**Use `npm start`, not a bare `ng serve`.** They are not equivalent: `ng serve`
+alone starts no emulators, so the app has no backend to talk to. And until
+`FEAT-012` it was worse than that — the `development` build inherited the
+production environment and the dev server proxied its Firebase config from the
+live Hosting site, so a local server read and wrote the **production**
+database. `docs/dev-environment.md` has the full account and the three
+environments.
 
 ## Code scaffolding
 

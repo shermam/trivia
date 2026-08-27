@@ -4,11 +4,17 @@ import { environment } from '../../environments/environment';
 
 /**
  * Reserved Firebase Hosting endpoint that returns the web app config for
- * whichever project is serving the current origin. In production this is
- * generated automatically by Hosting; in dev it's proxied to the live
- * Hosting site (see src/proxy.conf.json). This means no Firebase config —
- * not even the "safe to expose" apiKey — ever needs to live in a committed
- * environment file.
+ * whichever project is serving the current origin. Hosting generates it
+ * automatically, so no Firebase config — not even the "safe to expose"
+ * apiKey — ever needs to live in a committed environment file. It is also
+ * what lets one bundle work against production or `trivimind-dev` unchanged.
+ *
+ * **Only reached when `useEmulators` is false**, which now excludes the
+ * default dev server. It used to include it, and `src/proxy.conf.json`
+ * forwarded the request to the *production* Hosting site — so `npm start`
+ * initialised Firebase against the real project. That is `FEAT-012`, and the
+ * fix is upstream of this constant: the `development` build sets
+ * `useEmulators`, so the fetch never happens.
  */
 const RUNTIME_CONFIG_URL = '/__/firebase/init.json';
 
@@ -27,18 +33,30 @@ const RUNTIME_CONFIG_TIMEOUT_MS = 10_000;
 
 /**
  * The Auth/Firestore emulators don't validate project credentials at all, so
- * under `environment.useEmulators` (see the `e2e` build config + Cypress)
- * this fake config is used instead of fetching runtime config — that fetch
- * would otherwise 404 (no Hosting emulator serving `ng serve`) or, worse,
- * proxy to the live production project. The "demo-" prefix is a Firebase
- * convention that keeps the emulators fully offline even if something here
- * were ever misconfigured.
+ * under `environment.useEmulators` (the `e2e` and `development` builds) this
+ * fake config is used instead of fetching runtime config — that fetch would
+ * otherwise 404 (no Hosting emulator serving `ng serve`) or, worse, proxy to
+ * the live production project. The "demo-" prefix is a Firebase convention
+ * that keeps the emulators fully offline even if something here were ever
+ * misconfigured.
+ *
+ * **The project id is per-environment, not a constant.** It was hard-coded to
+ * the e2e project, which was right while e2e was the only thing running on
+ * emulators. `npm start` runs on them too now (`FEAT-012`), and giving local
+ * development its own id keeps an e2e run — which wipes state between specs —
+ * from emptying the data you were developing against. Whichever it is, it has
+ * to match the `--project` the emulators were started with: emulator data is
+ * namespaced per project id, so a mismatch presents as an empty database
+ * rather than as an error.
  */
-const EMULATOR_CONFIG: FirebaseOptions = {
-  apiKey: 'demo-api-key',
-  authDomain: 'demo-trivia-app-e2e.firebaseapp.com',
-  projectId: 'demo-trivia-app-e2e',
-};
+function emulatorConfig(): FirebaseOptions {
+  const projectId = environment.emulatorProjectId;
+  return {
+    apiKey: 'demo-api-key',
+    authDomain: `${projectId}.firebaseapp.com`,
+    projectId,
+  };
+}
 
 /**
  * Single shared entry point for initializing the Firebase app. Firestore and
@@ -74,7 +92,7 @@ export class FirebaseAppService {
 
   private async loadRuntimeConfig(): Promise<FirebaseOptions> {
     if (environment.useEmulators) {
-      return EMULATOR_CONFIG;
+      return emulatorConfig();
     }
     // `AbortSignal.timeout` genuinely aborts the request. Racing a promise
     // against a timer only stops *waiting* — the connection stays open and the
