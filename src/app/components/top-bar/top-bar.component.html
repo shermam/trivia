@@ -20,7 +20,7 @@
     `minmax(0,…)` is what makes the account chip truncate instead.
   -->
   <div
-    class="max-w-5xl mx-auto px-4 sm:px-6 h-16 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:flex sm:justify-between sm:gap-0"
+    class="max-w-5xl mx-auto px-4 max-[359px]:px-3 sm:px-6 h-16 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:flex sm:justify-between sm:gap-0"
   >
     <button
       #navTrigger
@@ -36,9 +36,33 @@
       <app-icon name="menu" [size]="18" />
     </button>
 
-    <a routerLink="/" class="flex items-center gap-2">
-      <app-logo [size]="32" class="text-emerald-600" />
-      <span class="font-extrabold text-emerald-600 dark:text-emerald-400 text-lg tracking-tight"
+    <!--
+      **The brand shrinks below 360px, and nothing else fits.** It sits in the
+      centre track of the mobile grid, centred in the *bar*, so its right edge
+      is `160 + width/2` at a 320px viewport — while the account chip is
+      right-aligned at `320 - 16 - 95.36`. Measured on production before this:
+      brand right 220.34 against a chip starting at 208.64, so "Trivimind" ran
+      **underneath** the chip by 11.7px, on the signed-out chip that a
+      first-time visitor sees.
+
+      Something has to give at that width, and the arithmetic says how much:
+      the brand has to reach 97.28px against its natural 120.69. The three
+      candidates were losing the wordmark, losing the chip's "Sign in" label,
+      and making the brand smaller. Smaller is the least lost — the mark and
+      the name both survive, one notch down, on a band of widths where the
+      alternative was the name being invisible under a button.
+
+      `max-[359px]:` rather than `sm:`, so the change is confined to the band
+      that is actually broken. At 360 the brand already clears the chip by
+      8.3px and nothing here applies.
+    -->
+    <a routerLink="/" class="flex items-center gap-2 max-[359px]:gap-1.5">
+      <app-logo
+        [size]="32"
+        class="text-emerald-600 max-[359px]:[&>svg]:h-5 max-[359px]:[&>svg]:w-5"
+      />
+      <span
+        class="font-extrabold text-emerald-600 dark:text-emerald-400 text-lg tracking-tight max-[359px]:text-sm"
         >Trivimind</span
       >
       <!--
