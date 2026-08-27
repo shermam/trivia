@@ -1,6 +1,20 @@
 {
+  "//": [
+    "Forwards the reserved /__/firebase/init.json endpoint so a locally served",
+    "build can pick up a real Firebase config without one being committed.",
+    "",
+    "It pointed at the PRODUCTION Hosting site, and the default `ng serve` used",
+    "it — which is how `npm start` came to initialise Firebase against the real",
+    "project (FEAT-012). It points at the dev project now, and the default dev",
+    "server no longer reaches it at all: the `development` build sets",
+    "`useEmulators`, so FirebaseAppService never makes the request.",
+    "",
+    "What is left using it is `npm run start:dev-project`, for driving the real",
+    "dev backend from a local Angular server. That needs Hosting initialised on",
+    "trivimind-dev; until then it 404s, which is the correct failure."
+  ],
   "/__/firebase/**": {
-    "target": "https://intellectura-3b26a.web.app",
+    "target": "https://trivimind-dev.web.app",
     "secure": true,
     "changeOrigin": true,
     "logLevel": "warn"

@@ -53,10 +53,21 @@
                 "fonts": true
               }
             },
-            "development": {
+            "test": {
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.development.ts"
+                }
+              ]
             },
             "e2e": {
               "optimization": false,
@@ -68,6 +79,36 @@
                   "with": "src/environments/environment.e2e.ts"
                 }
               ]
+            },
+            "dev-project": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "8kB"
+                }
+              ],
+              "outputHashing": "all",
+              "serviceWorker": "ngsw-config.json",
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.dev.ts"
+                }
+              ],
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": false
+                },
+                "fonts": true
+              }
             },
             "lighthouse": {
               "budgets": [
@@ -116,6 +157,9 @@
             },
             "e2e": {
               "buildTarget": "trivia-app:build:e2e"
+            },
+            "dev-project": {
+              "buildTarget": "trivia-app:build:dev-project"
             }
           },
           "defaultConfiguration": "development"
@@ -123,6 +167,7 @@
         "test": {
           "builder": "@angular/build:unit-test",
           "options": {
+            "buildTarget": "trivia-app:build:test",
             "coverage": true,
             "coverageReporters": ["text-summary"],
             "coverageThresholds": {

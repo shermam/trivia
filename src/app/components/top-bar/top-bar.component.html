@@ -41,6 +41,30 @@
       <span class="font-extrabold text-emerald-600 dark:text-emerald-400 text-lg tracking-tight"
         >Trivimind</span
       >
+      <!--
+        Which backend is this? In production, nothing — the badge is absent
+        rather than blank, because production is the one environment where the
+        answer needs no saying.
+
+        Everywhere else it is load-bearing: `trivimind-dev` runs the same
+        production build against the same rules and the same headers, so it is
+        indistinguishable from production by design, and this is the only
+        thing on screen that distinguishes it. Amber rather than emerald so it
+        reads as "not the real one" at a glance and does not blend into the
+        brand it sits beside.
+
+        Inside the brand link, so on a phone it lives in the centred grid
+        track and cannot push the account chip into the hamburger.
+      -->
+      @if (environmentLabel) {
+        <span
+          data-cy="environment-badge"
+          class="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950"
+        >
+          <span class="sr-only">Environment:</span>
+          {{ environmentLabel }}
+        </span>
+      }
     </a>
 
     <div class="flex min-w-0 items-center gap-6 justify-self-end">

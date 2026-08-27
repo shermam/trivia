@@ -105,3 +105,17 @@ jobs:
       # ungated and nothing noticed. Scope and reasoning: `scripts/verify-motion.mjs`.
       - name: Verify animations respect prefers-reduced-motion
         run: npm run motion:verify
+
+      # Fails when anything non-production can reach the production Firebase
+      # project. Here rather than in a workflow of its own for the reason
+      # given at the top of this file: `lint` is required today, so a step
+      # added here gates a merge immediately.
+      #
+      # The defect it guards against was invisible to every other check, and
+      # invisible in the worst way — `npm start` worked. It worked against the
+      # real database, because the `development` build had no
+      # `fileReplacements` and quietly inherited `environment.ts`. Nothing was
+      # red for as long as that was true. Reasoning:
+      # `scripts/verify-environment-isolation.mjs`.
+      - name: Verify no non-production build can reach production
+        run: npm run env:verify
