@@ -41,6 +41,15 @@ it worked against the users' database. Two more of the same shape:
 `scripts/verify-environment-isolation.mjs` (`npm run env:verify`, part of the
 required `lint` check) is what stops all three coming back.
 
+> **The badge is `sm`-and-up only.** Below that it sat inside the brand link,
+> which on a phone is the centre track of a three-column grid already close to
+> full: measured at 320px it pushed the brand 32px into the account chip, and
+> at 390px it cleared by 2.5px. Nothing would have caught it —
+> `mobile-nav.cy.ts` asserts exactly that clearance but runs at 390, and the
+> badge never renders in an e2e build at all. On a phone the URL is the signal
+> instead: `localhost`, or a `*.web.app` preview channel, neither of which can
+> be mistaken for the production domain.
+
 ## 2. Working locally
 
 ```bash

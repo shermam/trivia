@@ -11,7 +11,7 @@ npm start
 Starts the Firebase emulators (Auth, Firestore, Functions) under
 `demo-trivimind-local` and runs `ng serve` inside them, then open
 `http://localhost:4200/`. The app reloads whenever you modify a source file,
-and a **EMULATOR** badge in the top bar tells you which backend you are on.
+and an **EMULATOR** badge in the top bar (tablet width and up) tells you which backend you are on.
 
 **Use `npm start`, not a bare `ng serve`.** They are not equivalent: `ng serve`
 alone starts no emulators, so the app has no backend to talk to. And until
