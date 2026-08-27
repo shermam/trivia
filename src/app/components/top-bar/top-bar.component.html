@@ -53,13 +53,30 @@
         reads as "not the real one" at a glance and does not blend into the
         brand it sits beside.
 
-        Inside the brand link, so on a phone it lives in the centred grid
-        track and cannot push the account chip into the hamburger.
+        **`hidden sm:inline-block`, and that is a measurement rather than a
+        preference.** It sits inside the brand link, which below `sm` is the
+        centre track of a three-column grid already close to full. Measured on
+        the DEV build: at 320px the brand's right edge reached 241.09 against
+        an account chip starting at 208.64 — a 32px overlap — and at 390px it
+        cleared by 2.5px, which is not clearance, it is luck that a longer
+        label or a different font would spend.
+
+        Nothing would have caught it. `mobile-nav.cy.ts` asserts exactly this
+        ("keeps the account chip clear of the brand") but runs at 390, where it
+        passes by those 2.5px — and the badge does not render in the e2e build
+        at all, because `environment.e2e.ts` leaves the label empty. Hiding it
+        below `sm` makes the overlap impossible by construction rather than
+        untested.
+
+        The cost is stated: on a phone there is no badge, so the URL is the
+        only signal — `localhost`, or a `*.web.app` preview channel, neither of
+        which can be mistaken for the production domain. That is weaker than a
+        badge and it is the narrow bar's to give.
       -->
       @if (environmentLabel) {
         <span
           data-cy="environment-badge"
-          class="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950"
+          class="hidden rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 sm:inline-block"
         >
           <span class="sr-only">Environment:</span>
           {{ environmentLabel }}

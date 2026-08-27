@@ -741,6 +741,28 @@ describe('TopBarComponent: the environment badge', () => {
   });
 
   /**
+   * **Below `sm` the badge must not render at all**, and this pins the
+   * mechanism because nothing else can: jsdom has no layout, and the badge
+   * never appears in an e2e build (`environment.e2e.ts` empties the label), so
+   * the suite that measures the top bar cannot see it either.
+   *
+   * It shipped without this and crowded the bar. Measured on the DEV build at
+   * 320px, the brand's right edge reached 241.09 against an account chip
+   * starting at 208.64 — a 32px overlap — and at 390px it cleared by 2.5px,
+   * which is luck rather than clearance. With the badge out of the flow below
+   * `sm`, the mobile bar measures identically to production at every width.
+   */
+  it('keeps the badge out of the mobile bar entirely', () => {
+    environment.environmentLabel = 'DEV';
+
+    const h = setup();
+
+    const classes = badge(h.fixture)?.className ?? '';
+    expect(classes).toContain('hidden');
+    expect(classes).toContain('sm:inline-block');
+  });
+
+  /**
    * The label is announced with its meaning. "DEV" alone is a three-letter
    * shout with no context; the `sr-only` prefix is what makes it a sentence.
    */
