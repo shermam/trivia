@@ -14,6 +14,7 @@ const user = {
 const base = {
   user,
   leaderboardEntries: [],
+  gameplayStats: null,
   contributedQuestions: [],
   stripeCustomerId: null,
   subscriptions: [],
@@ -90,4 +91,33 @@ test('keeps each leaderboard entry labelled with the board it came from', () => 
     result.leaderboardEntries.map((entry) => entry['board']),
     ['30', 'unlimited'],
   );
+});
+
+/**
+ * The lifetime totals from `users/{uid}`. Two rows, because the absent case is
+ * the one that matters: the document is created lazily on the first completed
+ * game, so an account that has never finished one legitimately has nothing —
+ * and an export that dropped the key would read as "we are not telling you"
+ * rather than "there is nothing", which is the distinction this file's
+ * `notHeldHere` exists to make everywhere else.
+ */
+test('includes lifetime gameplay totals when the account has them', () => {
+  const result = buildAccountExport({
+    ...base,
+    gameplayStats: { gamesPlayed: 12, questionsAnswered: 120, correctAnswers: 84, bestStreak: 9 },
+  });
+
+  assert.deepEqual(result.gameplayStats, {
+    gamesPlayed: 12,
+    questionsAnswered: 120,
+    correctAnswers: 84,
+    bestStreak: 9,
+  });
+});
+
+test('reports an explicit null, not an absent key, when no game has been finished', () => {
+  const result = buildAccountExport({ ...base, gameplayStats: null });
+
+  assert.equal(result.gameplayStats, null);
+  assert.ok('gameplayStats' in result, 'the key must be present so its emptiness is stated');
 });

@@ -352,6 +352,67 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // One document per player holding their lifetime gameplay totals. Created
+    // lazily by the `recordGameResult` callable (`functions/src/game-stats.ts`)
+    // the first time a signed-in account finishes a game, and deleted by
+    // `deleteAccount`. Both go through the Admin SDK, which bypasses these
+    // rules entirely.
+    //
+    // **Nothing here is client-writable, and that is the design rather than an
+    // omission.** §4.1 of `CLAUDE.md` requires every client-writable collection
+    // to carry an exact-key `hasOnly()` allowlist; §4.2 records the corollary,
+    // that a document has no allowlist to widen later *only* while it stays
+    // free of any client write path. Five roadmap specs name this document and
+    // their proposed field sets are neither settled nor consistent with each
+    // other, so freezing a key set here would put the A10 one-way door on the
+    // collection least able to afford it. Keeping every write on the Admin SDK
+    // costs one callable invocation per completed game and buys a schema that
+    // can grow — the exact inverse of `custom_questions`, and the same bargain
+    // `user_roles` above already makes.
+    //
+    // **The totals are not server-attested, and this is where that is written
+    // down.** §4.1 wants an achievement number attested or hard-bounded; the
+    // callable's payload is still client-supplied, so these are *bounded*
+    // rather than attested — 1..25 questions per game, correct <= answered,
+    // streak <= correct, one write per game id, and a per-hour ceiling. That is
+    // audit decision A1 adopted deliberately rather than inherited by accident.
+    // Reopening it means building the signed game token A1 deferred, not
+    // loosening anything here.
+    //
+    // **Not created for anonymous sessions.** `deleteAccount` never runs for an
+    // anonymous account, and Firebase's auto-deletion removes the Auth record
+    // only — so a document per guest would accumulate with nothing able to
+    // delete it, and the Privacy Policy's claim that no data of any kind is
+    // attached to an anonymous session would stop being true on the first page
+    // load after deploy. That gate lives in the callable, because there is no
+    // client write rule here for it to live in.
+    match /users/{uid} {
+      // Your own totals, and only ever as a single-document `get`.
+      //
+      // `request.auth != null` rather than `isRealAuthedUser()`, following
+      // `user_roles` above: an anonymous session gets a uid it does not choose,
+      // so it can never name somebody else's document, and its own does not
+      // exist. Narrowing it would add a second condition that has to stay in
+      // step with nothing.
+      allow get: if request.auth != null && request.auth.uid == uid;
+
+      // Never enumerable, by anyone. Listing this collection is a roster of
+      // every account that has ever finished a game, orderable by any field on
+      // it. Spelled out rather than left to `allow read`, which would have
+      // granted both verbs — and the difference between them is only
+      // observable through a query Firestore can prove it satisfies, so the
+      // tests pin `where(documentId(), '==', <own uid>)` specifically and that
+      // one row is the entire content of this line.
+      allow list: if false;
+
+      // No client write path at all — see the block comment. This is the line
+      // that keeps the schema growable, so changing it is not a rules tweak: it
+      // is a decision to close the door, and it needs §4.1's full kit (exact-key
+      // allowlist, type-and-range check per field, ownership check) plus a
+      // re-argument of everything above, in the same PR.
+      allow create, update, delete: if false;
+    }
+
     // Question bank: readable by anyone playing the game. Creating a new
     // question requires both the anti-flood gate (real, non-anonymous,
     // verified-if-password account) and an active Pro subscription — this

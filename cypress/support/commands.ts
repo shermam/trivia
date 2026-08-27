@@ -71,6 +71,7 @@ declare global {
       seedProProduct(): Chainable<null>;
       /** Reads back Auth/leaderboard/customer/question state after an account deletion. */
       inspectAccountState(query: AccountStateQuery): Chainable<AccountState>;
+      countGameplayStatsDocuments(): Chainable<number>;
       /** Reads every `question_reports` doc via the Admin SDK — clients are forbidden from reading them. */
       getQuestionReports(): Chainable<QuestionReportRecord[]>;
     }
@@ -217,6 +218,10 @@ Cypress.Commands.add('seedProProduct', () => {
 
 Cypress.Commands.add('inspectAccountState', (query: AccountStateQuery) => {
   cy.task('inspectAccountState', query);
+});
+
+Cypress.Commands.add('countGameplayStatsDocuments', () => {
+  cy.task('countGameplayStatsDocuments');
 });
 
 Cypress.Commands.add('getQuestionReports', () => {

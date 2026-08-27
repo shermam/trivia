@@ -55,6 +55,19 @@ export interface PersistedGame {
    * `GameOverComponent.recap`.
    */
   answerHistory: PickedAnswerId[];
+  /**
+   * This game's identity, minted at start — the idempotency key that stops a
+   * reload of `/game-over` banking the same game twice into the player's
+   * lifetime totals (`users/{uid}`).
+   *
+   * `null` for a save written before this field existed, and additive for the
+   * same reason as the two above: a mismatch discards rather than migrates, so
+   * bumping `SCHEMA_VERSION` would throw away every in-flight game on deploy.
+   * Such a game is simply never banked — one lost total, against the
+   * alternative of minting an id on the results screen, which would be fresh
+   * on every refresh and inflate the totals on each one.
+   */
+  gameId: string | null;
 }
 
 /** As written to the object store: the same record plus the keyPath field. */
@@ -149,6 +162,7 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     isComplete,
     flaggedQuestionIds,
     answerHistory,
+    gameId,
   } = parsed;
 
   if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) {
@@ -210,6 +224,11 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     // So it is all-or-nothing, and the recap renders only when the history
     // covers the whole game.
     answerHistory: isUsableAnswerHistory(answerHistory, questions) ? answerHistory : [],
+    // Anything that is not a plausible id becomes `null`, which the caller
+    // treats as "do not bank this game" rather than as an error. A hand-edited
+    // record cannot mint itself extra lifetime totals that way, and an honest
+    // pre-feature save takes the same path.
+    gameId: typeof gameId === 'string' && gameId.length > 0 && gameId.length <= 128 ? gameId : null,
   };
 }
 

@@ -79,6 +79,27 @@ export class GameControllerService {
    */
   readonly answerHistory = signal<readonly PickedAnswerId[]>([]);
 
+  /**
+   * A per-game identity, minted when the game starts and carried in the
+   * persisted snapshot.
+   *
+   * **The idempotency key for `recordGameResult`.** `/game-over` survives a
+   * reload by design — the completed game is deliberately kept so the score
+   * about to be submitted is not lost — and a callable that times out gets
+   * retried. Both would otherwise bank the same game twice into the player's
+   * lifetime totals, which a best-score `setDoc` tolerates and an increment
+   * does not.
+   *
+   * Minted at game *start*, not at game over, and that is the whole point: an
+   * id created on the results screen would be fresh on every reload, which is
+   * exactly the duplicate it exists to prevent.
+   *
+   * `null` for a game restored from a save written before this field existed.
+   * Those games are simply not banked — one lost game's totals, against the
+   * alternative of minting an id lazily and inflating them on every refresh.
+   */
+  readonly gameId = signal<string | null>(null);
+
   /** The single in-flight restore, so bootstrap and the guards await the same read. */
   private restorePromise: Promise<void> | null = null;
 
@@ -146,6 +167,7 @@ export class GameControllerService {
         isComplete: this.isComplete(),
         flaggedQuestionIds: [...this.flaggedQuestionIds()],
         answerHistory: [...this.answerHistory()],
+        gameId: this.gameId(),
       };
       this.enqueueWrite(() => this.persistence.save(snapshot));
     });
@@ -219,6 +241,7 @@ export class GameControllerService {
     this.isComplete.set(saved.isComplete);
     this.flaggedQuestionIds.set(new Set(saved.flaggedQuestionIds));
     this.answerHistory.set(saved.answerHistory);
+    this.gameId.set(saved.gameId);
   }
 
   /**
@@ -281,6 +304,7 @@ export class GameControllerService {
 
       this.config.set(config);
       this.questions.set(questions);
+      this.gameId.set(crypto.randomUUID());
       this.currentIndex.set(0);
       this.score.set(0);
       this.isComplete.set(false);
@@ -345,5 +369,6 @@ export class GameControllerService {
     this.loadError.set(null);
     this.flaggedQuestionIds.set(new Set());
     this.answerHistory.set([]);
+    this.gameId.set(null);
   }
 }
