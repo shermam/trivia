@@ -4,6 +4,15 @@ const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 const password = 'Str0ngPassw0rd!';
 
 /**
+ * How long to wait for a `recordGameResult` invocation to be made and
+ * answered. Generous on purpose: this is a ceiling, not a delay — the wait
+ * ends when the response arrives — and it has to clear a cold Functions
+ * emulator on a CPU-starved runner. Above Cypress's 5s `requestTimeout`
+ * default, which is what `cy.wait('@alias')` would otherwise use.
+ */
+const CALLABLE_TIMEOUT_MS = 30000;
+
+/**
  * `users/{uid}` — the lifetime totals a completed game banks.
  *
  * Every assertion reads the document through the Admin SDK rather than through
@@ -70,12 +79,24 @@ describe('lifetime gameplay totals', () => {
    */
   it('does not bank the same game twice when the results screen is reloaded', () => {
     cy.stubOpenTrivia();
+    // Spy on the callable — pass-through, nothing is stubbed — so the reload's
+    // own invocation becomes something this test can wait *for* rather than
+    // wait *out*. `/game-over` fires it from `ngOnInit`, so there is one
+    // request per visit and `cy.wait` consumes them in order.
+    //
+    // A RegExp rather than a glob: the callable posts to
+    // `http://127.0.0.1:5001/<projectId>/us-central1/recordGameResult`, and a
+    // `**/` glob has to match across the `//` in the protocol, which is
+    // exactly where minimatch is fussy. A regex is matched against the whole
+    // URL with no such subtlety.
+    cy.intercept('POST', /\/recordGameResult(\?|$)/).as('recordGameResult');
     cy.visit('/');
     cy.signInViaUi(email, password);
 
     cy.startNewGame(5);
     playFullGame();
 
+    cy.wait('@recordGameResult', { timeout: CALLABLE_TIMEOUT_MS });
     cy.then(() => {
       cy.waitForGameplayStats(uid).should('include', { gamesPlayed: 1 });
     });
@@ -84,11 +105,18 @@ describe('lifetime gameplay totals', () => {
     cy.location('pathname').should('eq', '/game-over');
     cy.contains('Game Over!');
 
-    // The reload's own call has to have been made and refused before this is
-    // meaningful, so give it the same window the first write got — otherwise
-    // "still 1" could just mean "the second call has not happened yet", which
-    // would pass against the very double-count this test exists to catch.
-    cy.wait(3000);
+    // **The reload's call has to have been made and answered before the
+    // assertion below means anything** — otherwise "still 1" could just mean
+    // "the second call has not happened yet", which would pass against the
+    // very double-count this test exists to catch.
+    //
+    // Which is why this waits on the interception and not on a clock. A fixed
+    // delay is calibrated against whichever machine it was written on: too
+    // short on a loaded runner and the assertion passes vacuously, too long
+    // and every run pays for it. Waiting on the request returns the instant
+    // the response lands.
+    cy.wait('@recordGameResult', { timeout: CALLABLE_TIMEOUT_MS });
+
     cy.then(() => {
       cy.waitForGameplayStats(uid).should('include', {
         gamesPlayed: 1,
