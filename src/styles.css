@@ -234,9 +234,18 @@
 .boot-fallback {
   visibility: hidden;
   animation: boot-fallback-reveal 0s linear 10s forwards;
+
+  /* Out of flow, and that is not a styling preference — it is what keeps this
+     free. `visibility: hidden` hides an element but still reserves its box, so
+     an in-flow version gives the body a height before Angular boots and the
+     body jumps when Angular replaces <app-root>'s contents. Measured: CLS
+     0.063 on main, 0.179 in flow, back to 0.063 absolutely positioned.
+     Absolute positioning takes it out of the flow entirely, so there is
+     nothing to reserve and nothing to give back. */
+  position: absolute;
+  inset: 6rem 1.5rem auto;
   max-width: 32rem;
-  margin: 6rem auto 0;
-  padding: 0 1.5rem;
+  margin-inline: auto;
   text-align: center;
   color: var(--color-slate-600);
 }
