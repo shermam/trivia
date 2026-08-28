@@ -12,7 +12,7 @@ Part of the project overview — start at [`PROJECT_OVERVIEW.md`](../PROJECT_OVE
 
 ### 1.1 Game flow
 
-The app is a five-screen game flow, plus two static legal pages, implemented as lazily-loaded standalone Angular routes:
+The app is a six-screen game flow, plus two static legal pages, implemented as lazily-loaded standalone Angular routes:
 
 | Route           | Component                 | Purpose                                                                    |
 | --------------- | ------------------------- | -------------------------------------------------------------------------- |
@@ -20,6 +20,7 @@ The app is a five-screen game flow, plus two static legal pages, implemented as 
 | `/play`         | `QuizLoopComponent`       | Answer questions one at a time, against a timer                            |
 | `/game-over`    | `GameOverComponent`       | Show final score, submit to leaderboard, view top 10                       |
 | `/add-question` | `AddQuestionComponent`    | Submit a new question to the custom question bank (**Pro only**, see §1.6) |
+| `/review`       | `ReviewQueueComponent`    | Approve or reject submitted questions (**reviewers only**, see §1.4)       |
 | `/pricing`      | `PricingComponent`        | Compare Starter vs. Pro and subscribe via Stripe Checkout (§1.6)           |
 | `/privacy`      | `PrivacyPolicyComponent`  | Privacy Policy (§1.9)                                                      |
 | `/terms`        | `TermsOfServiceComponent` | Terms of Service (§1.9)                                                    |

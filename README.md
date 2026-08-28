@@ -14,12 +14,9 @@ Starts the Firebase emulators (Auth, Firestore, Functions) under
 and an **EMULATOR** badge in the top bar (tablet width and up) tells you which backend you are on.
 
 **Use `npm start`, not a bare `ng serve`.** They are not equivalent: `ng serve`
-alone starts no emulators, so the app has no backend to talk to. And until
-`FEAT-012` it was worse than that — the `development` build inherited the
-production environment and the dev server proxied its Firebase config from the
-live Hosting site, so a local server read and wrote the **production**
-database. `docs/dev-environment.md` has the full account and the three
-environments.
+alone starts no emulators, so the app has no backend to talk to.
+`docs/dev-environment.md` covers the three environments and what keeps them
+apart.
 
 ## Code scaffolding
 
