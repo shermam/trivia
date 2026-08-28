@@ -24,6 +24,20 @@ export interface Answer {
   isCorrect: boolean;
 }
 
+/**
+ * What the player did on one question: the `id` of the option they picked, or
+ * `null` if the clock ran out first.
+ *
+ * **The id, not the text, and not a richer record.** Two options can carry the
+ * same string, and matching on display text once let a wrong answer score as
+ * correct (`CLAUDE.md` §4.4) — so identity is the id here as it is everywhere
+ * else. Everything the recap shows is derived from it: correctness is
+ * `all_answers.find(a => a.id === picked).isCorrect`, and a timeout is
+ * `picked === null`. Storing those alongside would be three fields that can
+ * disagree with each other, in a record that goes to disk and comes back.
+ */
+export type PickedAnswerId = string | null;
+
 export interface TriviaQuestion {
   id: string;
   category: string;

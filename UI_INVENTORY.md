@@ -197,6 +197,11 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 - **Save-score area** — content depends on auth state (see States below)
 - **Section heading**: "Top 10 Leaderboard" (with a medal icon)
 - **Leaderboard list** — content depends on load state (see States below); each row: rank (🥇/🥈/🥉 for top 3, "#N" otherwise), gradient avatar circle with the player's initials, name, "{{ score }} / {{ totalQuestions }} ({{ percentage }}%)". The current player's own row (matched by `uid`) is highlighted (indigo tint + left border) and tagged with a "YOU" badge, if present in the fetched top 10.
+- **"Review answers" card** (`FEAT-001`) — a collapsible disclosure below the leaderboard, present only when the round's answer history is complete (a game restored from a save written before the feature shipped shows no card). Collapsed by default.
+  - **Toggle row**: rotate-ccw icon, "Review answers" (bold) followed by "({{ correct }}/{{ total }} correct)" in grey, and a chevron that rotates 180° when open.
+  - **Each row** (one `<li>` per question, in play order): a circular number badge — emerald tint if the answer was right, red if not — then the question text, a category badge and a difficulty badge, plus an amber "Time expired" badge with a clock icon when the clock ran out.
+  - **Below that**, the player's pick: a green check + the answer in emerald if right, a red x + the answer in red if wrong, or a clock + "No answer" in grey on a timeout.
+  - **Then, only when the pick was not right**, a second line with a green check and the correct answer (prefixed by an `sr-only` "Correct answer:"). A correct pick shows one line, not the same string twice under two labels.
 - **Button**: "Play Again" (full width, dark slate, reset icon) — resets all in-memory game state, navigates to `/`
 
 ### States — Save-score area

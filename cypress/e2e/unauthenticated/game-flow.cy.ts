@@ -187,6 +187,64 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.location('pathname').should('eq', '/game-over');
     cy.contains(`${restCorrect.length} / ${CORRECT_ANSWERS.length}`);
   });
+
+  /**
+   * `FEAT-001`. The recap is the one part of game-over built from state the
+   * player produced *on a different screen*, so the thing worth testing here
+   * is the handoff: five answers given at `/play`, five rows rendered at
+   * `/game-over`, each showing the option that was actually clicked.
+   *
+   * A wrong answer and a *correct* one, deliberately — the unit tests cover
+   * every branch, but only a real run proves the ids recorded during play are
+   * the same ids the recap resolves against afterwards, which is the whole
+   * mechanism and the part no stub can vouch for.
+   */
+  it('recaps every answer of the round, right and wrong alike', () => {
+    cy.startGame(5);
+
+    const wrongAnswer = questionsFixture.results[0].incorrect_answers[0];
+    cy.answerQuestion(wrongAnswer);
+    const [, ...restCorrect] = CORRECT_ANSWERS;
+    restCorrect.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+
+    cy.location('pathname').should('eq', '/game-over');
+
+    // Collapsed by default, and the header carries the tally.
+    cy.get('[data-cy="recap-toggle"]')
+      .should('contain', 'Review answers')
+      .and('contain', `(4/5 correct)`)
+      .and('have.attr', 'aria-expanded', 'false');
+    cy.get('[data-cy="recap-panel"]').should('not.exist');
+
+    cy.get('[data-cy="recap-toggle"]').click();
+    cy.get('[data-cy="recap-toggle"]').should('have.attr', 'aria-expanded', 'true');
+    cy.get('[data-cy="recap-row"]').should('have.length', 5);
+
+    // The missed question shows what was picked *and* what was right; the
+    // rest show only the pick, which is the same string either way.
+    cy.get('[data-cy="recap-row"]')
+      .first()
+      .within(() => {
+        cy.contains(questionsFixture.results[0].question);
+        cy.get('[data-cy="recap-picked"]').should('contain', wrongAnswer);
+        cy.get('[data-cy="recap-correct"]').should('contain', CORRECT_ANSWERS[0]);
+      });
+
+    cy.get('[data-cy="recap-row"]')
+      .eq(1)
+      .within(() => {
+        cy.get('[data-cy="recap-picked"]').should('contain', CORRECT_ANSWERS[1]);
+        cy.get('[data-cy="recap-correct"]').should('not.exist');
+      });
+
+    // Nothing timed out — every question was answered well inside 15s.
+    cy.get('[data-cy="recap-timed-out"]').should('not.exist');
+
+    cy.get('[data-cy="recap-toggle"]').click();
+    cy.get('[data-cy="recap-panel"]').should('not.exist');
+  });
 });
 
 describe('anonymous game flow (custom source)', () => {

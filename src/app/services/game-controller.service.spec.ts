@@ -278,6 +278,56 @@ describe('GameControllerService persistence (B8)', () => {
     expect(fresh.totalQuestions()).toBe(3);
   });
 
+  // The recap's half of the same reload problem the flags above have. A
+  // completed game is deliberately kept so the score survives a refresh of
+  // `/game-over`; a recap that emptied while the score stayed would be the
+  // same defect one screen along.
+  it('carries the answer history through a reload', async () => {
+    const service = await playAndPersist(3, 2, 2);
+    service.registerAnswer(service.questions()[0].all_answers[0]); // correct
+    service.registerAnswer(null); // timed out
+    service.registerAnswer(service.questions()[2].all_answers[1]); // wrong
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    expect((await reload()).answerHistory()).toEqual(['q0:correct', null, 'q2:incorrect-0']);
+  });
+
+  it('clears the answer history when the game is reset', async () => {
+    const service = await playAndPersist(10, 3, 2);
+    service.registerAnswer(service.questions()[0].all_answers[0]);
+
+    service.resetGame();
+
+    expect(service.answerHistory()).toEqual([]);
+  });
+
+  // Same leak as the flags, and worse: `routerLink="/"` starts a new game
+  // without passing through `resetGame()`, and `restoreSavedGame()` puts the
+  // old history back into the signal on the way. Left there, the recap would
+  // render the abandoned game's answers underneath the new game's score.
+  it('clears the answer history when a new game starts, not only on Play Again', async () => {
+    const abandoned = await playAndPersist(10, 3, 2);
+    abandoned.registerAnswer(abandoned.questions()[0].all_answers[0]);
+    TestBed.tick();
+    await abandoned.flushPendingWrites();
+
+    TestBed.resetTestingModule();
+    const fresh = setupWithQuestionSource(3);
+    await fresh.restoreSavedGame();
+    expect(fresh.answerHistory().length).toBeGreaterThan(0); // the leak this guards
+
+    await fresh.startGame({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+
+    expect(fresh.answerHistory()).toEqual([]);
+  });
+
   // Reproduces the e2e failure: choosing "no limit" and reloading must not
   // silently move the player onto a different board.
   it('carries an unlimited time limit through a reload', async () => {
@@ -381,3 +431,72 @@ function setupWithQuestionSource(questionCount: number) {
   });
   return TestBed.inject(GameControllerService);
 }
+
+/**
+ * `FEAT-001`. The recap is built entirely from this array, so what matters is
+ * that it stays *positional* — entry `i` is the answer to question `i` — and
+ * that a timeout is stored as something other than a wrong answer. Before this
+ * feature `registerAnswer` took a `boolean`, which made those two cases
+ * identical the moment they left the quiz component.
+ */
+describe('GameControllerService answer history (FEAT-001)', () => {
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('accumulates one entry per answer, in order', () => {
+    const service = setup(3);
+    const [q0, q1, q2] = service.questions();
+
+    service.registerAnswer(q0.all_answers[0]); // correct
+    service.registerAnswer(q1.all_answers[1]); // wrong
+    service.registerAnswer(q2.all_answers[0]); // correct
+
+    expect(service.answerHistory()).toEqual(['q0:correct', 'q1:incorrect-0', 'q2:correct']);
+    expect(service.score()).toBe(2);
+  });
+
+  // The distinction the old `boolean` signature could not carry: both of these
+  // score zero, and the recap has to show one as "No answer / Time expired"
+  // and the other as the option the player actually picked.
+  it('distinguishes a timeout from a wrong answer', () => {
+    const service = setup(2);
+
+    service.registerAnswer(null);
+    service.registerAnswer(service.questions()[1].all_answers[1]);
+
+    expect(service.answerHistory()).toEqual([null, 'q1:incorrect-0']);
+    expect(service.score()).toBe(0);
+  });
+
+  // Two options carrying the same *text* must still be told apart — storing
+  // the display string instead of the id is the shape of the bug in
+  // `CLAUDE.md` §4.4, and it would land here first.
+  it('records the picked option by id, not by its text', () => {
+    const service = setup(1);
+    const question = service.questions()[0];
+    question.all_answers[1].text = question.all_answers[0].text;
+
+    service.registerAnswer(question.all_answers[1]);
+
+    expect(service.answerHistory()).toEqual(['q0:incorrect-0']);
+    expect(service.score()).toBe(0);
+  });
+
+  it('starts empty, so a game with no answers yet has no recap to render', () => {
+    expect(setup(5).answerHistory()).toEqual([]);
+  });
+
+  // A replaced array rather than a mutated one, or `computed`s downstream of
+  // it never re-run and the recap renders the state before the last answer.
+  it('replaces the array rather than mutating it', () => {
+    const service = setup(2);
+    const before = service.answerHistory();
+
+    service.registerAnswer(service.questions()[0].all_answers[0]);
+
+    expect(service.answerHistory()).not.toBe(before);
+    expect(before).toEqual([]);
+  });
+});

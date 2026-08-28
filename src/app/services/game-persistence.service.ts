@@ -3,6 +3,7 @@ import {
   DEFAULT_TIME_LIMIT,
   Difficulty,
   GameConfig,
+  PickedAnswerId,
   QuestionSource,
   TriviaQuestion,
   isTimeLimitOption,
@@ -42,6 +43,18 @@ export interface PersistedGame {
    * be exactly backwards.
    */
   flaggedQuestionIds: string[];
+  /**
+   * The option the player picked for each question answered so far, in order —
+   * an answer `id`, or `null` for a timeout. What the game-over recap renders.
+   *
+   * **Additive, and no `SCHEMA_VERSION` bump**, for the same reason as
+   * `flaggedQuestionIds` above: a mismatch discards rather than migrates, so
+   * bumping would throw away every in-flight game at deploy time. A save
+   * written before this field restores with an empty history, which the recap
+   * treats as "no recap" rather than as "you got none right" — see
+   * `GameOverComponent.recap`.
+   */
+  answerHistory: PickedAnswerId[];
 }
 
 /** As written to the object store: the same record plus the keyPath field. */
@@ -127,8 +140,16 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     return null;
   }
 
-  const { savedAt, config, questions, currentIndex, score, isComplete, flaggedQuestionIds } =
-    parsed;
+  const {
+    savedAt,
+    config,
+    questions,
+    currentIndex,
+    score,
+    isComplete,
+    flaggedQuestionIds,
+    answerHistory,
+  } = parsed;
 
   if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) {
     return null;
@@ -181,7 +202,36 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
             typeof id === 'string' && questions.some((question) => question.id === id),
         )
       : [],
+    // Dropped wholesale rather than filtered, unlike the flags above, and the
+    // difference is that this array is *positional*: entry `i` is the answer to
+    // question `i`. Filtering out one bad entry would silently shift every
+    // later answer onto the wrong question, which is worse than no recap —
+    // it would confidently show the player picking things they never picked.
+    // So it is all-or-nothing, and the recap renders only when the history
+    // covers the whole game.
+    answerHistory: isUsableAnswerHistory(answerHistory, questions) ? answerHistory : [],
   };
+}
+
+/**
+ * Whether a restored answer history can be trusted to line up with its
+ * questions: no longer than the game, and every entry either a timeout or an
+ * id belonging to *that* question's own options.
+ *
+ * The last clause is the one that matters. An id that exists in the game but
+ * on a different question would render a plausible, wrong recap rather than
+ * an obviously broken one.
+ */
+function isUsableAnswerHistory(value: unknown, questions: TriviaQuestion[]): value is PickedAnswerId[] {
+  if (!Array.isArray(value) || value.length > questions.length) {
+    return false;
+  }
+  return value.every(
+    (picked, index) =>
+      picked === null ||
+      (typeof picked === 'string' &&
+        questions[index].all_answers.some((answer) => answer.id === picked)),
+  );
 }
 
 /**

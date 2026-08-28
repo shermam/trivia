@@ -14,6 +14,7 @@ import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import {
+  Answer,
   DEFAULT_TIME_LIMIT,
   LeaderboardEntry,
   NewQuestionReportDoc,
@@ -39,6 +40,17 @@ function initialsFor(name: string): string {
     .toUpperCase()
     .slice(0, 2);
   return initials || '?';
+}
+
+/** One question, as the recap shows it. */
+interface RecapRow {
+  number: number;
+  question: TriviaQuestion;
+  /** The option the player picked, or `null` if the clock ran out. */
+  picked: Answer | null;
+  correct: Answer | null;
+  timedOut: boolean;
+  wasRight: boolean;
 }
 
 /**
@@ -440,6 +452,65 @@ export class GameOverComponent implements OnInit {
     }
     return this.authService.isFullyAuthenticated() ? 'save' : 'verify';
   });
+
+  /**
+   * One row per question: what was asked, what the player picked, and what was
+   * right. Everything is derived from the picked answer's `id` — see
+   * `PickedAnswerId` for why nothing else is stored.
+   *
+   * **Empty unless the history covers the whole game**, which is the honest
+   * failure mode rather than a defensive one. A restored save written before
+   * this feature existed has no history, and a recap built from it would say
+   * "Review answers (0/10 correct)" underneath a score card reading 8/10 —
+   * confidently wrong, which is worse than absent. The template renders
+   * nothing at all in that case.
+   */
+  protected readonly recap = computed<RecapRow[]>(() => {
+    const questions = this.gameController.questions();
+    const history = this.gameController.answerHistory();
+    if (questions.length === 0 || history.length !== questions.length) {
+      return [];
+    }
+
+    const rows: RecapRow[] = [];
+    for (const [index, question] of questions.entries()) {
+      const pickedId = history[index];
+      // `find` by id, never by text: two options can carry the same string,
+      // and letting text stand in for identity is what made a wrong answer
+      // score as correct once already (`CLAUDE.md` §4.4).
+      const picked =
+        pickedId === null ? null : (question.all_answers.find((a) => a.id === pickedId) ?? null);
+      // An id that names no option on its own question. Unreachable from a
+      // live game and rejected on restore (`isUsableAnswerHistory`), so this
+      // is the third guard on the same thing — and it drops the *whole* recap
+      // rather than the row, for the same reason the restore does: the rows
+      // are positional, and a recap missing one silently renumbers the rest.
+      if (pickedId !== null && picked === null) {
+        return [];
+      }
+      rows.push({
+        number: index + 1,
+        question,
+        picked,
+        correct: question.all_answers.find((a) => a.isCorrect) ?? null,
+        timedOut: pickedId === null,
+        wasRight: picked?.isCorrect === true,
+      });
+    }
+    return rows;
+  });
+
+  protected readonly recapCorrectCount = computed(
+    () => this.recap().filter((row) => row.wasRight).length,
+  );
+
+  private readonly isRecapOpenSignal = signal(false);
+  protected readonly isRecapOpen = this.isRecapOpenSignal.asReadonly();
+  protected readonly recapPanelId = 'game-recap-panel';
+
+  protected toggleRecap(): void {
+    this.isRecapOpenSignal.update((open) => !open);
+  }
 
   ngOnInit(): void {
     // Reaching here means hasCompletedGameGuard passed — a finished game is in

@@ -494,6 +494,183 @@
          which is this card, declared above the dialog. Opening a report form
          from inside the modal would then send focus to the copy behind the
          backdrop, outside the trap. One row per question, always. -->
+    <!--
+      **The recap, and it sits after the leaderboard rather than "directly
+      below the score summary" as `FEAT-001` asks.** That slot is now the
+      five-face fixed-height card from `FEAT-045`, and the two things the
+      player came here to do — save the score, see where it landed — are above.
+      A collapsible card that pushes both of them down to make room for
+      reflection has the ordering backwards. It sits with the report sections
+      instead, which are the other backwards-looking part of this screen.
+
+      **A third list, and the spec asked for a second.** `FEAT-001` §0 says to
+      extend the per-question list this screen already renders rather than add
+      one beside it — but both lists it means are `reportableQuestions()`,
+      filtered to `source === 'custom'`, because Open Trivia DB content isn't
+      ours to moderate (audit H4). The recap has to cover *every* question in
+      the round, so extending either would either shrink the recap to the
+      custom questions or grow the report affordance onto questions there is
+      nobody to report to. The premise the instruction rests on isn't true of
+      this screen.
+
+      A **disclosure**, not a popup: `aria-expanded` + `aria-controls` and
+      deliberately no `aria-haspopup`, because the panel expands in place
+      (`CLAUDE.md` §4.5 — announcing a popup that isn't one misleads exactly as
+      much as omitting one that is).
+
+      Rendered only when there is a whole game's worth of history. See
+      `recap()` — a partial history would render a confidently wrong summary
+      under a correct score, which is worse than no recap.
+
+      **The panel appears instantly rather than sliding open, which the spec
+      asks for.** Animating an `@if`'s height means the `0fr`→`1fr` grid trick,
+      and that needs the panel mounted at all times — which costs a hidden ten
+      row list on every game-over, an `inert`/`aria-hidden` pair to keep it out
+      of the tab order, and the `should('not.exist')` hazard §4.6 was written
+      about: a permanently mounted panel turns every existence assertion in
+      this area vacuous. The card is below the leaderboard and the page is
+      top-aligned (`items-start`), so opening it moves nothing above it —
+      measured 0px at 390x700, 390x1000, 1024x900 and 1440x2000. The chevron
+      still animates, motion-gated.
+    -->
+    @if (recap().length > 0) {
+      <div
+        class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden"
+        data-cy="recap-card"
+      >
+        <button
+          type="button"
+          (click)="toggleRecap()"
+          [attr.aria-expanded]="isRecapOpen()"
+          [attr.aria-controls]="recapPanelId"
+          data-cy="recap-toggle"
+          class="flex w-full items-center gap-2.5 px-6 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60"
+        >
+          <app-icon name="rotate-ccw" [size]="18" class="text-slate-400" />
+          <span class="flex-1 font-bold text-slate-900 dark:text-slate-50">
+            Review answers
+            <span class="font-normal text-slate-500 dark:text-slate-400">
+              ({{ recapCorrectCount() }}/{{ recap().length }} correct)
+            </span>
+          </span>
+          <app-icon
+            name="chevron-down"
+            [size]="16"
+            class="text-slate-400 motion-safe:transition-transform"
+            [class.rotate-180]="isRecapOpen()"
+          />
+        </button>
+
+        @if (isRecapOpen()) {
+          <!--
+            No explicit `role` on the panel, unlike game-over's report form
+            (`role="group"`): an `<ol>` already has one — `list` — and
+            overriding it with `group` would trade "list, 10 items" for
+            nothing. `aria-label` names it; that is what §4.5's "panel has a
+            role" is actually asking for.
+          -->
+          <ol
+            [id]="recapPanelId"
+            aria-label="Your answers"
+            data-cy="recap-panel"
+            class="border-t border-slate-900/6 dark:border-white/10"
+          >
+            <!-- Tracked by question id, never by index or text (`CLAUDE.md` §4.4). -->
+            @for (row of recap(); track row.question.id) {
+              <li
+                class="px-6 py-4 border-b border-slate-900/6 dark:border-white/10 last:border-b-0"
+                data-cy="recap-row"
+              >
+                <div class="flex items-start gap-3">
+                  <span
+                    class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                    [ngClass]="
+                      row.wasRight
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300'
+                        : 'bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-300'
+                    "
+                  >
+                    {{ row.number }}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <p class="font-medium text-slate-900 dark:text-slate-50">
+                      {{ row.question.question }}
+                    </p>
+                    <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                      <span
+                        class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-600 dark:text-slate-300"
+                        >{{ row.question.category }}</span
+                      >
+                      <span
+                        class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
+                        >{{ row.question.difficulty }}</span
+                      >
+                      @if (row.timedOut) {
+                        <span
+                          class="flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 font-semibold text-amber-800 dark:text-amber-300"
+                          data-cy="recap-timed-out"
+                        >
+                          <app-icon name="clock" [size]="12" />
+                          Time expired
+                        </span>
+                      }
+                    </p>
+
+                    <!--
+                      What you picked, then what was right — and the second line
+                      only when they differ. Repeating the same answer twice
+                      under two labels reads as a mistake in the app rather than
+                      as reassurance.
+                    -->
+                    <p class="mt-2 flex items-start gap-1.5 text-sm" data-cy="recap-picked">
+                      @if (row.timedOut) {
+                        <app-icon
+                          name="clock"
+                          [size]="15"
+                          class="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400"
+                        />
+                        <span class="text-slate-500 dark:text-slate-400">No answer</span>
+                      } @else if (row.wasRight) {
+                        <app-icon
+                          name="circle-check-big"
+                          [size]="15"
+                          class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                        />
+                        <span class="text-emerald-800 dark:text-emerald-300">{{
+                          row.picked?.text
+                        }}</span>
+                      } @else {
+                        <app-icon
+                          name="x"
+                          [size]="15"
+                          class="mt-0.5 shrink-0 text-red-600 dark:text-red-400"
+                        />
+                        <span class="text-red-800 dark:text-red-300">{{ row.picked?.text }}</span>
+                      }
+                    </p>
+
+                    @if (!row.wasRight && row.correct) {
+                      <p class="mt-1 flex items-start gap-1.5 text-sm" data-cy="recap-correct">
+                        <app-icon
+                          name="circle-check-big"
+                          [size]="15"
+                          class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                        />
+                        <span class="text-emerald-800 dark:text-emerald-300">
+                          <span class="sr-only">Correct answer:</span>
+                          {{ row.correct.text }}
+                        </span>
+                      </p>
+                    }
+                  </div>
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      </div>
+    }
+
     @if (flaggedQuestions().length > 0 && !isReportDialogOpen()) {
       <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
         <div
