@@ -85,6 +85,8 @@ export interface AccountState {
   customerExists: boolean;
   questionExists: boolean;
   questionCreatedBy: string | null;
+  /** `users/{uid}` in full, or null when the account has never finished a game. */
+  gameplayStats: Record<string, unknown> | null;
 }
 
 /** Grants (or explicitly withholds) the moderation role for one account. */

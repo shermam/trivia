@@ -165,6 +165,43 @@ describe('legal pages', () => {
     expect(text).toContain('irrevocable');
   });
 
+  /**
+   * The gameplay-totals disclosure. `users/{uid}` is the first thing the app
+   * stores that is *about the player rather than about a game*, so it is the
+   * disclosure most likely to be falsified by a later feature — one field
+   * shown to another player, one number on a leaderboard, and two of these
+   * sentences stop being true with nothing going red.
+   *
+   * Pinned rather than trusted, because `CLAUDE.md` §4.0 exists precisely for
+   * the class of document whose correctness decays without anyone touching it.
+   */
+  it('discloses the lifetime totals, and that they are private and not kept for guests', async () => {
+    const el = await render(PrivacyPolicyComponent);
+    const text = el.textContent ?? '';
+
+    expect(text).toContain('gameplay totals');
+    // The two claims a later feature is most likely to break.
+    expect(text).toContain('Only you can read it');
+    expect(text).toContain('nothing is kept for anonymous play');
+    // ...and the two promises the account lifecycle has to keep honouring.
+    expect(text).toContain('deletes your gameplay totals');
+    expect(text).toContain('your gameplay totals, every question you have contributed');
+  });
+
+  /**
+   * The absolute "no profiling" claim appeared **three** times, and keeping
+   * running totals of a player's own games engages every one of them. Two were
+   * rewritten when `users/{uid}` shipped; this pins that none has quietly
+   * reverted to the unqualified form, which would be the easy edit to make
+   * while tidying copy.
+   */
+  it('makes no unqualified claim that no profile is built', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).not.toContain('no profile of you is built');
+    expect(text).not.toContain('there is no advertising, profiling or tracking here');
+  });
+
   it('states the minimum age on both pages consistently', async () => {
     const privacy = await render(PrivacyPolicyComponent);
     const terms = await render(TermsOfServiceComponent);

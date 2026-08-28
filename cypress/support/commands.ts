@@ -71,6 +71,8 @@ declare global {
       seedProProduct(): Chainable<null>;
       /** Reads back Auth/leaderboard/customer/question state after an account deletion. */
       inspectAccountState(query: AccountStateQuery): Chainable<AccountState>;
+      countGameplayStatsDocuments(): Chainable<number>;
+      waitForGameplayStats(uid: string): Chainable<Record<string, unknown>>;
       /** Reads every `question_reports` doc via the Admin SDK — clients are forbidden from reading them. */
       getQuestionReports(): Chainable<QuestionReportRecord[]>;
     }
@@ -217,6 +219,48 @@ Cypress.Commands.add('seedProProduct', () => {
 
 Cypress.Commands.add('inspectAccountState', (query: AccountStateQuery) => {
   cy.task('inspectAccountState', query);
+});
+
+Cypress.Commands.add('countGameplayStatsDocuments', () => {
+  cy.task('countGameplayStatsDocuments');
+});
+
+/**
+ * Waits for `users/{uid}` to appear, then yields it.
+ *
+ * **`recordGameResult` is fire-and-forget by design** — `/game-over` renders
+ * from local state and must not wait on a cold start — so there is nothing in
+ * the DOM that changes when the write lands, and no command to hang an
+ * assertion off. The write also races a cold path on its first use in a spec:
+ * a dynamic `firebase/functions` import plus the runtime-config fetch behind
+ * `getApp()`, and then the callable itself.
+ *
+ * **`cy.task()` is not a retrying query, so `.should()` after it does not
+ * re-run it** — it asserts once against whatever the single read returned.
+ * That is a race by construction, and it is the same shape as the leaderboard
+ * skeleton flake (`ci-cd.md` §4.3): the fix is to remove the transience, not
+ * to retry an assertion that cannot retry. Hence explicit recursion, which is
+ * Cypress's own idiom for retrying a non-query command.
+ */
+Cypress.Commands.add('waitForGameplayStats', (uid: string) => {
+  const attempt = (remaining: number): Cypress.Chainable<Record<string, unknown>> =>
+    cy.inspectAccountState({ uid }).then((state) => {
+      if (state.gameplayStats) {
+        return cy.wrap(state.gameplayStats, { log: false });
+      }
+      if (remaining === 0) {
+        throw new Error(
+          `users/${uid} never appeared. recordGameResult is fire-and-forget, so either it was ` +
+            'never called, it was refused (anonymous or unsupported provider), or it failed.',
+        );
+      }
+      cy.wait(250, { log: false });
+      return attempt(remaining - 1);
+    });
+
+  // 20 x 250ms = 5s, comfortably past the cold-start path and well inside the
+  // callable's own 10s timeout.
+  return attempt(20);
 });
 
 Cypress.Commands.add('getQuestionReports', () => {

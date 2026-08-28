@@ -24,6 +24,15 @@ const DELETE_ACCOUNT_TIMEOUT_MS = 60_000;
 /** Read-only and cheaper than deletion, but still several Firestore round-trips. */
 const EXPORT_TIMEOUT_MS = 30_000;
 
+/**
+ * The stats call is fire-and-forget, so nothing is waiting for it — which
+ * makes a timeout *more* necessary rather than less. Without one an abandoned
+ * request holds a connection open indefinitely for a result nobody will read.
+ * Short, because this is a background write on a screen the player is already
+ * looking at: a game not banked is a lost total, not a broken screen.
+ */
+const RECORD_GAME_TIMEOUT_MS = 10_000;
+
 type FunctionsModule = typeof import('firebase/functions');
 
 /**
@@ -67,6 +76,21 @@ export class AccountService {
     functionsModule: FunctionsModule;
   }> | null = null;
 
+  /**
+   * The `firebase/functions` bootstrap, memoized — **and cleared on
+   * rejection**, which it was not.
+   *
+   * `CLAUDE.md` §4.4: never cache a rejected promise. Both halves of this can
+   * fail transiently — a dynamic chunk fetch and the runtime-config fetch
+   * behind `getApp()` — and without the `.catch` one failed chunk was replayed
+   * for the life of the tab, so a single network blip permanently disabled
+   * Export and Delete account. That is the third instance of this exact
+   * pattern in this repo (`SubscriptionService.getProPriceId` has the correct
+   * one; `AuthService.getAuth` was the second), which is why §4.4 names it.
+   *
+   * Nothing downstream is left stuck by the clear: every caller awaits this
+   * promise directly and surfaces its own error, so a retry genuinely retries.
+   */
   private getFunctions() {
     if (!this.functionsPromise) {
       this.functionsPromise = Promise.all([
@@ -82,6 +106,9 @@ export class AccountService {
           );
         }
         return { functions, functionsModule };
+      });
+      this.functionsPromise.catch(() => {
+        this.functionsPromise = null;
       });
     }
     return this.functionsPromise;
@@ -151,5 +178,51 @@ export class AccountService {
       throw new Error(accountErrorMessage(error, 'delete your account'), { cause: error });
     }
     await this.authService.signOut();
+  }
+
+  /**
+   * Banks one completed game into the caller's lifetime totals at
+   * `users/{uid}`.
+   *
+   * **Fire-and-forget, and never throws.** `/game-over` renders entirely from
+   * local state and must not wait on a cold start to show a score the player
+   * has already earned — so this resolves whatever happens, and a failure
+   * costs one game's worth of totals rather than a broken screen. These are
+   * gameplay statistics, not a ledger.
+   *
+   * The uid is never sent: the callable reads it from the verified token, so a
+   * caller can only ever record against themselves. The numbers *are* sent,
+   * and are bounded server-side rather than attested — see
+   * `functions/src/game-stats.ts` and audit decision A1.
+   *
+   * Lives here rather than on `FirebaseService` because this is the file that
+   * already owns the `firebase/functions` bootstrap, and duplicating that
+   * bootstrap would have duplicated the cached-rejection bug fixed above.
+   */
+  async recordGameResult(result: {
+    gameId: string;
+    totalQuestions: number;
+    correctAnswers: number;
+    bestStreak: number;
+  }): Promise<void> {
+    try {
+      // **Before the call, not after.** The Functions SDK attaches whatever ID
+      // token exists at invocation time, and `auth.currentUser` is `null` for
+      // a moment after bootstrap even for an already-signed-in user — so a
+      // callable fired inside that window arrives unauthenticated and is
+      // refused with nothing to show for it. `/game-over` runs this from
+      // `ngOnInit`, and reloading `/game-over` is a supported flow, so without
+      // this a returning player's game is silently dropped from their totals.
+      await this.authService.whenAuthStateReady();
+      const { functions, functionsModule } = await this.getFunctions();
+      const callable = functionsModule.httpsCallable(functions, 'recordGameResult', {
+        timeout: RECORD_GAME_TIMEOUT_MS,
+      });
+      await callable(result);
+    } catch {
+      // Deliberately silent. There is no user-facing action to offer — the
+      // player cannot re-bank a game — and a toast about a background write
+      // would be noise on the screen where they are reading their score.
+    }
   }
 }

@@ -232,6 +232,34 @@ export class AuthService {
    * runtime-config fetch inside `getAuth()`, must be swallowed internally
    * rather than left to reject as an unhandled promise.
    */
+  /**
+   * Resolves once Firebase Auth has finished restoring a persisted session.
+   *
+   * **The token is not attached until this settles**, which is what makes it
+   * load-bearing rather than tidy: `auth.currentUser` reads `null` for a
+   * moment after `getAuth()` even for a returning, already-signed-in user
+   * (persistence restores asynchronously — see `ensureSignedIn` below, which
+   * documents the same trap for a different symptom). A callable invoked
+   * inside that window is sent with **no** ID token, so it arrives
+   * unauthenticated and is refused, silently.
+   *
+   * That is not hypothetical: it is how the first `recordGameResult` call
+   * behaved on a freshly loaded `/game-over` — and reloading `/game-over` is a
+   * supported flow, so the effect was that a real player's game could be
+   * silently dropped from their totals.
+   *
+   * Swallows its own failures for the same reason `ensureSignedIn` does: a
+   * caller that cannot reach auth should degrade, not reject.
+   */
+  async whenAuthStateReady(): Promise<void> {
+    try {
+      const { auth } = await this.getAuth();
+      await auth.authStateReady();
+    } catch {
+      // Offline or unreachable. The caller decides what to do without auth.
+    }
+  }
+
   async ensureSignedIn(): Promise<void> {
     try {
       const { auth, authModule } = await this.getAuth();
