@@ -215,3 +215,57 @@
     cursor: not-allowed;
   }
 }
+
+/* The pre-boot recovery notice in index.html's <app-root>.
+
+   Hidden for the first ten seconds of every page load, which is why it costs
+   the normal case nothing: the app paints at roughly two seconds, Angular
+   replaces <app-root>'s contents when it does, and this markup is gone before
+   the reveal ever fires. What is left is the case where nothing arrives at all.
+
+   The delay has to come from CSS because the failure it addresses is the one
+   where no script runs — see the comment in index.html. A zero-length
+   animation with a delay and `forwards` is the only way to schedule a style
+   change without JavaScript.
+
+   Not gated on `prefers-reduced-motion`: nothing moves, scales or loops. The
+   animation is a scheduling mechanism for a visibility flip, which is the
+   distinction `scripts/verify-motion.mjs` draws in its header comment. */
+.boot-fallback {
+  visibility: hidden;
+  animation: boot-fallback-reveal 0s linear 10s forwards;
+  max-width: 32rem;
+  margin: 6rem auto 0;
+  padding: 0 1.5rem;
+  text-align: center;
+  color: var(--color-slate-600);
+}
+
+@keyframes boot-fallback-reveal {
+  to {
+    visibility: visible;
+  }
+}
+
+.boot-fallback__title {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--color-slate-900);
+}
+
+.boot-fallback__action {
+  color: var(--color-emerald-600);
+  text-decoration: underline;
+}
+
+html.dark .boot-fallback {
+  color: var(--color-slate-400);
+}
+
+html.dark .boot-fallback__title {
+  color: var(--color-slate-50);
+}
+
+html.dark .boot-fallback__action {
+  color: var(--color-emerald-400);
+}

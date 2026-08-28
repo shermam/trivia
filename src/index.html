@@ -43,7 +43,31 @@
     <script src="theme-init.js"></script>
   </head>
   <body>
-    <app-root></app-root>
+    <app-root>
+      <!-- The only thing on the page when the bundle does not arrive.
+
+           A stale service worker serves this cached index.html, then the
+           hashed entry script it names is neither in the worker's cache nor on
+           the origin any more, so nothing boots and the body is blank. There is
+           no JavaScript available to detect that — the script that would have
+           detected it is the one that failed — so the recovery notice is markup
+           that is already here, revealed by a CSS delay rather than by code.
+
+           Reloading is a real fix and not a platitude: the worker's own
+           on-navigation update check installs the current version during the
+           failed load, so the next navigation serves an index.html whose
+           scripts exist. Measured at one blank load, recovered on the next.
+
+           Angular replaces the contents of <app-root> on bootstrap, so on every
+           normal load this is gone long before the reveal delay elapses. -->
+      <div class="boot-fallback">
+        <p class="boot-fallback__title">This is taking longer than it should.</p>
+        <p>
+          Trivimind could not finish loading.
+          <a href="." class="boot-fallback__action">Reload the page</a> — that usually fixes it.
+        </p>
+      </div>
+    </app-root>
     <noscript>Please enable JavaScript to continue using this application.</noscript>
   </body>
 </html>
