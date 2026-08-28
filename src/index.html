@@ -60,11 +60,16 @@
 
            Angular replaces the contents of <app-root> on bootstrap, so on every
            normal load this is gone long before the reveal delay elapses. -->
-      <div class="boot-fallback">
+      <div class="boot-fallback" data-cy="boot-fallback">
         <p class="boot-fallback__title">This is taking longer than it should.</p>
         <p>
           Trivimind could not finish loading.
-          <a href="." class="boot-fallback__action">Reload the page</a> — that usually fixes it.
+          <!-- Absolute, not "." — with <base href="/"> both resolve to the app
+               root anyway, and spelling it out is one less thing to work out. -->
+          <a href="/" class="boot-fallback__action" data-cy="boot-fallback-reload"
+            >Reload the page</a
+          >
+          — that usually fixes it.
         </p>
       </div>
     </app-root>
