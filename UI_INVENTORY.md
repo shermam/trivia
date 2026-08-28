@@ -170,7 +170,14 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 | **Answer selected — correct**       | frozen                                    | Selected/correct button (and its letter badge) turns **green**; all other buttons disabled                                                                                                         |
 | **Answer selected — incorrect**     | frozen                                    | Chosen button (and its letter badge) turns **red**; the actual correct answer turns **green**; all remaining (non-chosen, non-correct) buttons dim to 60% opacity, grey text; all buttons disabled |
 | **Post-answer delay (2s)**          | —                                         | Result banner + colors stay visible for 2 seconds before auto-advancing (the banner's box was already occupying its space before the answer, so nothing moves)                                     |
-| **Advance**                         | —                                         | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over`                                                              |
+
+- **Lifelines toolbar** (`FEAT-002`) — a labelled button group (`role="group"`, "Lifelines") between the question and the answer options, present on every question. Each is single-use per round; a spent one greys out and stays in place so the row cannot change size.
+  - **50/50** (percent icon) — removes two wrong options on a four-option question, one on a three-option. Removed options stay in the grid, muted, struck through and unclickable. Disabled rather than hidden on a true/false question, where removing anything would hand over the answer.
+  - **+15s** (clock-plus icon) — adds 15 seconds to this question's countdown. **Not rendered at all on an unlimited game.**
+  - **Skip** (skip-forward icon) — straight to the next question, no result banner and no pause. The question still counts toward the total, and the label says so.
+  - An `sr-only` `role="status"` region announces each use.
+
+| **Advance** | — | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over` |
 
 Score only increments on a correct, non-timed-out answer.
 
@@ -197,7 +204,7 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 - **Save-score area** — content depends on auth state (see States below)
 - **Section heading**: "Top 10 Leaderboard" (with a medal icon)
 - **Leaderboard list** — content depends on load state (see States below); each row: rank (🥇/🥈/🥉 for top 3, "#N" otherwise), gradient avatar circle with the player's initials, name, "{{ score }} / {{ totalQuestions }} ({{ percentage }}%)". The current player's own row (matched by `uid`) is highlighted (indigo tint + left border) and tagged with a "YOU" badge, if present in the fetched top 10.
-- **"Review answers" card** (collapsible, collapsed by default) — header button reading "Review answers (X/N correct)" with a rotate icon and a chevron that flips on open. Expanded, it lists one row per question of the round: a numbered pill (emerald if the answer was right, red if not), the question text, category and difficulty badges, the player's pick with a check/cross/clock icon, and — only when the pick was wrong or the clock ran out — the correct answer on a second line with a check icon. A timed-out question also carries an amber "Time expired" badge. The whole card is absent unless the recorded answers cover the whole round.
+- **"Review answers" card** (collapsible, collapsed by default) — header button reading "Review answers (X/N correct)" with a rotate icon and a chevron that flips on open. Expanded, it lists one row per question of the round: a numbered pill (emerald if the answer was right, red if not), the question text, category and difficulty badges, the player's pick with a check/cross/clock icon, and — only when the pick was wrong or the clock ran out — the correct answer on a second line with a check icon. A timed-out question also carries an amber "Time expired" badge, and a skipped one (`FEAT-002`) a grey "Skipped" badge with "You skipped this" in place of a pick. The whole card is absent unless the recorded answers cover the whole round.
 - **Button**: "Play Again" (full width, dark slate, reset icon) — resets all in-memory game state, navigates to `/`
 
 ### States — Save-score area
@@ -213,14 +220,15 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 
 ### States — Review answers card
 
-| State            | Content                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **No recap**     | The card does not render at all — no answers recorded for this round (e.g. a game restored from a save written before the feature existed) |
-| **Collapsed**    | Header button only; `aria-expanded="false"`, panel not in the DOM                                                                          |
-| **Expanded**     | Header button (`aria-expanded="true"`) plus the `<ol>` of question rows                                                                    |
-| **Row: right**   | Emerald number pill, emerald pick line with a check icon, no second line                                                                   |
-| **Row: wrong**   | Red number pill, red pick line with a cross icon, emerald "correct answer" line below it                                                   |
-| **Row: expired** | Red number pill, amber "Time expired" badge among the meta badges, grey "No answer" line with a clock icon, emerald correct-answer line    |
+| State            | Content                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No recap**     | The card does not render at all — no answers recorded for this round (e.g. a game restored from a save written before the feature existed)      |
+| **Collapsed**    | Header button only; `aria-expanded="false"`, panel not in the DOM                                                                               |
+| **Expanded**     | Header button (`aria-expanded="true"`) plus the `<ol>` of question rows                                                                         |
+| **Row: right**   | Emerald number pill, emerald pick line with a check icon, no second line                                                                        |
+| **Row: wrong**   | Red number pill, red pick line with a cross icon, emerald "correct answer" line below it                                                        |
+| **Row: expired** | Red number pill, amber "Time expired" badge among the meta badges, grey "No answer" line with a clock icon, emerald correct-answer line         |
+| **Row: skipped** | Red number pill, grey "Skipped" badge with a skip-forward icon among the meta badges, grey "You skipped this" line, emerald correct-answer line |
 
 ### States — Leaderboard list
 

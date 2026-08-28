@@ -1,9 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import {
+  ALL_LIFELINES_AVAILABLE,
   DEFAULT_TIME_LIMIT,
   Difficulty,
   GameConfig,
-  PickedAnswerId,
+  LIFELINE_IDS,
+  LifelineState,
+  PickedAnswer,
   QuestionSource,
   TriviaQuestion,
   isTimeLimitOption,
@@ -54,7 +57,23 @@ export interface PersistedGame {
    * treats as "no recap" rather than as "you got none right" — see
    * `GameOverComponent.recap`.
    */
-  answerHistory: PickedAnswerId[];
+  answerHistory: PickedAnswer[];
+  /**
+   * Which lifelines are still unspent (`FEAT-002`), and which options 50/50 has
+   * already removed from the question the player is looking at.
+   *
+   * Both additive, no `SCHEMA_VERSION` bump — the fourth time this call has
+   * been made, for the same reason each time: a mismatch discards the game
+   * rather than migrating it.
+   *
+   * They are two fields rather than one because they expire differently: the
+   * availability flags last the whole round, the eliminated ids last exactly
+   * one question. They still have to restore *together*, though — bringing back
+   * "50/50 spent" without the options it removed would take the lifeline and
+   * hand nothing back — which is why an unusable value for either resets both.
+   */
+  lifelines: LifelineState;
+  eliminatedAnswerIds: string[];
 }
 
 /** As written to the object store: the same record plus the keyPath field. */
@@ -149,6 +168,8 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     isComplete,
     flaggedQuestionIds,
     answerHistory,
+    lifelines,
+    eliminatedAnswerIds,
   } = parsed;
 
   if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) {
@@ -210,31 +231,96 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     // So it is all-or-nothing, and the recap renders only when the history
     // covers the whole game.
     answerHistory: isUsableAnswerHistory(answerHistory, questions) ? answerHistory : [],
+    // Both or neither, per the field comment: restoring a spent 50/50 without
+    // the options it removed is strictly worse than restoring a fresh set.
+    ...restoreLifelines(lifelines, eliminatedAnswerIds, questions[currentIndex]),
   };
 }
 
 /**
  * Whether a restored answer history can be trusted to line up with its
- * questions: no longer than the game, and every entry either a timeout or an
- * id belonging to *that* question's own options.
+ * questions: no longer than the game, and every entry a recognised outcome —
+ * with an `answered` id belonging to *that* question's own options.
  *
  * The last clause is the one that matters. An id that exists in the game but
  * on a different question would render a plausible, wrong recap rather than
  * an obviously broken one.
+ *
+ * It also rejects the **previous shape** (`string | null`), which is how a game
+ * in flight across the `FEAT-002` deploy loses its recap and keeps its score.
  */
 function isUsableAnswerHistory(
   value: unknown,
   questions: TriviaQuestion[],
-): value is PickedAnswerId[] {
+): value is PickedAnswer[] {
   if (!Array.isArray(value) || value.length > questions.length) {
     return false;
   }
+  return value.every((picked, index) => {
+    if (!isRecord(picked)) {
+      return false;
+    }
+    switch (picked['kind']) {
+      case 'timedOut':
+      case 'skipped':
+        return true;
+      case 'answered':
+        return questions[index].all_answers.some((answer) => answer.id === picked['id']);
+      default:
+        return false;
+    }
+  });
+}
+
+/**
+ * Lifeline availability, or `null` if the stored value is not a complete set of
+ * three booleans.
+ *
+ * All-or-nothing rather than per-key defaulting, and the direction of the
+ * default matters: a partial record filled in with `true` **refunds** whatever
+ * was missing, so a truncated or hand-edited save would be worth spending a
+ * lifeline to produce. Reset the whole set instead, which is the same answer a
+ * fresh game gives.
+ */
+function parseLifelines(value: unknown): LifelineState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (!LIFELINE_IDS.every((id) => typeof value[id] === 'boolean')) {
+    return null;
+  }
+  return Object.fromEntries(LIFELINE_IDS.map((id) => [id, value[id]])) as unknown as LifelineState;
+}
+
+/** Eliminated ids are only meaningful against the question on screen. */
+function isUsableEliminatedIds(
+  value: unknown,
+  question: TriviaQuestion | undefined,
+): value is string[] {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  if (value.length === 0) {
+    return true;
+  }
+  if (question === undefined) {
+    return false;
+  }
   return value.every(
-    (picked, index) =>
-      picked === null ||
-      (typeof picked === 'string' &&
-        questions[index].all_answers.some((answer) => answer.id === picked)),
+    (id) => typeof id === 'string' && question.all_answers.some((answer) => answer.id === id),
   );
+}
+
+function restoreLifelines(
+  lifelines: unknown,
+  eliminatedAnswerIds: unknown,
+  currentQuestion: TriviaQuestion | undefined,
+): Pick<PersistedGame, 'lifelines' | 'eliminatedAnswerIds'> {
+  const parsed = parseLifelines(lifelines);
+  if (parsed === null || !isUsableEliminatedIds(eliminatedAnswerIds, currentQuestion)) {
+    return { lifelines: ALL_LIFELINES_AVAILABLE, eliminatedAnswerIds: [] };
+  }
+  return { lifelines: parsed, eliminatedAnswerIds };
 }
 
 /**

@@ -1,7 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Answer, GameConfig, TimeLimitOption, TriviaQuestion } from '../../models/question.model';
+import {
+  ALL_LIFELINES_AVAILABLE,
+  Answer,
+  GameConfig,
+  LifelineState,
+  SKIPPED,
+  TimeLimitOption,
+  TriviaQuestion,
+} from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { QuizLoopComponent } from './quiz-loop.component';
@@ -30,10 +38,34 @@ function setup(
     playingOffline?: boolean;
     question?: TriviaQuestion;
     timeLimit?: TimeLimitOption;
+    lifelines?: LifelineState;
   } = {},
 ) {
   const registerAnswer = vi.fn();
   const advanceQuestion = vi.fn();
+  const registerSkippedQuestion = vi.fn();
+  // The real service's contract: spends the lifeline and reports whether there
+  // was one. Faking it as a flat `true` would let a test pass against a
+  // component that never checks.
+  const consumeLifeline = vi.fn((id: keyof LifelineState) => {
+    const state = gameController.lifelines();
+    if (!state[id]) {
+      return false;
+    }
+    gameController.lifelines.set({ ...state, [id]: false });
+    return true;
+  });
+  const useFiftyFifty = vi.fn(() => {
+    if (!consumeLifeline('fiftyFifty')) {
+      return false;
+    }
+    const question = gameController.currentQuestion();
+    const wrong = (question?.all_answers ?? []).filter((a) => !a.isCorrect);
+    gameController.eliminatedAnswerIds.set(
+      wrong.slice(0, Math.min(2, wrong.length - 1)).map((a) => a.id),
+    );
+    return true;
+  });
   const gameController = {
     config: signal<GameConfig | null>({
       amount: 1,
@@ -52,6 +84,11 @@ function setup(
     toggleQuestionFlag: vi.fn(),
     registerAnswer,
     advanceQuestion,
+    lifelines: signal<LifelineState>(options.lifelines ?? ALL_LIFELINES_AVAILABLE),
+    eliminatedAnswerIds: signal<readonly string[]>([]),
+    registerSkippedQuestion,
+    consumeLifeline,
+    useFiftyFifty,
   };
 
   TestBed.configureTestingModule({
@@ -70,7 +107,19 @@ function setup(
 
   const fixture = TestBed.createComponent(QuizLoopComponent);
   fixture.detectChanges();
-  return { fixture, registerAnswer, advanceQuestion, gameController };
+  return {
+    fixture,
+    registerAnswer,
+    advanceQuestion,
+    gameController,
+    registerSkippedQuestion,
+    consumeLifeline,
+    host: fixture.nativeElement as HTMLElement,
+    query: (selector: string) =>
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(selector),
+    queryAll: (selector: string) =>
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>(selector)),
+  };
 }
 
 // The countdown reads the wall clock, so tests fake only the timer functions and
@@ -554,5 +603,276 @@ describe('QuizLoopComponent — the adjustable timer (G7)', () => {
     now = START + 15_500;
     vi.advanceTimersByTime(250);
     expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
+  });
+});
+
+/**
+ * `FEAT-002`, component half. The service owns which lifelines are left; this
+ * owns the timer, so Extra Time's arithmetic is only testable here — and so is
+ * every rule about what the toolbar renders.
+ */
+describe('QuizLoopComponent — lifelines (FEAT-002)', () => {
+  const START = 1_000_000_000;
+
+  function fourAnswers(): TriviaQuestion {
+    return makeQuestion({
+      all_answers: [
+        { id: 'q1:correct', text: 'Paris', isCorrect: true },
+        { id: 'q1:incorrect-0', text: 'London', isCorrect: false },
+        { id: 'q1:incorrect-1', text: 'Berlin', isCorrect: false },
+        { id: 'q1:incorrect-2', text: 'Madrid', isCorrect: false },
+      ],
+    });
+  }
+
+  it('offers all three on a timed game', () => {
+    const { query } = setup({ question: fourAnswers() });
+
+    expect(query('[data-cy="lifeline-fiftyFifty"]')).not.toBeNull();
+    expect(query('[data-cy="lifeline-extraTime"]')).not.toBeNull();
+    expect(query('[data-cy="lifeline-skip"]')).not.toBeNull();
+  });
+
+  /*
+   * Hidden, not disabled — there is no countdown to extend, and the spec is
+   * right that a control which visibly does nothing is worse than one that is
+   * not there. Safe from the §4.4 sizing rule precisely because the limit is
+   * fixed before question 1: the toolbar is two buttons for the whole game
+   * rather than changing size during it.
+   */
+  it('renders no Extra Time button at all on an unlimited game', () => {
+    const { query } = setup({ timeLimit: 'unlimited', question: fourAnswers() });
+
+    expect(query('[data-cy="lifeline-extraTime"]')).toBeNull();
+    expect(query('[data-cy="lifeline-fiftyFifty"]')).not.toBeNull();
+    expect(query('[data-cy="lifeline-skip"]')).not.toBeNull();
+  });
+
+  /*
+   * ...and 50/50 gets the opposite treatment on a question it cannot help
+   * with, for the mirror-image reason: whether a question is true/false varies
+   * question to question, so hiding it would resize the toolbar mid-round.
+   */
+  it('disables rather than hides 50/50 on a true/false question', () => {
+    const { query } = setup(); // makeQuestion() is two options
+
+    const button = query('[data-cy="lifeline-fiftyFifty"]') as HTMLButtonElement;
+    expect(button).not.toBeNull();
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-label')).toContain('unavailable');
+  });
+
+  it('greys out the options 50/50 removed, and makes them unclickable', () => {
+    const { query, queryAll, fixture, registerAnswer, gameController } = setup({
+      question: fourAnswers(),
+    });
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+    fixture.detectChanges();
+
+    const eliminated = queryAll('[data-cy="answer-option"][data-eliminated]');
+    expect(eliminated).toHaveLength(2);
+    expect(eliminated.every((el) => (el as HTMLButtonElement).disabled)).toBe(true);
+
+    // Clicking one anyway must not score it. Driven through `selectAnswer`
+    // rather than `.click()`: the button is `disabled`, so a DOM click never
+    // reaches the handler and the assertion passes with the guard removed —
+    // which is exactly what mutation testing found. The guard is there for the
+    // programmatic path, so that is the path the test takes.
+    eliminated[0].click();
+    expect(registerAnswer).not.toHaveBeenCalled();
+
+    const component = fixture.componentInstance as unknown as {
+      selectAnswer: (answer: Answer) => void;
+    };
+    const removedId = gameController.eliminatedAnswerIds()[0];
+    const removed = gameController.currentQuestion()?.all_answers.find((a) => a.id === removedId);
+    expect(removed).toBeDefined();
+    component.selectAnswer(removed as Answer);
+    expect(registerAnswer).not.toHaveBeenCalled();
+  });
+
+  // The options keep their cells. Collapsing a four-option grid to two would
+  // move the surviving answers under the player's cursor mid-read (§4.4).
+  it('keeps every option mounted after 50/50', () => {
+    const { queryAll, query, fixture } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+    fixture.detectChanges();
+
+    expect(queryAll('[data-cy="answer-option"]')).toHaveLength(4);
+  });
+
+  it('spends a lifeline once — the button is disabled afterwards', () => {
+    const { query, fixture } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+    fixture.detectChanges();
+
+    expect((query('[data-cy="lifeline-fiftyFifty"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(query('[data-cy="lifeline-fiftyFifty"]')?.getAttribute('aria-label')).toContain(
+      'already used',
+    );
+  });
+
+  it('keeps spent lifelines in the DOM, so the toolbar cannot change size', () => {
+    const { queryAll, query, fixture } = setup({ question: fourAnswers() });
+    // Scoped to the toolbar, not `[data-cy^="lifeline-"]` — that prefix also
+    // matches the `lifeline-status` live region, and a `<p>` has no `disabled`
+    // property, so the sibling assertion below silently passed on `undefined`
+    // until it didn't. The §4.6 selector trap, in a new costume.
+    const before = queryAll('[data-cy="lifelines"] button').length;
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+    fixture.detectChanges();
+
+    expect(queryAll('[data-cy="lifelines"] button')).toHaveLength(before);
+  });
+
+  it('moves the deadline forward by 15 seconds rather than adding ticks', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { query, fixture, registerAnswer } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-extraTime"]')?.click();
+    fixture.detectChanges();
+
+    // Past the original 15s deadline, inside the extended 30s one.
+    now = START + 20_000;
+    vi.advanceTimersByTime(250);
+    expect(registerAnswer).not.toHaveBeenCalled();
+
+    now = START + 30_500;
+    vi.advanceTimersByTime(250);
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it('repaints the countdown immediately, not on the next tick', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { query, fixture, host } = setup({ question: fourAnswers() });
+
+    now = START + 5_000; // 10s left
+    vi.advanceTimersByTime(250);
+    fixture.detectChanges();
+
+    query('[data-cy="lifeline-extraTime"]')?.click();
+    fixture.detectChanges();
+
+    expect(host.querySelector('[data-cy="question-timer"]')?.textContent).toContain('25');
+  });
+
+  /*
+   * Driven through the component method rather than a click, deliberately.
+   * The button is not rendered on an unlimited game, so a click-based test
+   * asserts only that nothing happened when nothing was pressed — it passed
+   * with the `isTimed()` guard deleted, which mutation testing showed. The
+   * guard exists for the programmatic path, so the test has to take it.
+   */
+  it('does not spend Extra Time on an unlimited game, where there is nothing to extend', () => {
+    const { fixture, consumeLifeline } = setup({
+      timeLimit: 'unlimited',
+      question: fourAnswers(),
+    });
+    const component = fixture.componentInstance as unknown as { useExtraTime: () => void };
+
+    component.useExtraTime();
+
+    expect(consumeLifeline).not.toHaveBeenCalledWith('extraTime');
+  });
+
+  it('skips straight to the next question, with no result delay', () => {
+    const { query, registerSkippedQuestion, advanceQuestion, registerAnswer } = setup({
+      question: fourAnswers(),
+    });
+
+    query('[data-cy="lifeline-skip"]')?.click();
+
+    expect(registerSkippedQuestion).toHaveBeenCalledOnce();
+    // Immediately, without waiting out ANSWER_DELAY_MS — the point of Skip.
+    expect(advanceQuestion).toHaveBeenCalledOnce();
+    // And it is not an answer: nothing is scored and no banner is shown.
+    expect(registerAnswer).not.toHaveBeenCalled();
+  });
+
+  /*
+   * The skipped question's countdown must not carry over — the next question
+   * starts on a full clock, not on whatever was left.
+   *
+   * Deliberately **not** "no answer is registered after the deadline": the next
+   * question legitimately gets its own timer the moment we advance, so jumping
+   * past the old deadline expires the *new* one and the test would fail against
+   * correct code. That is what the first draft of this asserted.
+   */
+  it('restarts the countdown from full when a question is skipped', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { query, fixture, host, registerAnswer } = setup({ question: fourAnswers() });
+
+    now = START + 10_000; // 5s left
+    vi.advanceTimersByTime(250);
+    fixture.detectChanges();
+    expect(host.querySelector('[data-cy="question-timer"]')?.textContent).toContain('5');
+
+    query('[data-cy="lifeline-skip"]')?.click();
+    fixture.detectChanges();
+
+    // A fresh 15s, and the skip itself scored nothing on the way past.
+    expect(host.querySelector('[data-cy="question-timer"]')?.textContent).toContain('15');
+    expect(registerAnswer).not.toHaveBeenCalled();
+    // **And exactly one interval is running.** Without `stopTimer()` the old
+    // one is never cleared — `startTimer()` just overwrites the handle — so a
+    // skip leaks an interval per use and `clearTimers()` on destroy only ever
+    // clears the last. Invisible to every assertion above, which is why this
+    // counts them (`CLAUDE.md` §4.4: every timer has a teardown).
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('locks every lifeline once the question is answered', () => {
+    const { queryAll, fixture, query } = setup({ question: fourAnswers() });
+
+    query('[data-cy="answer-option"]')?.click();
+    fixture.detectChanges();
+
+    const buttons = queryAll('[data-cy="lifelines"] button') as HTMLButtonElement[];
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.every((b) => b.disabled)).toBe(true);
+  });
+
+  it('announces a spent lifeline, which is otherwise a silent visual change', () => {
+    const { query, fixture } = setup({ question: fourAnswers() });
+    expect(query('[data-cy="lifeline-status"]')?.textContent?.trim()).toBe('');
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+    fixture.detectChanges();
+
+    expect(query('[data-cy="lifeline-status"]')?.textContent).toContain('Fifty-fifty used');
+  });
+
+  it('labels the toolbar as a group, so its buttons are not three loose controls', () => {
+    const { query } = setup({ question: fourAnswers() });
+
+    expect(query('[data-cy="lifelines"]')?.getAttribute('role')).toBe('group');
+    expect(query('[data-cy="lifelines"]')?.getAttribute('aria-label')).toBe('Lifelines');
+  });
+
+  // The label has to say so: a player choosing between Skip and a guess is
+  // making a scoring decision, and "no penalty" would imply the opposite.
+  it('says in the Skip label that the question still counts', () => {
+    const { query } = setup({ question: fourAnswers() });
+
+    expect(query('[data-cy="lifeline-skip"]')?.getAttribute('aria-label')).toContain(
+      'still counts',
+    );
+  });
+
+  it('records the skip as SKIPPED, not as a timeout', () => {
+    const { query, gameController } = setup({ question: fourAnswers() });
+    const history: unknown[] = [];
+    gameController.registerSkippedQuestion.mockImplementation(() => history.push(SKIPPED));
+
+    query('[data-cy="lifeline-skip"]')?.click();
+
+    expect(history).toEqual([SKIPPED]);
   });
 });

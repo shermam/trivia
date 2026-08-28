@@ -21,6 +21,9 @@ export type IconName =
   | 'moon'
   | 'wifi-off'
   | 'clock'
+  | 'clock-plus'
+  | 'percent'
+  | 'skip-forward'
   | 'flag'
   | 'flag-filled'
   | 'menu';
@@ -131,6 +134,23 @@ export type IconName =
         @case ('clock') {
           <circle cx="12" cy="12" r="10" />
           <path d="M12 6v6l4 2" />
+        }
+        <!-- Extra Time: a clock missing its lower-right quadrant, with a plus
+             sitting in the gap — so the two glyphs never overlap at 18px. -->
+        @case ('clock-plus') {
+          <path d="M21.17 11a9 9 0 1 0-8.17 10" />
+          <path d="M12 7v5l2.5 1.5" />
+          <path d="M16 19h6" />
+          <path d="M19 16v6" />
+        }
+        @case ('percent') {
+          <line x1="19" y1="5" x2="5" y2="19" />
+          <circle cx="6.5" cy="6.5" r="2.5" />
+          <circle cx="17.5" cy="17.5" r="2.5" />
+        }
+        @case ('skip-forward') {
+          <path d="M5 4l10 8-10 8z" />
+          <line x1="19" y1="5" x2="19" y2="19" />
         }
         @case ('arrow-left') {
           <path d="m12 19-7-7 7-7" />

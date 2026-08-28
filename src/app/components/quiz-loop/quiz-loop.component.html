@@ -171,13 +171,101 @@
           </p>
         }
 
+        <!--
+          **Lifelines** (`FEAT-002`). Below the question and above the options,
+          which is where the spec asks for them and also where they are read
+          after the question rather than instead of it.
+
+          Two rules from `CLAUDE.md` §4.4 shape what is rendered:
+
+          - **Spent lifelines are disabled, never removed.** A three-button row
+            that becomes a two-button row moves the answer options up, mid-round,
+            while the clock runs.
+          - **Extra Time is absent for the whole game on an unlimited run**, not
+            disabled — there is no countdown to extend, and the spec is right
+            that a control which visibly does nothing is worse than one that
+            isn't there. That is safe precisely because it cannot change during
+            the game: the limit is fixed before question 1. 50/50 gets the
+            opposite treatment for the mirror-image reason — whether a question
+            is true/false varies question to question, so it is disabled.
+
+          `aria-disabled` is not used in place of `disabled`: there is no reason
+          to keep a spent lifeline focusable, and `disabled` is what actually
+          stops the click.
+        -->
+        <div
+          class="mb-5 flex items-stretch gap-2"
+          role="group"
+          aria-label="Lifelines"
+          data-cy="lifelines"
+        >
+          <button
+            type="button"
+            data-cy="lifeline-fiftyFifty"
+            (click)="useFiftyFifty()"
+            [disabled]="!canUseLifeline('fiftyFifty')"
+            [attr.aria-label]="
+              lifelines().fiftyFifty
+                ? canUseFiftyFifty()
+                  ? 'Fifty-fifty: remove two wrong answers. One use per game.'
+                  : 'Fifty-fifty is unavailable on a true or false question.'
+                : 'Fifty-fifty already used.'
+            "
+            [ngClass]="lifelineClass(lifelines().fiftyFifty && canUseFiftyFifty())"
+          >
+            <app-icon name="percent" [size]="16" />
+            <span>50/50</span>
+          </button>
+
+          @if (showsExtraTime()) {
+            <button
+              type="button"
+              data-cy="lifeline-extraTime"
+              (click)="useExtraTime()"
+              [disabled]="!canUseLifeline('extraTime')"
+              [attr.aria-label]="
+                lifelines().extraTime
+                  ? 'Extra time: add 15 seconds to this question. One use per game.'
+                  : 'Extra time already used.'
+              "
+              [ngClass]="lifelineClass(lifelines().extraTime)"
+            >
+              <app-icon name="clock-plus" [size]="16" />
+              <span>+15s</span>
+            </button>
+          }
+
+          <button
+            type="button"
+            data-cy="lifeline-skip"
+            (click)="useSkip()"
+            [disabled]="!canUseLifeline('skip')"
+            [attr.aria-label]="
+              lifelines().skip
+                ? 'Skip: move to the next question. It still counts toward your total. One use per game.'
+                : 'Skip already used.'
+            "
+            [ngClass]="lifelineClass(lifelines().skip)"
+          >
+            <app-icon name="skip-forward" [size]="16" />
+            <span>Skip</span>
+          </button>
+        </div>
+
+        <!-- Spending a lifeline is otherwise a silent visual change: options
+             grey out, a number jumps, the question changes. (G3) -->
+        <p role="status" aria-live="polite" data-cy="lifeline-status" class="sr-only">
+          {{ lifelineAnnouncement() }}
+        </p>
+
         <div class="grid gap-2.5 sm:grid-cols-2">
           @for (answer of question.all_answers; track answer.id; let i = $index) {
             <button
               type="button"
               data-cy="answer-option"
+              [attr.data-eliminated]="isEliminated(answer) ? '' : null"
               (click)="selectAnswer(answer)"
-              [disabled]="isAnswered()"
+              [disabled]="isAnswered() || isEliminated(answer)"
               class="flex items-center gap-3 text-left rounded-xl border-[1.5px] px-4 py-3.5 font-medium transition-colors disabled:cursor-not-allowed"
               [ngClass]="answerClass(answer)"
             >

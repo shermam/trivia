@@ -1,7 +1,19 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Answer, GameConfig, PickedAnswerId, TriviaQuestion } from '../models/question.model';
+import {
+  ALL_LIFELINES_AVAILABLE,
+  Answer,
+  GameConfig,
+  LifelineId,
+  LifelineState,
+  PickedAnswer,
+  SKIPPED,
+  TIMED_OUT,
+  TriviaQuestion,
+  answeredWith,
+} from '../models/question.model';
 import { giveUpAfter } from '../utils/give-up-after.util';
+import { shuffleArray } from '../utils/shuffle.util';
 import { GamePersistenceService } from './game-persistence.service';
 import { TriviaService } from './trivia.service';
 
@@ -77,7 +89,28 @@ export class GameControllerService {
    * lose the one property worth having — that a short history means an
    * unfinished game rather than a question nobody answered.
    */
-  readonly answerHistory = signal<readonly PickedAnswerId[]>([]);
+  readonly answerHistory = signal<readonly PickedAnswer[]>([]);
+
+  /**
+   * Which lifelines this round still has (`FEAT-002`). Single-use each, so a
+   * `true` becomes `false` and never comes back until the next game.
+   *
+   * On the service rather than in `QuizLoopComponent` for the same reason the
+   * flags and the answer history are: it has to survive a reload. A lifeline
+   * refunded by refreshing the page is not a lifeline, and the component is
+   * destroyed and rebuilt on every navigation.
+   */
+  readonly lifelines = signal<LifelineState>(ALL_LIFELINES_AVAILABLE);
+
+  /**
+   * Answer ids 50/50 has removed from the question on screen, and **only** that
+   * question — cleared by `advanceQuestion()` and by a skip.
+   *
+   * Persisted alongside the availability flags, because the pair has to move
+   * together: restoring "50/50 is spent" while restoring four visible options
+   * would take the lifeline and give nothing back.
+   */
+  readonly eliminatedAnswerIds = signal<readonly string[]>([]);
 
   /** The single in-flight restore, so bootstrap and the guards await the same read. */
   private restorePromise: Promise<void> | null = null;
@@ -146,6 +179,8 @@ export class GameControllerService {
         isComplete: this.isComplete(),
         flaggedQuestionIds: [...this.flaggedQuestionIds()],
         answerHistory: [...this.answerHistory()],
+        lifelines: { ...this.lifelines() },
+        eliminatedAnswerIds: [...this.eliminatedAnswerIds()],
       };
       this.enqueueWrite(() => this.persistence.save(snapshot));
     });
@@ -219,6 +254,8 @@ export class GameControllerService {
     this.isComplete.set(saved.isComplete);
     this.flaggedQuestionIds.set(new Set(saved.flaggedQuestionIds));
     this.answerHistory.set(saved.answerHistory);
+    this.lifelines.set(saved.lifelines);
+    this.eliminatedAnswerIds.set(saved.eliminatedAnswerIds);
   }
 
   /**
@@ -299,6 +336,11 @@ export class GameControllerService {
       // than a leaked flag, because the recap would show the previous game's
       // answers underneath this game's score.
       this.answerHistory.set([]);
+      // ...and the same for lifelines, which leak in the most rewarding
+      // direction: a player who abandoned a game having spent all three would
+      // start the next one with none.
+      this.lifelines.set(ALL_LIFELINES_AVAILABLE);
+      this.eliminatedAnswerIds.set([]);
       await this.router.navigateByUrl('/play');
     } catch {
       this.loadError.set('Failed to load questions. Please check your connection and try again.');
@@ -319,10 +361,97 @@ export class GameControllerService {
     if (answer?.isCorrect === true) {
       this.score.update((value) => value + 1);
     }
-    this.answerHistory.update((history) => [...history, answer?.id ?? null]);
+    this.record(answer === null ? TIMED_OUT : answeredWith(answer.id));
+  }
+
+  /**
+   * Skip: the question is over, scores nothing, and still counts.
+   *
+   * **"Advances without penalty" is not the same as "does not count", and the
+   * difference is a leaderboard exploit.** `firestore.rules` validates only
+   * `percentage == math.round(score * 100.0 / totalQuestions)` and
+   * `totalQuestions >= score`, so a skip that shrank the denominator would let
+   * a player skip nine of ten, answer one, and post a perfectly well-formed
+   * 100%. `totalQuestions` is `questions().length` and nothing here touches it,
+   * so the denominator holds by construction rather than by a check — but that
+   * is the property being relied on, which is why it is written down and
+   * pinned by a test. Decided explicitly with the owner, 28 August 2026.
+   *
+   * What the lifeline actually buys is the clock and the wrong-answer sting,
+   * not a free point.
+   */
+  registerSkippedQuestion(): void {
+    this.record(SKIPPED);
+  }
+
+  private record(outcome: PickedAnswer): void {
+    this.answerHistory.update((history) => [...history, outcome]);
+  }
+
+  /**
+   * Spends a lifeline, reporting whether there was one to spend.
+   *
+   * The guard and the mutation are one call on purpose. Split into
+   * `canUse()` + `use()` they are two reads of a signal that a caller can
+   * forget to pair, and the failure is silent — a second click spends nothing
+   * and still performs the effect.
+   */
+  consumeLifeline(id: LifelineId): boolean {
+    if (!this.lifelines()[id]) {
+      return false;
+    }
+    this.lifelines.update((state) => ({ ...state, [id]: false }));
+    return true;
+  }
+
+  /**
+   * Removes wrong options from the current question, and returns whether it
+   * did anything.
+   *
+   * **It never reduces the question to one option**, which is a deliberate
+   * departure from the spec's "fewer than 4 choices → remove 1 instead of 2".
+   * Taken literally on a true/false question that removes the only wrong
+   * answer and hands over the correct one — not a 50/50, a free point. The
+   * rule here is `min(2, wrongAnswers - 1)`: two removals on a four-option
+   * question, one on a three-option, and **none** on true/false, where the
+   * button is disabled rather than hidden (see the template for why disabled
+   * and not hidden).
+   */
+  useFiftyFifty(): boolean {
+    const question = this.currentQuestion();
+    if (!question) {
+      return false;
+    }
+    const wrong = question.all_answers.filter((answer) => !answer.isCorrect);
+    const removals = Math.min(2, wrong.length - 1);
+    if (removals <= 0) {
+      return false;
+    }
+    // `consumeLifeline` is the only thing standing between a first use and a
+    // second — there is deliberately no separate "already eliminated something
+    // on this question" check. One existed and mutation testing showed it was
+    // unreachable: the lifeline is spent on first use, so the flag refuses the
+    // second call before any such check could. A guard that cannot fire reads
+    // as protection and provides none.
+    if (!this.consumeLifeline('fiftyFifty')) {
+      return false;
+    }
+    // Shuffled then sliced, so which two go is not always the first two —
+    // otherwise the surviving wrong answer is always the last option, which is
+    // a pattern a player learns in about three questions.
+    const eliminated = shuffleArray([...wrong])
+      .slice(0, removals)
+      .map((answer) => answer.id);
+    this.eliminatedAnswerIds.set(eliminated);
+    return true;
   }
 
   advanceQuestion(): void {
+    // Before the early return as well as after it: the eliminated ids belong to
+    // the question being left, and `/game-over` renders the recap from the same
+    // persisted snapshot. Leaving them set would carry one question's 50/50
+    // into whatever the next game draws.
+    this.eliminatedAnswerIds.set([]);
     if (this.isLastQuestion()) {
       this.isComplete.set(true);
       void this.router.navigateByUrl('/game-over');
@@ -345,5 +474,7 @@ export class GameControllerService {
     this.loadError.set(null);
     this.flaggedQuestionIds.set(new Set());
     this.answerHistory.set([]);
+    this.lifelines.set(ALL_LIFELINES_AVAILABLE);
+    this.eliminatedAnswerIds.set([]);
   }
 }
