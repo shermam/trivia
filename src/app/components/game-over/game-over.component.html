@@ -612,13 +612,25 @@
                         class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
                         >{{ row.question.difficulty }}</span
                       >
-                      @if (row.timedOut) {
+                      @if (row.outcome === 'timedOut') {
                         <span
                           class="flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 font-semibold text-amber-800 dark:text-amber-300"
                           data-cy="recap-timed-out"
                         >
                           <app-icon name="clock" [size]="12" />
                           Time expired
+                        </span>
+                      } @else if (row.outcome === 'skipped') {
+                        <!-- Its own badge, not the timeout one. Both score
+                             zero, and telling a player the clock beat them on a
+                             question they chose to skip is a small lie the
+                             recap exists to avoid. -->
+                        <span
+                          class="flex items-center gap-1 rounded-md bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 font-semibold text-slate-700 dark:text-slate-200"
+                          data-cy="recap-skipped"
+                        >
+                          <app-icon name="skip-forward" [size]="12" />
+                          Skipped
                         </span>
                       }
                     </p>
@@ -630,13 +642,20 @@
                       as reassurance.
                     -->
                     <p class="mt-2 flex items-start gap-1.5 text-sm" data-cy="recap-picked">
-                      @if (row.timedOut) {
+                      @if (row.outcome === 'timedOut') {
                         <app-icon
                           name="clock"
                           [size]="15"
                           class="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400"
                         />
                         <span class="text-slate-500 dark:text-slate-400">No answer</span>
+                      } @else if (row.outcome === 'skipped') {
+                        <app-icon
+                          name="skip-forward"
+                          [size]="15"
+                          class="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400"
+                        />
+                        <span class="text-slate-500 dark:text-slate-400">You skipped this</span>
                       } @else if (row.wasRight) {
                         <app-icon
                           name="circle-check-big"

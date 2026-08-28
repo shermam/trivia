@@ -15,6 +15,7 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import {
   Answer,
+  PickedAnswer,
   DEFAULT_TIME_LIMIT,
   LeaderboardEntry,
   NewQuestionReportDoc,
@@ -47,10 +48,16 @@ function initialsFor(name: string): string {
 interface RecapRow {
   number: number;
   question: TriviaQuestion;
-  /** The option the player picked, or `null` if the clock ran out. */
+  /** The option the player picked; `null` when they never picked one. */
   picked: Answer | null;
   correct: Answer | null;
-  timedOut: boolean;
+  /**
+   * The three outcomes rendered as one value rather than a pair of booleans.
+   * `timedOut` and `skipped` were briefly both flags, which admits a fourth
+   * state that means nothing — the template would then have to decide which of
+   * two contradicting `true`s wins.
+   */
+  outcome: PickedAnswer['kind'];
   wasRight: boolean;
 }
 
@@ -457,8 +464,8 @@ export class GameOverComponent implements OnInit {
 
   /**
    * One row per question: what was asked, what the player picked, and what was
-   * right. Everything is derived from the picked answer's `id` — see
-   * `PickedAnswerId` for why nothing else is stored.
+   * right. Everything is derived from the recorded outcome — see
+   * `PickedAnswer` for why nothing else is stored.
    *
    * **Empty unless the history covers the whole game**, which is the honest
    * failure mode rather than a defensive one. A restored save written before
@@ -476,18 +483,20 @@ export class GameOverComponent implements OnInit {
 
     const rows: RecapRow[] = [];
     for (const [index, question] of questions.entries()) {
-      const pickedId = history[index];
+      const outcome = history[index];
       // `find` by id, never by text: two options can carry the same string,
       // and letting text stand in for identity is what made a wrong answer
       // score as correct once already (`CLAUDE.md` §4.4).
       const picked =
-        pickedId === null ? null : (question.all_answers.find((a) => a.id === pickedId) ?? null);
+        outcome.kind === 'answered'
+          ? (question.all_answers.find((a) => a.id === outcome.id) ?? null)
+          : null;
       // An id that names no option on its own question. Unreachable from a
       // live game and rejected on restore (`isUsableAnswerHistory`), so this
       // is the third guard on the same thing — and it drops the *whole* recap
       // rather than the row, for the same reason the restore does: the rows
       // are positional, and a recap missing one silently renumbers the rest.
-      if (pickedId !== null && picked === null) {
+      if (outcome.kind === 'answered' && picked === null) {
         return [];
       }
       rows.push({
@@ -495,7 +504,7 @@ export class GameOverComponent implements OnInit {
         question,
         picked,
         correct: question.all_answers.find((a) => a.isCorrect) ?? null,
-        timedOut: pickedId === null,
+        outcome: outcome.kind,
         wasRight: picked?.isCorrect === true,
       });
     }

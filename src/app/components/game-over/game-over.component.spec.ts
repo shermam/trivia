@@ -5,9 +5,12 @@ import { NEVER, of, throwError } from 'rxjs';
 import {
   GameConfig,
   LeaderboardEntry,
-  PickedAnswerId,
+  PickedAnswer,
+  SKIPPED,
+  TIMED_OUT,
   TimeLimitOption,
   TriviaQuestion,
+  answeredWith,
 } from '../../models/question.model';
 import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
@@ -85,7 +88,7 @@ function setup(options: {
           questions: signal([]),
           config: signal(makeConfig(options.timeLimit)),
           flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-          answerHistory: signal<readonly PickedAnswerId[]>([]),
+          answerHistory: signal<readonly PickedAnswer[]>([]),
           gameId: signal<string | null>('game-fixture'),
           resetGame: () => undefined,
         },
@@ -275,7 +278,7 @@ function configureReporting(options: {
           flaggedQuestionIds: signal<ReadonlySet<string>>(
             new Set(options.flaggedIds ?? options.questions.map((q) => q.id)),
           ),
-          answerHistory: signal<readonly PickedAnswerId[]>([]),
+          answerHistory: signal<readonly PickedAnswer[]>([]),
           gameId: signal<string | null>('game-fixture'),
           resetGame: () => undefined,
         },
@@ -803,7 +806,7 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
             questions: signal([]),
             config: signal(makeConfig(15)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-            answerHistory: signal<readonly PickedAnswerId[]>([]),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -957,7 +960,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             questions: signal([]),
             config: signal(makeConfig(timeLimit)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-            answerHistory: signal<readonly PickedAnswerId[]>([]),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1045,7 +1048,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             questions: signal([]),
             config: signal(null),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-            answerHistory: signal<readonly PickedAnswerId[]>([]),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1103,7 +1106,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
             questions: signal([]),
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-            answerHistory: signal<readonly PickedAnswerId[]>([]),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1307,7 +1310,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     });
   }
 
-  function render(options: { questions: TriviaQuestion[]; answerHistory: PickedAnswerId[] }) {
+  function render(options: { questions: TriviaQuestion[]; answerHistory: PickedAnswer[] }) {
     TestBed.configureTestingModule({
       providers: [
         {
@@ -1319,7 +1322,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
             questions: signal(options.questions),
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-            answerHistory: signal<readonly PickedAnswerId[]>(options.answerHistory),
+            answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1374,7 +1377,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   it('summarises the round on the toggle, and starts collapsed', () => {
     const { query } = render({
       questions: [q0, q1, q2],
-      answerHistory: ['q0:right', 'q1:wrong', null],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong'), TIMED_OUT],
     });
 
     const toggle = query('[data-cy="recap-toggle"]');
@@ -1387,7 +1390,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   it('expands and collapses on the toggle', () => {
     const { query, queryAll, open } = render({
       questions: [q0, q1, q2],
-      answerHistory: ['q0:right', 'q1:wrong', null],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong'), TIMED_OUT],
     });
 
     open();
@@ -1402,7 +1405,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   // The disclosure contract from `CLAUDE.md` §4.5: `aria-controls` has to name
   // an element that actually exists once open, or it points at nothing.
   it('points aria-controls at the panel it opens', () => {
-    const { query, open } = render({ questions: [q0], answerHistory: ['q0:right'] });
+    const { query, open } = render({ questions: [q0], answerHistory: [answeredWith('q0:right')] });
     open();
 
     const controls = query('[data-cy="recap-toggle"]')?.getAttribute('aria-controls');
@@ -1413,7 +1416,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   // ...and deliberately *not* `aria-haspopup`: the panel expands in place, so
   // announcing a popup would misdescribe it (§4.5's scoped exception).
   it('does not claim to open a popup', () => {
-    const { query } = render({ questions: [q0], answerHistory: ['q0:right'] });
+    const { query } = render({ questions: [q0], answerHistory: [answeredWith('q0:right')] });
 
     expect(query('[data-cy="recap-toggle"]')?.hasAttribute('aria-haspopup')).toBe(false);
   });
@@ -1421,7 +1424,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   it('renders every question with its number, text and badges', () => {
     const { queryAll, open } = render({
       questions: [q0, q1, q2],
-      answerHistory: ['q0:right', 'q1:wrong', null],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong'), TIMED_OUT],
     });
     open();
 
@@ -1439,7 +1442,10 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   // A correct answer shows what was picked and nothing else — repeating the
   // same string under "Correct answer" reads as a bug in the app.
   it('shows a correct answer once, with no second line', () => {
-    const { queryAll, open } = render({ questions: [q0], answerHistory: ['q0:right'] });
+    const { queryAll, open } = render({
+      questions: [q0],
+      answerHistory: [answeredWith('q0:right')],
+    });
     open();
 
     expect(queryAll('[data-cy="recap-picked"]')[0].textContent).toContain('q0 right');
@@ -1447,18 +1453,69 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   });
 
   it('shows the correct answer alongside a wrong pick', () => {
-    const { queryAll, open } = render({ questions: [q1], answerHistory: ['q1:wrong'] });
+    const { queryAll, open } = render({
+      questions: [q1],
+      answerHistory: [answeredWith('q1:wrong')],
+    });
     open();
 
     expect(queryAll('[data-cy="recap-picked"]')[0].textContent).toContain('q1 wrong');
     expect(queryAll('[data-cy="recap-correct"]')[0].textContent).toContain('q1 right');
   });
 
+  /*
+   * `FEAT-002`. A skip scores the same as a timeout and as a wrong answer, and
+   * has to read as none of them: the player chose to move on, and telling them
+   * "Time expired" is a small lie about their own game. This is the case the
+   * `string | null` shape had no room for.
+   */
+  it('marks a skipped question as skipped, not as a timeout', () => {
+    const { queryAll, open } = render({ questions: [q1], answerHistory: [SKIPPED] });
+    open();
+
+    const row = queryAll('[data-cy="recap-row"]')[0];
+    expect(row.querySelector('[data-cy="recap-skipped"]')).not.toBeNull();
+    expect(row.querySelector('[data-cy="recap-timed-out"]')).toBeNull();
+    expect(row.querySelector('[data-cy="recap-picked"]')?.textContent).toContain(
+      'You skipped this',
+    );
+    // Still shows what the answer was — the whole point of reviewing it.
+    expect(row.querySelector('[data-cy="recap-correct"]')?.textContent).toContain('q1 right');
+  });
+
+  it('counts a skip as not-correct in the tally', () => {
+    const { query } = render({
+      questions: [q0, q1],
+      answerHistory: [answeredWith('q0:right'), SKIPPED],
+    });
+
+    expect(query('[data-cy="recap-toggle"]')?.textContent).toContain('(1/2 correct)');
+  });
+
+  // Three outcomes, three renderings — asserted together so a future change
+  // that collapses two of them fails here rather than in one branch's test.
+  it('renders skipped, timed out and answered as three different things', () => {
+    const { queryAll, open } = render({
+      questions: [q0, q1, q2],
+      answerHistory: [answeredWith('q0:wrong'), TIMED_OUT, SKIPPED],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    expect(rows[0].querySelector('[data-cy="recap-picked"]')?.textContent).toContain('q0 wrong');
+    expect(rows[1].querySelector('[data-cy="recap-picked"]')?.textContent).toContain('No answer');
+    expect(rows[2].querySelector('[data-cy="recap-picked"]')?.textContent).toContain(
+      'You skipped this',
+    );
+    expect(queryAll('[data-cy="recap-timed-out"]')).toHaveLength(1);
+    expect(queryAll('[data-cy="recap-skipped"]')).toHaveLength(1);
+  });
+
   // The case the old `boolean` signature could not represent. A timeout scores
   // the same as a wrong answer and has to *look* different, or the recap
   // claims the player picked something they never saw.
   it('marks a timeout as time expired rather than as a wrong answer', () => {
-    const { queryAll, open } = render({ questions: [q2], answerHistory: [null] });
+    const { queryAll, open } = render({ questions: [q2], answerHistory: [TIMED_OUT] });
     open();
 
     const row = queryAll('[data-cy="recap-row"]')[0];
@@ -1468,7 +1525,10 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   });
 
   it('does not mark an answered question as timed out', () => {
-    const { queryAll, open } = render({ questions: [q0], answerHistory: ['q0:wrong'] });
+    const { queryAll, open } = render({
+      questions: [q0],
+      answerHistory: [answeredWith('q0:wrong')],
+    });
     open();
 
     expect(
@@ -1488,7 +1548,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     });
     const { query, queryAll, open } = render({
       questions: [ambiguous],
-      answerHistory: ['amb:wrong'],
+      answerHistory: [answeredWith('amb:wrong')],
     });
 
     expect(query('[data-cy="recap-toggle"]')?.textContent).toContain('(0/1 correct)');
@@ -1503,8 +1563,8 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
    * 2/3 — confidently wrong, which is worse than nothing at all.
    */
   it.each([
-    ['no history at all', [] as PickedAnswerId[]],
-    ['a partial history', ['q0:right'] as PickedAnswerId[]],
+    ['no history at all', [] as PickedAnswer[]],
+    ['a partial history', [answeredWith('q0:right')] as PickedAnswer[]],
   ])('renders no recap for %s', (_label, answerHistory) => {
     const { query } = render({ questions: [q0, q1, q2], answerHistory });
 
@@ -1521,7 +1581,10 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
    * simply one too many, and only the length comparison notices.
    */
   it('renders no recap for a history longer than the round', () => {
-    const { query } = render({ questions: [q0], answerHistory: ['q0:right', 'q1:right'] });
+    const { query } = render({
+      questions: [q0],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:right')],
+    });
 
     expect(query('[data-cy="recap-card"]')).toBeNull();
   });
@@ -1532,7 +1595,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   it("renders no recap when an entry names another question's option", () => {
     const { query } = render({
       questions: [q0, q1],
-      answerHistory: ['q1:right', 'q0:right'],
+      answerHistory: [answeredWith('q1:right'), answeredWith('q0:right')],
     });
 
     expect(query('[data-cy="recap-card"]')).toBeNull();
@@ -1561,7 +1624,7 @@ describe('GameOverComponent lifetime stats recording', () => {
 
   function render(options: {
     questions: TriviaQuestion[];
-    answerHistory: PickedAnswerId[];
+    answerHistory: PickedAnswer[];
     score: number;
     gameId?: string | null;
   }) {
@@ -1577,7 +1640,7 @@ describe('GameOverComponent lifetime stats recording', () => {
             questions: signal(options.questions),
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
-            answerHistory: signal<readonly PickedAnswerId[]>(options.answerHistory),
+            answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
             gameId: signal<string | null>(options.gameId === undefined ? 'game-1' : options.gameId),
             resetGame: () => undefined,
           },
@@ -1615,7 +1678,12 @@ describe('GameOverComponent lifetime stats recording', () => {
   it('records the finished game on init', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: ['q0:right', 'q1:right', 'q2:wrong', 'q3:right'],
+      answerHistory: [
+        answeredWith('q0:right'),
+        answeredWith('q1:right'),
+        answeredWith('q2:wrong'),
+        answeredWith('q3:right'),
+      ],
       score: 3,
     });
 
@@ -1636,7 +1704,12 @@ describe('GameOverComponent lifetime stats recording', () => {
   it('sends the longest run of correct answers, not the count of them', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: ['q0:right', 'q1:wrong', 'q2:right', 'q3:right'],
+      answerHistory: [
+        answeredWith('q0:right'),
+        answeredWith('q1:wrong'),
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
       score: 3,
     });
 
@@ -1646,7 +1719,12 @@ describe('GameOverComponent lifetime stats recording', () => {
   it('sends a zero streak for a game with nothing right', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: ['q0:wrong', 'q1:wrong', 'q2:wrong', 'q3:wrong'],
+      answerHistory: [
+        answeredWith('q0:wrong'),
+        answeredWith('q1:wrong'),
+        answeredWith('q2:wrong'),
+        answeredWith('q3:wrong'),
+      ],
       score: 0,
     });
 
@@ -1656,7 +1734,12 @@ describe('GameOverComponent lifetime stats recording', () => {
   it('breaks the streak on a timeout, same as on a wrong answer', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: ['q0:right', null, 'q2:right', 'q3:right'],
+      answerHistory: [
+        answeredWith('q0:right'),
+        TIMED_OUT,
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
       score: 3,
     });
 
@@ -1689,7 +1772,12 @@ describe('GameOverComponent lifetime stats recording', () => {
   it('records nothing when the game has no id', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: ['q0:right', 'q1:right', 'q2:right', 'q3:right'],
+      answerHistory: [
+        answeredWith('q0:right'),
+        answeredWith('q1:right'),
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
       score: 4,
       gameId: null,
     });

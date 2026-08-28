@@ -286,6 +286,101 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.get('[data-cy="recap-toggle"]').click();
     cy.get('[data-cy="recap-panel"]').should('not.exist');
   });
+
+  /**
+   * `FEAT-002`. The lifelines are three interactions the unit layer can only
+   * check in pieces — jsdom has no real click-to-disable, and the ids recorded
+   * during play are only proved to match the recap by a real round.
+   */
+  it('spends each lifeline once, and a skip reads as skipped at game over', () => {
+    cy.startGame(5);
+
+    // All three offered on a timed game, none spent.
+    cy.get('[data-cy="lifelines"]').should('have.attr', 'aria-label', 'Lifelines');
+    cy.get('[data-cy="lifeline-fiftyFifty"]').should('not.be.disabled');
+    cy.get('[data-cy="lifeline-extraTime"]').should('not.be.disabled');
+    cy.get('[data-cy="lifeline-skip"]').should('not.be.disabled');
+
+    // 50/50 removes two of the four options and cannot be used twice.
+    cy.get('[data-cy="answer-option"]').should('have.length', 4);
+    cy.get('[data-cy="lifeline-fiftyFifty"]').click();
+    cy.get('[data-cy="answer-option"][data-eliminated]').should('have.length', 2);
+    // The options stay in the DOM — the grid must not collapse under the
+    // player's cursor (`CLAUDE.md` §4.4).
+    cy.get('[data-cy="answer-option"]').should('have.length', 4);
+    cy.get('[data-cy="lifeline-fiftyFifty"]').should('be.disabled');
+
+    // Answer the first question with a surviving option.
+    cy.get('[data-cy="answer-option"]:not([data-eliminated])').first().click();
+    cy.contains(`Question 2 / 5`);
+    // Spent for the round, not just for that question.
+    cy.get('[data-cy="lifeline-fiftyFifty"]').should('be.disabled');
+    // ...and the elimination does not follow us to the next question.
+    cy.get('[data-cy="answer-option"][data-eliminated]').should('not.exist');
+
+    // Skip advances immediately — no result banner, no 2s wait.
+    cy.get('[data-cy="lifeline-skip"]').click();
+    cy.contains('Question 3 / 5');
+    cy.get('[data-cy="lifeline-skip"]').should('be.disabled');
+
+    // Extra time is spendable once.
+    cy.get('[data-cy="lifeline-extraTime"]').click();
+    cy.get('[data-cy="lifeline-extraTime"]').should('be.disabled');
+
+    // Finish the round.
+    cy.get('[data-cy="answer-option"]').first().click();
+    cy.contains('Question 4 / 5');
+    cy.get('[data-cy="answer-option"]').first().click();
+    cy.contains('Question 5 / 5');
+    cy.get('[data-cy="answer-option"]').first().click();
+
+    cy.location('pathname').should('eq', '/game-over');
+
+    // The skipped question reads as skipped, not as a timeout — and it still
+    // counts, so the recap has all five rows.
+    cy.get('[data-cy="recap-toggle"]').click();
+    cy.get('[data-cy="recap-row"]').should('have.length', 5);
+    cy.get('[data-cy="recap-skipped"]').should('have.length', 1);
+    cy.get('[data-cy="recap-timed-out"]').should('not.exist');
+    cy.get('[data-cy="recap-row"]')
+      .eq(1)
+      .within(() => {
+        cy.get('[data-cy="recap-picked"]').should('contain', 'You skipped this');
+      });
+  });
+
+  // A skip must not shrink the denominator — see `registerSkippedQuestion`.
+  it('counts a skipped question in the score denominator', () => {
+    cy.startGame(5);
+
+    cy.get('[data-cy="lifeline-skip"]').click();
+    cy.contains('Question 2 / 5');
+    const [, ...rest] = CORRECT_ANSWERS;
+    rest.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+
+    cy.location('pathname').should('eq', '/game-over');
+    // Four right out of five, not four out of four.
+    cy.contains('4 / 5');
+    cy.contains('80%');
+  });
+
+  // Hidden rather than disabled, because there is no countdown to extend.
+  it('offers no Extra Time on an unlimited game', () => {
+    cy.stubOpenTrivia();
+    cy.visit('/');
+    cy.wait('@categories');
+    cy.get('#amount').select('5');
+    cy.get('[data-cy="time-limit-unlimited"]').click({ force: true });
+    cy.contains('button', 'Start Game').click();
+    cy.wait('@questions');
+    cy.get('[data-cy="question-text"]').should('be.visible');
+
+    cy.get('[data-cy="lifeline-extraTime"]').should('not.exist');
+    cy.get('[data-cy="lifeline-fiftyFifty"]').should('exist');
+    cy.get('[data-cy="lifeline-skip"]').should('exist');
+  });
 });
 
 describe('anonymous game flow (custom source)', () => {

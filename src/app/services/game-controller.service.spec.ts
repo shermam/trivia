@@ -1,7 +1,15 @@
 import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { Answer, GameConfig, TriviaQuestion } from '../models/question.model';
+import {
+  ALL_LIFELINES_AVAILABLE,
+  Answer,
+  GameConfig,
+  SKIPPED,
+  TIMED_OUT,
+  TriviaQuestion,
+  answeredWith,
+} from '../models/question.model';
 import { GameControllerService } from './game-controller.service';
 import { GamePersistenceService } from './game-persistence.service';
 import { OfflineDbService } from './offline-db.service';
@@ -290,7 +298,11 @@ describe('GameControllerService persistence (B8)', () => {
     TestBed.tick();
     await service.flushPendingWrites();
 
-    expect((await reload()).answerHistory()).toEqual(['q0:correct', null, 'q2:incorrect-0']);
+    expect((await reload()).answerHistory()).toEqual([
+      answeredWith('q0:correct'),
+      TIMED_OUT,
+      answeredWith('q2:incorrect-0'),
+    ]);
   });
 
   it('clears the answer history when the game is reset', async () => {
@@ -501,7 +513,11 @@ describe('GameControllerService answer history (FEAT-001)', () => {
     service.registerAnswer(q1.all_answers[1]); // wrong
     service.registerAnswer(q2.all_answers[0]); // correct
 
-    expect(service.answerHistory()).toEqual(['q0:correct', 'q1:incorrect-0', 'q2:correct']);
+    expect(service.answerHistory()).toEqual([
+      answeredWith('q0:correct'),
+      answeredWith('q1:incorrect-0'),
+      answeredWith('q2:correct'),
+    ]);
     expect(service.score()).toBe(2);
   });
 
@@ -514,7 +530,7 @@ describe('GameControllerService answer history (FEAT-001)', () => {
     service.registerAnswer(null);
     service.registerAnswer(service.questions()[1].all_answers[1]);
 
-    expect(service.answerHistory()).toEqual([null, 'q1:incorrect-0']);
+    expect(service.answerHistory()).toEqual([TIMED_OUT, answeredWith('q1:incorrect-0')]);
     expect(service.score()).toBe(0);
   });
 
@@ -528,7 +544,7 @@ describe('GameControllerService answer history (FEAT-001)', () => {
 
     service.registerAnswer(question.all_answers[1]);
 
-    expect(service.answerHistory()).toEqual(['q0:incorrect-0']);
+    expect(service.answerHistory()).toEqual([answeredWith('q0:incorrect-0')]);
     expect(service.score()).toBe(0);
   });
 
@@ -546,5 +562,208 @@ describe('GameControllerService answer history (FEAT-001)', () => {
 
     expect(service.answerHistory()).not.toBe(before);
     expect(before).toEqual([]);
+  });
+});
+
+/**
+ * `FEAT-002`. The service owns *availability* — which lifelines are left, and
+ * which options 50/50 removed — because both have to survive a reload. The
+ * timer itself stays in `QuizLoopComponent`, so Extra Time is only a
+ * `consumeLifeline` call here; the deadline arithmetic is tested there.
+ */
+describe('GameControllerService lifelines (FEAT-002)', () => {
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('starts a game with all three available', () => {
+    expect(setup(3).lifelines()).toEqual(ALL_LIFELINES_AVAILABLE);
+  });
+
+  it('spends a lifeline once and refuses the second attempt', () => {
+    const service = setup(3);
+
+    expect(service.consumeLifeline('skip')).toBe(true);
+    expect(service.lifelines().skip).toBe(false);
+    expect(service.consumeLifeline('skip')).toBe(false);
+  });
+
+  it('spends only the lifeline named', () => {
+    const service = setup(3);
+
+    service.consumeLifeline('extraTime');
+
+    expect(service.lifelines()).toEqual({ fiftyFifty: true, extraTime: false, skip: true });
+  });
+
+  // Two removals on a four-option question, leaving the correct answer and one
+  // wrong one — the classic 50/50.
+  it('removes two wrong options from a four-option question', () => {
+    const service = setup(1);
+    const question = service.questions()[0];
+    question.all_answers = [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B', isCorrect: false },
+      { id: 'c', text: 'C', isCorrect: false },
+      { id: 'd', text: 'D', isCorrect: false },
+    ];
+
+    expect(service.useFiftyFifty()).toBe(true);
+
+    const eliminated = service.eliminatedAnswerIds();
+    expect(eliminated).toHaveLength(2);
+    expect(eliminated).not.toContain('a'); // never the correct one
+  });
+
+  it('removes one from a three-option question, still leaving a choice', () => {
+    const service = setup(1);
+    const question = service.questions()[0];
+    question.all_answers = [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B', isCorrect: false },
+      { id: 'c', text: 'C', isCorrect: false },
+    ];
+
+    expect(service.useFiftyFifty()).toBe(true);
+    expect(service.eliminatedAnswerIds()).toHaveLength(1);
+  });
+
+  /*
+   * **Deliberately not what the spec says.** "Fewer than 4 choices → remove 1"
+   * applied to true/false removes the only wrong answer and hands over the
+   * correct one — a free point, not a 50/50. The rule is
+   * `min(2, wrongAnswers - 1)`, so a two-option question yields nothing and the
+   * lifeline is not spent.
+   */
+  it('does nothing on a true/false question, and does not spend the lifeline', () => {
+    const service = setup(1);
+    const question = service.questions()[0];
+    question.all_answers = [
+      { id: 'a', text: 'True', isCorrect: true },
+      { id: 'b', text: 'False', isCorrect: false },
+    ];
+
+    expect(service.useFiftyFifty()).toBe(false);
+    expect(service.eliminatedAnswerIds()).toEqual([]);
+    expect(service.lifelines().fiftyFifty).toBe(true); // still spendable elsewhere
+  });
+
+  it('refuses a second 50/50 on the same question', () => {
+    const service = setup(2);
+    service.questions()[0].all_answers = [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B', isCorrect: false },
+      { id: 'c', text: 'C', isCorrect: false },
+    ];
+
+    expect(service.useFiftyFifty()).toBe(true);
+    expect(service.useFiftyFifty()).toBe(false);
+  });
+
+  // The eliminated ids belong to one question. Carried forward they would grey
+  // out options on a question 50/50 was never used on.
+  it('clears the eliminated options when the question advances', () => {
+    const service = setup(3);
+    service.questions()[0].all_answers = [
+      { id: 'a', text: 'A', isCorrect: true },
+      { id: 'b', text: 'B', isCorrect: false },
+      { id: 'c', text: 'C', isCorrect: false },
+    ];
+    service.useFiftyFifty();
+    expect(service.eliminatedAnswerIds()).not.toEqual([]);
+
+    service.advanceQuestion();
+
+    expect(service.eliminatedAnswerIds()).toEqual([]);
+    expect(service.lifelines().fiftyFifty).toBe(false); // spent for the round, though
+  });
+
+  /*
+   * The security-relevant one, decided explicitly with the owner on 28 August
+   * 2026. `firestore.rules` validates only
+   * `percentage == math.round(score * 100.0 / totalQuestions)` and
+   * `totalQuestions >= score` — so if a skip shrank the denominator, skipping
+   * nine of ten and answering one would post a well-formed 100%.
+   */
+  it('counts a skipped question toward the total, so skipping cannot inflate accuracy', () => {
+    const service = setup(10);
+    service.registerAnswer(service.questions()[0].all_answers[0]); // 1 correct
+    for (let i = 0; i < 9; i++) {
+      service.registerSkippedQuestion();
+    }
+
+    expect(service.score()).toBe(1);
+    expect(service.totalQuestions()).toBe(10);
+    expect(service.percentage()).toBe(10); // not 100
+  });
+
+  it('records a skip as its own outcome, distinct from a timeout', () => {
+    const service = setup(2);
+
+    service.registerSkippedQuestion();
+    service.registerAnswer(null);
+
+    expect(service.answerHistory()).toEqual([SKIPPED, TIMED_OUT]);
+    expect(service.score()).toBe(0);
+  });
+
+  it('carries spent lifelines through a reload, so refreshing does not refund one', async () => {
+    const service = setup(3);
+    service.config.set({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+    service.consumeLifeline('skip');
+    service.consumeLifeline('extraTime');
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    TestBed.resetTestingModule();
+    const reloaded = setupWithoutQuestions();
+    await reloaded.restoreSavedGame();
+
+    expect(reloaded.lifelines()).toEqual({ fiftyFifty: true, extraTime: false, skip: false });
+  });
+
+  it('restores all three when a new game starts', async () => {
+    const abandoned = setup(3);
+    abandoned.config.set({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+    abandoned.consumeLifeline('skip');
+    TestBed.tick();
+    await abandoned.flushPendingWrites();
+
+    TestBed.resetTestingModule();
+    const fresh = setupWithQuestionSource(3);
+    await fresh.restoreSavedGame();
+    expect(fresh.lifelines().skip).toBe(false); // the leak this guards
+
+    await fresh.startGame({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+
+    expect(fresh.lifelines()).toEqual(ALL_LIFELINES_AVAILABLE);
+  });
+
+  it('clears lifelines on resetGame, so Play Again starts fresh', () => {
+    const service = setup(3);
+    service.consumeLifeline('skip');
+
+    service.resetGame();
+
+    expect(service.lifelines()).toEqual(ALL_LIFELINES_AVAILABLE);
   });
 });

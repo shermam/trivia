@@ -25,18 +25,58 @@ export interface Answer {
 }
 
 /**
- * What the player did on one question: the `id` of the option they picked, or
- * `null` if the clock ran out first.
+ * What the player did on one question — answered it, let the clock run out, or
+ * skipped it with the Skip lifeline (`FEAT-002`).
  *
- * **The id, not the text, and not a richer record.** Two options can carry the
- * same string, and matching on display text once let a wrong answer score as
- * correct (`CLAUDE.md` §4.4) — so identity is the id here as it is everywhere
- * else. Everything the recap shows is derived from it: correctness is
- * `all_answers.find(a => a.id === picked).isCorrect`, and a timeout is
- * `picked === null`. Storing those alongside would be three fields that can
- * disagree with each other, in a record that goes to disk and comes back.
+ * **The id, not the text.** Two options can carry the same string, and matching
+ * on display text once let a wrong answer score as correct (`CLAUDE.md` §4.4),
+ * so identity is the id here as everywhere else. Correctness is still derived
+ * rather than stored — `all_answers.find(a => a.id === id).isCorrect` — because
+ * two fields that can disagree are worse than one in a record that goes to disk
+ * and comes back.
+ *
+ * **A discriminated union rather than the `string | null` this started as.**
+ * That scalar had exactly one spare value, `null`, and it was already spent on
+ * "timed out". Skip is a third outcome and the only room left was a magic
+ * string — which TypeScript widens straight back to `string`, giving a runtime
+ * case the compiler can never make anyone handle. That is the shape §4.4 calls
+ * "a runtime type that only one consumer checks is a type nobody checks". Three
+ * outcomes, three variants, and `switch` exhaustiveness does the enforcing.
+ *
+ * The persisted shape changes with it. No `SCHEMA_VERSION` bump, same call as
+ * every additive field before it: a save written by the previous build fails
+ * validation, so its history is dropped and the *game* survives with no recap —
+ * see `isUsableAnswerHistory`. Bumping would discard the game itself.
  */
-export type PickedAnswerId = string | null;
+export type PickedAnswer =
+  | { readonly kind: 'answered'; readonly id: string }
+  | { readonly kind: 'timedOut' }
+  | { readonly kind: 'skipped' };
+
+export const TIMED_OUT: PickedAnswer = { kind: 'timedOut' };
+export const SKIPPED: PickedAnswer = { kind: 'skipped' };
+
+export function answeredWith(id: string): PickedAnswer {
+  return { kind: 'answered', id };
+}
+
+/**
+ * The three single-use lifelines (`FEAT-002`). Availability lives on
+ * `GameControllerService` and rides the persisted snapshot, so a reload does
+ * not refund one.
+ */
+export type LifelineId = 'fiftyFifty' | 'extraTime' | 'skip';
+
+export const LIFELINE_IDS: readonly LifelineId[] = ['fiftyFifty', 'extraTime', 'skip'];
+
+/** `true` means still available. */
+export type LifelineState = Readonly<Record<LifelineId, boolean>>;
+
+export const ALL_LIFELINES_AVAILABLE: LifelineState = {
+  fiftyFifty: true,
+  extraTime: true,
+  skip: true,
+};
 
 export interface TriviaQuestion {
   id: string;

@@ -1,6 +1,13 @@
 import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
-import { GameConfig, TriviaQuestion } from '../models/question.model';
+import {
+  ALL_LIFELINES_AVAILABLE,
+  GameConfig,
+  SKIPPED,
+  TIMED_OUT,
+  TriviaQuestion,
+  answeredWith,
+} from '../models/question.model';
 import { GamePersistenceService } from './game-persistence.service';
 import { CURRENT_GAME_KEY, GAME_STATE_STORE, OfflineDbService } from './offline-db.service';
 
@@ -73,6 +80,8 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     isComplete: false,
     flaggedQuestionIds: [],
     answerHistory: [],
+    lifelines: ALL_LIFELINES_AVAILABLE,
+    eliminatedAnswerIds: [],
     gameId: 'game-fixture',
     ...overrides,
   };
@@ -207,9 +216,9 @@ describe('GamePersistenceService (B8)', () => {
    * snapshot.
    */
   it('round-trips the answer history, timeouts included', async () => {
-    await service.save(makeGame({ answerHistory: ['q0:correct', null] }));
+    await service.save(makeGame({ answerHistory: [answeredWith('q0:correct'), TIMED_OUT] }));
 
-    expect((await service.load())?.answerHistory).toEqual(['q0:correct', null]);
+    expect((await service.load())?.answerHistory).toEqual([answeredWith('q0:correct'), TIMED_OUT]);
   });
 
   it('restores a record written before the answer history existed', async () => {
@@ -232,9 +241,9 @@ describe('GamePersistenceService (B8)', () => {
    */
   it.each([
     ['a non-array value', 'q0:correct'],
-    ['more answers than questions', ['q0:correct', null]],
-    ['an id belonging to no question in the save', ['q1:correct']],
-    ['a non-string, non-null entry', [42]],
+    ['more answers than questions', [answeredWith('q0:correct'), TIMED_OUT]],
+    ['an id belonging to no question in the save', [answeredWith('q1:correct')]],
+    ['an unrecognised entry', [42]],
   ])('discards %s rather than filtering it', async (_label, stored) => {
     await putRaw(validRecord({ answerHistory: stored }));
 
@@ -253,7 +262,7 @@ describe('GamePersistenceService (B8)', () => {
     await putRaw(
       validRecord({
         questions: [makeQuestion('q0'), makeQuestion('q1')],
-        answerHistory: ['q1:correct', 'q0:correct'], // both real ids, both on the wrong question
+        answerHistory: [answeredWith('q1:correct'), answeredWith('q0:correct')], // real ids, wrong questions
       }),
     );
 
@@ -266,11 +275,97 @@ describe('GamePersistenceService (B8)', () => {
     await putRaw(
       validRecord({
         questions: [makeQuestion('q0'), makeQuestion('q1')],
-        answerHistory: ['q0:incorrect-0'],
+        answerHistory: [answeredWith('q0:incorrect-0')],
       }),
     );
 
-    expect((await service.load())?.answerHistory).toEqual(['q0:incorrect-0']);
+    expect((await service.load())?.answerHistory).toEqual([answeredWith('q0:incorrect-0')]);
+  });
+
+  it('round-trips a skipped question as its own outcome', async () => {
+    await service.save(makeGame({ answerHistory: [SKIPPED, TIMED_OUT] }));
+
+    expect((await service.load())?.answerHistory).toEqual([SKIPPED, TIMED_OUT]);
+  });
+
+  /*
+   * The shape `FEAT-001` shipped, one day before `FEAT-002` replaced it. A save
+   * in flight across that deploy must lose its **recap** and keep its **game**,
+   * which is the whole reason the history is validated separately from the rest
+   * of the record rather than rejecting it.
+   */
+  it('drops a history written in the previous scalar shape, and keeps the game', async () => {
+    // **One entry, because `validRecord()` holds one question.** The first
+    // draft used two and passed against the *length* check without the shape
+    // check ever running — mutation testing caught it: loosening
+    // `isUsableAnswerHistory` to accept `string | null` changed nothing.
+    await putRaw(validRecord({ answerHistory: ['q0:correct'] }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.questions).toHaveLength(1);
+    expect(loaded?.answerHistory).toEqual([]);
+  });
+
+  /*
+   * Lifelines (`FEAT-002`). The pair has to move together — see the field
+   * comment — so these cover the round trip and then every way the pair can be
+   * unusable, all of which reset **both** halves.
+   */
+  it('round-trips spent lifelines and the options 50/50 removed', async () => {
+    await service.save(
+      makeGame({
+        lifelines: { fiftyFifty: false, extraTime: true, skip: false },
+        eliminatedAnswerIds: ['q1:incorrect-0'],
+        currentIndex: 1,
+      }),
+    );
+
+    const loaded = await service.load();
+    expect(loaded?.lifelines).toEqual({ fiftyFifty: false, extraTime: true, skip: false });
+    expect(loaded?.eliminatedAnswerIds).toEqual(['q1:incorrect-0']);
+  });
+
+  it('restores a record written before lifelines existed with all three available', async () => {
+    await putRaw(validRecord()); // validRecord() omits both fields
+
+    const loaded = await service.load();
+    expect(loaded?.lifelines).toEqual(ALL_LIFELINES_AVAILABLE);
+    expect(loaded?.eliminatedAnswerIds).toEqual([]);
+  });
+
+  /*
+   * **The direction of the default is the point.** Filling a partial record's
+   * missing keys with `true` refunds whatever was left out, which makes a
+   * truncated save worth manufacturing. Resetting the whole set is the same
+   * answer a fresh game gives, so the edit buys nothing.
+   */
+  it.each([
+    ['a partial set', { fiftyFifty: false }],
+    ['a non-boolean value', { fiftyFifty: false, extraTime: 'yes', skip: true }],
+    ['an unrecognised shape', 'all of them'],
+    ['nothing at all', null],
+  ])('resets lifelines rather than refunding when the stored value is %s', async (_l, stored) => {
+    await putRaw(validRecord({ lifelines: stored, eliminatedAnswerIds: [] }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.lifelines).toEqual(ALL_LIFELINES_AVAILABLE);
+  });
+
+  // Restoring "50/50 spent" while showing four options takes the lifeline and
+  // hands nothing back, so an unusable id resets the availability flags too.
+  it('resets both halves when the eliminated ids do not match the current question', async () => {
+    await putRaw(
+      validRecord({
+        lifelines: { fiftyFifty: false, extraTime: false, skip: false },
+        eliminatedAnswerIds: ['not-an-answer-on-this-question'],
+      }),
+    );
+
+    const loaded = await service.load();
+    expect(loaded?.lifelines).toEqual(ALL_LIFELINES_AVAILABLE);
+    expect(loaded?.eliminatedAnswerIds).toEqual([]);
   });
 
   /*

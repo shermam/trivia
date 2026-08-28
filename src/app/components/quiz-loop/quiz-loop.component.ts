@@ -8,7 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { Answer, DEFAULT_TIME_LIMIT } from '../../models/question.model';
+import { Answer, DEFAULT_TIME_LIMIT, LifelineId } from '../../models/question.model';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
@@ -28,6 +28,15 @@ const FALLBACK_DURATION_SECONDS: number =
  */
 const TIMER_TICK_MS = 250;
 const ANSWER_DELAY_MS = 2000;
+/**
+ * What Extra Time adds to *this question's* deadline (`FEAT-002`).
+ *
+ * It does not change `GameConfig.timeLimit`, does not carry into the next
+ * question and does not move the run to another board — a 15s game with one
+ * extended question still ranks on the 15s board, which is what respecting
+ * finding G7's per-limit leaderboards means here.
+ */
+const EXTRA_TIME_SECONDS = 15;
 /**
  * Option labels are derived from the index rather than read out of a fixed
  * array. The array had four entries while `firestore.rules` permitted up to
@@ -85,6 +94,56 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly timeLeft = signal<number>(FALLBACK_DURATION_SECONDS);
   protected readonly selectedAnswer = signal<Answer | null>(null);
   protected readonly isAnswered = signal(false);
+
+  /**
+   * How long the current question's countdown runs for, which is the chosen
+   * limit **plus any Extra Time spent on it** — and therefore not the same as
+   * `limitSeconds()`.
+   *
+   * The ring needs its own denominator because `timeLeft` can now exceed the
+   * limit: dividing by `limitSeconds()` after an extension gives a ratio above
+   * 1, a negative `stroke-dashoffset`, and a ring that draws itself inside out.
+   */
+  private readonly questionDuration = signal<number>(FALLBACK_DURATION_SECONDS);
+
+  protected readonly lifelines = this.gameController.lifelines;
+
+  /**
+   * Extra Time is **hidden** on an unlimited game and 50/50 is **disabled** on
+   * a two-option question, and the asymmetry is deliberate.
+   *
+   * Whether the game is timed is fixed before the first question and cannot
+   * change while this component is alive, so hiding the button costs no layout
+   * shift — it is simply a two-button toolbar for that whole game. Whether a
+   * question is true/false changes *per question*, so hiding 50/50 would resize
+   * the toolbar mid-round, which is the thing `CLAUDE.md` §4.4 forbids. A
+   * disabled button keeps its box.
+   */
+  protected readonly showsExtraTime = this.isTimed;
+
+  protected readonly canUseFiftyFifty = computed(() => {
+    const question = this.gameController.currentQuestion();
+    if (!question) {
+      return false;
+    }
+    // Mirrors `useFiftyFifty()`'s own rule — never reduce a question to a
+    // single option — so the button's enabled state and what the service will
+    // actually do cannot disagree.
+    return question.all_answers.filter((answer) => !answer.isCorrect).length > 1;
+  });
+
+  protected readonly eliminatedAnswerIds = this.gameController.eliminatedAnswerIds;
+
+  protected isEliminated(answer: Answer): boolean {
+    return this.eliminatedAnswerIds().includes(answer.id);
+  }
+
+  /**
+   * Announced when a lifeline is spent (G3). Carries the question's position
+   * for the same reason `flagAnnouncement` does: a live region only announces
+   * on mutation, so identical text set twice says nothing the second time.
+   */
+  protected readonly lifelineAnnouncement = signal('');
 
   /**
    * What a screen reader is told the moment a question is answered (G3).
@@ -149,11 +208,15 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   });
 
   protected readonly timerRingOffset = computed(() => {
-    const limit = this.limitSeconds();
-    if (limit === null) {
+    if (this.limitSeconds() === null) {
       return 0;
     }
-    return TIMER_RING_CIRCUMFERENCE - (this.timeLeft() / limit) * TIMER_RING_CIRCUMFERENCE;
+    // Against the question's own duration, not the game's limit — see
+    // `questionDuration`. Clamped anyway, because a tick can land a few
+    // milliseconds before the deadline moves.
+    const duration = this.questionDuration();
+    const fraction = duration <= 0 ? 0 : Math.min(1, this.timeLeft() / duration);
+    return TIMER_RING_CIRCUMFERENCE - fraction * TIMER_RING_CIRCUMFERENCE;
   });
 
   /**
@@ -228,15 +291,94 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   }
 
   protected selectAnswer(answer: Answer): void {
-    if (this.isAnswered()) {
+    // An eliminated option is `disabled` in the template, so this is the
+    // belt to that braces — a click can still arrive programmatically, and
+    // scoring a 50/50'd option would be the one bug this feature could
+    // introduce into the score itself.
+    if (this.isAnswered() || this.isEliminated(answer)) {
       return;
     }
     this.stopTimer();
     this.commitAnswer(answer);
   }
 
+  protected useFiftyFifty(): void {
+    if (!this.canUseLifeline('fiftyFifty')) {
+      return;
+    }
+    if (!this.gameController.useFiftyFifty()) {
+      return;
+    }
+    const remaining = this.gameController
+      .currentQuestion()
+      ?.all_answers.filter((answer) => !this.isEliminated(answer)).length;
+    this.announce(`Fifty-fifty used. ${remaining} options remain.`);
+  }
+
+  protected useExtraTime(): void {
+    // `isTimed()` as well as the availability flag: on an unlimited game there
+    // is no deadline to move, and spending the lifeline to do nothing would be
+    // the worst outcome of the three. The button is not rendered there either.
+    if (!this.canUseLifeline('extraTime') || !this.isTimed()) {
+      return;
+    }
+    if (!this.gameController.consumeLifeline('extraTime')) {
+      return;
+    }
+    this.deadline += EXTRA_TIME_SECONDS * 1000;
+    this.questionDuration.update((seconds) => seconds + EXTRA_TIME_SECONDS);
+    // Repaint the countdown now rather than up to a tick later, so the number
+    // jumps the instant the button is pressed.
+    this.tickTimer();
+    this.announce(`Extra time added. ${EXTRA_TIME_SECONDS} seconds more on this question.`);
+  }
+
+  protected useSkip(): void {
+    if (!this.canUseLifeline('skip')) {
+      return;
+    }
+    if (!this.gameController.consumeLifeline('skip')) {
+      return;
+    }
+    this.stopTimer();
+    // No result banner and no `ANSWER_DELAY_MS` pause: there is no result to
+    // read. The whole point of Skip is not to sit here.
+    this.gameController.registerSkippedQuestion();
+    this.goToNextQuestion();
+  }
+
+  /** A lifeline is spendable only while the question is still live. */
+  protected canUseLifeline(id: LifelineId): boolean {
+    if (this.isAnswered() || !this.gameController.currentQuestion()) {
+      return false;
+    }
+    if (!this.lifelines()[id]) {
+      return false;
+    }
+    return id === 'fiftyFifty' ? this.canUseFiftyFifty() : true;
+  }
+
+  /** One box either way, so spending a lifeline cannot resize the row (§4.4). */
+  protected lifelineClass(available: boolean): string {
+    const base =
+      'flex flex-1 items-center justify-center gap-1.5 rounded-xl border-[1.5px] px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed';
+    return available
+      ? `${base} border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-50 hover:border-emerald-600 hover:bg-slate-50 dark:hover:bg-slate-700`
+      : `${base} border-slate-900/8 dark:border-white/10 bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600`;
+  }
+
+  private announce(message: string): void {
+    this.lifelineAnnouncement.set(`Question ${this.gameController.currentIndex() + 1}: ${message}`);
+  }
+
   protected answerClass(answer: Answer): string {
     const question = this.gameController.currentQuestion();
+    // Removed by 50/50: muted and non-interactive, but still occupying its
+    // cell. Collapsing the grid to two options would reflow the answers under
+    // the player's cursor at the moment they are reading them (§4.4).
+    if (this.isEliminated(answer)) {
+      return 'bg-slate-50 dark:bg-slate-800/40 border-slate-900/8 dark:border-white/10 text-slate-400 dark:text-slate-600 opacity-50 line-through';
+    }
     if (!this.isAnswered() || !question) {
       return 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-emerald-600 hover:shadow-[0_0_0_3px_rgba(5,150,105,0.08)] border-slate-900/15 dark:border-white/15 text-slate-900 dark:text-slate-50';
     }
@@ -255,6 +397,9 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
   protected answerBadgeClass(answer: Answer): string {
     const question = this.gameController.currentQuestion();
+    if (this.isEliminated(answer)) {
+      return 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600';
+    }
     if (!this.isAnswered() || !question) {
       return 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300';
     }
@@ -282,6 +427,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     }
     this.deadline = Date.now() + limit * 1000;
     this.timeLeft.set(limit);
+    this.questionDuration.set(limit);
     this.timerHandle = setInterval(() => this.tickTimer(), TIMER_TICK_MS);
   }
 
@@ -333,6 +479,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
     this.isAnswered.set(false);
     this.selectedAnswer.set(null);
+    this.lifelineAnnouncement.set('');
     this.startTimer();
   }
 
