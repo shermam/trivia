@@ -31,19 +31,19 @@ Two additions specific to this queue:
 
 ## 2. The queue
 
-Legend: ✅ done · 🔵 in review · 🟡 in progress · ⬜ not started
+Legend: ✅ done · → migrated to the roadmap repo, which is where its status now lives
 
-| #   | Item                                                                                            | Size | Status |
-| --- | ----------------------------------------------------------------------------------------------- | ---- | ------ |
-| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                                          | M    | ✅     |
-| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | ✅     |
-| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ✅     |
-| 4   | [Review before publish](#4-review-before-publish)                                               | L    | ✅     |
-| 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | ⬜     |
-| 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | ⬜     |
-| 7   | [Recover from a wedged service worker](#7-recover-from-a-wedged-service-worker)                 | S    | ⬜     |
-| 8   | [In-app role management](#8-in-app-role-management)                                             | M    | ⬜     |
-| 9   | [Show the user's real avatar](#9-show-the-users-real-avatar)                                    | S    | ⬜     |
+| #   | Item                                                                                            | Size | Status       |
+| --- | ----------------------------------------------------------------------------------------------- | ---- | ------------ |
+| 1   | [Coverage & hygiene sweep](#1-coverage--hygiene-sweep)                                          | M    | ✅           |
+| 2   | [Firestore client SDK → REST](#2-firestore-client-sdk--rest)                                    | L    | ✅           |
+| 3   | [Rate limit on `custom_questions`](#3-rate-limit-on-custom_questions)                           | M    | ✅           |
+| 4   | [Review before publish](#4-review-before-publish)                                               | L    | ✅           |
+| 5   | [Report retention vs. account deletion](#5-report-retention-vs-account-deletion)                | S    | → `FEAT-042` |
+| 6   | [Edit and delete your own submitted questions](#6-edit-and-delete-your-own-submitted-questions) | M    | → `FEAT-007` |
+| 7   | [Recover from a wedged service worker](#7-recover-from-a-wedged-service-worker)                 | S    | → `FEAT-043` |
+| 8   | [In-app role management](#8-in-app-role-management)                                             | M    | → `FEAT-044` |
+| 9   | [Show the user's real avatar](#9-show-the-users-real-avatar)                                    | S    | → `FEAT-038` |
 
 ### Why this order
 

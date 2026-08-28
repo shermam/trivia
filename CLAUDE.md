@@ -25,6 +25,20 @@ These apply to every session in this repository. Follow them without being asked
 - If the change is to tooling/CI/hosting rather than app functionality, update `INFRASTRUCTURE.md` instead (or in addition).
 - **If the change closes an audit finding, update `AUDIT_REMEDIATION.md`** — mark the finding in §5 with its PR link and refresh the counts in §1, in the same PR. It's the only thing tracking that series across sessions; a stale plan is worse than none.
 
+### 2a. Edit the documentation in place. Do not append to it.
+
+**A document describes the project as it is now.** When something you are changing makes a sentence wrong, rewrite that sentence. Do not leave it standing and add a correction after it, and do not add a note saying it used to be different — that produces a document where the reader has to work out which of two accounts is current, which is worse than either account on its own.
+
+The same rule applies to reviewing a `.md` file: **fix the text, don't comment on it.** A review that says "this paragraph is out of date" leaves the paragraph out of date. Edit it.
+
+**Why a change is being made belongs in the pull request description, not in the document.** The PR is the permanent, dated, linkable record of the reasoning — that is what it is for, and it is where a reader goes when they want the history. A document that carries its own changelog inline grows a second, worse copy of that history which nobody prunes.
+
+Three distinctions, because this rule is narrower than it first sounds:
+
+- **Rationale is not history.** "`connect-src` must list every origin the page fetches, because the service worker re-issues them and `script-src` does not apply there" is a reason the current code is shaped the way it is, and it stays. "This used to be in `script-src` and we moved it" is history, and it goes in the PR. When the distinction is genuinely unclear, ask whether a reader who had never seen the old version would be worse off without the sentence.
+- **`CLAUDE.md` §4 and `AUDIT_REMEDIATION.md` are deliberate exceptions.** §4 is a contract whose entries exist _because_ something broke, and it says so on purpose — the incident is the argument for the invariant. `AUDIT_REMEDIATION.md` is a closed historical record by definition. Neither is a description of current state.
+- **A closed item in `docs/known-gaps.md` may be struck through and kept** while it is recent enough to be worth telling a reader "yes, we know, it is done" — but it is a list of gaps, so once a struck entry stops being something anyone would ask about, delete it rather than carrying it forever.
+
 ## 3. Before sending a PR / concluding a task
 
 Run the full local verification suite, in this order, and treat all of it as required:

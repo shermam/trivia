@@ -155,6 +155,7 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
   - Category badge (indigo pill, uppercase, e.g. "GENERAL KNOWLEDGE")
   - Difficulty badge (grey pill, uppercase, e.g. "MEDIUM")
 - **Question text** (large, bold heading)
+- **Lifelines toolbar**: a labelled button group of two or three buttons (see below)
 - **Answer grid**: 2-column grid (stacks to 1 column on small screens) of answer buttons, one per `all_answers` entry (2 for true/false, 4 for multiple-choice); each button has a leading letter badge (A/B/C/D by position) plus the answer text
 - **Result feedback banner** (below the answer grid): a coloured strip with an emoji and one of three fixed messages — 🎉 "Correct! Well done.", ⏰ "Time's up!", ❌ "Incorrect." Its space is **reserved from the first render**, empty until there is a result, because the card is vertically centred and a banner that appeared on answering lifted the whole card by half its height (measured at 43px on a 390×1000 phone, 37px at 1024×900). All three messages are stacked in one grid cell so the reserved height is the tallest of them rather than a hard-coded guess.
   - The messages deliberately **do not name the correct answer**, which is what used to make the banner's height depend on the question — a long answer wrapped to a second line. On screen it is redundant: the correct option keeps an emerald border and badge while every other option drops to 60% opacity. They also carry no pointer to that highlight ("the answer is highlighted", "see the green answer"), because every such phrasing wraps at 320px and the reserved space would then cost a permanent second line on every phone.
@@ -170,16 +171,22 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 | **Answer selected — correct**       | frozen                                    | Selected/correct button (and its letter badge) turns **green**; all other buttons disabled                                                                                                         |
 | **Answer selected — incorrect**     | frozen                                    | Chosen button (and its letter badge) turns **red**; the actual correct answer turns **green**; all remaining (non-chosen, non-correct) buttons dim to 60% opacity, grey text; all buttons disabled |
 | **Post-answer delay (2s)**          | —                                         | Result banner + colors stay visible for 2 seconds before auto-advancing (the banner's box was already occupying its space before the answer, so nothing moves)                                     |
+| **Advance**                         | —                                         | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over`                                                              |
 
-- **Lifelines toolbar** (`FEAT-002`) — a labelled button group (`role="group"`, "Lifelines") between the question and the answer options, present on every question. Each is single-use per round; a spent one greys out and stays in place so the row cannot change size.
-  - **50/50** (percent icon) — removes two wrong options on a four-option question, one on a three-option. Removed options stay in the grid, muted, struck through and unclickable. Disabled rather than hidden on a true/false question, where removing anything would hand over the answer.
-  - **+15s** (clock-plus icon) — adds 15 seconds to this question's countdown. **Not rendered at all on an unlimited game.**
-  - **Skip** (skip-forward icon) — straight to the next question, no result banner and no pause. The question still counts toward the total, and the label says so.
-  - An `sr-only` `role="status"` region announces each use.
+Score only increments on a correct answer. A timeout and a skip both score zero and both still count toward the total.
 
-| **Advance** | — | Either the next question loads (ring/buttons reset to the countdown state) or, if it was the last question, navigates to `/game-over` |
+### Lifelines toolbar
 
-Score only increments on a correct, non-timed-out answer.
+A labelled button group (`role="group"`, "Lifelines") between the question and the answer options, present on every question. Each lifeline is single-use per round; a spent one greys out and stays in place, so the row cannot change size mid-game. An `sr-only` `role="status"` region announces each use — the visible change is options greying out or a number jumping, which is silent to a screen reader.
+
+| Button                  | Does                                                          | Unavailable when                                                                                        |
+| ----------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **50/50** (percent)     | Removes two wrong options (one, on a three-option question)   | **Disabled** on true/false, where removing anything hands over the answer; **disabled** once spent      |
+| **+15s** (clock-plus)   | Adds 15 seconds to this question's countdown                  | **Not rendered at all** on an unlimited game — there is no countdown to extend; **disabled** once spent |
+| **Skip** (skip-forward) | Straight to the next question — no result banner, no 2s pause | **Disabled** once spent                                                                                 |
+
+- **Removed options stay in the grid**, muted and unclickable, rather than being taken out — collapsing four cells to two moves the surviving answers under the reader's cursor as they are reading them.
+- **Hidden vs disabled follows one rule**: a reason that can change from question to question disables the button, because hiding it would resize the toolbar mid-round. Only Extra Time is hidden, and only because its reason (an unlimited game) is fixed before question 1.
 
 #### Result feedback banner (per outcome)
 
@@ -295,7 +302,54 @@ Full-screen centered card on a light slate background. Reachable via the game-se
 
 ---
 
-## 5. Route: `/pricing` — Pricing (`PricingComponent`)
+## 5. Route: `/review` — Review Queue (`ReviewQueueComponent`)
+
+Full-screen centered card. **No route guard** — access is decided in-page from `ReviewerService`, so a non-reviewer reaching the URL gets an explanation rather than a silent redirect. The top bar's "Review" link only appears for reviewers.
+
+### Hierarchy
+
+- **Back link**: "← Back to game" → `/`
+- **Title**: "Review Queue"
+- **Status filter**: a labelled tab group (`sr-only` heading "Filter by status") with **Pending / Approved / Rejected**; the active tab is filled, the others outlined
+- **Question list**: one card per question in the active status — question text, its answers with the correct one marked, then `Category:` / `Difficulty:` / `Submitted:` / `Author:` metadata
+- **Action buttons** per card: **Approve** (hidden on the Approved tab) and **Reject** (hidden on the Rejected tab), so the button that would be a no-op is never offered
+- **Truncation note** when the queue is full — the query is capped, and the list says so rather than implying it is the whole queue
+
+### States
+
+| State                           | Content                                                                                                     |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Access still resolving**      | "Checking your access…" — the neutral state, shown before the role is known rather than guessing either way |
+| **Not a reviewer**              | An explanation that the queue is for reviewers, with a way back to the game                                 |
+| **Loading the queue**           | "Loading…"                                                                                                  |
+| **Load failed**                 | An inline error with a retry affordance                                                                     |
+| **Empty for the active status** | An empty-state message for that tab                                                                         |
+| **Loaded**                      | The question list                                                                                           |
+| **Action failed**               | An inline error above the list; the card stays put so the action can be retried                             |
+
+---
+
+## 6. Routes: `/privacy` and `/terms` — Legal pages (`PrivacyPolicyComponent`, `TermsOfServiceComponent`)
+
+Two documents sharing one shell (`LegalPageComponent`), which supplies the chrome and takes the body as content. No guard, no auth, no data — they render the same for everyone.
+
+### Hierarchy
+
+- **Back link**: "← Back to Trivimind" → `/`
+- **Title** and, under it, "Last updated: {{ LEGAL_LAST_UPDATED }}"
+- **Amber `role="note"` banner**: "In force, but not yet reviewed by a lawyer" — states that the document applies today and was written by reading the source, that what it lacks is professional review, and invites corrections by email. Rendered from a single flag, so it disappears from both pages at once when that stops being true.
+- **Body**, in a `prose-legal` block
+- **Footer line** crediting the structure and tone the documents were adapted from
+
+**`/privacy` sections**: Who is responsible for your information · Information you give us · Information created by using the app · Why we handle it, and on what basis · Payments · What is stored on your device · Who else your browser contacts · What we do not do · Where your information is stored · How long we keep it · Your rights over your information · Children · How your information is protected · Changes to this policy · Contact
+
+**`/terms` sections**: The service · Who can use it · Your account · Questions you contribute · Acceptable use · Pro subscription · Availability and liability · Ending your use · Governing law · Changes to these terms · Contact
+
+> These two are the only documents in the repo whose correctness decays without anyone touching them — a change to what the app stores, or to which hosts it contacts, falsifies them silently. `CLAUDE.md` §4.0 is the contract; the operating company's name and CNPJ live in `legal.ts` and are pinned by `legal-pages.spec.ts`.
+
+---
+
+## 7. Route: `/pricing` — Pricing (`PricingComponent`)
 
 Full-width page (not a single centered card — a two-column comparison layout) on a light slate background.
 
@@ -354,16 +408,16 @@ A "← Back to game" link (→ `/`) sits above the header.
 
 ---
 
-## 6. Cross-cutting elements & patterns
+## 8. Cross-cutting elements & patterns
 
-### 6.1 PRO badge
+### 8.1 PRO badge
 
 A small rounded pill, bold uppercase "PRO" text. Two visual variants used consistently everywhere it appears (game-setup footer link, Auth Menu "Add a question" link, top-bar account trigger):
 
 - **Locked** (non-Pro user): grey background, muted grey text
 - **Unlocked** (Pro user): indigo-100 background, indigo-600 text (indigo-600/white on the "Add a question" button itself, which is solid indigo)
 
-### 6.2 Buttons
+### 8.2 Buttons
 
 Consistent visual vocabulary across the whole app:
 
@@ -374,7 +428,7 @@ Consistent visual vocabulary across the whole app:
 - **Danger-adjacent text buttons**: none — errors are always shown as banners, not button color changes
 - **Destructive-looking dark button**: "Play Again" uses a dark slate fill (distinct from primary indigo), signaling a full reset action
 
-### 6.3 Inline banners (consistent 3-color system across every screen)
+### 8.3 Inline banners (consistent 3-color system across every screen)
 
 - **Red** (`bg-red-50`/`border-red-200`/`text-red-700`): hard errors (failed save, failed load, failed submit)
 - **Amber** (`bg-amber-50`/`border-amber-200`/`text-amber-700`): soft warnings / non-fatal notices (categories failed to load but game still playable; checkout cancelled; existing best score was already higher)
@@ -382,22 +436,22 @@ Consistent visual vocabulary across the whole app:
 - **Indigo** (`bg-indigo-50`/`bg-indigo-100`): neutral call-to-action prompts, not errors (sign-in prompts, verify-email prompts, Pro upsell box, save-score prompt)
 - Most banners now carry a small leading icon reinforcing their color (triangle-alert/circle-alert for amber/red, circle-check-big for green, mail for the verify-email prompt)
 
-### 6.4 Loading / busy conventions
+### 8.4 Loading / busy conventions
 
 - Buttons that trigger an async action disable themselves and swap their label to a present-participle phrase ending in an ellipsis: "Loading Questions…", "Saving…", "Please wait…", "Redirecting…", "Opening billing portal…"
 - The top bar and Pricing's Subscribe button both guard on `authReady()` specifically (distinct from "anonymous") to avoid a one-frame flash of the wrong state before Firebase's first auth callback resolves — shown as "Loading…" in both places.
 
-### 6.5 Form field conventions
+### 8.5 Form field conventions
 
 - All labels are `<label>` elements, small, semibold, slate-500/600, positioned directly above their control with a small gap
 - All text/select inputs share the same shape: `rounded-xl` corners, thin slate border, indigo focus ring; `<select>`s use a custom chevron-down icon (native arrow hidden via `appearance-none`)
 - Segmented "pill" radio groups (Question Source, Question Type, True/False, Multiple/True-False question type) are used instead of native radio buttons or dropdowns wherever the option set is small (2–3 choices) — the underlying `<input type="radio">` is visually hidden (`sr-only`) and its wrapping `<label>` is styled as the visible control, with the selected option getting an indigo-100 fill + indigo-600 bold text; unselected labels use slate-600 (not a lighter grey) to keep body text at a readable contrast ratio against the segmented control's slate-100 track
 
-### 6.6 Elevation & shape tokens
+### 8.6 Elevation & shape tokens
 
 Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s shadow scale so every surface pulls from the same set: `shadow-card` (subtle card shadow), `shadow-card-lg` (quiz/game-over/leaderboard cards), `shadow-hero-card` (game-setup's large gradient-backed card), `shadow-dropdown` (auth menu), `shadow-cta`/`shadow-cta-hover` (primary gradient buttons), `shadow-pro-card` (pricing's Pro card). Corner radii follow Tailwind's default scale: `rounded-3xl` (24px, cards), `rounded-2xl` (16px, dropdowns/sub-cards), `rounded-xl` (12px, buttons/inputs/segmented controls).
 
-### 6.7 Embed mode (`?embed=1`)
+### 8.7 Embed mode (`?embed=1`)
 
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
 - On Game Over, the "Sign in" button in the anonymous-player prompt is also hidden (there's nowhere for it to open a menu into), leaving just the explanatory text.
@@ -405,20 +459,23 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 ---
 
-## 7. Full route table
+## 9. Full route table
 
-| Path            | Component              | Guard                                            | Purpose                                         |
-| --------------- | ---------------------- | ------------------------------------------------ | ----------------------------------------------- |
-| `/`             | `GameSetupComponent`   | none                                             | Configure & start a game                        |
-| `/play`         | `QuizLoopComponent`    | redirects to `/` if no active question in memory | Answer questions against a timer                |
-| `/game-over`    | `GameOverComponent`    | redirects to `/` if no completed game in memory  | Final score, save to leaderboard, view top 10   |
-| `/add-question` | `AddQuestionComponent` | none (in-page gating by auth/Pro state instead)  | Submit a question to the custom bank (Pro only) |
-| `/pricing`      | `PricingComponent`     | none                                             | Compare Starter vs. Pro, subscribe via Stripe   |
-| `*` (unmatched) | —                      | redirects to `/`                                 | —                                               |
+| Path            | Component                 | Guard                                            | Purpose                                         |
+| --------------- | ------------------------- | ------------------------------------------------ | ----------------------------------------------- |
+| `/`             | `GameSetupComponent`      | none                                             | Configure & start a game                        |
+| `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory | Answer questions against a timer                |
+| `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory  | Final score, save to leaderboard, view top 10   |
+| `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)  | Submit a question to the custom bank (Pro only) |
+| `/pricing`      | `PricingComponent`        | none                                             | Compare Starter vs. Pro, subscribe via Stripe   |
+| `/review`       | `ReviewQueueComponent`    | none (in-page gating on the reviewer role)       | Approve or reject submitted questions           |
+| `/privacy`      | `PrivacyPolicyComponent`  | none                                             | Published Privacy Policy                        |
+| `/terms`        | `TermsOfServiceComponent` | none                                             | Published Terms of Service                      |
+| `*` (unmatched) | —                         | redirects to `/`                                 | —                                               |
 
 ---
 
-## 8. Full copy inventory (verbatim strings)
+## 10. Full copy inventory (verbatim strings)
 
 Grouped by screen, for quick reference when building Figma text styles / content models.
 
@@ -426,12 +483,16 @@ Grouped by screen, for quick reference when building Figma text styles / content
 
 **Game Setup**: Trivimind · Configure your quiz and test your knowledge · Could not load categories from Open Trivia DB. You can still start with "Any Category". · No questions were found for the selected options. Try a different category, difficulty, or source. · Failed to load questions. Please check your connection and try again. · Number of Questions · Category · Any Category · Difficulty · Any Difficulty · Easy · Medium · Hard · Question Source · Open Trivia · Custom · Mixed · Start Game · Loading Questions… · + Create custom question
 
-**Quiz Loop**: Question {{n}} / {{total}} · Score: {{n}} · (category badge) · (difficulty badge) · Correct! Well done. · Time's up! The answer was {{correct_answer}}. · Incorrect. The correct answer is {{correct_answer}}.
+**Quiz Loop**: Question {{n}} / {{total}} · Score: {{n}} · (category badge) · (difficulty badge) · Correct! Well done. · Time's up! The answer was {{correct_answer}}. · Incorrect. The correct answer is {{correct_answer}}. · Lifelines · 50/50 · +15s · Skip · Fifty-fifty: remove two wrong answers. One use per game. · Fifty-fifty is unavailable on a true or false question. · Fifty-fifty already used. · Extra time: add 15 seconds to this question. One use per game. · Extra time already used. · Skip: move to the next question. It still counts toward your total. One use per game. · Skip already used.
 
-**Game Over**: Game Over! · Here's how you did · Score · correct answers · Accuracy · Outstanding! · Great job! · Good effort! · Keep practicing! · Score saved to the leaderboard! · You're ranked #{{n}} on the leaderboard. · Your best score is already higher — nice consistency! We kept your existing best. · Sign in to save this score to the leaderboard. · Verify your email to save this score to the leaderboard. · Enter your name · Save Score · Saving… · Could not save your score. Please try again. · Top 10 Leaderboard · Loading leaderboard… · Could not load the leaderboard. Please try again later. · No scores yet. Be the first! · Play Again · YOU (leaderboard badge for the current player's own row)
+**Game Over**: Game Over! · Here's how you did · Score · correct answers · Accuracy · Outstanding! · Great job! · Good effort! · Keep practicing! · Score saved to the leaderboard! · You're ranked #{{n}} on the leaderboard. · Your best score is already higher — nice consistency! We kept your existing best. · Sign in to save this score to the leaderboard. · Verify your email to save this score to the leaderboard. · Enter your name · Save Score · Saving… · Could not save your score. Please try again. · Top 10 Leaderboard · Loading leaderboard… · Could not load the leaderboard. Please try again later. · No scores yet. Be the first! · Play Again · YOU (leaderboard badge for the current player's own row) · Review answers ({{n}}/{{total}} correct) · Your answers · Correct answer: · No answer · Time expired · You skipped this · Questions you flagged · Found something wrong in this game? Report it here.
 
 **Add a Question**: Add a Question · Contribute a question to the shared custom bank · Sign in to submit a question to the shared bank. · Verify your email to submit a question. · This one's for Pro members · Upgrade to Pro ($0.99/month) to create and add your own questions to the shared question bank. · Upgrade to Pro · Thanks! Your question was added to the bank. · Add another · Back to game · Category · e.g. Science · Difficulty · Question Type · Multiple Choice · True / False · Question · What is the question? · Correct Answer · True · False · Incorrect Answers · Incorrect answer 1/2/3 · Could not save your question. Please try again. · Cancel · Add Question
 
 **Pricing**: Back to game · Pricing · Play free forever, or go Pro to contribute your own questions. · Subscription started! It may take a few seconds to finish activating. · Start playing · Dismiss · Checkout was cancelled — no charge was made. · Starter · Everything you need to play and compete. · Free ($0/month) · Play unlimited games · Submit scores to the global leaderboard · Your current plan · Pro · Contribute questions and shape the game. · $0.99/month · Everything in Starter · Create and add custom questions to the global question bank · More features coming soon · You're subscribed · Loading… · Sign in to subscribe · Redirecting… · Subscribe — $0.99/mo · Verify your email first, then come back to subscribe. · Could not start checkout. Please try again. · Cancel anytime. No hidden fees.
+
+**Review Queue**: Review Queue · Back to game · Filter by status · Pending · Approved · Rejected · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Author: · Approve · Reject
+
+**Legal pages (`/privacy`, `/terms`)**: Back to Trivimind · Last updated: {{date}} · In force, but not yet reviewed by a lawyer · This document applies to your use of the service today, and everything it says about what the app does with your information was written by reading the application's own source code — so it describes real behaviour rather than what a template assumes. What it has not had is a professional legal review. If you spot something wrong, unclear, or missing, please write to {{contactEmail}} — that is genuinely useful and it will be fixed.
 
 **Auth error messages** (surfaced verbatim in the red banner of the sign-in/sign-up form, mapped from Firebase Auth error codes): "This sign-in method isn't enabled yet." · "An account with this email already exists. Try signing in instead." · "That email address looks invalid." · "Choose a stronger password (at least 6 characters)." · "Incorrect email or password." · "No account found with this email." · "This account is already linked to another user." · "Network error. Please check your connection and try again." · "Something went wrong. Please try again." (default fallback) · "Email aliases (e.g. \"name+tag@domain.com\") aren't allowed. Please use your plain email address." (client-side, sign-up only)
