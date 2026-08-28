@@ -1335,6 +1335,15 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   const q1 = recapQuestion('q1');
   const q2 = recapQuestion('q2');
 
+  /*
+   * `FEAT-046` moved these off existence and onto `inert` + `aria-expanded`,
+   * and the distinction is the point. The collapse animates, so the panel is
+   * in the DOM in both states — and jsdom loads no stylesheet, applies no
+   * `visibility` and has no layout, so a spec here asserting "hidden" would
+   * pass whatever the truth was. The attributes are real in jsdom; whether
+   * anything is actually on screen is checked in a browser, by
+   * `game-flow.cy.ts` (`CLAUDE.md` §4.4).
+   */
   it('summarises the round on the toggle, and starts collapsed', () => {
     const { query } = render({
       questions: [q0, q1, q2],
@@ -1345,7 +1354,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     expect(toggle?.textContent).toContain('Review answers');
     expect(toggle?.textContent).toContain('(1/3 correct)');
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-    expect(query('[data-cy="recap-panel"]')).toBeNull();
+    expect(query('[data-cy="recap-panel-content"]')?.hasAttribute('inert')).toBe(true);
   });
 
   it('expands and collapses on the toggle', () => {
@@ -1356,18 +1365,31 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
 
     open();
     expect(query('[data-cy="recap-toggle"]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(query('[data-cy="recap-panel-content"]')?.hasAttribute('inert')).toBe(false);
     expect(queryAll('[data-cy="recap-row"]')).toHaveLength(3);
 
     open(); // toggling again
     expect(query('[data-cy="recap-toggle"]')?.getAttribute('aria-expanded')).toBe('false');
-    expect(query('[data-cy="recap-panel"]')).toBeNull();
+    expect(query('[data-cy="recap-panel-content"]')?.hasAttribute('inert')).toBe(true);
+  });
+
+  // The row that makes the collapse animatable at all: `0fr → 1fr` is what
+  // lets content of unknown height transition. A `max-height` guess would
+  // pass every test here and clip the last rows of a 25-question game.
+  it('drives the collapse with grid rows rather than a measured height', () => {
+    const { query, open } = render({ questions: [q0], answerHistory: ['q0:right'] });
+
+    expect(query('[data-cy="recap-panel"]')?.className).toContain('grid-rows-[0fr]');
+    open();
+    expect(query('[data-cy="recap-panel"]')?.className).toContain('grid-rows-[1fr]');
   });
 
   // The disclosure contract from `CLAUDE.md` §4.5: `aria-controls` has to name
-  // an element that actually exists once open, or it points at nothing.
+  // an element that actually exists. Checked while *closed* now — the panel is
+  // always mounted, and a reference that only resolves once open is exactly
+  // what the attribute is not allowed to be.
   it('points aria-controls at the panel it opens', () => {
-    const { query, open } = render({ questions: [q0], answerHistory: ['q0:right'] });
-    open();
+    const { query } = render({ questions: [q0], answerHistory: ['q0:right'] });
 
     const controls = query('[data-cy="recap-toggle"]')?.getAttribute('aria-controls');
     expect(controls).toBeTruthy();

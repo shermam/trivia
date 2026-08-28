@@ -253,14 +253,21 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.location('pathname').should('eq', '/game-over');
 
     // Collapsed by default, and the header carries the tally.
+    //
+    // `not.be.visible`, never `not.exist`: since `FEAT-046` the collapse
+    // animates, so the panel is in the DOM in both states (§4.6). **This is
+    // the only layer that can tell the difference** — jsdom has no stylesheet
+    // and no layout, so the unit spec asserts `inert` and `aria-expanded` and
+    // would pass either way.
     cy.get('[data-cy="recap-toggle"]')
       .should('contain', 'Review answers')
       .and('contain', `(4/5 correct)`)
       .and('have.attr', 'aria-expanded', 'false');
-    cy.get('[data-cy="recap-panel"]').should('not.exist');
+    cy.get('[data-cy="recap-panel"]').should('not.be.visible');
 
     cy.get('[data-cy="recap-toggle"]').click();
     cy.get('[data-cy="recap-toggle"]').should('have.attr', 'aria-expanded', 'true');
+    cy.get('[data-cy="recap-panel"]').should('be.visible');
     cy.get('[data-cy="recap-row"]').should('have.length', 5);
 
     // The missed question shows what was picked *and* what was right; the
@@ -284,7 +291,7 @@ describe('anonymous game flow (open_trivia source)', () => {
     cy.get('[data-cy="recap-timed-out"]').should('not.exist');
 
     cy.get('[data-cy="recap-toggle"]').click();
-    cy.get('[data-cy="recap-panel"]').should('not.exist');
+    cy.get('[data-cy="recap-panel"]').should('not.be.visible');
   });
 });
 
