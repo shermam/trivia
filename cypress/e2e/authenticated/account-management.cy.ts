@@ -1,3 +1,6 @@
+import questionsFixture from '../../fixtures/open-trivia-questions.json';
+
+const CORRECT_ANSWERS = questionsFixture.results.map((q) => q.correct_answer);
 const password = 'Str0ngPassw0rd!';
 
 /**
@@ -46,6 +49,25 @@ describe('account management: export and deletion', () => {
     cy.visit('/');
     cy.signInViaUi(email, password);
 
+    // Play a game first, so there is a `users/{uid}` document to delete.
+    // Without this the "stats removed" assertion below is **vacuous**: the
+    // document is created lazily on the first completed game, so an account
+    // that never finished one has none, and `null` after deletion would pass
+    // against a `deleteAccount` that sweeps nothing at all. This is the single
+    // test standing behind a published policy promise.
+    cy.startNewGame(5);
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+    cy.location('pathname').should('eq', '/game-over');
+    // Waits for the write rather than reading once: the call is
+    // fire-and-forget, and `cy.task` is not a retrying query, so a bare
+    // `.should()` here asserts against a single read that can easily precede
+    // the callable landing. See `waitForGameplayStats`.
+    cy.then(() => {
+      cy.waitForGameplayStats(uid);
+    });
+
     cy.openAuthMenu();
     cy.get('[data-cy=delete-account]').click();
     cy.get('[data-cy=confirm-delete-account]').click();
@@ -59,6 +81,8 @@ describe('account management: export and deletion', () => {
         expect(state.authUserExists, 'Auth user removed').to.be.false;
         expect(state.leaderboardExists, 'leaderboard entry removed').to.be.false;
         expect(state.customerExists, 'customer record removed').to.be.false;
+        // Non-vacuous because the game above proved it existed a moment ago.
+        expect(state.gameplayStats, 'gameplay totals removed').to.be.null;
         // The question survives — it belongs to the shared bank other players
         // draw from — but is no longer traceable to the deleted user.
         expect(state.questionExists, 'contributed question kept').to.be.true;
@@ -106,6 +130,7 @@ describe('account management: export and deletion', () => {
           account: { uid: string; email: string; signInProviders: string[] };
           leaderboardEntries: { board: string; score: number }[];
           contributedQuestions: { id: string }[];
+          gameplayStats: Record<string, number> | null;
           notHeldHere: string[];
         };
         expect(exported.account.uid).to.eq(uid);
@@ -118,6 +143,12 @@ describe('account management: export and deletion', () => {
         expect(exported.leaderboardEntries[0].board).to.eq('15');
         expect(exported.leaderboardEntries[0].score).to.eq(3);
         expect(exported.contributedQuestions.map((q) => q.id)).to.include('authored-for-export');
+        // Present and explicitly null, because this account never finished a
+        // game. The key has to be *there*: an absent key reads as "we are not
+        // telling you", an explicit null reads as "there is nothing" — the
+        // distinction `notHeldHere` exists to make everywhere else.
+        expect(exported).to.have.property('gameplayStats');
+        expect(exported.gameplayStats).to.be.null;
         // The export has to say what it deliberately does not contain,
         // otherwise a missing card number reads as concealment.
         expect(exported.notHeldHere.join(' ')).to.match(/stripe/i);

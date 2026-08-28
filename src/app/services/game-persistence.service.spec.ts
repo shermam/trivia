@@ -82,6 +82,7 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     answerHistory: [],
     lifelines: ALL_LIFELINES_AVAILABLE,
     eliminatedAnswerIds: [],
+    gameId: 'game-fixture',
     ...overrides,
   };
 }
@@ -365,6 +366,53 @@ describe('GamePersistenceService (B8)', () => {
     const loaded = await service.load();
     expect(loaded?.lifelines).toEqual(ALL_LIFELINES_AVAILABLE);
     expect(loaded?.eliminatedAnswerIds).toEqual([]);
+  });
+
+  /*
+   * `gameId` — the idempotency key that stops a reload of `/game-over` banking
+   * the same game twice into `users/{uid}`. Additive, no `SCHEMA_VERSION`
+   * bump, same call as the three fields before it.
+   */
+  it('round-trips the game id', async () => {
+    await service.save(makeGame({ gameId: 'game-xyz' }));
+
+    expect((await service.load())?.gameId).toBe('game-xyz');
+  });
+
+  /*
+   * A save written before this field existed. It restores with `null`, and the
+   * caller treats that as "do not bank this game" — one lost total, against
+   * the alternative of minting an id on the results screen, which would be
+   * fresh on every refresh and inflate the totals on each one.
+   */
+  it('restores a record written before the game id existed, as null', async () => {
+    await putRaw(validRecord()); // validRecord() deliberately omits the field
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.gameId).toBeNull();
+  });
+
+  // Dropped to null rather than rejecting the save: an unusable id costs the
+  // game's totals, and losing the game itself to protect them would be
+  // exactly backwards — the same call `flaggedQuestionIds` makes.
+  it.each([
+    ['a non-string', 42],
+    ['an empty string', ''],
+    ['an over-long id', 'x'.repeat(129)],
+  ])('discards %s without rejecting the save', async (_label, stored) => {
+    await putRaw(validRecord({ gameId: stored }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.gameId).toBeNull();
+  });
+
+  it('keeps an id at exactly the length limit', async () => {
+    const id = 'x'.repeat(128);
+    await putRaw(validRecord({ gameId: id }));
+
+    expect((await service.load())?.gameId).toBe(id);
   });
 
   it('overwrites rather than accumulating — there is only ever one game', async () => {

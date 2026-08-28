@@ -24,6 +24,7 @@ import {
   boardKey,
 } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
+import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
@@ -81,6 +82,7 @@ type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save';
 export class GameOverComponent implements OnInit {
   protected readonly gameController = inject(GameControllerService);
   protected readonly authService = inject(AuthService);
+  private readonly accountService = inject(AccountService);
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly embedMode = inject(EmbedModeService);
   private readonly firebaseService = inject(FirebaseService);
@@ -521,11 +523,62 @@ export class GameOverComponent implements OnInit {
     this.isRecapOpenSignal.update((open) => !open);
   }
 
+  /**
+   * The longest run of consecutive correct answers in this game.
+   *
+   * Derived from the recap rather than tracked during play — the data is
+   * already there, and a second counter maintained in the quiz loop would be a
+   * second thing that can disagree with the score.
+   *
+   * A game restored from a save written before the recap shipped has no
+   * history, so this is 0 while `score` is genuinely non-zero. That is a
+   * knowing under-report rather than a rejection: the server accepts it (see
+   * `game-stats.test.ts`), and the alternative — refusing to bank the game —
+   * would lose more.
+   */
+  private bestStreak(): number {
+    let best = 0;
+    let run = 0;
+    for (const row of this.recap()) {
+      run = row.wasRight ? run + 1 : 0;
+      best = Math.max(best, run);
+    }
+    return best;
+  }
+
+  /**
+   * Banks this game into the player's lifetime totals.
+   *
+   * Fire-and-forget on purpose — the screen is already rendered from local
+   * state and must not wait on a cold start. Skipped entirely for a game with
+   * no `gameId`, which means a save written before that field existed: minting
+   * one here would produce a fresh id on every reload of this screen and
+   * inflate the totals on each one, which is precisely what the id exists to
+   * prevent.
+   *
+   * Anonymous and unverified sessions are refused server-side rather than
+   * here, so this deliberately does not duplicate that predicate — a client
+   * mirror of a server gate is a thing that drifts (H6).
+   */
+  private recordGameResult(): void {
+    const gameId = this.gameController.gameId();
+    if (!gameId) {
+      return;
+    }
+    void this.accountService.recordGameResult({
+      gameId,
+      totalQuestions: this.gameController.totalQuestions(),
+      correctAnswers: this.gameController.score(),
+      bestStreak: this.bestStreak(),
+    });
+  }
+
   ngOnInit(): void {
     // Reaching here means hasCompletedGameGuard passed — a finished game is in
     // memory (finding F4; the completeness check lives on the route, not here).
     this.playerName = this.authService.user()?.displayName ?? '';
     void this.loadLeaderboard();
+    this.recordGameResult();
   }
 
   protected openSignIn(): void {

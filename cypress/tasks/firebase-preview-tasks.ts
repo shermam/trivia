@@ -129,6 +129,18 @@ export function registerFirebasePreviewTasks(on: Cypress.PluginEvents): void {
 
       await Promise.all([
         ...[...trackedAuthUids].map((uid) => auth.deleteUser(uid).catch(() => undefined)),
+        // Lifetime totals. Written by the `recordGameResult` callable the
+        // first time a signed-in account finishes a game — so a preview run
+        // that signs a test user in and plays creates one in the **real**
+        // project, and without this the document outlives the Auth user that
+        // owned it, orphaned and undeletable by `deleteAccount`.
+        ...[...trackedAuthUids].map((uid) =>
+          firestore
+            .collection('users')
+            .doc(uid)
+            .delete()
+            .catch(() => undefined),
+        ),
         // Every board, or a preview run leaves real rows behind on the two
         // this suite happens not to write to.
         ...[...leaderboardUids].flatMap((uid) =>

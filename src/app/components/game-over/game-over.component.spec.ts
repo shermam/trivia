@@ -12,6 +12,7 @@ import {
   TriviaQuestion,
   answeredWith,
 } from '../../models/question.model';
+import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
@@ -88,6 +89,7 @@ function setup(options: {
           config: signal(makeConfig(options.timeLimit)),
           flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
           answerHistory: signal<readonly PickedAnswer[]>([]),
+          gameId: signal<string | null>('game-fixture'),
           resetGame: () => undefined,
         },
       },
@@ -101,6 +103,10 @@ function setup(options: {
         },
       },
       { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+      {
+        provide: AccountService,
+        useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+      },
       { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
       {
         provide: FirebaseService,
@@ -273,6 +279,7 @@ function configureReporting(options: {
             new Set(options.flaggedIds ?? options.questions.map((q) => q.id)),
           ),
           answerHistory: signal<readonly PickedAnswer[]>([]),
+          gameId: signal<string | null>('game-fixture'),
           resetGame: () => undefined,
         },
       },
@@ -288,6 +295,10 @@ function configureReporting(options: {
         },
       },
       { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+      {
+        provide: AccountService,
+        useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+      },
       { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
       {
         provide: FirebaseService,
@@ -796,6 +807,7 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
             config: signal(makeConfig(15)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
         },
@@ -808,6 +820,10 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
           },
         },
         { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
         { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
         {
           provide: FirebaseService,
@@ -945,6 +961,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             config: signal(makeConfig(timeLimit)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
         },
@@ -957,6 +974,10 @@ describe('GameOverComponent — per-board leaderboards', () => {
           },
         },
         { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
         { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
         {
           provide: FirebaseService,
@@ -1028,6 +1049,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             config: signal(null),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
         },
@@ -1040,6 +1062,10 @@ describe('GameOverComponent — per-board leaderboards', () => {
           },
         },
         { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
         { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
         {
           provide: FirebaseService,
@@ -1081,6 +1107,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
         },
@@ -1094,6 +1121,10 @@ describe('GameOverComponent: which face of the score card shows', () => {
           },
         },
         { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
         { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
         {
           provide: FirebaseService,
@@ -1292,6 +1323,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
+            gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
         },
@@ -1305,6 +1337,10 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
           },
         },
         { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
         { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
         {
           provide: FirebaseService,
@@ -1563,5 +1599,189 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     });
 
     expect(query('[data-cy="recap-card"]')).toBeNull();
+  });
+});
+
+/**
+ * Recording a finished game into `users/{uid}`. Rendered through the real
+ * component rather than calling the private method, because the two things
+ * worth pinning are *when* it fires (on init, unconditionally) and *what it
+ * sends* — and the streak is derived from the recap, so a change to the recap
+ * silently changes the payload.
+ */
+describe('GameOverComponent lifetime stats recording', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  function statsQuestion(id: string): TriviaQuestion {
+    return makeTriviaQuestion({
+      id,
+      all_answers: [
+        { id: `${id}:right`, text: 'right', isCorrect: true },
+        { id: `${id}:wrong`, text: 'wrong', isCorrect: false },
+      ],
+    });
+  }
+
+  function render(options: {
+    questions: TriviaQuestion[];
+    answerHistory: PickedAnswer[];
+    score: number;
+    gameId?: string | null;
+  }) {
+    const recordGameResult = vi.fn().mockResolvedValue(undefined);
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(options.score),
+            totalQuestions: signal(options.questions.length),
+            percentage: signal(50),
+            questions: signal(options.questions),
+            config: signal(makeConfig()),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
+            gameId: signal<string | null>(options.gameId === undefined ? 'game-1' : options.gameId),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isAnonymous: signal(false),
+            isFullyAuthenticated: signal(true),
+            resendVerificationEmail: () => Promise.resolve(),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: AccountService, useValue: { recordGameResult } },
+        { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore: vi.fn().mockResolvedValue(undefined),
+            getLeaderboardEntry: () => Promise.resolve(null),
+            getTopScores: () => of([]),
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    return { recordGameResult };
+  }
+
+  const q = [statsQuestion('q0'), statsQuestion('q1'), statsQuestion('q2'), statsQuestion('q3')];
+
+  it('records the finished game on init', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [
+        answeredWith('q0:right'),
+        answeredWith('q1:right'),
+        answeredWith('q2:wrong'),
+        answeredWith('q3:right'),
+      ],
+      score: 3,
+    });
+
+    expect(recordGameResult).toHaveBeenCalledExactlyOnceWith({
+      gameId: 'game-1',
+      totalQuestions: 4,
+      correctAnswers: 3,
+      bestStreak: 2,
+    });
+  });
+
+  /*
+   * The streak is the run, not the total. Pinned with a game whose correct
+   * answers are deliberately non-adjacent, because `bestStreak === score` for
+   * every all-correct game — so an implementation that just returned the score
+   * would pass any simpler fixture.
+   */
+  it('sends the longest run of correct answers, not the count of them', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [
+        answeredWith('q0:right'),
+        answeredWith('q1:wrong'),
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
+      score: 3,
+    });
+
+    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(2);
+  });
+
+  it('sends a zero streak for a game with nothing right', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [
+        answeredWith('q0:wrong'),
+        answeredWith('q1:wrong'),
+        answeredWith('q2:wrong'),
+        answeredWith('q3:wrong'),
+      ],
+      score: 0,
+    });
+
+    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(0);
+  });
+
+  it('breaks the streak on a timeout, same as on a wrong answer', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [
+        answeredWith('q0:right'),
+        TIMED_OUT,
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
+      score: 3,
+    });
+
+    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(2);
+  });
+
+  /*
+   * A game restored from a save written before the recap shipped has no
+   * history, so the streak derives as 0 while the score is genuinely 3. The
+   * game is still banked — a knowing under-report beats losing the totals —
+   * and the server accepts it (`game-stats.test.ts` pins the accept case).
+   */
+  it('still records a game whose history predates the recap, with a zero streak', () => {
+    const { recordGameResult } = render({ questions: q, answerHistory: [], score: 3 });
+
+    expect(recordGameResult).toHaveBeenCalledExactlyOnceWith({
+      gameId: 'game-1',
+      totalQuestions: 4,
+      correctAnswers: 3,
+      bestStreak: 0,
+    });
+  });
+
+  /*
+   * **The duplicate guard.** A save written before `gameId` existed restores
+   * with `null`, and minting one here would produce a fresh id on every reload
+   * of this screen — inflating the totals on each one, which is precisely what
+   * the id exists to prevent. Not banking it is the cheaper mistake.
+   */
+  it('records nothing when the game has no id', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [
+        answeredWith('q0:right'),
+        answeredWith('q1:right'),
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
+      score: 4,
+      gameId: null,
+    });
+
+    expect(recordGameResult).not.toHaveBeenCalled();
   });
 });

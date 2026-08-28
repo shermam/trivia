@@ -46,7 +46,7 @@ export const LEGAL_AWAITING_PROFESSIONAL_REVIEW = true;
  * date, and "Draft — not yet published" (what this said while the branch sat
  * open) is not one, least of all on a page that is published.
  */
-export const LEGAL_LAST_UPDATED = '23 August 2026';
+export const LEGAL_LAST_UPDATED = '27 August 2026';
 
 /**
  * The single published contact route, used by both documents for privacy

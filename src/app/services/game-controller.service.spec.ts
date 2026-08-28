@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import {
   ALL_LIFELINES_AVAILABLE,
   Answer,
+  GameConfig,
   SKIPPED,
   TIMED_OUT,
   TriviaQuestion,
@@ -337,6 +338,54 @@ describe('GameControllerService persistence (B8)', () => {
     });
 
     expect(fresh.answerHistory()).toEqual([]);
+  });
+
+  /*
+   * `gameId` — the idempotency key behind `users/{uid}`. It has to survive a
+   * reload, because the reload is exactly the case it exists for: `/game-over`
+   * is deliberately kept restorable so the score about to be submitted is not
+   * lost, and a fresh id on each refresh would bank the same game again every
+   * time.
+   */
+  it('carries the game id through a reload', async () => {
+    const service = await playAndPersist(10, 3, 2);
+    service.gameId.set('game-xyz');
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    expect((await reload()).gameId()).toBe('game-xyz');
+  });
+
+  it('clears the game id when the game is reset', async () => {
+    const service = await playAndPersist(10, 3, 2);
+    service.gameId.set('game-xyz');
+
+    service.resetGame();
+
+    expect(service.gameId()).toBeNull();
+  });
+
+  // Minted at start, not at game-over — and a *new* one each time, or two
+  // games in a session would collide and the second would never be banked.
+  it('mints a fresh game id for each new game', async () => {
+    TestBed.resetTestingModule();
+    const service = setupWithQuestionSource(3);
+    const config: GameConfig = {
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    };
+
+    await service.startGame(config);
+    const first = service.gameId();
+    await service.startGame(config);
+    const second = service.gameId();
+
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
   });
 
   // Reproduces the e2e failure: choosing "no limit" and reloading must not

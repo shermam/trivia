@@ -23,6 +23,16 @@ export interface AccountExport {
   };
   /** One entry per board the player has a score on (finding G7); empty if none. */
   leaderboardEntries: Record<string, unknown>[];
+  /**
+   * Lifetime totals from `users/{uid}`, or an explicit `null` when the account
+   * has never finished a game — which is a normal state, since the document is
+   * created lazily on the first completed one.
+   *
+   * `null` rather than an absent key, deliberately: an absent key reads as "we
+   * are not telling you", an explicit null reads as "there is nothing". The
+   * same convention `notHeldHere` exists for.
+   */
+  gameplayStats: Record<string, unknown> | null;
   contributedQuestions: Record<string, unknown>[];
   billing: {
     stripeCustomerId: string | null;
@@ -48,6 +58,7 @@ export function buildAccountExport(input: {
   >;
   leaderboardEntries: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
+  gameplayStats: Record<string, unknown> | null;
   stripeCustomerId: string | null;
   subscriptions: Record<string, unknown>[];
   checkoutSessions: Record<string, unknown>[];
@@ -66,6 +77,7 @@ export function buildAccountExport(input: {
       lastSignInAt: input.user.metadata.lastSignInTime ?? null,
     },
     leaderboardEntries: input.leaderboardEntries,
+    gameplayStats: input.gameplayStats,
     contributedQuestions: input.contributedQuestions,
     billing: {
       stripeCustomerId: input.stripeCustomerId,

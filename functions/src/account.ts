@@ -45,6 +45,10 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // pre-migration row — a deletion that missed any of them would leave the
     // user's name and score publicly readable after they asked to be removed.
     await Promise.all(leaderboardPathsFor(uid).map((path) => firestore.doc(path).delete()));
+    // Lifetime totals. A delete on a document that was never created is a
+    // no-op, which is the normal case for an account that never finished a
+    // game — the document is created lazily by `recordGameResult`.
+    await firestore.collection('users').doc(uid).delete();
     await deleteCustomerRecord(uid);
     await getAuth().deleteUser(uid);
   } catch (error) {
@@ -80,7 +84,7 @@ export const exportAccountData = onCall(async (request) => {
   const customerRef = firestore.collection('customers').doc(uid);
 
   try {
-    const [user, leaderboard, questions, customer, subscriptions, checkouts, portals] =
+    const [user, leaderboard, stats, questions, customer, subscriptions, checkouts, portals] =
       await Promise.all([
         getAuth().getUser(uid),
         // One read per board. A player can hold an entry on each timing
@@ -91,6 +95,7 @@ export const exportAccountData = onCall(async (request) => {
             firestore.doc(`leaderboards/${board}/entries/${uid}`).get(),
           ),
         ),
+        firestore.collection('users').doc(uid).get(),
         firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
         customerRef.get(),
         customerRef.collection('subscriptions').get(),
@@ -111,6 +116,9 @@ export const exportAccountData = onCall(async (request) => {
       }))
         .filter(({ snapshot }) => snapshot.exists)
         .map(({ board, snapshot }) => ({ board, ...snapshot.data() })),
+      // Explicit null rather than an absent key when the account has never
+      // finished a game — see `AccountExport.gameplayStats`.
+      gameplayStats: stats.exists ? (stats.data() as Record<string, unknown>) : null,
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
       subscriptions: subscriptions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),

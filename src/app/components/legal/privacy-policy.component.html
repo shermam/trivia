@@ -98,6 +98,24 @@
     may hold up to one entry on each, and each keeps only your best score.
   </p>
 
+  <h3>Your gameplay totals — these are private to you</h3>
+  <p>
+    Once you have finished a game while signed in, we keep a single record of your running totals:
+    how many games you have finished, how many questions you have been asked, how many you got
+    right, your longest run of correct answers within one game, when those totals started being
+    kept, and when they were last updated. It also holds the identifier of the most recent game and
+    a short-lived count of how many games you have banked in the past hour, both of which exist to
+    stop the same game being counted twice or the totals being inflated.
+  </p>
+  <p>
+    <strong>Only you can read it.</strong> It is never shown to other players and never appears on a
+    leaderboard. We keep no per-game history: not what you were asked, not what you answered, and no
+    record of any individual game beyond the most recent one's identifier and the time it was
+    banked. Nothing is kept at all until you finish your first game while signed in, and
+    <strong>nothing is kept for anonymous play</strong>. Deleting your account deletes it, and
+    &ldquo;Export my data&rdquo; returns it in full.
+  </p>
+
   <h3>Subscription records</h3>
   <p>
     If you subscribe to Pro we store the status of your subscription, which plan and price it is
@@ -109,8 +127,8 @@
   <p>
     Where the GDPR, UK GDPR or Brazil's LGPD apply to you, these are the grounds we rely on. We do
     not ask for consent for any of it, because none of it is the kind of processing that consent
-    would be the right basis for — there is no advertising, profiling or tracking here to consent
-    to.
+    would be the right basis for — there is no advertising and no tracking here to consent to, and
+    the only thing resembling a profile is the tally of your own games, which only you can see.
   </p>
   <table>
     <thead>
@@ -151,11 +169,25 @@
         <td>Other players are actively drawing on it; removing it would break the game for them</td>
         <td>Legitimate interests</td>
       </tr>
+      <tr>
+        <td>Keep your running gameplay totals</td>
+        <td>So you can see your own progress across games</td>
+        <td>Legitimate interests</td>
+      </tr>
+      <tr>
+        <td>Count how many games you banked in the past hour</td>
+        <td>
+          So one account cannot inflate its own totals by submitting the same game over and over
+        </td>
+        <td>Legitimate interests</td>
+      </tr>
     </tbody>
   </table>
   <p>
     <strong>No automated decision-making and no profiling.</strong> Nothing here makes a decision
-    about you automatically, and no profile of you is built.
+    about you automatically. We do keep running totals of your own play, described above, and show
+    them only to you &mdash; they are not used to categorise you, to predict anything about you, or
+    to change what the app does.
   </p>
 
   <h2>Payments</h2>
@@ -265,8 +297,8 @@
   </p>
   <ul>
     <li>
-      <strong>Your account, leaderboard entries and billing records</strong> are kept for as long as
-      your account exists. Delete your account and they go — see below.
+      <strong>Your account, leaderboard entries, gameplay totals and billing records</strong> are
+      kept for as long as your account exists. Delete your account and they go — see below.
     </li>
     <li>
       <strong>Checkout and billing-portal records</strong> expire 24 hours after they are created
@@ -304,13 +336,14 @@
   <ul>
     <li>
       <strong>Download my data</strong> gives you a JSON file containing your account details, your
-      leaderboard entries on every board, every question you have contributed, and your billing
-      records. It also lists what is deliberately not in it and why.
+      leaderboard entries on every board, your gameplay totals, every question you have contributed,
+      and your billing records. It also lists what is deliberately not in it and why.
     </li>
     <li>
       <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
       record and the payment methods stored against it, deletes your leaderboard entries on every
-      board, deletes your billing records, and deletes your sign-in account itself.
+      board, deletes your gameplay totals, deletes your billing records, and deletes your sign-in
+      account itself.
       <strong
         >Questions you contributed are kept, with your authorship replaced by a
         <code>[deleted-user]</code> marker.</strong

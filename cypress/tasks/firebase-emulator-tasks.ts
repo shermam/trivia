@@ -87,6 +87,12 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         deleteCollection(firestore.collection('custom_questions')),
         deleteCollection(firestore.collection('question_reports')),
         deleteCollection(firestore.collection('user_roles')),
+        deleteCollection(firestore.collection('users')),
+        // Pre-existing gap, fixed while this list is being touched: a quota
+        // window carried from one spec into the next would make a later
+        // `custom_questions` write fail for a reason that spec knows nothing
+        // about.
+        deleteCollection(firestore.collection('custom_question_quota')),
         // `recursiveDelete` (not the plain `deleteCollection` helper above)
         // because each `customers/{uid}` doc owns subcollections
         // (`subscriptions`, `checkout_sessions`, `payments`) that a
@@ -136,8 +142,24 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
      * and asserting only on the UI would prove nothing about any of them —
      * the whole risk is a step that silently doesn't run.
      */
+    /**
+     * How many `users/{uid}` documents exist at all.
+     *
+     * Exists for the anonymous case, where there is no uid to inspect: the
+     * claim being tested is that *nobody* got a document, and counting the
+     * collection states that directly rather than inferring it from one uid
+     * the test would have to dig out of the browser's auth state.
+     *
+     * Safe as a full-collection read only because `resetBackend()` empties it
+     * before every test — this is the emulator, not the real project.
+     */
+    async countGameplayStatsDocuments() {
+      const snapshot = await firestore.collection('users').get();
+      return snapshot.size;
+    },
+
     async inspectAccountState({ uid, questionId }: AccountStateQuery) {
-      const [authUser, leaderboardDoc, questionDoc, customerDoc] = await Promise.all([
+      const [authUser, leaderboardDoc, questionDoc, customerDoc, statsDoc] = await Promise.all([
         auth.getUser(uid).catch(() => null),
         Promise.all(
           LEADERBOARD_BOARDS.map((board) =>
@@ -148,6 +170,7 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
           ? firestore.collection('custom_questions').doc(questionId).get()
           : Promise.resolve(null),
         firestore.collection('customers').doc(uid).get(),
+        firestore.collection('users').doc(uid).get(),
       ]);
       return {
         authUserExists: authUser !== null,
@@ -157,6 +180,11 @@ export function registerFirebaseEmulatorTasks(on: Cypress.PluginEvents): void {
         customerExists: customerDoc.exists,
         questionExists: questionDoc?.exists ?? false,
         questionCreatedBy: (questionDoc?.data()?.['createdBy'] as string | undefined) ?? null,
+        // The whole document, not a boolean. A test that can only ask "does it
+        // exist" cannot tell a correct total from a doubled one — and the
+        // double-count on reload is the specific defect `lastGameId` exists to
+        // prevent, so the assertion has to be able to read the number.
+        gameplayStats: statsDoc.exists ? (statsDoc.data() as Record<string, unknown>) : null,
       };
     },
 
