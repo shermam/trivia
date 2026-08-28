@@ -288,6 +288,78 @@ describe('anonymous game flow (open_trivia source)', () => {
   });
 
   /**
+   * The recap grows on purpose — but it must grow **downwards**, and nothing
+   * about that is guaranteed by where it sits in the template.
+   *
+   * The game-over card is vertically centred (`min-h-screen flex items-center`),
+   * so anything that makes it taller can lift the whole thing: that is exactly
+   * how the result banner moved the card 43px
+   * ([#128](https://github.com/shermam/trivia/pull/128)). `CLAUDE.md` §4.4 asks
+   * for the assertion to live where a real layout exists, which is here — jsdom
+   * has no layout and Lighthouse only loads `/`.
+   *
+   * **This is also the measurement behind the placement decision.** `FEAT-001`
+   * asked for the recap "directly below the score summary"; #137 put it after
+   * the leaderboard instead. Hoisting the card back above the score summary in
+   * a real browser and running exactly this measurement moves the score card
+   * and the leaderboard **545px** at 1024×1000, against **0px** as shipped — so
+   * the deviation is a measured one rather than an argued one, and this test is
+   * what would notice it being undone.
+   *
+   * Two details the reading depends on. It is **document-relative**
+   * (`top + scrollY`), because scrolling the toggle into view would otherwise
+   * be measured as layout. And the leaderboard is awaited first: its own
+   * arrival is a 508px change of its own, and catching it mid-flight would
+   * attribute that to the recap.
+   *
+   * `FEAT-046` (the deferred open/close transition, `known-gaps.md`) is the
+   * change most likely to break this: the only way to animate to an `auto`
+   * height is an always-mounted panel with `grid-template-rows: 0fr → 1fr`,
+   * which alters what the collapsed card contributes to the stack.
+   */
+  it('does not move anything above it when the recap expands', () => {
+    cy.viewport(1024, 1000);
+    cy.startGame(5);
+    CORRECT_ANSWERS.forEach((answer) => {
+      cy.answerQuestion(answer);
+    });
+    cy.location('pathname').should('eq', '/game-over');
+
+    // Settle the board first — see above.
+    cy.get('[data-cy="leaderboard-skeleton"]').should('not.exist');
+    cy.get('[data-cy="recap-toggle"]').scrollIntoView();
+
+    const WATCHED = ['score-action', 'leaderboard-body', 'recap-toggle'] as const;
+    const tops = (win: Cypress.AUTWindow) =>
+      Object.fromEntries(
+        WATCHED.map((name) => [
+          name,
+          Math.round(
+            win.document.querySelector(`[data-cy="${name}"]`)!.getBoundingClientRect().top +
+              win.scrollY,
+          ),
+        ]),
+      );
+
+    cy.window().then((win) => {
+      const before = tops(win);
+
+      cy.get('[data-cy="recap-toggle"]').click();
+      cy.get('[data-cy="recap-panel"]').should('exist');
+
+      // One retrying callback over all three, rather than three chained
+      // `should`s — they retry together and the subject never moves
+      // (`CLAUDE.md` §4.6).
+      cy.window().should((after) => {
+        expect(
+          tops(after),
+          'expanding the recap must not move the score card, the leaderboard, or the toggle itself',
+        ).to.deep.equal(before);
+      });
+    });
+  });
+
+  /**
    * `FEAT-002`. The lifelines are three interactions the unit layer can only
    * check in pieces — jsdom has no real click-to-disable, and the ids recorded
    * during play are only proved to match the recap by a real round.
