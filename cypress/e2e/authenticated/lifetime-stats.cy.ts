@@ -37,6 +37,20 @@ describe('lifetime gameplay totals', () => {
     });
   });
 
+  /**
+   * Every test here asserts an exact tally, so every game they play is
+   * **unlimited**.
+   *
+   * The default 15-second limit is a real deadline, and on a loaded runner a
+   * click can land after it expires: the question auto-advances as wrong and
+   * the game ends 4/5. That is what made this spec red on `main` — the
+   * assertion reported `correctAnswers` 4 against an expected 5, with nothing
+   * in the message pointing at a clock, and the callable was right about the
+   * game it was told about. Removing the deadline removes the whole class of
+   * failure, and costs nothing: `functions/src/game-stats.ts` never reads the
+   * time limit, so an unlimited game banks identically. The countdown itself
+   * is `adjustable-timer.cy.ts`'s subject, not this file's.
+   */
   function playFullGame() {
     CORRECT_ANSWERS.forEach((answer) => {
       cy.answerQuestion(answer);
@@ -49,7 +63,7 @@ describe('lifetime gameplay totals', () => {
     cy.visit('/');
     cy.signInViaUi(email, password);
 
-    cy.startNewGame(5);
+    cy.startNewGame(5, 'unlimited');
     playFullGame();
 
     // `waitForGameplayStats` rather than a bare `.should()`: the call is
@@ -93,7 +107,7 @@ describe('lifetime gameplay totals', () => {
     cy.visit('/');
     cy.signInViaUi(email, password);
 
-    cy.startNewGame(5);
+    cy.startNewGame(5, 'unlimited');
     playFullGame();
 
     cy.wait('@recordGameResult', { timeout: CALLABLE_TIMEOUT_MS });
@@ -142,7 +156,7 @@ describe('lifetime gameplay totals', () => {
    * browser's auth state, which would be the more fragile half of the check.
    */
   it('keeps nothing for an anonymous player', () => {
-    cy.startGame(5);
+    cy.startGame(5, 'unlimited');
     playFullGame();
 
     // A positive anchor first. The count below is a negative assertion, and a

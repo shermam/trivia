@@ -1,4 +1,7 @@
 import { deleteOfflineDatabase } from './offline-storage';
+
+/** The three options the setup form's time-limit radiogroup offers (G7). */
+type TimeLimit = '15' | '30' | 'unlimited';
 import type {
   AccountState,
   AccountStateQuery,
@@ -33,14 +36,14 @@ declare global {
        * `amount`, starts the game, and waits until `/play` is actually the
        * active route.
        */
-      startGame(amount?: 5 | 10 | 15 | 20 | 25): Chainable<null>;
+      startGame(amount?: 5 | 10 | 15 | 20 | 25, timeLimit?: TimeLimit): Chainable<null>;
       /**
        * Starts another game without revisiting the page — for replaying via
        * "Play Again" within the same test/session, where the app is already
        * loaded and on `/`. Categories are already cached in `TriviaService`
        * from the first `startGame()`, so no new `@categories` request fires.
        */
-      startNewGame(amount?: 5 | 10 | 15 | 20 | 25): Chainable<null>;
+      startNewGame(amount?: 5 | 10 | 15 | 20 | 25, timeLimit?: TimeLimit): Chainable<null>;
       /** Clicks the answer button matching this exact text on the active quiz question. */
       answerQuestion(answerText: string): Chainable<null>;
       /** Opens the top-bar auth menu (only valid while it's closed). */
@@ -98,19 +101,41 @@ Cypress.Commands.add('stubOpenTrivia', () => {
   }).as('questions');
 });
 
-Cypress.Commands.add('startGame', (amount = 5) => {
+/**
+ * Picks a time limit on the setup form, when a caller asks for one.
+ *
+ * `force` because the real control is a visually-hidden radio behind a styled
+ * label, the same way `adjustable-timer.cy.ts` drives it.
+ *
+ * **Passing `'unlimited'` is how a spec opts out of the countdown**, which
+ * matters to any spec asserting an exact score. The default 15s limit is a
+ * real deadline: on a loaded runner a click can land after it expires, the
+ * question auto-advances as wrong, and the game ends 4/5 with nothing about
+ * the failure pointing at a clock.
+ */
+function pickTimeLimit(timeLimit: TimeLimit): void {
+  cy.get(`[data-cy="time-limit-${timeLimit}"]`).click({ force: true });
+}
+
+Cypress.Commands.add('startGame', (amount = 5, timeLimit) => {
   cy.stubOpenTrivia();
   cy.visit('/');
   cy.wait('@categories');
   cy.get('#amount').select(String(amount));
+  if (timeLimit) {
+    pickTimeLimit(timeLimit);
+  }
   cy.contains('button', 'Start Game').click();
   cy.wait('@questions');
   waitForPlayRoute();
 });
 
-Cypress.Commands.add('startNewGame', (amount = 5) => {
+Cypress.Commands.add('startNewGame', (amount = 5, timeLimit) => {
   cy.location('pathname').should('eq', '/');
   cy.get('#amount').select(String(amount));
+  if (timeLimit) {
+    pickTimeLimit(timeLimit);
+  }
   cy.contains('button', 'Start Game').click();
   cy.wait('@questions');
   waitForPlayRoute();
