@@ -139,8 +139,30 @@ function waitForPlayRoute(): void {
   cy.get('[data-cy="question-text"]').should('be.visible');
 }
 
+/**
+ * Scoped to `[data-cy=answer-option]`, and that scoping is the whole command.
+ *
+ * `cy.contains('button', text)` is a substring match that silently takes the
+ * **first** hit in DOM order, and the top bar is above the quiz. A signed-in
+ * account chip renders the user's display name or email inside the trigger
+ * button (`top-bar.component.html`, as the `sr-only` accessible name), so with
+ * an address like `stats-1787954295926-k3x@example.com` this command answered
+ * "4" by clicking the account chip and opening the auth menu.
+ *
+ * The reason it went undiagnosed is worth more than the fix. The countdown
+ * **hid** it: the question nobody answered timed out, auto-advanced as wrong,
+ * and the game finished 4/5 — so the symptom was `correctAnswers` short by
+ * one, which reads as a scoring or stats bug and got investigated as a slow
+ * runner. Only removing the deadline made it fail loudly, on the *next*
+ * question, as "cannot find 'True'".
+ *
+ * So: anonymous specs passed, signed-in specs with digits in the address did
+ * not, and nothing in either failure named a button. `CLAUDE.md` §4.6 already
+ * warns about exactly this — it is the same defect as
+ * `cy.contains('button', 'Approve')` matching an "Approved" tab.
+ */
 Cypress.Commands.add('answerQuestion', (answerText: string) => {
-  cy.contains('button', answerText).click();
+  cy.contains('[data-cy="answer-option"]', answerText).click();
 });
 
 Cypress.Commands.add('openAuthMenu', () => {
