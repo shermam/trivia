@@ -32,7 +32,22 @@ export default defineConfig({
     // emulator already covers is worth. Its writes would also survive the
     // run: `finalCleanup` sweeps uids and seeded docs, not reports, so each
     // preview would leave real rows in the owner's review queue.
-    excludeSpecPattern: ['cypress/e2e/unauthenticated/question-reporting.cy.ts'],
+    // `boot-fallback.cy.ts` is emulator-only for a reason that has nothing to
+    // do with safety: it cannot work here. Two of its three tests force the
+    // entry script to 404 with `cy.intercept`, and `firebase.json` serves
+    // `**/*.@(js|css)` as `max-age=31536000, immutable` — so by the time this
+    // spec runs, an earlier spec has already loaded the app and the browser
+    // satisfies the script from its own HTTP cache. Nothing reaches the
+    // network, the intercept never matches, and `cy.wait` fails with "No
+    // request ever occurred". That is exactly how it failed on the first CI
+    // run of the file, and it is a property of the deployment rather than
+    // something the spec can be written around. The cost is that the preview
+    // suite does not check the notice is absent on a healthy boot; the
+    // emulator suite does.
+    excludeSpecPattern: [
+      'cypress/e2e/unauthenticated/question-reporting.cy.ts',
+      'cypress/e2e/unauthenticated/boot-fallback.cy.ts',
+    ],
     fixturesFolder: 'cypress/fixtures',
     video: false,
     // Real network hops (Hosting CDN + production Auth/Firestore) instead of
