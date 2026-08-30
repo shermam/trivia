@@ -50,6 +50,15 @@ describe('lifetime gameplay totals', () => {
    * failure, and costs nothing: `functions/src/game-stats.ts` never reads the
    * time limit, so an unlimited game banks identically. The countdown itself
    * is `adjustable-timer.cy.ts`'s subject, not this file's.
+   *
+   * **All three tests use `startGame`, including the two that have already
+   * loaded the page.** `startNewGame` skips `cy.wait('@categories')` by design
+   * — its contract is "the app is loaded and categories are cached" — and
+   * picking the time limit without that wait made both tests using it fail in
+   * CI while the one using `startGame` passed. The extra page load is a small
+   * price for touching the setup form only once it has settled, which is the
+   * order `adjustable-timer.cy.ts` has always used. Signing in survives the
+   * revisit; the reload in the second test already depends on that.
    */
   function playFullGame() {
     CORRECT_ANSWERS.forEach((answer) => {
@@ -63,7 +72,7 @@ describe('lifetime gameplay totals', () => {
     cy.visit('/');
     cy.signInViaUi(email, password);
 
-    cy.startNewGame(5, 'unlimited');
+    cy.startGame(5, 'unlimited');
     playFullGame();
 
     // `waitForGameplayStats` rather than a bare `.should()`: the call is
@@ -107,7 +116,7 @@ describe('lifetime gameplay totals', () => {
     cy.visit('/');
     cy.signInViaUi(email, password);
 
-    cy.startNewGame(5, 'unlimited');
+    cy.startGame(5, 'unlimited');
     playFullGame();
 
     cy.wait('@recordGameResult', { timeout: CALLABLE_TIMEOUT_MS });

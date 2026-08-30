@@ -114,7 +114,14 @@ Cypress.Commands.add('stubOpenTrivia', () => {
  * the failure pointing at a clock.
  */
 function pickTimeLimit(timeLimit: TimeLimit): void {
-  cy.get(`[data-cy="time-limit-${timeLimit}"]`).click({ force: true });
+  // `should('be.checked')` is not decoration. `force` skips every actionability
+  // check, so a click landing while the setup form is still re-rendering is
+  // simply lost — and a lost click here is silent: the game runs on the default
+  // 15s limit and the only symptom is a score that is occasionally short by
+  // one, blamed on whatever the test was really asserting. The assertion
+  // retries until the control actually holds the value, so the failure mode
+  // becomes "the radio never got checked" instead.
+  cy.get(`[data-cy="time-limit-${timeLimit}"]`).click({ force: true }).should('be.checked');
 }
 
 Cypress.Commands.add('startGame', (amount = 5, timeLimit) => {
