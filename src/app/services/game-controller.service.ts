@@ -14,6 +14,7 @@ import {
 } from '../models/question.model';
 import { giveUpAfter } from '../utils/give-up-after.util';
 import { shuffleArray } from '../utils/shuffle.util';
+import { DailyGameLimitService } from './daily-game-limit.service';
 import { GamePersistenceService } from './game-persistence.service';
 import { TriviaService } from './trivia.service';
 
@@ -50,6 +51,7 @@ const GUARD_RESTORE_TIMEOUT_MS = 10_000;
 @Injectable({ providedIn: 'root' })
 export class GameControllerService {
   private readonly triviaService = inject(TriviaService);
+  private readonly dailyLimit = inject(DailyGameLimitService);
   private readonly persistence = inject(GamePersistenceService);
   private readonly router = inject(Router);
 
@@ -325,9 +327,17 @@ export class GameControllerService {
     return this.writeQueue;
   }
 
+  /**
+   * Set when a game is refused because the day's free allowance is spent.
+   * Cleared by starting a game that is allowed, so the setup screen never shows
+   * a stale refusal after midnight or after an upgrade.
+   */
+  readonly limitReached = signal(false);
+
   async startGame(config: GameConfig): Promise<void> {
     this.isLoading.set(true);
     this.loadError.set(null);
+    this.limitReached.set(false);
 
     try {
       const questions = await this.triviaService.getQuestions(config);
@@ -336,6 +346,15 @@ export class GameControllerService {
         this.loadError.set(
           'No questions were found for the selected options. Try a different category, difficulty, or source.',
         );
+        return;
+      }
+
+      // Spent here, after the questions are in hand and before any state is
+      // committed — so a fetch that fails or comes back empty costs the player
+      // nothing. Charging at submit would bill a bad connection, which is the
+      // one moment a free player is least inclined to forgive a paywall.
+      if (!(await this.dailyLimit.consumeGame())) {
+        this.limitReached.set(true);
         return;
       }
 

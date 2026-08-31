@@ -41,8 +41,11 @@ export const OFFLINE_DB_NAME = new InjectionToken<string>('OFFLINE_DB_NAME', {
  * - **4** — `questions` re-keyed from the question text to a source-aware
  *   `dedupeKey` (finding C4). A store's `keyPath` cannot be changed in place,
  *   so this one does have to recreate it; `game-state` is still preserved.
+ * - **5** — adds `daily-limit`, the free tier's per-device game counter
+ *   (`FEAT-014`). Purely additive: nothing existing is touched, and a browser
+ *   arriving from any earlier version keeps its questions and its saved game.
  */
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /** Rolling pool of prefetched questions (`OfflineQuestionsService`). Keyed by question text. */
 export const QUESTIONS_STORE = 'questions';
@@ -52,6 +55,19 @@ export const GAME_STATE_STORE = 'game-state';
 
 /** There is only ever one game in flight, so it always occupies the same key. */
 export const CURRENT_GAME_KEY = 'current';
+
+/**
+ * The free tier's daily game counter (`DailyGameLimitService`). One record.
+ *
+ * Here rather than in its own database for the reason this file exists: a
+ * database has one version shared by every connection, and two services
+ * opening the same name at different versions is how a store gets silently
+ * dropped. One database, one version, one schema.
+ */
+export const DAILY_LIMIT_STORE = 'daily-limit';
+
+/** There is only ever one counter, so it always occupies the same key. */
+export const DAILY_LIMIT_KEY = 'today';
 
 /**
  * Opens the app's IndexedDB database, shared by every store in it.
@@ -128,5 +144,11 @@ function upgrade(db: IDBDatabase, oldVersion: number): void {
   // Never recreated: it holds an in-progress game, which is not refillable.
   if (!db.objectStoreNames.contains(GAME_STATE_STORE)) {
     db.createObjectStore(GAME_STATE_STORE, { keyPath: 'id' });
+  }
+
+  // Added in v5. A record for a day that is not today reads as a fresh
+  // allowance anyway, so there is nothing to migrate into it.
+  if (!db.objectStoreNames.contains(DAILY_LIMIT_STORE)) {
+    db.createObjectStore(DAILY_LIMIT_STORE, { keyPath: 'id' });
   }
 }

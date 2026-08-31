@@ -12,6 +12,10 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { DEFAULT_TIME_LIMIT, GameConfig, TimeLimitOption } from '../../models/question.model';
 import { ConnectivityService } from '../../services/connectivity.service';
+import {
+  DAILY_FREE_GAME_LIMIT,
+  DailyGameLimitService,
+} from '../../services/daily-game-limit.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
 import { SubscriptionService } from '../../services/subscription.service';
@@ -36,6 +40,9 @@ export class GameSetupComponent implements OnInit {
   protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly connectivity = inject(ConnectivityService);
   protected readonly offlineQuestions = inject(OfflineQuestionsService);
+  protected readonly dailyLimit = inject(DailyGameLimitService);
+
+  protected readonly dailyGameLimit = DAILY_FREE_GAME_LIMIT;
 
   protected readonly categories = signal<TriviaCategory[]>([]);
   protected readonly categoriesError = signal<string | null>(null);
@@ -84,6 +91,7 @@ export class GameSetupComponent implements OnInit {
   // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
   ngOnInit(): void {
     void this.loadCategories();
+    void this.dailyLimit.refresh();
     this.form.controls.timeLimit.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.timeLimit.set(value));
