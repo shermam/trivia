@@ -240,7 +240,8 @@ service cloud.firestore {
       let data = request.resource.data;
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
-                 'incorrect_answers', 'createdBy', 'createdAt', 'status']
+                 'incorrect_answers', 'createdBy', 'createdAt', 'status',
+                 'sourceUrl', 'sourceTitle']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
             && data.type in ['multiple', 'boolean']
@@ -255,6 +256,27 @@ service cloud.firestore {
             // The old ceiling of 5 allowed six answers in total while the quiz
             // only ever labelled four (finding B2).
             && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 3
+            // Source attribution (FEAT-022), both optional. A question with no
+            // citation is normal — Open Trivia DB exposes none, so most
+            // questions a player sees could never have one, and the UI shows
+            // nothing rather than marking them unverified.
+            //
+            // `https://` only. The app is served over a CSP that would not load
+            // an `http://` page, and a citation the reader cannot open is worse
+            // than none because it looks checked. Prefix-matched rather than
+            // pattern-matched: `matches()` on a URL is a regex nobody can read
+            // and this only has to refuse the one scheme that cannot work.
+            && (!('sourceUrl' in data)
+                || (data.sourceUrl is string
+                    && data.sourceUrl.size() > 8
+                    && data.sourceUrl.size() <= 500
+                    && data.sourceUrl[0:8] == 'https://'))
+            // A title with no URL is allowed: it is a citation of something
+            // that has no link — a book, an edition, a printed source.
+            && (!('sourceTitle' in data)
+                || (data.sourceTitle is string
+                    && data.sourceTitle.size() > 0
+                    && data.sourceTitle.size() <= 200))
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
             // click against `correct_answer` by text, so the wrong option

@@ -688,6 +688,19 @@
                         </span>
                       </p>
                     }
+
+                    <!--
+                      Optional source attribution (FEAT-022). Absent on the
+                      overwhelming majority of questions — everything from Open
+                      Trivia DB, and every contribution written before the
+                      field existed — so the component renders nothing at all
+                      rather than a placeholder or an "unverified" badge, which
+                      would turn a missing optional field into an accusation.
+                    -->
+                    <app-source-link
+                      [url]="row.question.sourceUrl"
+                      [title]="row.question.sourceTitle"
+                    />
                   </div>
                 </div>
               </li>

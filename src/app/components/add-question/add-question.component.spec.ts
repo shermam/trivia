@@ -81,6 +81,8 @@ function setup(
         question: { setValue: (v: string) => void };
         correctAnswer: { setValue: (v: string) => void };
         type: { setValue: (v: string) => void };
+        sourceUrl: { setValue: (v: string) => void };
+        sourceTitle: { setValue: (v: string) => void };
         incorrectAnswers: { controls: { setValue: (v: string) => void }[] };
       };
     };
@@ -185,6 +187,121 @@ describe('AddQuestionComponent validation', () => {
   });
 });
 
+/**
+ * `FEAT-022`. Both source fields are optional, and the whole feature turns on
+ * that staying true: the very first version of this made `sourceTitle` invalid
+ * when empty, which left the form permanently invalid for every contributor
+ * who did not cite anything — a Save button that silently did nothing, the
+ * exact symptom finding B4 was about.
+ */
+describe('AddQuestionComponent source attribution', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('submits with no source at all, writing neither key', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    const written = addCustomQuestion.mock.calls[0][0];
+    // Absent, not empty: `firestore.rules` refuses an empty `sourceTitle`, and
+    // a missing key is the honest encoding of "no citation given".
+    expect('sourceUrl' in written).toBe(false);
+    expect('sourceTitle' in written).toBe(false);
+  });
+
+  it('writes both fields when both are given, trimmed', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('  https://example.org/h2o  ');
+    component.form.controls.sourceTitle.setValue('  Example Journal  ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0]).toMatchObject({
+      sourceUrl: 'https://example.org/h2o',
+      sourceTitle: 'Example Journal',
+    });
+  });
+
+  it('accepts a title with no URL — a book has no href', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceTitle.setValue('Feynman Lectures, Vol. II');
+
+    await component.onSubmit();
+
+    const written = addCustomQuestion.mock.calls[0][0];
+    expect(written.sourceTitle).toBe('Feynman Lectures, Vol. II');
+    expect('sourceUrl' in written).toBe(false);
+  });
+
+  it('accepts a URL with no title', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('https://example.org/h2o');
+
+    await component.onSubmit();
+
+    const written = addCustomQuestion.mock.calls[0][0];
+    expect(written.sourceUrl).toBe('https://example.org/h2o');
+    expect('sourceTitle' in written).toBe(false);
+  });
+
+  it('drops a whitespace-only title rather than writing one the rules refuse', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceTitle.setValue('    ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('sourceTitle' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  /**
+   * Caught in the form rather than by Firestore on purpose: without this the
+   * contributor's only feedback is a bare `permission-denied` mapped to a
+   * generic "could not save", which names no field and offers no fix.
+   */
+  it.each([
+    ['plain http', 'http://example.org/article'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a bare scheme', 'https://'],
+    ['a bare hostname', 'example.org'],
+  ])('refuses %s before it reaches the rules', async (_label, url) => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue(url);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+    expect(component.validationSummary()).toMatch(/source/i);
+  });
+
+  it('refuses a URL past the length the rules cap', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue(`https://example.org/${'a'.repeat(500)}`);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+  });
+
+  it('refuses a title past the length the rules cap', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceTitle.setValue('t'.repeat(201));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+  });
+});
+
 describe('AddQuestionComponent submit failures', () => {
   afterEach(() => TestBed.resetTestingModule());
 
@@ -256,6 +373,32 @@ describe('AddQuestionComponent rendered feedback', () => {
     const input: HTMLElement | null = fixture.nativeElement.querySelector('#category');
     expect(input?.getAttribute('aria-invalid')).toBe('true');
     expect(input?.getAttribute('aria-describedby')).toBe('category-error');
+  });
+
+  /**
+   * The regression this pins: `fieldLabels` is what the summary and the focus
+   * move are built from, and the two source controls were not in it. A bad
+   * link therefore blocked the submit while naming nothing and focusing
+   * nothing — the same "Save does nothing" experience the whole error-handling
+   * path in this component exists to prevent.
+   */
+  it('names and focuses a malformed source link, rather than failing silently', async () => {
+    const { fixture, component, fillValidForm } = setup();
+    fixture.detectChanges();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('example.org');
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    expect(component.validationSummary()).toMatch(/source link/i);
+    expect(document.activeElement?.id).toBe('sourceUrl');
+
+    const error: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl-error');
+    expect(error?.textContent).toMatch(/https:\/\//);
+    const input: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl');
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(input?.getAttribute('aria-describedby')).toBe('sourceUrl-error');
   });
 
   it('moves focus to the first invalid field so the problem is unmissable', async () => {

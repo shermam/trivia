@@ -23,6 +23,13 @@ export interface CustomQuestionSeed {
    */
   status?: 'approved' | 'pending' | 'rejected';
   createdAt?: number;
+  /**
+   * Optional source attribution (`FEAT-022`). Optional in the schema too, not
+   * merely here — almost no question in the bank has one, so a spec asserting
+   * the *absence* of a source link is testing the common case.
+   */
+  sourceUrl?: string;
+  sourceTitle?: string;
 }
 
 /**

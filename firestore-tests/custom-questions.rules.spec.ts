@@ -104,6 +104,157 @@ describe('custom_questions: read — approved is public, the rest is reviewers o
   });
 });
 
+/**
+ * `FEAT-022`. Two optional fields carrying where a contributed question came
+ * from. Both directions, because a suite of nothing but `assertFails` passes
+ * against a rule that denies everything (`CLAUDE.md` §4.6).
+ *
+ * The accept cases are the load-bearing ones here: the whole feature is
+ * optional fields, so a rule that refused them all would look exactly like a
+ * rule that worked, on every question written so far.
+ */
+describe('custom_questions: source attribution (FEAT-022)', () => {
+  it('accepts a question with no source at all — the normal case', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: validQuestion('pro') }),
+    );
+  });
+
+  it('accepts an https source with a title', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', {
+          sourceUrl: 'https://en.wikipedia.org/wiki/Water',
+          sourceTitle: 'Water — Wikipedia',
+        }),
+      }),
+    );
+  });
+
+  it('accepts a url with no title', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceUrl: 'https://example.org/a' }),
+      }),
+    );
+  });
+
+  /** A book or a printed edition has a citation and no link. */
+  it('accepts a title with no url', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceTitle: 'CRC Handbook, 95th ed.' }),
+      }),
+    );
+  });
+
+  it('refuses http, which the CSP would not load anyway', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceUrl: 'http://example.org/a' }),
+      }),
+    );
+  });
+
+  it('refuses a scheme that only looks like https', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceUrl: 'javascript:https://x' }),
+      }),
+    );
+  });
+
+  it('refuses a bare scheme with nothing after it', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceUrl: 'https://' }),
+      }),
+    );
+  });
+
+  it('refuses an over-long url', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceUrl: `https://e.org/${'a'.repeat(500)}` }),
+      }),
+    );
+  });
+
+  it('refuses a non-string url', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceUrl: 42 }),
+      }),
+    );
+  });
+
+  it('refuses an empty title', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceTitle: '' }),
+      }),
+    );
+  });
+
+  it('refuses an over-long title', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { sourceTitle: 'x'.repeat(201) }),
+      }),
+    );
+  });
+
+  /**
+   * **The regression that matters.** Widening the create allowlist must not
+   * widen what a reviewer may rewrite on somebody else's question — the update
+   * rule is `hasOnly(['status'])` and adding a field to `create` would sail
+   * straight past it if that rule ever loosened.
+   */
+  it('does not let a reviewer add or change a source', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'q1'), validQuestion('author'));
+    });
+    await grantReviewer(env, 'mod');
+
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), {
+        sourceUrl: 'https://example.org/injected',
+      }),
+    );
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), {
+        status: 'approved',
+        sourceUrl: 'https://example.org/injected',
+      }),
+    );
+  });
+
+  it('does not let the author rewrite their own source after submitting', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { sourceUrl: 'https://example.org/original' }),
+      );
+    });
+
+    await assertFails(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), {
+        sourceUrl: 'https://example.org/swapped',
+      }),
+    );
+  });
+});
+
 describe('custom_questions: create — who may write', () => {
   it('rejects a signed-out caller', async () => {
     await assertFails(
