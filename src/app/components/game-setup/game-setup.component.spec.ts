@@ -3,6 +3,10 @@ import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { GameConfig } from '../../models/question.model';
 import { ConnectivityService } from '../../services/connectivity.service';
+import {
+  DAILY_FREE_GAME_LIMIT,
+  DailyGameLimitService,
+} from '../../services/daily-game-limit.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
 import { SubscriptionService } from '../../services/subscription.service';
@@ -24,6 +28,20 @@ function setup() {
           hasResumableGame: signal(false),
           currentIndex: signal(0),
           totalQuestions: signal(0),
+          limitReached: signal(false),
+        },
+      },
+      // Stubbed rather than left real: these tests are about the config the
+      // form emits, and the real service would open IndexedDB to answer a
+      // question they do not ask.
+      {
+        provide: DailyGameLimitService,
+        useValue: {
+          isUnlimited: signal(false),
+          hasGamesLeft: signal(true),
+          remaining: signal(DAILY_FREE_GAME_LIMIT),
+          refresh: vi.fn(() => Promise.resolve()),
+          consumeGame: vi.fn(() => Promise.resolve(true)),
         },
       },
       { provide: TriviaService, useValue: { getCategories: () => Promise.resolve([]) } },

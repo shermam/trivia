@@ -280,18 +280,69 @@
         </p>
       </div>
 
-      <button
-        type="submit"
-        [disabled]="gameController.isLoading()"
-        class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
+      <!--
+        The allowance row. Rendered for everybody, always, from first paint —
+        which is what keeps it free of `CLAUDE.md` §4.4. Appearing once a signal
+        resolves would move the Start button down the screen at the exact moment
+        the reader is looking at it, and hiding it for Pro would move it back up
+        again. One row, one height, only the sentence inside it changes.
+      -->
+      <p
+        class="mb-3 text-center text-xs text-slate-500 dark:text-slate-400"
+        data-cy="daily-allowance"
       >
-        @if (gameController.isLoading()) {
-          Loading Questions&hellip;
+        @if (dailyLimit.isUnlimited()) {
+          Unlimited games with Pro.
+        } @else if (dailyLimit.hasGamesLeft()) {
+          {{ dailyLimit.remaining() }} of {{ dailyGameLimit }} free games left today.
         } @else {
-          <app-icon name="sparkles" [size]="16" />
-          Start Game
+          No free games left today.
         }
-      </button>
+      </p>
+
+      @if (gameController.limitReached() || !dailyLimit.hasGamesLeft()) {
+        <!--
+          In place rather than a modal, deliberately. A dialog would owe the
+          whole §4.5 contract — focus trap both ways, Escape, focus restore, and
+          the three traps §4.5 records about writing that trap wrongly — to
+          interrupt somebody who is already looking at the screen the answer is
+          on. `role="status"` because it replaces the control the player just
+          reached for, and a screen reader would otherwise be told nothing.
+        -->
+        <div
+          role="status"
+          data-cy="daily-limit-reached"
+          class="rounded-xl border-[1.5px] border-amber-300 bg-amber-50 px-4 py-3.5 text-center dark:border-amber-500/40 dark:bg-amber-500/10"
+        >
+          <p class="font-semibold text-slate-900 dark:text-slate-50">
+            That's your {{ dailyGameLimit }} free games for today.
+          </p>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            They reset at midnight. Pro removes the limit entirely.
+          </p>
+          <a
+            routerLink="/pricing"
+            data-cy="daily-limit-upgrade"
+            class="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-2.5 font-bold text-white shadow-cta transition-colors hover:bg-emerald-800"
+          >
+            <app-icon name="sparkles" [size]="16" />
+            See Pro
+          </a>
+        </div>
+      } @else {
+        <button
+          type="submit"
+          [disabled]="gameController.isLoading()"
+          class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
+        >
+          @if (gameController.isLoading()) {
+            Loading Questions&hellip;
+          } @else {
+            <app-icon name="sparkles" [size]="16" />
+            Start Game
+          }
+        </button>
+      }
     </form>
 
     <a

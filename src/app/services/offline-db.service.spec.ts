@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
 import {
+  DAILY_LIMIT_STORE,
   GAME_STATE_STORE,
   OFFLINE_DB_NAME,
   OfflineDbService,
@@ -33,13 +34,16 @@ let dbCounter = 0;
  * keyed it, plus (from v3) a `game-state` row, so a migration can be observed
  * rather than inferred.
  */
-function seedOldDatabase(name: string, version: 2 | 3): Promise<void> {
+function seedOldDatabase(name: string, version: 2 | 3 | 4): Promise<void> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open(name, version);
     open.onupgradeneeded = () => {
       const db = open.result;
-      // Pre-v4 stores were keyed on the question text (finding C4).
-      const store = db.createObjectStore(QUESTIONS_STORE, { keyPath: 'question' });
+      // Pre-v4 stores were keyed on the question text (finding C4); v4 moved
+      // to the source-aware `dedupeKey`.
+      const store = db.createObjectStore(QUESTIONS_STORE, {
+        keyPath: version >= 4 ? 'dedupeKey' : 'question',
+      });
       store.createIndex('cachedAt', 'cachedAt');
       if (version >= 3) {
         db.createObjectStore(GAME_STATE_STORE, { keyPath: 'id' });
@@ -49,7 +53,13 @@ function seedOldDatabase(name: string, version: 2 | 3): Promise<void> {
       const db = open.result;
       const stores = version >= 3 ? [QUESTIONS_STORE, GAME_STATE_STORE] : [QUESTIONS_STORE];
       const tx = db.transaction(stores, 'readwrite');
-      tx.objectStore(QUESTIONS_STORE).put({ question: 'Cached before the upgrade?', cachedAt: 1 });
+      // Keyed to match whichever schema is being seeded: v4 moved the store's
+      // keyPath to `dedupeKey`, and a record missing its key aborts the write.
+      tx.objectStore(QUESTIONS_STORE).put(
+        version >= 4
+          ? { dedupeKey: 'open_trivia:cached', question: 'Cached before the upgrade?', cachedAt: 1 }
+          : { question: 'Cached before the upgrade?', cachedAt: 1 },
+      );
       if (version >= 3) {
         tx.objectStore(GAME_STATE_STORE).put({ id: 'current', score: 7 });
       }
@@ -124,27 +134,44 @@ describe('OfflineDbService schema (B8)', () => {
 
     const db = await openViaService();
 
-    expect(db.version).toBe(4);
+    expect(db.version).toBe(5);
     expect(await countQuestions(db)).toBe(0);
     expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
   });
 
-  it('upgrading from v2 creates both stores', async () => {
+  it('upgrading from v2 creates every store', async () => {
     await seedOldDatabase(dbName, 2);
 
     const db = await openViaService();
 
-    expect(db.version).toBe(4);
+    expect(db.version).toBe(5);
     expect(db.objectStoreNames.contains(GAME_STATE_STORE)).toBe(true);
+    expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
     expect(await countQuestions(db)).toBe(0);
   });
 
-  it('creates both stores from nothing', async () => {
+  it('creates every store from nothing', async () => {
     const db = await openViaService();
 
     expect(db.objectStoreNames.contains(QUESTIONS_STORE)).toBe(true);
     expect(db.objectStoreNames.contains(GAME_STATE_STORE)).toBe(true);
+    expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
     expect(await countQuestions(db)).toBe(0);
+  });
+
+  /**
+   * The v5 addition, from a database that predates it. A browser upgrading
+   * in-place is the case a "create what is missing" upgrade path exists for,
+   * and the one a fresh-install test cannot reach.
+   */
+  it('adds the daily-limit store to an existing v4 database, keeping the saved game', async () => {
+    await seedOldDatabase(dbName, 4);
+
+    const db = await openViaService();
+
+    expect(db.version).toBe(5);
+    expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
+    expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
   });
 
   it('opens once and shares the connection', async () => {
