@@ -12,6 +12,18 @@ These apply to every session in this repository. Follow them without being asked
   ```
 - Once the change is complete and the verification suite in §3 is green, push the branch and open a PR against `main` (`gh pr create`). Don't push straight to `main` and don't merge the PR yourself unless explicitly asked to.
 
+## 0a. Reporting back
+
+**Default to a few lines.** These documents carry the detail; the terminal carries the outcome. A reply that restates the PR body has written it twice and made the reader read it twice.
+
+- **Lead with anything needed from the user**, marked clearly. If nothing is needed, say so in a clause.
+- **Results, not reasoning.** Reasoning goes in the commit message, the PR body, or the doc it belongs to — somewhere findable in six months. A terminal message is findable for about a day.
+- **No status tables, no per-step narration, no recap of what was just done.**
+- **Expand only for** a decision that changed, a diagnosis that turned out wrong, or something genuinely uncertain — and only the uncertain part.
+- A correction is one sentence and then the correct thing.
+
+This is not a licence to do less or to check less. Everything in §3 still runs, and §2's documentation duties are what make the short reply honest rather than merely brief.
+
 ## 1. Before starting any task
 
 - **Read `PROJECT_OVERVIEW.md` first — it is now an index, and it is short.** It maps five documents under `docs/`, each with a "read it when" line: `app.md` (§1, everything under `src/app/`), `stack.md` (§2, dependencies, Firebase wiring, `functions/`), `data-model.md` (§3, collections and `firestore.rules`), `ci-cd.md` (§4, workflows, e2e, Lighthouse, npm scripts), `known-gaps.md` (§5–§6, history and what is deliberately missing). **Then read the one your task touches, in full** — and `known-gaps.md` too if you are planning rather than implementing. Together these are the source of truth for what this app does and how it is built; don't assume, confirm against them before touching code. This used to be one 148 KB file read in full every session, which is what finding F5 was about; the section numbers did not change in the split, so an old `§4.2a` reference still resolves — it just lives in `ci-cd.md` now.
