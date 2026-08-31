@@ -24,6 +24,25 @@ import { IconComponent } from '../icon/icon.component';
  * would come back as a bare `permission-denied` — a rejection the user cannot
  * act on, for a rule the client already knows about.
  */
+/**
+ * Optional, but `https://` when present — the same rule `firestore.rules`
+ * enforces, checked here so the contributor gets a field error instead of a
+ * `permission-denied` they cannot act on.
+ *
+ * Deliberately not a full URL regex. The rule this mirrors is a prefix check,
+ * and a client validator stricter than the server's would refuse writes the
+ * backend would have accepted.
+ */
+function httpsUrl(control: AbstractControl): ValidationErrors | null {
+  const value = typeof control.value === 'string' ? control.value.trim() : '';
+  if (value.length === 0) {
+    return null;
+  }
+  return value.startsWith('https://') && value.length > 'https://'.length
+    ? null
+    : { httpsUrl: true };
+}
+
 function nonBlank(control: AbstractControl): ValidationErrors | null {
   return typeof control.value === 'string' && control.value.trim().length === 0
     ? { required: true }
@@ -58,6 +77,21 @@ export class AddQuestionComponent implements OnInit {
     type: ['multiple' as QuestionType, Validators.required],
     question: ['', [Validators.required, nonBlank, Validators.maxLength(500)]],
     correctAnswer: ['', [Validators.required, nonBlank, Validators.maxLength(200)]],
+    // Optional on purpose. Requiring a citation would push contributors toward
+    // pasting *something*, and a bad citation is worse than none because it
+    // looks checked. `https` only, matching `firestore.rules` — the CSP would
+    // not load an `http` page, so the rule refuses what the reader could not
+    // open anyway, and catching it here turns a bare `permission-denied` into
+    // a field error the contributor can act on.
+    sourceUrl: ['', [httpsUrl, Validators.maxLength(500)]],
+    // No `nonBlank` here, unlike every required field above: `nonBlank`
+    // rejects the empty string too, which is exactly right for a control that
+    // must be filled in and exactly wrong for one that may be left alone — it
+    // made the whole form invalid for every contributor who did not cite a
+    // source, i.e. almost all of them, and the symptom was a submit button
+    // that silently did nothing. Whitespace-only needs no validator of its
+    // own: it trims to '' and is omitted from the write.
+    sourceTitle: ['', [Validators.maxLength(200)]],
     // Required only for a "multiple" question — for a boolean one these three
     // are irrelevant and hidden, and the opposite value is derived instead.
     // The validators are therefore applied and cleared as `type` changes
@@ -154,6 +188,8 @@ export class AddQuestionComponent implements OnInit {
 
     const raw = this.form.getRawValue();
     const isBoolean = raw.type === 'boolean';
+    const sourceUrl = raw.sourceUrl.trim();
+    const sourceTitle = raw.sourceTitle.trim();
     const incorrectAnswers = isBoolean
       ? [raw.correctAnswer.trim() === 'True' ? 'False' : 'True']
       : raw.incorrectAnswers.map((answer) => answer.trim());
@@ -200,6 +236,11 @@ export class AddQuestionComponent implements OnInit {
       // can't be attributed to someone else or backdated.
       createdBy: author.uid,
       createdAt: Date.now(),
+      // Omitted entirely when blank rather than written as an empty string:
+      // `firestore.rules` refuses an empty `sourceTitle`, and a key that is
+      // absent is the honest representation of "no citation given".
+      ...(sourceUrl ? { sourceUrl } : {}),
+      ...(sourceTitle ? { sourceTitle } : {}),
     };
 
     this.isSubmitting.set(true);
@@ -269,6 +310,15 @@ export class AddQuestionComponent implements OnInit {
       id: `incorrect-answer-${index}`,
       label: `Incorrect answer ${index + 1}`,
     })),
+    // Optional fields still belong here. This table is not "the required
+    // fields" — it is what `describeMissingFields()` and
+    // `focusFirstInvalidControl()` can *see*, and a control missing from it is
+    // invisible to both: a malformed source link blocked the submit, produced
+    // the fallback "Please check the form and try again." naming nothing, and
+    // moved focus nowhere. That is the finding-B4 symptom exactly, reached by
+    // a different route.
+    { control: this.form.controls.sourceUrl, id: 'sourceUrl', label: 'Source link' },
+    { control: this.form.controls.sourceTitle, id: 'sourceTitle', label: 'Source name' },
   ];
 
   private describeMissingFields(): string {
@@ -307,6 +357,9 @@ export class AddQuestionComponent implements OnInit {
     }
     if (control.hasError('maxlength')) {
       return `${label} must be ${maxLength} characters or fewer.`;
+    }
+    if (control.hasError('httpsUrl')) {
+      return `${label} has to be a full address starting with https://.`;
     }
     return '';
   }

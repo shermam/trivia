@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { signal } from '@angular/core';
 import { Subject, of, throwError } from 'rxjs';
 import { CustomQuestionDoc, QuestionStatus } from '../../models/question.model';
@@ -209,5 +210,58 @@ describe('ReviewQueueComponent', () => {
     await component.load();
 
     expect(component.isFull()).toBe(true);
+  });
+});
+
+/**
+ * `FEAT-022`. Rendered, because the value of this feature to a reviewer is
+ * entirely in the link being *there* — a card that silently stops passing the
+ * fields through looks identical to a question that never carried a source,
+ * and the tests above build the component directly and would never see it.
+ */
+describe('ReviewQueueComponent source attribution', () => {
+  async function render(questions: Q[]) {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: FirebaseService,
+          useValue: {
+            getQuestionsByStatus: () => of(questions),
+            setQuestionStatus: vi.fn(() => Promise.resolve()),
+          },
+        },
+        {
+          provide: ReviewerService,
+          useValue: { isReviewer: signal(true), isResolved: signal(true) },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(ReviewQueueComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    return Array.from(host.querySelectorAll<HTMLElement>('[data-cy="review-question"]'));
+  }
+
+  it('shows the source as a link the reviewer can open to check the answer', async () => {
+    const cards = await render([
+      question('p1', {
+        sourceUrl: 'https://example.org/h2o',
+        sourceTitle: 'Example Journal',
+      }),
+    ]);
+
+    const link = cards[0].querySelector<HTMLAnchorElement>('[data-cy="question-source-link"]');
+    expect(link?.getAttribute('href')).toBe('https://example.org/h2o');
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link?.textContent).toContain('Example Journal');
+  });
+
+  it('renders no source furniture on a card that carries none', async () => {
+    const cards = await render([question('p1')]);
+
+    expect(cards[0].querySelector('[data-cy="question-source"]')).toBeNull();
   });
 });

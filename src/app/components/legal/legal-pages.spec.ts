@@ -189,6 +189,23 @@ describe('legal pages', () => {
   });
 
   /**
+   * `FEAT-022` falsified an enumeration rather than a claim, which is the
+   * quieter way one of these documents goes stale. The policy listed what a
+   * published question exposes — "its text, the answers, the category and the
+   * difficulty" — and reads as exhaustive, so shipping two more published
+   * fields made it wrong without touching a sentence anyone would think to
+   * re-read. This pins both halves: that the list names the source fields, and
+   * that the outbound-link paragraph's `noreferrer` promise is still one the
+   * app keeps (`SourceLinkComponent` asserts the attribute itself).
+   */
+  it('lists the source fields among what a published question exposes', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('the source link and source name');
+    expect(text).toContain('your browser sends no referrer');
+  });
+
+  /**
    * The absolute "no profiling" claim appeared **three** times, and keeping
    * running totals of a player's own games engages every one of them. Two were
    * rewritten when `users/{uid}` shipped; this pins that none has quietly

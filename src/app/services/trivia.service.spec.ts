@@ -480,6 +480,75 @@ describe('TriviaService entity decoding is per source', () => {
 });
 
 /**
+ * `FEAT-022`. The mapper is where an optional field is easiest to lose: it
+ * builds a `TriviaQuestion` key by key, so a field nobody copies across simply
+ * does not exist downstream, and the recap renders exactly as it would for a
+ * question that never had one. The absence half matters just as much — the
+ * key has to stay *absent*, not become `undefined`, because `undefined` is
+ * what a `hasOnly()`-shaped write would later reject.
+ */
+describe('TriviaService source attribution passes through the mapper', () => {
+  function configure(customQuestions: unknown[]) {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions: () => of(customQuestions) } },
+      ],
+    });
+  }
+
+  const base = {
+    id: 'q1',
+    category: 'Science',
+    type: 'multiple' as const,
+    difficulty: 'easy' as const,
+    question: 'What is the chemical symbol for water?',
+    correct_answer: 'H2O',
+    incorrect_answers: ['CO2', 'O2', 'NaCl'],
+  };
+
+  function play(): Promise<TriviaQuestion[]> {
+    return TestBed.inject(TriviaService).getQuestions({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+  }
+
+  it('carries both fields through to the question the recap renders', async () => {
+    configure([{ ...base, sourceUrl: 'https://example.org/h2o', sourceTitle: 'Example Journal' }]);
+
+    const [question] = await play();
+
+    expect(question.sourceUrl).toBe('https://example.org/h2o');
+    expect(question.sourceTitle).toBe('Example Journal');
+  });
+
+  it('leaves both keys absent when the document has no source', async () => {
+    configure([base]);
+
+    const [question] = await play();
+
+    expect('sourceUrl' in question).toBe(false);
+    expect('sourceTitle' in question).toBe(false);
+  });
+
+  it('does not decode entities in a source title, the way it leaves every other Firestore field alone', async () => {
+    configure([{ ...base, sourceTitle: 'Tom &amp; Jerry Quarterly' }]);
+
+    const [question] = await play();
+
+    // `CLAUDE.md` §4.4: `decodeHtmlEntities` is an Open Trivia DB adapter
+    // concern, and running it over text a contributor typed rewrites what they
+    // wrote.
+    expect(question.sourceTitle).toBe('Tom &amp; Jerry Quarterly');
+  });
+});
+
+/**
  * Finding C1. The category/difficulty filter and the amount ceiling used to be
  * applied here, in the browser, over every document in the collection. They are
  * the query's job now — so what this layer must get right is *forwarding* them.

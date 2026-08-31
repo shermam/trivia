@@ -134,6 +134,18 @@
                 </div>
               </dl>
 
+              <!--
+                The source, when the contributor gave one (FEAT-022). Styled
+                to match the metadata list above it because that is what it is
+                — but kept outside the `<dl>` deliberately: a term/definition
+                pair whose definition is a link into a new tab is awkward to
+                announce, and the shared component owns the new-tab and
+                https-only handling that this card would otherwise have to
+                repeat. Renders nothing when there is no source, which is the
+                common case.
+              -->
+              <app-source-link [url]="question.sourceUrl" [title]="question.sourceTitle" />
+
               <div class="flex gap-2 mt-4">
                 @if (activeStatus() !== 'approved') {
                   <button

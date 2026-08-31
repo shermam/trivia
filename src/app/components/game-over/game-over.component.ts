@@ -31,6 +31,7 @@ import { FirebaseService, QuestionReportRejectedError } from '../../services/fir
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
 import { IconComponent } from '../icon/icon.component';
+import { SourceLinkComponent } from '../source-link/source-link.component';
 
 /** Derives initials for a leaderboard avatar, e.g. "Jane Doe" -> "JD". */
 function initialsFor(name: string): string {
@@ -74,7 +75,7 @@ type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save';
 @Component({
   selector: 'app-game-over',
   standalone: true,
-  imports: [FormsModule, IconComponent, NgClass, NgTemplateOutlet],
+  imports: [FormsModule, IconComponent, NgClass, NgTemplateOutlet, SourceLinkComponent],
   templateUrl: './game-over.component.html',
   styleUrl: './game-over.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

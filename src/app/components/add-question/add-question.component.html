@@ -340,6 +340,76 @@
           </p>
         }
 
+        <!--
+          Source attribution (FEAT-022). Optional, and said so in the label
+          rather than only by the absence of an asterisk — a contributor who
+          thinks it is required will paste something, and a citation that was
+          guessed at is worse than none because it looks checked.
+        -->
+        <div>
+          <label
+            for="sourceUrl"
+            class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+          >
+            Source link
+            <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+          </label>
+          <input
+            id="sourceUrl"
+            type="url"
+            formControlName="sourceUrl"
+            data-cy="source-url"
+            inputmode="url"
+            placeholder="https://en.wikipedia.org/wiki/..."
+            [attr.aria-invalid]="showsError(form.controls.sourceUrl)"
+            [attr.aria-describedby]="showsError(form.controls.sourceUrl) ? 'sourceUrl-error' : null"
+            class="w-full rounded-xl border-[1.5px] border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-emerald-600 focus:outline-none transition-colors"
+          />
+          @if (showsError(form.controls.sourceUrl)) {
+            <p
+              id="sourceUrl-error"
+              data-cy="source-url-error"
+              class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+            >
+              {{ errorFor(form.controls.sourceUrl, 'Source link', 500) }}
+            </p>
+          }
+          <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+            Where the answer comes from. Reviewers see it, and so do players after they answer.
+          </p>
+        </div>
+
+        <div>
+          <label
+            for="sourceTitle"
+            class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+          >
+            Source name
+            <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+          </label>
+          <input
+            id="sourceTitle"
+            type="text"
+            formControlName="sourceTitle"
+            data-cy="source-title"
+            placeholder="MDN Web Docs, CRC Handbook 95th ed., …"
+            [attr.aria-invalid]="showsError(form.controls.sourceTitle)"
+            [attr.aria-describedby]="
+              showsError(form.controls.sourceTitle) ? 'sourceTitle-error' : null
+            "
+            class="w-full rounded-xl border-[1.5px] border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-emerald-600 focus:outline-none transition-colors"
+          />
+          @if (showsError(form.controls.sourceTitle)) {
+            <p
+              id="sourceTitle-error"
+              data-cy="source-title-error"
+              class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+            >
+              {{ errorFor(form.controls.sourceTitle, 'Source name', 200) }}
+            </p>
+          }
+        </div>
+
         @if (submitError()) {
           <p
             class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
