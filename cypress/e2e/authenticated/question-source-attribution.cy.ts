@@ -79,17 +79,26 @@ describe('question source attribution', () => {
     cy.stubOpenTrivia();
   });
 
+  /**
+   * One account that is both Pro and a reviewer, which is how
+   * `review-queue.cy.ts` already does the author-to-reviewer handoff — and the
+   * reason is worth knowing rather than copying. Signing in as a second
+   * account inside one test does not work: `cy.signInViaUi` opens the auth
+   * menu and waits for "Already have an account? Sign in", which is not there
+   * while somebody is still signed in, so it times out 20s later naming a
+   * button rather than the sign-out that never happened. Signing out first is
+   * possible but races the async re-anonymous-sign-in that `sign-up-verify`
+   * already had to work around. Reviewing your own submission is not the
+   * production flow, but the claim under test is that the card renders the
+   * stored source, and the account that stored it is immaterial to that.
+   */
   it('accepts a cited question through the real rules, and shows the reviewer the link', () => {
-    const password = 'correct horse battery staple';
-    const email = `source-author-${Date.now()}@example.com`;
-
-    cy.createVerifiedUser({ email, password }).then(({ uid }) => {
-      cy.visit('/');
-      cy.signInViaUi(email, password);
-      cy.visit('/pricing?checkout=success');
+    cy.createVerifiedUser(SOURCE_REVIEWER).then(({ uid }) => {
+      cy.seedReviewer({ uid, reviewer: true });
       cy.setProSubscription({ uid });
     });
-    cy.contains("You're subscribed");
+    cy.visit('/');
+    cy.signInViaUi(SOURCE_REVIEWER.email, SOURCE_REVIEWER.password);
 
     cy.visit('/add-question');
     cy.get('#category').type('Science');
@@ -102,20 +111,14 @@ describe('question source attribution', () => {
     cy.get('[data-cy="source-title"]').type('Example Journal');
     cy.contains('button', 'Add Question').click();
 
-    // The assertion that matters: the write was accepted. A `hasOnly()`
-    // allowlist that had not been widened would land here as a generic
-    // failure message instead.
+    // The assertion that matters first: the write was accepted. A `hasOnly()`
+    // allowlist that had not been widened would land here as the form's
+    // generic failure message instead.
     cy.contains('Thanks! Your question has been submitted for review.');
 
-    // Now the other end of the same document. A fresh reviewer account, since
-    // the submission is pending and only a reviewer may list it.
-    cy.createVerifiedUser(SOURCE_REVIEWER).then(({ uid }) => {
-      cy.seedReviewer({ uid, reviewer: true });
-    });
-    cy.visit('/');
-    cy.signInViaUi(SOURCE_REVIEWER.email, SOURCE_REVIEWER.password);
+    // Now the other end of the same document, rendered from what Firestore
+    // actually stored rather than from anything this test held onto.
     cy.visit('/review');
-
     cy.get('[data-cy="review-question"]')
       .filter(':contains("chemical symbol for water")')
       .should('have.length', 1)
@@ -133,16 +136,14 @@ describe('question source attribution', () => {
   });
 
   it('refuses a malformed source link in the form, naming the field', () => {
-    const password = 'correct horse battery staple';
     const email = `source-bad-${Date.now()}@example.com`;
+    const password = 'correct horse battery staple';
 
     cy.createVerifiedUser({ email, password }).then(({ uid }) => {
-      cy.visit('/');
-      cy.signInViaUi(email, password);
-      cy.visit('/pricing?checkout=success');
       cy.setProSubscription({ uid });
     });
-    cy.contains("You're subscribed");
+    cy.visit('/');
+    cy.signInViaUi(email, password);
 
     cy.visit('/add-question');
     cy.get('#category').type('Science');
