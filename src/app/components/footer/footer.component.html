@@ -4,7 +4,27 @@
   <div
     class="mx-auto flex max-w-5xl flex-col items-center justify-between gap-3 sm:flex-row sm:px-2"
   >
-    <p class="text-xs text-slate-500 dark:text-slate-400">&copy; {{ year }} Trivimind</p>
+    <!--
+      The build identity hangs off the brand name (`build-info.ts` explains why
+      it exists at all). Two carriers on purpose, and they are on *different*
+      elements: `title` gives the hover tooltip, and a separate `sr-only` span
+      puts the same string in the accessibility tree. Putting both on one
+      element would make the title an accessible *description* of text that
+      already says it, which some screen readers then announce twice.
+
+      `title` alone would have been the smaller change and the wrong one: it is
+      not reachable by keyboard and its screen-reader support is inconsistent,
+      so on its own it hides a diagnostic from exactly the people who cannot
+      hover. This is not the WAI-ARIA tooltip pattern and does not claim to be
+      — there is no focusable trigger and no `role="tooltip"` — because the
+      information is fully present in the text either way; the title is a
+      convenience for a pointer, not the only route to it.
+    -->
+    <p class="text-xs text-slate-500 dark:text-slate-400">
+      &copy; {{ year }}
+      <span class="cursor-help" [title]="build" data-cy="footer-build">Trivimind</span>
+      <span class="sr-only">, build {{ build }}</span>
+    </p>
     <nav aria-label="Legal" class="flex items-center gap-5">
       <a
         routerLink="/privacy"
