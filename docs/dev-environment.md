@@ -110,13 +110,27 @@ introduced by hand, below.
    _less_ trustworthy than no dev at all. If you only do some, write down which.
 6. **Add the dev domain to Auth → Settings → Authorised domains.**
 7. **Deploy rules, indexes and functions:**
+
    ```bash
    npm run firebase:deploy:dev
    ```
+
    This builds the `dev-project` configuration and deploys `hosting`,
    `firestore` and `functions` from the same files production uses — so the
-   rules, the indexes and the `firebase.json` headers (CSP included) are the
-   same by construction rather than by discipline.
+   rules, the indexes and the `firebase.json` headers are the same by
+   construction rather than by discipline.
+
+   **The CSP is the exception to that, and it is the one worth reading twice.**
+   Three of its origins are _named after the Firebase project_: the Auth
+   `authDomain` in `frame-src` and `connect-src`, and the Cloud Functions host
+   in `connect-src`. Deploying the same header to a second project therefore
+   ships a policy that does not describe that project — which is exactly what
+   happened, and Google sign-in on `trivimind-dev` was refused for it. Both
+   projects are now listed in `scripts/csp-rules.mjs`'s `DEPLOY_TARGETS`, and
+   `npm run csp:verify` fails if a target's own origins are missing. **Adding a
+   third Firebase project means adding it there**, or its sign-in breaks the
+   same way (`ci-cd.md` §4.1).
+
 8. **Stripe test mode.** Create the Pro product and price in Stripe's _test_
    mode, and set the price's `firebaseRole` metadata to `pro` — the claim the
    app gates on comes from that metadata, and an active subscription without it

@@ -45,7 +45,7 @@
  * has to get past a check that reads the real deployed header.
  */
 
-import { findCspProblems } from '../../../scripts/csp-rules.mjs';
+import { findCspProblems, findDeploymentOriginProblems } from '../../../scripts/csp-rules.mjs';
 
 /**
  * What a `mode: 'no-cors'` fetch came back as. `ngsw`'s synthetic 504 is a
@@ -62,14 +62,18 @@ interface ProbeResult {
 
 describe('service worker: OAuth origins stay reachable (PR #112)', () => {
   let authDomain: string;
+  let projectId: string;
 
   before(() => {
     // `cy.request` runs outside the browser, which is the only way to read a
     // `/__/`-prefixed path here: Cypress reserves `/__` for its own runner and
     // any in-browser request to one hangs forever (see e2e.preview.ts).
     cy.request(`${Cypress.config('baseUrl')}/__/firebase/init.json`).then((response) => {
-      authDomain = (response.body as { authDomain: string }).authDomain;
+      const config = response.body as { authDomain: string; projectId: string };
+      authDomain = config.authDomain;
+      projectId = config.projectId;
       expect(authDomain, 'authDomain from runtime config').to.be.a('string').and.not.be.empty;
+      expect(projectId, 'projectId from runtime config').to.be.a('string').and.not.be.empty;
     });
   });
 
@@ -100,6 +104,44 @@ describe('service worker: OAuth origins stay reachable (PR #112)', () => {
         );
       });
     }
+  });
+
+  /**
+   * The check the other one cannot make: that the policy works for **this**
+   * deployment.
+   *
+   * `findCspProblems` compares the policy against itself and against a fixed
+   * list of hosts. Both are blind to project identity — `frame-src` naming *a*
+   * `firebaseapp.com` origin satisfies them whichever project it belongs to —
+   * so the CSP named the production project only, and Google sign-in was
+   * refused on `trivimind-dev` and on every preview channel while this suite,
+   * running against that very deployment, stayed green. The failure was in the
+   * *page's* console (`Framing 'https://trivimind-dev.firebaseapp.com/'
+   * violates ... frame-src`), and nothing here was looking at the page.
+   *
+   * The identity comes from the deployment's own `/__/firebase/init.json`, not
+   * from a list. `verify-csp.mjs` runs the same function over `DEPLOY_TARGETS`
+   * on disk, which is the half that catches a *new* project before it is ever
+   * deployed; this is the half that cannot be wrong about which project is
+   * actually being served.
+   *
+   * Read with `cy.request` for the same reason as the test above: Cypress
+   * strips `Content-Security-Policy` from documents it loads in the browser,
+   * so an in-browser probe could never see a frame-src violation at all.
+   */
+  it('serves a CSP that names this deployment’s own project, not just some project', () => {
+    cy.request(`${Cypress.config('baseUrl')}/`).then((response) => {
+      const csp = response.headers['content-security-policy'];
+      expect(csp, 'Content-Security-Policy served with /').to.be.a('string');
+
+      const problems = findDeploymentOriginProblems(csp as string, { projectId, authDomain }).map(
+        ({ origin, detail, why }) => `${origin} — ${detail}. ${why}`,
+      );
+      expect(
+        problems,
+        `the CSP served by ${projectId} does not cover ${projectId}'s own origins`,
+      ).to.deep.equal([]);
+    });
   });
 
   it('serves a worker whose bytes carry a fingerprint of the CSP served with it', () => {

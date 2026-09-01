@@ -34,7 +34,7 @@
           },
           {
             "key": "Content-Security-Policy",
-            "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src https://intellectura-3b26a.firebaseapp.com; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://apis.google.com https://intellectura-3b26a.firebaseapp.com https://us-central1-intellectura-3b26a.cloudfunctions.net https://opentdb.com"
+            "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self'; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src https://intellectura-3b26a.firebaseapp.com https://trivimind-dev.firebaseapp.com; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://apis.google.com https://intellectura-3b26a.firebaseapp.com https://us-central1-intellectura-3b26a.cloudfunctions.net https://trivimind-dev.firebaseapp.com https://us-central1-trivimind-dev.cloudfunctions.net https://opentdb.com"
           },
           {
             "key": "X-Content-Type-Options",

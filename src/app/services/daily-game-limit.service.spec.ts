@@ -99,6 +99,16 @@ describe('DailyGameLimitService', () => {
     // and creates the store — `putRaw` opens without a version, so it would
     // otherwise race ahead of the schema and find nothing to write to.
     await service.refresh();
+    // Then clear the counter, rather than trusting `afterEach` to have left it
+    // clear. `ng test` runs with `--isolate` false, so every spec file in a
+    // worker shares one `fake-indexeddb` — which means a *different* file can
+    // leave a record here, and one did: `game-controller.service.spec.ts`
+    // spent five real games through the unstubbed service and this suite's
+    // first test then opened on an exhausted allowance. That file now stubs
+    // the quota, and this reset makes the suite independent of whether the
+    // next one to touch storage remembers to.
+    await putRaw({ id: DAILY_LIMIT_KEY, date: '1970-01-01', count: 0 });
+    await service.refresh();
   });
 
   afterEach(async () => {

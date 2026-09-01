@@ -57,7 +57,14 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { RUNTIME_ORIGINS, SUBRESOURCE_DIRECTIVES, findCspProblems } from './csp-rules.mjs';
+import {
+  DEPLOY_TARGETS,
+  RUNTIME_ORIGINS,
+  SUBRESOURCE_DIRECTIVES,
+  authDomainOrigin,
+  findCspProblems,
+  findDeploymentOriginProblems,
+} from './csp-rules.mjs';
 
 const CONFIG = 'firebase.json';
 
@@ -75,24 +82,39 @@ if (!header) {
   fail(`No Content-Security-Policy on the '**' rule in ${CONFIG} \u2014 has it moved?`);
 }
 
-const problems = findCspProblems(header.value);
+const problems = [
+  ...findCspProblems(header.value),
+  // Check 3: the policy works for **every project it is deployed to**, not
+  // just for one of them. The two checks above compare the policy against
+  // itself and against a fixed host list, and both are blind to project
+  // identity — `frame-src` naming *a* firebaseapp.com origin satisfies them
+  // whichever project it belongs to. That is how Google sign-in stayed broken
+  // on `trivimind-dev` through a green `csp:verify` and a green preview suite.
+  ...DEPLOY_TARGETS.flatMap(([projectId]) =>
+    findDeploymentOriginProblems(header.value, {
+      projectId,
+      authDomain: authDomainOrigin(projectId),
+    }),
+  ),
+];
 
 if (problems.length > 0) {
-  console.error(`\u2717 ${problems.length} origin(s) missing from connect-src:\n`);
+  console.error(`\u2717 ${problems.length} CSP problem(s):\n`);
   for (const { origin, detail, why } of problems) {
     console.error(`    ${origin}`);
     console.error(`      ${detail}`);
     console.error(`      ${why}\n`);
   }
   console.error(
-    `  Add each to connect-src in ${CONFIG}. For an origin already allowed by another\n` +
-      `  directive this grants strictly less than it already has \u2014 fetching bytes from a host\n` +
-      `  you may already execute scripts from is not a widening.\n`,
+    `  Add each to the named directive in ${CONFIG}. For an origin already allowed by another\n` +
+      `  directive, adding it to connect-src grants strictly less than it already has \u2014 fetching\n` +
+      `  bytes from a host you may already execute scripts from is not a widening.\n`,
   );
   process.exit(1);
 }
 
 console.log(
-  `\u2713 CSP: ${RUNTIME_ORIGINS.length} runtime origin(s) reachable, and every subresource origin ` +
-    `across ${SUBRESOURCE_DIRECTIVES.length} directives is re-fetchable by the service worker.`,
+  `\u2713 CSP: ${RUNTIME_ORIGINS.length} runtime origin(s) reachable, every subresource origin ` +
+    `across ${SUBRESOURCE_DIRECTIVES.length} directives is re-fetchable by the service worker, ` +
+    `and all ${DEPLOY_TARGETS.length} deploy target(s) can frame their own authDomain.`,
 );
