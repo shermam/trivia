@@ -10,10 +10,46 @@ import {
   TriviaQuestion,
   answeredWith,
 } from '../models/question.model';
+import { DailyGameLimitService } from './daily-game-limit.service';
 import { GameControllerService } from './game-controller.service';
 import { GamePersistenceService } from './game-persistence.service';
 import { OfflineDbService } from './offline-db.service';
 import { TriviaService } from './trivia.service';
+
+/**
+ * A daily allowance that always says yes and never writes.
+ *
+ * `startGame()` spends one game against `DailyGameLimitService`, and the real
+ * service persists that count to IndexedDB — so without this stub these tests
+ * were writing five real records into the shared `trivia-offline` database,
+ * under today's date, on every run.
+ *
+ * That mattered because `ng test` runs with **`--isolate` defaulting to
+ * false** (see `ng test --help`): spec files share a worker's module registry,
+ * so they share one `fake-indexeddb` instance. Whenever this file happened to
+ * run before `daily-game-limit.service.spec.ts` in the same worker, that
+ * suite's first test opened on a counter already at the limit and failed with
+ * `expected +0 to be 5` — a ~40% flake whose cause was in a different file
+ * that never mentions the service under test. The general point: with shared
+ * isolation, a unit test that touches real storage is not local to its file.
+ *
+ * Stubbing is also just correct on its own terms. The quota is an unrelated
+ * collaborator here; nothing in this file asserts anything about it, and
+ * leaving the real one in place means a sixth `startGame()` added to this
+ * suite would silently start being refused.
+ */
+function noDailyLimit() {
+  return {
+    provide: DailyGameLimitService,
+    useValue: {
+      isUnlimited: () => true,
+      remaining: () => Number.POSITIVE_INFINITY,
+      hasGamesLeft: () => true,
+      refresh: () => Promise.resolve(),
+      consumeGame: () => Promise.resolve(true),
+    },
+  };
+}
 
 /** Wipes the persisted game between tests, via the service that owns the format. */
 async function clearSavedGame(): Promise<void> {
@@ -60,6 +96,7 @@ function setup(questionCount: number) {
     providers: [
       { provide: TriviaService, useValue: { getQuestions: () => Promise.resolve([]) } },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      noDailyLimit(),
     ],
   });
   const service = TestBed.inject(GameControllerService);
@@ -470,6 +507,7 @@ function setupWithoutQuestions() {
     providers: [
       { provide: TriviaService, useValue: { getQuestions: () => Promise.resolve([]) } },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      noDailyLimit(),
     ],
   });
   return TestBed.inject(GameControllerService);
@@ -487,6 +525,7 @@ function setupWithQuestionSource(questionCount: number) {
         },
       },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      noDailyLimit(),
     ],
   });
   return TestBed.inject(GameControllerService);
