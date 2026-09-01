@@ -192,6 +192,45 @@ domain, which dev does not have.
 10. ✅ **Issue a service-account key** for `trivimind-dev` (Project settings →
     Service accounts → Generate new private key) and add it to the repository's
     GitHub Actions secrets as `FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV`.
+
+    **The key is not the grant, and that distinction cost a red deploy.** A key
+    generated this way carries the Admin SDK service agent role and nothing
+    else. It deployed preview channels on every PR for weeks, which read as
+    proof that it worked — and proved only that it could deploy **Hosting**.
+    The first run of `deploy-dev` (`ci-cd.md` §4.2) failed on the rules step
+    with `403, The caller does not have permission` from
+    `firebaserules.googleapis.com`. Hosting, Firestore rules, Firestore indexes
+    and Cloud Functions are four separate grants, so **a credential already in
+    use is not evidence it is sufficient for a new use of it.**
+
+    What the deploy job needs, over the default:
+
+    ```bash
+    PROJECT=trivimind-dev
+    # The service account the key belongs to — cross-check against the
+    # `client_email` field inside the secret's JSON.
+    SA=$(gcloud iam service-accounts list --project "$PROJECT" \
+           --filter='email~^firebase-adminsdk' --format='value(email)')
+
+    for ROLE in \
+      roles/firebase.admin \
+      roles/cloudfunctions.admin \
+      roles/iam.serviceAccountUser \
+      roles/secretmanager.secretAccessor
+    do
+      gcloud projects add-iam-policy-binding "$PROJECT" \
+        --member="serviceAccount:$SA" --role="$ROLE" --condition=None
+    done
+    ```
+
+    `roles/firebase.admin` is the broad one and covers rules, indexes and
+    Hosting together; the narrow equivalent is `roles/firebaserules.admin` plus
+    `roles/datastore.indexAdmin`. The other three are the same set production
+    needed for its functions deploy (`ci-cd.md` §4.2). If the functions step
+    still fails after this, the next grants to try are Artifact Registry and
+    Cloud Build — Gen 2 functions build a container image, and that is a
+    separate permission surface again.
+
 11. ✅ **Repoint the preview workflow** — done in code, not by hand. All three
     jobs (deploy, e2e, cleanup) now use `trivimind-dev` and the secret from
     step 10, and `cypress/tasks/firebase-preview-tasks.ts` takes the project
@@ -221,11 +260,12 @@ ships every merge to `main` to `trivimind-dev` — hosting and Firestore
 rules/indexes — for the reasons in `ci-cd.md` §4.2. `npm run firebase:deploy:dev`
 still exists for pushing a branch you have not merged.
 
-**Cloud Functions are the exception**: they are not in that job, because the
-step needs the Stripe secrets of step 8 above and would otherwise fail on every
-merge. Deploy them with `npm run firebase:deploy:dev` until the secrets are
-known-set — and see §4 below, where this is listed as open rather than left to
-be discovered.
+Cloud Functions were held out of that job at first, because the step needs the
+Stripe secrets of step 8 and a missing one would have failed on every merge.
+Those secrets are set, so functions deploy there too and the mirror is
+complete: hosting, Firestore rules, Firestore indexes and functions, all from
+the same merge. `npm run firebase:deploy:dev` still exists for pushing a branch
+you have not merged.
 
 ## 4. Still open after this
 
@@ -234,12 +274,10 @@ be discovered.
 - **Google sign-in does not work on a preview channel** (§3.2a), because the
   channel domain cannot be pre-authorised. Pre-existing, and unrelated to which
   project the channel lives in.
-- **Cloud Functions on dev are not auto-deployed** (§3.4), so they lag `main`
-  until someone runs `npm run firebase:deploy:dev`. Hosting and the Firestore
-  rules/indexes are automatic; functions are not, because the step needs
-  `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` set in the dev project and a
-  missing one would turn **every** merge red. Confirm those secrets are set,
-  then add the two steps to `deploy-dev` and delete this bullet.
+- **Nothing about the deploy.** Hosting, Firestore rules/indexes and Cloud
+  Functions all ship to dev from every merge (§3.4). The one prerequisite that
+  is not in code is the IAM grant in step 10 — without it the job fails on the
+  rules step and dev silently stays on its old bundle.
 - **Nothing else.** `npm run env:verify` covers the parts that can regress
   silently: a non-production build inheriting the production environment, a
   dev-facing file or a writing workflow naming the production project, an
