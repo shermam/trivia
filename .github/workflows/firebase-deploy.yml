@@ -119,13 +119,113 @@ jobs:
       - name: Smoke-test production
         run: node scripts/smoke-test.mjs https://trivimind.com
 
+  # `trivimind-dev` gets the same commit, automatically, for the same reason it
+  # exists at all: it is only a faithful mirror while it is *current*. Nothing
+  # deployed its live channel before this — `firebase-preview.yml` creates a
+  # per-PR channel on the same project, and `npm run firebase:deploy:dev` is a
+  # laptop command somebody has to remember — so `trivimind-dev.web.app` served
+  # whatever was last pushed by hand, indefinitely.
+  #
+  # That is not a tidiness problem, and it cost a full round trip to diagnose.
+  # PR #153 fixed a CSP that refused Google sign-in on dev; the preview channel
+  # for the next PR picked the fix up immediately (it is built from that PR's
+  # head) while `trivimind-dev.web.app` went on refusing sign-in, because no
+  # deploy had touched it. Every client-side remedy — clearing storage,
+  # unregistering the service worker, hard reloads — was doomed by
+  # construction: the stale artifact was the *response header*, on the server.
+  #
+  # **The rules are the sharper edge.** `E2E (preview)` runs against this
+  # project's real Firestore, so a `firestore.rules` change that merged without
+  # reaching dev leaves the preview suite validating against the previous
+  # rules — green, and about the wrong thing. That is the failure mode
+  # `dev-environment.md` calls "dev less trustworthy than no dev at all".
+  #
+  # Independent of the production job on purpose: dev is not downstream of
+  # production, and holding one deploy behind the other only widens the window
+  # in which they disagree. The commit is the same one the preview channel
+  # already exercised end to end.
+  deploy-dev:
+    name: Deploy to trivimind-dev
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `build:dev-project`, not `build:prod`: the only difference is
+      # `environmentLabel: 'DEV'`, and that badge is the sole thing on screen
+      # distinguishing a faithful copy from the original — which matters most
+      # in exactly the moment someone tries a destructive change believing they
+      # are on dev. (`firebase-preview.yml` builds `build:prod` for its
+      # channels and that is a separate question; a preview URL already says
+      # what it is.)
+      - name: Build dev-project app
+        run: npm run build:dev-project
+
+      # Backend first, client last, same as production above (finding D2).
+      # The secret reaches the shell through `env`, never `${{ }}` inside
+      # `run:` — template expansion pastes the value into the script text
+      # itself, where its characters are parsed as shell (A11).
+      - name: Deploy Firestore rules and indexes
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project trivimind-dev
+
+      - name: Clean up service account credentials
+        if: always()
+        run: rm -f "${{ runner.temp }}/firebase-service-account.json"
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}'
+          projectId: trivimind-dev
+          channelId: live
+
+  # **Cloud Functions are deliberately not deployed to dev here**, and this is
+  # the one place the mirror is knowingly incomplete.
+  #
+  # A functions deploy needs `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`
+  # present in the dev project (`dev-environment.md` §3.1 step 8). If either is
+  # missing the step fails — and because this workflow runs on *every* merge,
+  # it would fail on every merge, for a reason that has nothing to do with the
+  # merge, and open a deploy-failure issue each time. A guardrail that cries
+  # wolf on every commit gets switched off, which costs more than the drift it
+  # was meant to catch.
+  #
+  # So dev functions stay on `npm run firebase:deploy:dev` until the secrets
+  # are known-set, at which point this is a step, not a redesign: copy the two
+  # functions steps from the production job above and point them at
+  # `trivimind-dev`. Until then the gap is written down here and in
+  # `docs/dev-environment.md` §3.4 rather than discovered.
+
   # The deploy failing used to be silent: it went red four merges running while
   # Hosting kept shipping, and nothing surfaced it. An issue is the cheapest
   # durable signal that does not depend on anyone watching a run or reading a
   # notification email — and unlike a comment on the merged PR, it stays open
   # until someone closes it.
   report-failure:
-    needs: deploy
+    needs: [deploy, deploy-dev]
     if: failure() && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
@@ -138,16 +238,21 @@ jobs:
           script: |
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const pr = context.payload.pull_request;
-            const title = `Production deploy failed after merging #${pr.number}`;
+            const title = `Deploy failed after merging #${pr.number}`;
             const body = [
               `The merge-to-deploy pipeline failed for **#${pr.number} — ${pr.title}**.`,
               '',
               `- Failed run: ${runUrl}`,
               `- Merge commit: ${pr.merge_commit_sha}`,
               '',
-              'Hosting deploys before Firestore rules/indexes and Cloud Functions, so production',
-              'may be **partially deployed**: a newer client against an older backend. Check which',
-              'step failed before assuming nothing shipped.',
+              'Two jobs run here — `deploy` (production, `intellectura-3b26a`) and `deploy-dev`',
+              '(`trivimind-dev`) — and they are independent, so **check which one failed**: a red',
+              'run does not mean production is affected.',
+              '',
+              'Within a job the order is Firestore rules/indexes, then Cloud Functions, then',
+              'Hosting — backend first, client last (finding D2). So a failure part-way leaves an',
+              '**older client against a newer backend**, never the reverse. Check which step',
+              'failed before assuming nothing shipped.',
               '',
               'Rollback and recovery: `INFRASTRUCTURE.md` §6.3a.',
             ].join('\n');

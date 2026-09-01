@@ -6,11 +6,11 @@ doing the one-time `trivimind-dev` Firebase setup in §3.
 Three environments, and the difference between them is which backend they talk
 to. `FEAT-012`.
 
-|                | Backend                                            | Built from                   | How you get it                                                                                        |
-| -------------- | -------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Local**      | Firebase emulators, project `demo-trivimind-local` | `environment.development.ts` | `npm start`                                                                                           |
-| **Dev**        | The real `trivimind-dev` Firebase project          | `environment.dev.ts`         | `npm run firebase:deploy:dev`, or `npm run start:dev-project` to drive it from a local Angular server |
-| **Production** | `intellectura-3b26a`                               | `environment.ts`             | `npm run firebase:deploy`                                                                             |
+|                | Backend                                            | Built from                   | How you get it                                                                                                                                                                           |
+| -------------- | -------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Local**      | Firebase emulators, project `demo-trivimind-local` | `environment.development.ts` | `npm start`                                                                                                                                                                              |
+| **Dev**        | The real `trivimind-dev` Firebase project          | `environment.dev.ts`         | Deployed automatically on every merge to `main` (`ci-cd.md` §4.2); `npm run firebase:deploy:dev` to push by hand, or `npm run start:dev-project` to drive it from a local Angular server |
+| **Production** | `intellectura-3b26a`                               | `environment.ts`             | `npm run firebase:deploy`                                                                                                                                                                |
 
 ---
 
@@ -210,9 +210,22 @@ domain, which dev does not have.
 
 ### 3.4 What stays production-only
 
-Deliberately, so the list is short and known: `firebase:deploy`, `.firebaserc`'s
-default project, and the smoke test's target. Everything else has a dev
-counterpart.
+Deliberately, so the list is short and known: `.firebaserc`'s default project,
+and the smoke test's target. Everything else has a dev counterpart.
+
+`firebase:deploy` used to be on that list, on the reasoning that dev is a place
+you push to when you want to test something. That was wrong, and wrong in a way
+that only shows up later: a mirror is a mirror only while it is _current_, and
+nothing kept it so. `firebase-deploy.yml` now carries a `deploy-dev` job that
+ships every merge to `main` to `trivimind-dev` — hosting and Firestore
+rules/indexes — for the reasons in `ci-cd.md` §4.2. `npm run firebase:deploy:dev`
+still exists for pushing a branch you have not merged.
+
+**Cloud Functions are the exception**: they are not in that job, because the
+step needs the Stripe secrets of step 8 above and would otherwise fail on every
+merge. Deploy them with `npm run firebase:deploy:dev` until the secrets are
+known-set — and see §4 below, where this is listed as open rather than left to
+be discovered.
 
 ## 4. Still open after this
 
@@ -221,6 +234,12 @@ counterpart.
 - **Google sign-in does not work on a preview channel** (§3.2a), because the
   channel domain cannot be pre-authorised. Pre-existing, and unrelated to which
   project the channel lives in.
+- **Cloud Functions on dev are not auto-deployed** (§3.4), so they lag `main`
+  until someone runs `npm run firebase:deploy:dev`. Hosting and the Firestore
+  rules/indexes are automatic; functions are not, because the step needs
+  `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` set in the dev project and a
+  missing one would turn **every** merge red. Confirm those secrets are set,
+  then add the two steps to `deploy-dev` and delete this bullet.
 - **Nothing else.** `npm run env:verify` covers the parts that can regress
   silently: a non-production build inheriting the production environment, a
   dev-facing file or a writing workflow naming the production project, an
