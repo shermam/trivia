@@ -148,8 +148,17 @@ jobs:
     name: Deploy to trivimind-dev
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    # The same three as the production job, and `contents: read` alone is not
+    # enough — which this job proved by failing on it. `action-hosting-deploy`
+    # opens a check run named "Deploy Preview" whichever channel it targets, so
+    # without `checks: write` it dies with GitHub's own
+    # `403 Resource not accessible by integration` *after* the Firebase deploy
+    # would have run. `ci-cd.md` §4.2 already recorded this exact 403 against
+    # the production job; narrowing the new job's permissions repeated it.
     permissions:
       contents: read
+      checks: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -190,6 +199,24 @@ jobs:
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project trivimind-dev
 
+      - name: Install Cloud Functions dependencies
+        run: npm ci --prefix functions
+
+      # Its own step, same as production: a functions-only failure should be
+      # distinguishable at a glance from a rules or Hosting one. `@14` rather
+      # than the `@13` used for rules/indexes above — `@13`'s bundled Functions
+      # support predates firebase-functions v7's removal of `functions.config()`
+      # and unconditionally probes for it, crashing.
+      - name: Deploy Cloud Functions
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npx firebase-tools@14 deploy --only functions --project trivimind-dev
+
+      # After its last user, not at the end of the job: the Hosting step below
+      # authenticates from the secret directly and never reads this file.
       - name: Clean up service account credentials
         if: always()
         run: rm -f "${{ runner.temp }}/firebase-service-account.json"
@@ -202,22 +229,26 @@ jobs:
           projectId: trivimind-dev
           channelId: live
 
-  # **Cloud Functions are deliberately not deployed to dev here**, and this is
-  # the one place the mirror is knowingly incomplete.
+  # **What the first run of `deploy-dev` taught, kept because the shape recurs.**
   #
-  # A functions deploy needs `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`
-  # present in the dev project (`dev-environment.md` §3.1 step 8). If either is
-  # missing the step fails — and because this workflow runs on *every* merge,
-  # it would fail on every merge, for a reason that has nothing to do with the
-  # merge, and open a deploy-failure issue each time. A guardrail that cries
-  # wolf on every commit gets switched off, which costs more than the drift it
-  # was meant to catch.
+  # It failed on the *rules* step: `403, The caller does not have permission`
+  # from `firebaserules.googleapis.com`. The credential had been deploying
+  # preview channels to this same project on every PR for weeks, which read as
+  # proof that it worked — and proved only that it could deploy **Hosting**.
+  # A Firebase service account generated from Project settings carries the
+  # Admin SDK service agent role and nothing else; Hosting, Firestore rules,
+  # Firestore indexes and Cloud Functions are four separate grants.
   #
-  # So dev functions stay on `npm run firebase:deploy:dev` until the secrets
-  # are known-set, at which point this is a step, not a redesign: copy the two
-  # functions steps from the production job above and point them at
-  # `trivimind-dev`. Until then the gap is written down here and in
-  # `docs/dev-environment.md` §3.4 rather than discovered.
+  # So "the credential is already in use" is not evidence it is sufficient for
+  # a *new* use of it. The roles this job needs are listed in
+  # `docs/dev-environment.md` §3.3, next to the step that issues the key,
+  # rather than left to be rediscovered from a 403.
+  #
+  # Note also which way the failure fell: backend-first ordering meant the
+  # rules failure stopped the job before Hosting ran, so dev stayed on its old
+  # bundle. That is the correct trade — a half-deployed mirror is worse than an
+  # un-deployed one — but it does mean a rules-permission problem presents as
+  # "the site did not update", which points at Hosting.
 
   # The deploy failing used to be silent: it went red four merges running while
   # Hosting kept shipping, and nothing surfaced it. An issue is the cheapest
