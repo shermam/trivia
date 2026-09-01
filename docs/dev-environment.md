@@ -215,21 +215,43 @@ domain, which dev does not have.
     for ROLE in \
       roles/firebase.admin \
       roles/cloudfunctions.admin \
-      roles/iam.serviceAccountUser \
-      roles/secretmanager.secretAccessor
+      roles/run.admin \
+      roles/eventarc.admin \
+      roles/artifactregistry.admin \
+      roles/cloudbuild.builds.builder \
+      roles/secretmanager.admin \
+      roles/iam.serviceAccountUser
     do
       gcloud projects add-iam-policy-binding "$PROJECT" \
         --member="serviceAccount:$SA" --role="$ROLE" --condition=None
     done
     ```
 
-    `roles/firebase.admin` is the broad one and covers rules, indexes and
-    Hosting together; the narrow equivalent is `roles/firebaserules.admin` plus
-    `roles/datastore.indexAdmin`. The other three are the same set production
-    needed for its functions deploy (`ci-cd.md` §4.2). If the functions step
-    still fails after this, the next grants to try are Artifact Registry and
-    Cloud Build — Gen 2 functions build a container image, and that is a
-    separate permission surface again.
+    `roles/firebase.admin` covers rules, indexes and Hosting together; the
+    narrow equivalent is `roles/firebaserules.admin` plus
+    `roles/datastore.indexAdmin`. The rest are what a **Gen 2** functions
+    deploy touches, and the list is longer than it looks like it should be
+    because Gen 2 functions are Cloud Run services built by Cloud Build into
+    Artifact Registry and triggered through Eventarc — four products, four
+    grants, none of them named "functions".
+
+    **`roles/secretmanager.secretAccessor` is not the one you want, and the
+    reason is worth knowing.** It grants `secretmanager.versions.access` and
+    nothing else — permission to read a secret's _value_, with no permission to
+    see that the secret _exists_. The deploy asks for metadata first, so it
+    fails at `secretmanager.secrets.get` before it ever reads a payload:
+
+    ```
+    Request to .../secrets/STRIPE_SECRET_KEY had HTTP Error: 403,
+    Permission 'secretmanager.secrets.get' denied on resource (or it may not exist)
+    ```
+
+    That parenthetical — _"or it may not exist"_ — is what makes this expensive
+    to diagnose: the error reads as a missing secret, and the secret was there
+    the whole time. `roles/secretmanager.admin` is used above because the CLI
+    also binds the _runtime_ service account onto each secret during deploy,
+    which needs `setIamPolicy` on it; `roles/secretmanager.viewer` fixes only
+    the `get` and fails at the next step.
 
 11. ✅ **Repoint the preview workflow** — done in code, not by hand. All three
     jobs (deploy, e2e, cleanup) now use `trivimind-dev` and the secret from
