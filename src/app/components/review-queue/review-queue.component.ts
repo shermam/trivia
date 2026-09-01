@@ -12,6 +12,7 @@ import { CustomQuestionDoc, QuestionStatus } from '../../models/question.model';
 import { FirebaseService, REVIEW_PAGE_SIZE } from '../../services/firebase.service';
 import { ReviewerService } from '../../services/reviewer.service';
 import { IconComponent } from '../icon/icon.component';
+import { SourceLinkComponent } from '../source-link/source-link.component';
 
 type ReviewQuestion = CustomQuestionDoc & { id: string };
 
@@ -40,7 +41,7 @@ export const REVIEW_TABS: readonly { status: QuestionStatus; label: string }[] =
 @Component({
   selector: 'app-review-queue',
   standalone: true,
-  imports: [RouterLink, IconComponent],
+  imports: [RouterLink, IconComponent, SourceLinkComponent],
   templateUrl: './review-queue.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
