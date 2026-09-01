@@ -148,8 +148,17 @@ jobs:
     name: Deploy to trivimind-dev
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    # The same three as the production job, and `contents: read` alone is not
+    # enough — which this job proved by failing on it. `action-hosting-deploy`
+    # opens a check run named "Deploy Preview" whichever channel it targets, so
+    # without `checks: write` it dies with GitHub's own
+    # `403 Resource not accessible by integration` *after* the Firebase deploy
+    # would have run. `ci-cd.md` §4.2 already recorded this exact 403 against
+    # the production job; narrowing the new job's permissions repeated it.
     permissions:
       contents: read
+      checks: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
