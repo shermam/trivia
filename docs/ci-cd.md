@@ -170,11 +170,11 @@ One practical gotcha when verifying this: it's a **ruleset**, not classic branch
 ```
 npm start              # emulators (demo-trivimind-local) + ng serve — see docs/dev-environment.md
 npm run start:dev-project # ng serve against the real trivimind-dev backend
-npm run build:dev-project # production build labelled DEV, for deploying to trivimind-dev
+npm run build:dev-project # same, labelled DEV, for deploying to trivimind-dev
 npm run firebase:deploy:dev # build:dev-project, then deploy hosting/firestore/functions to trivimind-dev
 npm run env:verify     # fails if anything non-production can reach production
 npm run build          # ng build (dev config)
-npm run build:prod     # ng build --configuration production
+npm run build:prod     # ng build (production) with the commit stamped in, then sw:stamp
 npm run watch          # ng build --watch --configuration development
 npm test               # ng test (Vitest + jsdom, setupFiles: src/test-setup.ts)
 npm run functions:install # npm ci inside functions/ (also runs automatically via the root `postinstall` hook)
@@ -190,6 +190,12 @@ npm run lighthouse     # build:prod, then Lighthouse CI against a local static s
 npm run firebase:emulate  # build:prod, functions:build, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore,functions
 ```
+
+**Both deploying builds go through `scripts/build-with-commit.mjs`**, which passes the current commit to `ng build --define` so `src/app/build-info.ts` can name it and the footer can show it on hover. Three decisions worth not re-litigating:
+
+- **`--define`, not a generated source file.** esbuild substitutes the identifier in the emitted JavaScript, so there is nothing on disk to generate, gitignore, keep in step, or accidentally commit with a real hash in it — and a fresh clone type-checks with no build step having run.
+- **The commit _date_, never a build timestamp.** A clock in the bundle makes every rebuild of the same commit emit different bytes, hence a different content hash, a different `ngsw.json`, and a service-worker update pushed to every client for a deploy that changed nothing. The commit date answers the same "how stale is this?" question and is a property of the commit.
+- **A script rather than `$(git rev-parse …)` inline in `package.json`.** npm runs scripts through `cmd` on Windows, where neither `$( )` nor `git log --format=%cd` survives — and the fallback belongs somewhere with `try`/`catch`, because building outside a checkout (a source tarball, a Docker context with no `.git`) has to degrade to an unstamped build rather than fail. `ng serve`, `ng test` and plain `ng build` pass no define at all, so the footer reads "local build" there; `build-info.spec.ts` runs under exactly that condition, which makes the undeclared-identifier path real rather than simulated.
 
 **`ng test` runs with `--isolate` defaulting to _false_, so spec files are not independent.** Vitest's Angular builder documents the default as aligning with the Karma/Jasmine experience: spec files share a worker's module registry, which means they share the module-level state of everything they import. `fake-indexeddb/auto` is the case that bites — nine spec files import it, and they get **one** in-memory IndexedDB between them, so a unit test that writes real storage is not local to its own file.
 

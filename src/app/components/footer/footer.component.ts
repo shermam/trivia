@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { environment } from '../../../environments/environment';
+import { buildLabel } from '../../build-info';
 
 /**
  * Site footer, carrying the legal links. Sits as a sibling of
@@ -20,4 +22,13 @@ import { RouterLink } from '@angular/router';
 })
 export class FooterComponent {
   protected readonly year = new Date().getFullYear();
+
+  /**
+   * Which build this is — hover the brand name to see it.
+   *
+   * Computed once at construction rather than in a signal: `--define`
+   * substitutes a constant, so there is nothing here that can change while the
+   * page is open.
+   */
+  protected readonly build = buildLabel(environment.environmentLabel);
 }
