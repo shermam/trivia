@@ -30,13 +30,13 @@ This document is the index. The overview itself lives in `docs/`, split by subje
 
 ### The other documents in this repo
 
-| Document                   | What it is                                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAUDE.md`                | Standing instructions for every session: branching, the verification suite, and §4's contract of invariants that must not regress     |
-| `INFRASTRUCTURE.md`        | The stack choices as infrastructure, independent of this app — the reference if scaffolding a new project on the same foundations     |
-| `BACKLOG.md`               | **Retired as a queue** (26 Aug 2026), kept for its per-item analysis — several roadmap specs cite its reasoning rather than repeat it |
-| `AUDIT_REMEDIATION.md`     | The 60-finding audit and the PR series that closed it: status, decisions taken, and a narrative per finding                           |
-| `UI_INVENTORY.md`          | Every screen, element, state and piece of user-facing copy as implemented — raw material for design work                              |
-| `BRAND_DESIGN_SYSTEM.md`   | Colors, typography, shadows, radii — the visual system `UI_INVENTORY.md` refers to                                                    |
-| `FIRESTORE_SDK_VS_REST.md` | Why every Firestore call goes over `fetch` rather than the client SDK, with the bundle measurements behind it                         |
-| `README.md`                | Getting a machine running: `npm start`, the build, the test commands                                                                  |
+| Document                   | What it is                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE.md`                | Standing instructions for every session: branching, who merges, the verification suite, and §4's contract of invariants that must not regress |
+| `INFRASTRUCTURE.md`        | The stack choices as infrastructure, independent of this app — the reference if scaffolding a new project on the same foundations             |
+| `BACKLOG.md`               | **Retired as a queue** (26 Aug 2026), kept for its per-item analysis — several roadmap specs cite its reasoning rather than repeat it         |
+| `AUDIT_REMEDIATION.md`     | The 60-finding audit and the PR series that closed it: status, decisions taken, and a narrative per finding                                   |
+| `UI_INVENTORY.md`          | Every screen, element, state and piece of user-facing copy as implemented — raw material for design work                                      |
+| `BRAND_DESIGN_SYSTEM.md`   | Colors, typography, shadows, radii — the visual system `UI_INVENTORY.md` refers to                                                            |
+| `FIRESTORE_SDK_VS_REST.md` | Why every Firestore call goes over `fetch` rather than the client SDK, with the bundle measurements behind it                                 |
+| `README.md`                | Getting a machine running: `npm start`, the build, the test commands                                                                          |
