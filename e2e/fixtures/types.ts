@@ -40,6 +40,20 @@ export interface ProSubscriptionSeed {
 }
 
 /**
+ * A `question_reports` document as read back by `getQuestionReports`, ID
+ * included — the ID carries the `{window}-{slot}-{uid}` volume cap, so specs
+ * assert on its shape as well as on the payload (finding H4).
+ */
+export interface QuestionReportRecord {
+  id: string;
+  questionId: string;
+  reason: 'incorrect' | 'inappropriate' | 'spam' | 'other';
+  detail?: string;
+  reportedBy: string;
+  createdAt: number;
+}
+
+/**
  * The boards, one per timing constraint (finding G7). Must match `isValidBoard`
  * in `firestore.rules`. Seeding and cleanup both have to visit every one of
  * them, so the list lives here rather than at each call site.
