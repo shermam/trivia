@@ -117,25 +117,63 @@ test.describe('daily free game limit', () => {
    * moving is. At a viewport tall enough to leave the card some slack, per the
    * §4.4 note that the same class of shift measures 0px at one height and 43px
    * at another.
+   *
+   * **Sampled every frame from first paint rather than measured before and
+   * after**, and that is the whole design. A pair of measurements only says
+   * anything if the first one is genuinely on the far side of the event — and
+   * nothing here can establish that it is. The IndexedDB read resolves on its
+   * own schedule, and the row says *the same sentence* either side of it (the
+   * counter starts at 0 in the signal and reads back 0 from an empty database),
+   * so there is no DOM state to wait for the absence of. Inherited from
+   * Cypress, where the same two-point shape had the same hole.
+   *
+   * Watching every frame removes the ordering requirement instead of trying to
+   * satisfy it: the first sample is the first frame in which the button exists,
+   * which is by construction at or before any later shift, and a row that
+   * appeared only once the count resolved would move the button between two
+   * samples. The sampler is installed as an init script so it is running before
+   * a line of application code is.
    */
   test('does not move the Start button when the allowance resolves', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 1000 });
+
+    await page.addInitScript(() => {
+      const tops: number[] = [];
+      (window as unknown as { __startButtonTops: number[] }).__startButtonTops = tops;
+      const sample = (): void => {
+        // The setup form's own submit control. It has no `data-cy` of its own,
+        // and the auth menu — the only other form on this route — is closed,
+        // so this resolves to the Start button or to nothing.
+        const button = document.querySelector('form button[type="submit"]');
+        if (button) {
+          tops.push(button.getBoundingClientRect().top);
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+
     await page.goto('/');
 
     const start = page.getByRole('button', { name: 'Start Game', exact: true });
-
-    // Before the count has been read back from IndexedDB.
-    const before = (await start.boundingBox())!.y;
-
+    await expect(start).toBeVisible();
     await expect(page.getByTestId('daily-allowance')).toContainText('free games left today');
 
-    // Polled rather than read once: a late layout frame must not decide the
-    // measurement, and a shift that never settles still fails, because the
-    // poll has nothing to settle *to* except the original position.
+    // Polled, so the window the samples cover is guaranteed to extend past the
+    // allowance having resolved rather than merely up to it — and so a late
+    // layout frame cannot decide the measurement. A shift that never settles
+    // still fails: the only value this can settle to is one where every sampled
+    // frame agrees.
     await expect
-      .poll(async () => Math.abs((await start.boundingBox())!.y - before), {
-        message: 'the allowance resolving must not move the Start button',
-      })
-      .toBeLessThanOrEqual(1);
+      .poll(
+        async () => {
+          const tops = await page.evaluate(
+            () => (window as unknown as { __startButtonTops: number[] }).__startButtonTops,
+          );
+          return { frames: tops.length > 1, spread: Math.max(...tops) - Math.min(...tops) <= 1 };
+        },
+        { message: 'the allowance resolving must not move the Start button' },
+      )
+      .toEqual({ frames: true, spread: true });
   });
 });

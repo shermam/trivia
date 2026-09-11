@@ -38,3 +38,17 @@ export interface VerifiedUserSeed {
 export interface ProSubscriptionSeed {
   uid: string;
 }
+
+/**
+ * A `question_reports` document as read back by `getQuestionReports`, ID
+ * included — the ID carries the `{window}-{slot}-{uid}` volume cap, so specs
+ * assert on its shape as well as on the payload (finding H4).
+ */
+export interface QuestionReportRecord {
+  id: string;
+  questionId: string;
+  reason: 'incorrect' | 'inappropriate' | 'spam' | 'other';
+  detail?: string;
+  reportedBy: string;
+  createdAt: number;
+}
