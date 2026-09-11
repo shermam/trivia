@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import {
   answerOption,
@@ -15,11 +15,17 @@ import { CORRECT_ANSWERS, questionsFixture, stubOpenTrivia } from '../../support
  * Sub-pixel, because these tests are about a box moving and a box staying put:
  * anything looser would pass through the 43px and 508px jumps they exist to
  * catch, and anything tighter would fail on fractional layout rounding.
+ * Anything larger than the tolerance is returned as-is, so a failure names the
+ * jump rather than merely reporting that there was one.
  */
+function drift(actual: number, expected: number): number {
+  const delta = actual - expected;
+  return Math.abs(delta) <= 0.5 ? 0 : delta;
+}
+
+/** A single comparison, for a measurement already gated on a settled state. */
 function expectUnmoved(actual: number, expected: number, what: string): void {
-  expect(Math.abs(actual - expected), `${what} (${actual} vs ${expected})`).toBeLessThanOrEqual(
-    0.5,
-  );
+  expect(drift(actual, expected), `${what} (${actual} vs ${expected})`).toBe(0);
 }
 
 test.describe('anonymous game flow (open_trivia source)', () => {
@@ -101,9 +107,20 @@ test.describe('anonymous game flow (open_trivia source)', () => {
     // measuring twice before anything changed.
     await expect(page.getByTestId('result-status')).toContainText('Correct');
 
-    const after = await card.boundingBox();
-    expectUnmoved(after!.height, before!.height, 'card height');
-    expectUnmoved(after!.y, before!.y, 'card top');
+    // Polled, not read once: the banner's arrival is a render the runner does
+    // not synchronise with, so a single `boundingBox()` can land on a frame
+    // mid-layout and fail for a jump that never reaches a reader's eye. A jump
+    // that *does* is not forgiven by polling — the only value this can settle
+    // to is where the card started.
+    await expect
+      .poll(
+        async () => {
+          const box = (await card.boundingBox())!;
+          return { height: drift(box.height, before!.height), top: drift(box.y, before!.y) };
+        },
+        { message: 'the result banner must not resize or move the quiz card' },
+      )
+      .toEqual({ height: 0, top: 0 });
   });
 
   /**
@@ -138,19 +155,18 @@ test.describe('anonymous game flow (open_trivia source)', () => {
 
     const card = page.getByTestId('score-action');
     await expect(card).toBeVisible();
-    const measured = await card.evaluate((element) => ({
-      cell: element.getBoundingClientRect().height,
-      faces: [...element.children].map((face) => ({
-        name: face.getAttribute('data-cy'),
-        height: face.getBoundingClientRect().height,
-      })),
-    }));
 
-    expect(measured.faces.length, 'faces stacked in the cell').toBe(5);
-    expect(measured.cell, 'card collapsed').toBeGreaterThan(0);
-    for (const face of measured.faces) {
-      expectUnmoved(face.height, measured.cell, `face ${face.name} against the reserved height`);
-    }
+    // One retrying poll over the whole card rather than a single read: the
+    // faces resolve as auth does, and a measurement taken on the frame between
+    // two of them would report a mismatch nobody ever sees. Every part of the
+    // property is in the one polled value, so they retry together and a card
+    // that is genuinely uneven still fails — there is nothing for it to settle
+    // into.
+    await expect
+      .poll(() => measureScoreCardFaces(card), {
+        message: 'every face of the score card fills the one reserved cell',
+      })
+      .toEqual({ faces: 5, collapsed: false, mismatched: [] });
   });
 
   /**
@@ -551,6 +567,34 @@ test.describe('anonymous game flow (custom source)', () => {
     await expect(page.getByText(`/ ${total}`).first()).toBeVisible();
   });
 });
+
+/**
+ * The reserved cell of the game-over score card, and how each of its faces
+ * measures against it.
+ *
+ * Reported as one value so a single poll can hold the whole property: how many
+ * faces are stacked in the cell, whether the cell collapsed to nothing, and
+ * which faces — named — differ from the reserved height.
+ */
+async function measureScoreCardFaces(
+  card: Locator,
+): Promise<{ faces: number; collapsed: boolean; mismatched: string[] }> {
+  const measured = await card.evaluate((element) => ({
+    cell: element.getBoundingClientRect().height,
+    faces: [...element.children].map((face) => ({
+      name: face.getAttribute('data-cy'),
+      height: face.getBoundingClientRect().height,
+    })),
+  }));
+
+  return {
+    faces: measured.faces.length,
+    collapsed: measured.cell <= 0,
+    mismatched: measured.faces
+      .filter((face) => drift(face.height, measured.cell) !== 0)
+      .map((face) => `${face.name} (${face.height} vs ${measured.cell})`),
+  };
+}
 
 /**
  * The document-relative top of each box the recap must not disturb.

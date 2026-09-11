@@ -1,5 +1,5 @@
 import { expect, test } from '../../fixtures/test';
-import { assertRadiosAreGrouped } from '../../support/a11y-assertions';
+import { expectRadiosAreGrouped } from '../../support/a11y';
 import { signInViaUi } from '../../support/auth';
 
 test.describe('add-question Pro gating', () => {
@@ -65,7 +65,7 @@ test.describe('add-question Pro gating', () => {
     // once a boolean question is chosen, Correct Answer), and it is only
     // reachable as Pro — so G4's sweep runs here rather than in the
     // unauthenticated spec.
-    await assertRadiosAreGrouped(page);
+    await expectRadiosAreGrouped(page);
 
     // Each of these retries until the Pro-gated form actually renders — i.e.
     // until the subscription read and the forced token refresh have landed, not

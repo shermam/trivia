@@ -1,4 +1,5 @@
 import { test as base } from '@playwright/test';
+import { AuthUidTracker, installAuthUidTracker } from '../support/auth-uid-tracker';
 import { FirebaseBackend } from './firebase-backend';
 import { emulatorTarget } from './firebase-target';
 
@@ -21,7 +22,7 @@ import { emulatorTarget } from './firebase-target';
  * connection. Here the isolation is a property of the context, so there is no
  * hook to place and no connection to race.
  */
-export const test = base.extend<object, { firebase: FirebaseBackend }>({
+export const test = base.extend<{ authUids: AuthUidTracker }, { firebase: FirebaseBackend }>({
   firebase: [
     // Playwright reads the *source text* of this parameter to work out which
     // fixtures the function depends on, and rejects anything that is not a
@@ -35,6 +36,29 @@ export const test = base.extend<object, { firebase: FirebaseBackend }>({
       await backend.cleanup();
     },
     { scope: 'worker' },
+  ],
+
+  /**
+   * Every uid the browser persists during a test, handed to the `firebase`
+   * fixture when the test ends so the target's sweep can delete it.
+   *
+   * **Automatic**, because the uids that matter are the ones nothing asked
+   * for: a page load signs in anonymously whether or not the test is about
+   * auth, and against the real preview project those accounts are what
+   * accumulates (finding C6). A fixture a spec had to remember to request
+   * would be requested by the specs that already knew.
+   *
+   * It takes `context` rather than `page` so the install covers every page the
+   * test opens, and because a context-level init script reaches the pages that
+   * already exist as well as the ones created later.
+   */
+  authUids: [
+    async ({ context, firebase }, use) => {
+      const tracker = await installAuthUidTracker(context);
+      await use(tracker);
+      firebase.trackAuthUids(tracker.take());
+    },
+    { auto: true },
   ],
 });
 

@@ -56,6 +56,21 @@ export class FirebaseBackend {
     return { uid: user.uid };
   }
 
+  /**
+   * Records uids the **browser** brought into existence, as
+   * `e2e/support/auth-uid-tracker.ts` observes them being persisted.
+   *
+   * Finding C6. `createVerifiedUser` above knows about the accounts a test asks
+   * for by name, which against the preview project are the minority: every page
+   * load signs in anonymously, and a sign-out mints another. Those are the
+   * accounts that accumulate, so the sweep has to hear about them too.
+   */
+  trackAuthUids(uids: Iterable<string>): void {
+    for (const uid of uids) {
+      this.authUids.add(uid);
+    }
+  }
+
   /** Writes documents straight into `custom_questions`, bypassing Firestore rules. */
   async seedCustomQuestions(questions: CustomQuestionSeed[]): Promise<void> {
     await Promise.all(
