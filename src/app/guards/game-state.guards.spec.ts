@@ -5,7 +5,7 @@ import { GameControllerService } from '../services/game-controller.service';
 import { hasActiveGameGuard, hasCompletedGameGuard } from './game-state.guards';
 
 /**
- * Finding F4. The e2e suite (route-guards.cy.ts) pins the user-visible
+ * Finding F4. The e2e suite (route-guards.spec.ts) pins the user-visible
  * behaviour — deep-linking `/play` or `/game-over` with no game lands on `/`
  * — in a real browser. This spec pins the mechanism at unit level: each guard
  * returns a `UrlTree` to `/` (a cancelled navigation, no history entry)

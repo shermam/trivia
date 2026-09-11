@@ -323,7 +323,7 @@ export class TopBarComponent {
    * it. Making the panel permanent removed the accident and left the bug.
    *
    * Nothing in jsdom enforces `inert` or `visibility`, so the unit spec's
-   * focus assertions pass either way. `mobile-nav.cy.ts` is where this is
+   * focus assertions pass either way. `mobile-nav.spec.ts` is where this is
    * actually checked.
    */
   private readonly navFocusEffect = afterRenderEffect(() => {

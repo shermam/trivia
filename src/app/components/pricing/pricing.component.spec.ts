@@ -12,7 +12,7 @@ import { PricingComponent } from './pricing.component';
  * (`BACKLOG.md` item 2). Until this spec existed, deleting the call broke
  * nothing: `subscription.service.spec.ts` calls `awaitProActivation()`
  * directly, which proves the method works but not that anything ever invokes
- * it, and `pricing.cy.ts` never loads `?checkout=success` at all.
+ * it, and `pricing.spec.ts` never loads `?checkout=success` at all.
  *
  * The gate matters as much as the call. Polling on every visit to `/pricing`
  * would spend up to twenty reads on a page most visitors reach by curiosity,

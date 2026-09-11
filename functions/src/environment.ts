@@ -34,7 +34,7 @@ export function resolveProjectId(env: Record<string, string | undefined>): strin
 }
 
 /**
- * A throwaway project — `demo-trivia-app-e2e` for the Cypress/Lighthouse
+ * A throwaway project — `demo-trivia-app-e2e` for the Playwright/Lighthouse
  * emulator runs, `demo-rules-*` for the rules suite.
  *
  * The `demo-` prefix is not a convention this repo invented: the Firebase

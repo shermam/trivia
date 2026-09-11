@@ -339,7 +339,7 @@ describe('SubscriptionService session handshake', () => {
 
   beforeEach(() => {
     // `window.location.assign` is non-configurable in a real browser, but this
-    // is jsdom; the redirect itself is covered for real by pricing.cy.ts.
+    // is jsdom; the redirect itself is covered for real by pricing.spec.ts.
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
   });
 
