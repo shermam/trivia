@@ -59,6 +59,43 @@ function rectOf(locator: Locator): Promise<Rect> {
   });
 }
 
+/**
+ * The account chip, measured **after it has stopped growing**.
+ *
+ * The chip's "Sign in" label wipes into view by transitioning `max-width` from
+ * `0` to a cap over 600ms (`top-bar.component.html`), so for the first third of
+ * a second after auth resolves the chip is narrower than it will be — and
+ * therefore starts further right. Every assertion here compares the chip's left
+ * edge against something to its left, so a single early read is wrong in the
+ * **passing** direction: a chip that will overlap the brand does not overlap it
+ * yet, and the test says so.
+ *
+ * Two steps, and both are needed. The text anchor proves the label exists,
+ * which is the moment the transition *starts* — not the moment it ends. The
+ * poll then waits for two consecutive reads to agree, which is what "ended"
+ * means here: the transition moves the edge every frame while it runs, and a
+ * reader who has asked for reduced motion gets no transition at all and settles
+ * on the first comparison.
+ */
+async function settledChipRect(page: Page): Promise<Rect> {
+  const chip = page.getByTestId('auth-menu-trigger');
+  await expect(chip, 'the chip is showing its sign-in label').toContainText('Sign in');
+
+  let previous = await rectOf(chip);
+  await expect
+    .poll(
+      async () => {
+        const current = await rectOf(chip);
+        const settled = current.x === previous.x && current.width === previous.width;
+        previous = current;
+        return settled;
+      },
+      { message: 'the account chip has finished animating its width' },
+    )
+    .toBe(true);
+  return previous;
+}
+
 /** The layout viewport, which is what "centred" and "does not overflow" are about. */
 function layoutViewport(page: Page): Promise<{ width: number; height: number }> {
   return page.evaluate(() => ({
@@ -170,7 +207,7 @@ test.describe('the top bar on a phone', () => {
    * one, which is the state every first-time visitor sees.
    */
   test('keeps the account chip clear of the brand', async ({ page }) => {
-    const chip = await rectOf(page.getByTestId('auth-menu-trigger'));
+    const chip = await settledChipRect(page);
     const mark = await rectOf(brand(page));
     expect(mark.right, 'the brand running under the account chip').toBeLessThanOrEqual(chip.x);
   });
@@ -401,7 +438,7 @@ test.describe('the top bar at its narrowest', () => {
   });
 
   test('keeps the account chip clear of the brand', async ({ page }) => {
-    const chip = await rectOf(page.getByTestId('auth-menu-trigger'));
+    const chip = await settledChipRect(page);
     const mark = await rectOf(brand(page));
     expect(mark.right, 'the brand running under the account chip').toBeLessThanOrEqual(chip.x);
   });

@@ -19,9 +19,10 @@ test.describe('segmented radio groups (G4)', () => {
     await page.goto('/');
     // Stands in for Cypress's `cy.wait('@categories')`: the dropdown is built
     // from the stubbed response, so a stubbed name appearing in it means the
-    // setup screen is really rendered. The sweep below counts radios in a
-    // single pass rather than retrying, so it needs an anchor in front of it
-    // or a page that has not painted yet fails it for the wrong reason.
+    // setup *screen* is really rendered, which is the screen this test names.
+    // The sweep below waits for the radios itself, so this is not what keeps it
+    // from running against a blank page — it is what stops the test passing on
+    // some other screen that happens to have radios on it.
     await expect(page.locator('#category')).toContainText('General Knowledge');
 
     await expectRadiosAreGrouped(page);

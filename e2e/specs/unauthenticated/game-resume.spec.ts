@@ -250,7 +250,14 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
 
     // Read from the DOM rather than assumed: the bank serves in an order this
     // test does not control.
+    //
+    // Asserted non-empty rather than asserted away with `!`. `textContent()`
+    // is a one-shot read, so an empty string is exactly what a question that
+    // has not rendered yet returns — and `toHaveText('')` after the reload
+    // would then pass against a screen with no question on it, which is the
+    // opposite of what this test is for.
     const flaggedQuestion = (await page.getByTestId('question-text').textContent())?.trim();
+    expect(flaggedQuestion, 'the question text this test flags').toBeTruthy();
 
     await page.getByTestId('flag-question').click();
     await expect(page.getByTestId('flag-notice')).toBeVisible();
@@ -266,7 +273,7 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
     await expect(
       page.getByTestId('question-text'),
       'the same question is back on screen',
-    ).toHaveText(flaggedQuestion!);
+    ).toHaveText(flaggedQuestion as string);
     // The flag is a promise to the player — it says they will be asked for
     // detail at game over — so a reload that dropped it would break that
     // promise with nothing on screen to say so.

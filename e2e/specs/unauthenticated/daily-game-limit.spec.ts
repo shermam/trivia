@@ -141,10 +141,13 @@ test.describe('daily free game limit', () => {
       const tops: number[] = [];
       (window as unknown as { __startButtonTops: number[] }).__startButtonTops = tops;
       const sample = (): void => {
-        // The setup form's own submit control. It has no `data-cy` of its own,
-        // and the auth menu — the only other form on this route — is closed,
-        // so this resolves to the Start button or to nothing.
-        const button = document.querySelector('form button[type="submit"]');
+        // The setup form's own submit control, scoped to the setup component's
+        // host rather than to "a form on this page". The Start button has no
+        // `data-cy`, and `form button[type="submit"]` would also match the auth
+        // menu's submit the moment that menu is open — which is a different
+        // element in a different part of the bar, so the sampler would silently
+        // start measuring its top instead.
+        const button = document.querySelector('app-game-setup form button[type="submit"]');
         if (button) {
           tops.push(button.getBoundingClientRect().top);
         }
@@ -159,11 +162,20 @@ test.describe('daily free game limit', () => {
     await expect(start).toBeVisible();
     await expect(page.getByTestId('daily-allowance')).toContainText('free games left today');
 
-    // Polled, so the window the samples cover is guaranteed to extend past the
-    // allowance having resolved rather than merely up to it — and so a late
-    // layout frame cannot decide the measurement. A shift that never settles
-    // still fails: the only value this can settle to is one where every sampled
-    // frame agrees.
+    // Polled so that a late layout frame cannot decide the measurement, and so
+    // the window keeps growing while the assertion retries. A shift that never
+    // settles still fails: the only value this can settle to is one where every
+    // sampled frame agrees.
+    //
+    // **It does not establish that the window extends past the allowance
+    // resolving, and nothing here can.** That is the same hole the block
+    // comment above describes from the other side: the row renders the
+    // identical sentence before and after the IndexedDB read, so there is no
+    // DOM state whose arrival marks the moment. What the shape does buy is that
+    // the window starts before any application code and ends no earlier than
+    // the first frame in which every sample agrees — so a shift inside it is
+    // caught, and the only escape left is a shift that lands after the poll has
+    // already settled.
     await expect
       .poll(
         async () => {

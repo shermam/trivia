@@ -20,11 +20,19 @@ import { expect, Page } from '@playwright/test';
  * assertion chained onto another is how a check stops being about the element
  * it named (`CLAUDE.md` §4.6). Here every assertion re-resolves its own
  * locator and none of them moves the subject.
+ *
+ * **The sweep waits for the radios rather than sampling them.** `count()` is a
+ * one-shot query with no retry, so on a screen that renders after a round trip
+ * — `/add-question` waits on a subscription read and a forced token refresh
+ * before the Pro-gated form exists at all — it returned `0` and failed on
+ * "radios on the page" before the thing under test had rendered. A retrying
+ * `not.toHaveCount(0)` in front of it makes the helper sound at every call
+ * site, rather than making each caller remember an anchor.
  */
 export async function expectRadiosAreGrouped(page: Page): Promise<void> {
   const radios = page.locator('input[type="radio"]');
+  await expect(radios, 'radios on the page').not.toHaveCount(0);
   const count = await radios.count();
-  expect(count, 'radios on the page').toBeGreaterThan(0);
 
   for (let index = 0; index < count; index++) {
     const radio = radios.nth(index);
