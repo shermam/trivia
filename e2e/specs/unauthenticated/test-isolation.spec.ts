@@ -68,8 +68,15 @@ test.describe('browser state does not leak between tests', () => {
       })
       .not.toBeNull();
 
+    // Polled, like its counterpart in the next test, because anonymous sign-in
+    // is a round trip and nothing here waits on it: the questions are stubbed,
+    // so the game can be on screen before Auth has answered. Against the
+    // emulator that gap is a millisecond and a one-shot read never lost the
+    // race; against the real project behind a preview channel it does.
+    await expect
+      .poll(() => authUids.uids().length, { message: 'an anonymous session was persisted' })
+      .toBeGreaterThanOrEqual(1);
     const uids = authUids.uids();
-    expect(uids.length, 'an anonymous session was persisted').toBeGreaterThanOrEqual(1);
     firstUid = uids[uids.length - 1];
 
     await expect
