@@ -20,4 +20,6 @@ coverage/
 cypress/videos/
 cypress/screenshots/
 cypress/downloads/
+playwright-report/
+test-results/
 *-debug.log

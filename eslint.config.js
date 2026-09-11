@@ -15,12 +15,12 @@ const angular = require('angular-eslint');
  * preference are left off — Prettier owns formatting, and a lint run that
  * cries wolf gets ignored.
  *
- * ## Three TypeScript blocks, not one
+ * ## Four TypeScript blocks, not one
  *
- * There is a block per source tree — `src/`, `functions/src/`, `cypress/` —
- * because each is a different program with different globals and a different
- * set of rules that make sense in it. They share the type-aware base; what
- * differs is written down at each block with the reason.
+ * There is a block per source tree — `src/`, `functions/src/`, `cypress/`,
+ * `e2e/` — because each is a different program with different globals and a
+ * different set of rules that make sense in it. They share the type-aware
+ * base; what differs is written down at each block with the reason.
  *
  * The blocks are scoped narrowly on purpose. The first one used to match
  * every TypeScript file in the repo, which was harmless only because
@@ -46,9 +46,9 @@ const angular = require('angular-eslint');
  *
  * `projectService: true` resolves each file against the nearest ancestor
  * `tsconfig.json` — `tsconfig.app.json` via the root solution file for `src/`,
- * `functions/tsconfig.json` for the functions, `cypress/tsconfig.json` for the
- * specs. No explicit `project` array is needed, and adding one would be a
- * third place to keep in sync.
+ * `functions/tsconfig.json` for the functions, `cypress/tsconfig.json` and
+ * `e2e/tsconfig.json` for the two e2e suites. No explicit `project` array is
+ * needed, and adding one would be another place to keep in sync.
  */
 const typeAwareLanguageOptions = {
   parserOptions: {
@@ -186,22 +186,48 @@ module.exports = defineConfig([
   },
   {
     /**
-     * The two Cypress config files sit at the repo root, so the project
-     * service resolves them against the root `tsconfig.json` — which is a
-     * solution file with `files: []` and would reject them outright.
-     * `cypress/tsconfig.json` does list them in `include`, but a tsconfig in
-     * a subdirectory is never consulted for a file above it.
+     * The Playwright suite. Same standard as `src/`: it is test code, but it
+     * is the test code that decides whether a release is safe, and an
+     * unawaited promise in a spec is an assertion that silently never ran.
      *
-     * Pointing `defaultProject` at it gives these two the same `strict: true`
-     * and `types: ['cypress', 'node']` as the rest of the suite, rather than
-     * inferred defaults.
+     * No chai exception is needed here — Playwright's `expect(x).toBe(y)` is a
+     * call, like Vitest's and unlike chai's property-access assertions — and
+     * no namespace exception either, since fixtures are declared with
+     * `test.extend` rather than through declaration merging.
      */
-    files: ['cypress.config.ts', 'cypress.preview.config.ts'],
+    files: ['e2e/**/*.ts'],
+    extends: [eslint.configs.recommended, tseslint.configs.recommended, tseslint.configs.stylistic],
+    languageOptions: typeAwareLanguageOptions,
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-unused-vars': unusedVarsWithUnderscoreOptOut,
+    },
+  },
+  {
+    /**
+     * The three runner config files sit at the repo root, so the project
+     * service resolves them against the root `tsconfig.json` — which is a
+     * solution file with `files: []` and would reject them outright. Each
+     * suite's own `tsconfig.json` does list its config in `include`, but a
+     * tsconfig in a subdirectory is never consulted for a file above it.
+     *
+     * Pointing `defaultProject` at `cypress/tsconfig.json` gives all three the
+     * same `strict: true` as the suites themselves rather than inferred
+     * defaults. It is the Cypress one only because a `defaultProject` takes a
+     * single path; the two configs differ in their `types`, which costs
+     * nothing here since neither root file references a runner global.
+     */
+    files: ['cypress.config.ts', 'cypress.preview.config.ts', 'playwright.config.ts'],
     extends: [eslint.configs.recommended, tseslint.configs.recommended, tseslint.configs.stylistic],
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['cypress.config.ts', 'cypress.preview.config.ts'],
+          allowDefaultProject: [
+            'cypress.config.ts',
+            'cypress.preview.config.ts',
+            'playwright.config.ts',
+          ],
           defaultProject: 'cypress/tsconfig.json',
         },
         tsconfigRootDir: __dirname,
