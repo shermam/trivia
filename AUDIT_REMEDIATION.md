@@ -99,7 +99,7 @@ npm run lint           # ESLint + angular-eslint
 npm test               # Vitest unit suite
 npm run functions:test # Cloud Functions unit tests
 npm run rules:test     # firestore.rules suite against the Firestore emulator
-npm run e2e            # Cypress against the full Firebase Emulator Suite
+npm run e2e            # Playwright against the full Firebase Emulator Suite
 npm run lighthouse     # Lighthouse CI
 ```
 
