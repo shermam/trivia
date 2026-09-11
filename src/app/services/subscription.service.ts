@@ -98,6 +98,53 @@ interface SessionOutcome {
 }
 
 /**
+ * A failure this service can explain, with a message written for the person
+ * at the screen.
+ *
+ * Every rejection of `startProCheckout()`/`openBillingPortal()` is one of two
+ * kinds, and the type is how a component tells them apart. This one carries a
+ * verified cause — the caller is signed out, no Pro price is on sale, the
+ * volume cap in `firestore.rules` is spent, the Cloud Function wrote an error
+ * back (its own client-facing message; see `clientMessageFor` in
+ * `functions/src/checkout-request.ts`), or the handshake reached its deadline
+ * with nothing written — and its message is the thing to show. Anything else
+ * that escapes is a transport failure (`FirestoreRestError`: a dropped
+ * connection, a refused read, a 500) whose cause nobody verified, so a
+ * component keeps its generic message for it (`subscriptionFailureMessage`).
+ *
+ * The distinction matters most to whoever is standing up a new environment:
+ * an empty catalog and a function that never ran both end in a red line under
+ * the Subscribe button, and "please try again" is the wrong instruction for
+ * either. Naming the cause is what makes the difference visible from the
+ * screen instead of from the function logs.
+ */
+export class SubscriptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SubscriptionError';
+  }
+}
+
+/**
+ * What a component shows for a rejected `startProCheckout()` or
+ * `openBillingPortal()`: the `SubscriptionError`'s own message, or `fallback`
+ * for a failure this service could not explain.
+ *
+ * The client half of `clientMessageFor` (`functions/src/checkout-request.ts`),
+ * applying the same rule from the other side: distinguish the cases or stay
+ * generic (`CLAUDE.md` §4.4). An unexplained error is logged rather than
+ * dropped — once the screen says "please try again", the console is the only
+ * place its real cause survives.
+ */
+export function subscriptionFailureMessage(error: unknown, fallback: string): string {
+  if (error instanceof SubscriptionError) {
+    return error.message;
+  }
+  console.error('[subscription] unexplained failure', error);
+  return fallback;
+}
+
+/**
  * Bridges the client to our own Cloud Functions backend (`functions/`,
  * `createCheckoutSession` + `stripeWebhook`) purely through the Firestore
  * collections that backend manages (`customers/{uid}/checkout_sessions`,
@@ -331,7 +378,14 @@ export class SubscriptionService {
     // not make which price is chosen depend on network timing.
     const proPriceId = monthlyPriceIds.find((priceId) => priceId !== null);
     if (!proPriceId) {
-      throw new Error('No active monthly Pro price found — check the Stripe Dashboard setup.');
+      // Says that Pro is not on sale rather than inviting a retry, because
+      // nothing the user does can change the answer: the catalog is written
+      // only by `stripeWebhook`, and this is what an environment looks like
+      // before its Stripe webhook has delivered a single `product.*`/`price.*`
+      // event (`dev-environment.md` §3.1 steps 8–9).
+      throw new SubscriptionError(
+        "Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later.",
+      );
     }
     return proPriceId;
   }
@@ -360,8 +414,8 @@ export class SubscriptionService {
         origin: window.location.origin,
       }),
       signedOutMessage: 'Sign in before subscribing.',
-      timeoutMessage: 'Timed out waiting for Stripe checkout to start.',
-      failureMessage: 'Stripe checkout could not be started.',
+      timeoutMessage: 'Timed out waiting for Stripe checkout to start. Please try again.',
+      failureMessage: 'Stripe checkout could not be started. Please try again.',
     });
     window.location.assign(checkoutUrl);
   }
@@ -378,8 +432,8 @@ export class SubscriptionService {
       collectionName: 'portal_sessions',
       buildPayload: () => ({ origin: window.location.origin }),
       signedOutMessage: 'Sign in before managing your subscription.',
-      timeoutMessage: 'Timed out waiting for the billing portal to open.',
-      failureMessage: 'Billing portal could not be opened.',
+      timeoutMessage: 'Timed out waiting for the billing portal to open. Please try again.',
+      failureMessage: 'Billing portal could not be opened. Please try again.',
     });
     window.location.assign(portalUrl);
   }
@@ -409,7 +463,7 @@ export class SubscriptionService {
   }): Promise<string> {
     const user = this.authService.user();
     if (!user || user.isAnonymous) {
-      throw new Error(options.signedOutMessage);
+      throw new SubscriptionError(options.signedOutMessage);
     }
 
     const payload = await options.buildPayload();
@@ -443,10 +497,15 @@ export class SubscriptionService {
     );
 
     if (!outcome) {
-      throw lastReadError ?? new Error(options.timeoutMessage);
+      // A deadline reached while the reads were answering (the document was
+      // there, with no URL yet) is a cause this code verified, so it is named.
+      // A deadline reached on a failing read is not: that error is handed on
+      // as the transport's own type, and the component stays generic for it.
+      throw lastReadError ?? new SubscriptionError(options.timeoutMessage);
     }
     if (outcome.error) {
-      throw new Error(outcome.error);
+      // Written by the function for exactly this purpose (`clientMessageFor`).
+      throw new SubscriptionError(outcome.error);
     }
     return outcome.url!;
   }
@@ -516,6 +575,8 @@ export class SubscriptionService {
       }
     }
 
-    throw new Error('Too many attempts just now. Reload the page and try again in a few minutes.');
+    throw new SubscriptionError(
+      'Too many attempts just now. Reload the page and try again in a few minutes.',
+    );
   }
 }

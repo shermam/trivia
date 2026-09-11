@@ -132,9 +132,12 @@ introduced by hand, below.
    same way (`ci-cd.md` §4.1).
 
 8. **Stripe test mode.** Create the Pro product and price in Stripe's _test_
-   mode, and set the price's `firebaseRole` metadata to `pro` — the claim the
-   app gates on comes from that metadata, and an active subscription without it
-   grants nothing (audit H6). Then set the dev project's secrets:
+   mode, and set `firebaseRole` metadata to `pro` on **both** the product and
+   the price — not either. The product's becomes the `role` field the client's
+   catalog query filters on, so without it the product is invisible to the
+   pricing page; the price's is where the `stripeRole` claim the app gates on
+   comes from, so without it an active subscription grants nothing (audit H6).
+   Then set the dev project's secrets:
    ```bash
    firebase functions:secrets:set STRIPE_SECRET_KEY --project trivimind-dev
    firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project trivimind-dev
@@ -143,7 +146,18 @@ introduced by hand, below.
    talking to from the key itself, not from the project name (audit §4.3), so a
    test key here is not merely safe — it is what makes the check correct.
 9. **Point a Stripe test webhook** at the dev project's `stripeWebhook`
-   function URL.
+   function URL
+   (`https://us-central1-trivimind-dev.cloudfunctions.net/stripeWebhook`),
+   subscribed to the event types `functions/src/webhook-routing.ts` handles,
+   and set `STRIPE_WEBHOOK_SECRET` to _that endpoint's_ signing secret — the
+   test and live endpoints are separate objects with separate secrets, and one
+   will not validate the other. **If the product and price were created before
+   the endpoint existed, edit and save each of them once** (adding the
+   metadata from step 8 is enough): Stripe emits events only for changes made
+   after an endpoint is registered, and `products`/`prices` are written only
+   from those events (`stack.md` §2.4), so a catalog created first never
+   reaches Firestore and the pricing page reports "Pro isn't available to buy
+   right now" until an edit sends it over.
 
 ### 3.2a What is enabled in `trivimind-dev`, and what is not
 

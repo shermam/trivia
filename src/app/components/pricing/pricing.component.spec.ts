@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
-import { SubscriptionService } from '../../services/subscription.service';
+import { SubscriptionError, SubscriptionService } from '../../services/subscription.service';
 import { PricingComponent } from './pricing.component';
 
 /**
@@ -20,7 +20,10 @@ import { PricingComponent } from './pricing.component';
  * nobody bought.
  */
 
-function setup(checkout: string | null) {
+function setup(
+  checkout: string | null,
+  startProCheckout: () => Promise<void> = () => Promise.resolve(),
+) {
   const awaitProActivation = vi.fn(() => Promise.resolve());
   TestBed.configureTestingModule({
     providers: [
@@ -31,7 +34,7 @@ function setup(checkout: string | null) {
       { provide: Router, useValue: { navigate: vi.fn() } },
       {
         provide: SubscriptionService,
-        useValue: { isProUser: signal(false), awaitProActivation },
+        useValue: { isProUser: signal(false), awaitProActivation, startProCheckout },
       },
       {
         provide: AuthService,
@@ -73,5 +76,51 @@ describe('PricingComponent post-checkout activation', () => {
   it('does not poll on an ordinary visit to the pricing page', () => {
     const { awaitProActivation } = setup(null);
     expect(awaitProActivation).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * What the Subscribe button says when checkout does not start.
+ *
+ * `SubscriptionService` explains every failure it can (`SubscriptionError`),
+ * and this component's only job is not to throw that explanation away. It
+ * did: one generic line for an empty catalog, a signed-out caller and a
+ * function that never ran alike, so nobody standing up a new environment
+ * could tell from the screen which of the three they had.
+ */
+describe('PricingComponent checkout failure message', () => {
+  const view = (component: PricingComponent) =>
+    component as unknown as {
+      subscribe(): Promise<void>;
+      errorMessage(): string | null;
+      isSubscribing(): boolean;
+    };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('shows the cause the service verified, word for word', async () => {
+    const { component } = setup(null, () =>
+      Promise.reject(new SubscriptionError('Timed out waiting for Stripe checkout to start.')),
+    );
+
+    await view(component).subscribe();
+
+    expect(view(component).errorMessage()).toBe('Timed out waiting for Stripe checkout to start.');
+    expect(view(component).isSubscribing()).toBe(false);
+  });
+
+  it('stays generic for a failure the service could not explain', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = new Error('Failed to fetch');
+    const { component } = setup(null, () => Promise.reject(error));
+
+    await view(component).subscribe();
+
+    expect(view(component).errorMessage()).toBe('Could not start checkout. Please try again.');
+    expect(view(component).isSubscribing()).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(expect.any(String), error);
   });
 });

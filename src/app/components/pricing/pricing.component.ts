@@ -2,7 +2,10 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
-import { SubscriptionService } from '../../services/subscription.service';
+import {
+  SubscriptionService,
+  subscriptionFailureMessage,
+} from '../../services/subscription.service';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 
@@ -83,8 +86,15 @@ export class PricingComponent {
       // Redirects the page to Stripe Checkout on success, so there's
       // nothing further to do here in the happy path.
       await this.subscriptionService.startProCheckout();
-    } catch {
-      this.errorMessage.set('Could not start checkout. Please try again.');
+    } catch (error) {
+      // The service names every cause it can verify — signed out, no Pro
+      // price on sale, the volume cap, an error the function wrote back, a
+      // handshake that timed out — and that message is shown as is. Only a
+      // failure it could not explain gets the generic line (`CLAUDE.md`
+      // §4.4: distinguish the cases or stay generic).
+      this.errorMessage.set(
+        subscriptionFailureMessage(error, 'Could not start checkout. Please try again.'),
+      );
       this.isSubscribing.set(false);
     }
   }
