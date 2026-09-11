@@ -30,13 +30,13 @@ import { stubOpenTrivia } from '../../support/open-trivia';
  * the thing under test.
  *
  * **Mutation-verified by removing the context boundary**: run the two bodies
- * back to back inside *one* test and every assertion below fails — the resume
- * banner is present (count 1), the saved game reads back, the uid is the same
- * one, and `localStorage` already holds `firebase:authUser:…` before a line of
- * app code runs. That is the failure a real order-dependent bug would
- * eventually produce somewhere far less obvious. The four are ordered with the
- * storage read last on purpose, because it is the one that fires first when
- * state leaks and would otherwise mask the other three.
+ * back to back inside *one* test and it fails, on `localStorage` already
+ * holding `firebase:authUser:…` before a line of app code has run — and with
+ * that assertion moved out of the way, on the resume banner being present
+ * (count 1). Those are two separate runs, because an assertion that fails ends
+ * the test: only the first one reached is ever observed, which is also why the
+ * storage read is asserted **last** below. It trips soonest when state leaks,
+ * so leaving it first would report one symptom out of four.
  */
 test.describe.configure({ mode: 'serial' });
 
