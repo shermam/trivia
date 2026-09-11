@@ -1241,7 +1241,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
   /**
    * The other half of the fix: the faces are stacked in one grid cell so the
    * card's height cannot depend on its state. jsdom has no layout, so it
-   * cannot check the heights — `game-flow.cy.ts` does that at 390px wide.
+   * cannot check the heights — `game-flow.spec.ts` does that at 390px wide.
    * What it *can* check is the mechanism the heights rest on: every face
    * present, exactly one of them not `invisible`.
    */

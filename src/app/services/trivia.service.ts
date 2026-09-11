@@ -134,11 +134,11 @@ export class TriviaService {
    * reconnect. Call once from the app root (mirrors `AuthService.ensureSignedIn()`). No-ops
    * under `environment.enableOfflinePrefetch === false` (the e2e/lighthouse *build*, i.e. the
    * local emulator-backed suite — see the comment on that flag for why), and also under
-   * `navigator.webdriver` (true for every browser-automation framework — Cypress, Selenium,
-   * Playwright — by spec). The second check is what actually matters for the *preview* e2e job:
+   * `navigator.webdriver` (true for every browser-automation framework — Playwright, Selenium —
+   * by spec). The second check is what actually matters for the *preview* e2e job:
    * that one deploys the plain production build (`environment.ts`, prefetch enabled), so the
    * environment flag alone doesn't catch it — confirmed live: this task's own opentdb.com/
-   * Firestore requests, firing on every one of Cypress's ~13 page visits against a real,
+   * Firestore requests, firing on every page visit the preview suite makes against a real,
    * shared, rate-limited backend, was the likely cause of a real CI run timing out on multiple
    * unrelated specs. A real user's browser never sets `navigator.webdriver`, so this doesn't
    * affect anyone actually playing the game.

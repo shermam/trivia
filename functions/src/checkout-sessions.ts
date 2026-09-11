@@ -82,8 +82,8 @@ export const createCheckoutSession = onDocumentCreated(
         // Deliberately same-origin (the caller's own origin, e.g.
         // `http://localhost:4200`), not a fake external host: the client for
         // real calls `window.location.assign` on this URL, and
-        // Location.assign/href can't be stubbed in a real Chromium/Electron
-        // (it's non-configurable/read-only) — so Cypress has to let that
+        // Location.assign/href can't be stubbed in a real Chromium
+        // (it's non-configurable/read-only) — so Playwright has to let that
         // navigation actually happen. A same-origin, hash-only target makes
         // that a harmless in-page navigation instead of an attempt to reach a
         // domain that doesn't exist.
