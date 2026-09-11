@@ -69,3 +69,7 @@ serviceAccountKey*.json
 # Derived from firebase.json by scripts/make-lighthouse-firebase-config.mjs;
 # widens connect-src for the emulator-backed Lighthouse run only.
 firebase.lighthouse.json
+
+# Playwright — the HTML report, and the traces/screenshots retained on failure
+/playwright-report
+/test-results
