@@ -3,10 +3,10 @@ import { Page } from '@playwright/test';
 /**
  * Reading the app's own IndexedDB from a test.
  *
- * **There is nothing here that clears it, and that is the point.** Cypress
- * needed a whole module for the clearing half (`cypress/support/offline-
- * storage.ts`): `testIsolation` clears cookies, `localStorage` and
- * `sessionStorage` and there is no `cy.clearAllIndexedDb()`, so
+ * **There is nothing here that clears it, and that is the point.** The runner
+ * this suite replaced needed a whole module for the clearing half: its own
+ * isolation cleared cookies, `localStorage` and `sessionStorage` but had no
+ * command for IndexedDB at all, so
  * `OfflineDbService`'s database — the saved in-progress game, the offline
  * question pool, the daily-allowance counter — survived from one test into the
  * next and had to be deleted by hand from a `beforeEach` timed against the

@@ -15,19 +15,19 @@ const angular = require('angular-eslint');
  * preference are left off — Prettier owns formatting, and a lint run that
  * cries wolf gets ignored.
  *
- * ## Four TypeScript blocks, not one
+ * ## Three TypeScript blocks, not one
  *
- * There is a block per source tree — `src/`, `functions/src/`, `cypress/`,
- * `e2e/` — because each is a different program with different globals and a
- * different set of rules that make sense in it. They share the type-aware
- * base; what differs is written down at each block with the reason.
+ * There is a block per source tree — `src/`, `functions/src/`, `e2e/` —
+ * because each is a different program with different globals and a different
+ * set of rules that make sense in it. They share the type-aware base; what
+ * differs is written down at each block with the reason.
  *
  * The blocks are scoped narrowly on purpose. The first one used to match
  * every TypeScript file in the repo, which was harmless only because
  * `angular.json`'s `lintFilePatterns` never sent it anything outside `src/`.
  * Widening those patterns without narrowing this glob would have quietly
  * applied the Angular config — and `processor: angular.processInlineTemplates`
- * — to Cloud Functions and Cypress specs, which have no components in them at
+ * — to Cloud Functions and e2e specs, which have no components in them at
  * all. Flat config merges *every* matching block rather than picking the most
  * specific one, so a narrow block cannot override a broad one; the broad one
  * has to stop matching.
@@ -35,7 +35,7 @@ const angular = require('angular-eslint');
  * **`eslint.config.js` and `angular.json` have to be changed together.** The
  * config decides what the rules are; `lintFilePatterns` decides which files
  * are handed to it. Editing one alone accomplishes nothing, which is the trap
- * that left two of these three trees unlinted for as long as they were.
+ * that left whole trees here unlinted for as long as it did.
  */
 
 /**
@@ -46,9 +46,9 @@ const angular = require('angular-eslint');
  *
  * `projectService: true` resolves each file against the nearest ancestor
  * `tsconfig.json` — `tsconfig.app.json` via the root solution file for `src/`,
- * `functions/tsconfig.json` for the functions, `cypress/tsconfig.json` and
- * `e2e/tsconfig.json` for the two e2e suites. No explicit `project` array is
- * needed, and adding one would be another place to keep in sync.
+ * `functions/tsconfig.json` for the functions, `e2e/tsconfig.json` for the e2e
+ * suite. No explicit `project` array is needed, and adding one would be
+ * another place to keep in sync.
  */
 const typeAwareLanguageOptions = {
   parserOptions: {
@@ -154,46 +154,15 @@ module.exports = defineConfig([
   },
   {
     /**
-     * The Cypress suite. Two rules differ from `src/`, both because chai and
-     * Cypress's own types are shaped differently from Vitest and Angular —
-     * not because the suite deserves a lower standard.
-     */
-    files: ['cypress/**/*.ts'],
-    extends: [eslint.configs.recommended, tseslint.configs.recommended, tseslint.configs.stylistic],
-    languageOptions: typeAwareLanguageOptions,
-    rules: {
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error',
-      '@typescript-eslint/no-unused-vars': unusedVarsWithUnderscoreOptOut,
-
-      /**
-       * `declare global { namespace Cypress { interface Chainable } }` is the
-       * only way to declare a custom Cypress command's type; ES2015 module
-       * syntax cannot express it. `allowDeclarations` permits exactly that
-       * shape and still rejects a plain, non-declared namespace, which is
-       * what the rule is actually for.
-       */
-      '@typescript-eslint/no-namespace': ['error', { allowDeclarations: true }],
-
-      /**
-       * Chai's BDD assertions (`expect(x).to.be.false`) are property accesses,
-       * not calls, so they are indistinguishable from a genuinely dead
-       * expression by any option this rule has. `src/` never trips it because
-       * Vitest's `expect(x).toBe(y)` is a call.
-       */
-      '@typescript-eslint/no-unused-expressions': 'off',
-    },
-  },
-  {
-    /**
-     * The Playwright suite. Same standard as `src/`: it is test code, but it
+     * The end-to-end suite. Same standard as `src/`: it is test code, but it
      * is the test code that decides whether a release is safe, and an
      * unawaited promise in a spec is an assertion that silently never ran.
      *
-     * No chai exception is needed here — Playwright's `expect(x).toBe(y)` is a
-     * call, like Vitest's and unlike chai's property-access assertions — and
-     * no namespace exception either, since fixtures are declared with
-     * `test.extend` rather than through declaration merging.
+     * No exceptions are carved out for it either. Playwright's
+     * `expect(x).toBe(y)` is a call, so `no-unused-expressions` sees nothing it
+     * has to be told to ignore, and fixtures are declared with `test.extend`
+     * rather than through declaration merging, so `no-namespace` stays on as
+     * written.
      */
     files: ['e2e/**/*.ts'],
     extends: [eslint.configs.recommended, tseslint.configs.recommended, tseslint.configs.stylistic],
@@ -206,29 +175,22 @@ module.exports = defineConfig([
   },
   {
     /**
-     * The three runner config files sit at the repo root, so the project
-     * service resolves them against the root `tsconfig.json` — which is a
-     * solution file with `files: []` and would reject them outright. Each
-     * suite's own `tsconfig.json` does list its config in `include`, but a
-     * tsconfig in a subdirectory is never consulted for a file above it.
+     * The two runner config files sit at the repo root, so the project service
+     * resolves them against the root `tsconfig.json` — which is a solution file
+     * with `files: []` and would reject them outright. `e2e/tsconfig.json` does
+     * list both in its `include`, but a tsconfig in a subdirectory is never
+     * consulted for a file above it.
      *
-     * Pointing `defaultProject` at `cypress/tsconfig.json` gives all three the
-     * same `strict: true` as the suites themselves rather than inferred
-     * defaults. It is the Cypress one only because a `defaultProject` takes a
-     * single path; the two configs differ in their `types`, which costs
-     * nothing here since neither root file references a runner global.
+     * Pointing `defaultProject` at it anyway gives them the same `strict: true`
+     * as the specs rather than inferred defaults.
      */
-    files: ['cypress.config.ts', 'cypress.preview.config.ts', 'playwright.config.ts'],
+    files: ['playwright.config.ts', 'playwright.preview.config.ts'],
     extends: [eslint.configs.recommended, tseslint.configs.recommended, tseslint.configs.stylistic],
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: [
-            'cypress.config.ts',
-            'cypress.preview.config.ts',
-            'playwright.config.ts',
-          ],
-          defaultProject: 'cypress/tsconfig.json',
+          allowDefaultProject: ['playwright.config.ts', 'playwright.preview.config.ts'],
+          defaultProject: 'e2e/tsconfig.json',
         },
         tsconfigRootDir: __dirname,
       },

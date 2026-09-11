@@ -37,13 +37,13 @@ const TARGETS: Record<FirebaseTargetName, FirebaseTarget> = {
  *
  * Browser state is *not* shared and deliberately so: Playwright gives every
  * test a fresh `BrowserContext`, which means a fresh anonymous uid, fresh
- * cookies, fresh `localStorage` **and fresh IndexedDB**. That last one is what
- * Cypress had no equivalent for — `testIsolation` clears the first three and
- * there is no `cy.clearAllIndexedDb()` — so the app's saved in-progress game
- * and its daily-allowance counter leaked from one test into the next and had
- * to be deleted by hand from a `beforeEach` timed against the app's own open
- * connection. Here the isolation is a property of the context, so there is no
- * hook to place and no connection to race.
+ * cookies, fresh `localStorage` **and fresh IndexedDB**. The last of those is
+ * worth naming, because it is the one a runner can plausibly leave out: the
+ * app's saved in-progress game and its daily-allowance counter live there, and
+ * clearing them by hand means a `beforeEach` timed against the app's own open
+ * connection, which blocks `deleteDatabase()` for the life of the tab. Here the
+ * isolation is a property of the context, so there is no hook to place and no
+ * connection to race.
  */
 export const test = base.extend<
   { authUids: AuthUidTracker },

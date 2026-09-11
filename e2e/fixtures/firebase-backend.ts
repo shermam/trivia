@@ -17,11 +17,10 @@ import {
 /**
  * Admin-SDK seeding, as the `firebase` test fixture exposes it.
  *
- * This is the Playwright counterpart of Cypress's `cy.task` bridge: the same
- * operations, called directly instead of marshalled across a process boundary,
- * because a Playwright test body already runs in Node. Which project they act
- * on is the `FirebaseTarget`'s business, not this class's — see
- * `firebase-target.ts`.
+ * The Admin SDK is called directly rather than marshalled across a process
+ * boundary, because a Playwright test body already runs in Node. Which project
+ * these operations act on is the `FirebaseTarget`'s business, not this
+ * class's — see `firebase-target.ts`.
  *
  * **Nothing here resets the backend.** Workers share one emulator, so a
  * blanket wipe would delete state another worker is mid-assertion on. Tests
@@ -91,13 +90,11 @@ export class FirebaseBackend {
    * `question_reports` — so the UI saying "Reported" proves nothing about the
    * write on its own (finding H4).
    *
-   * **Takes the ids rather than reading the collection**, which is the one way
-   * it differs from the Cypress task it replaces. That task read every
-   * document and could, because `resetBackend()` had just emptied the
-   * emulator. Here the emulator is shared by every worker in the run, so an
-   * unscoped read would return another test's reports and an "no reports were
-   * written" assertion would fail for something the test did not do. Question
-   * ids are unique per test, so filtering on them *is* the isolation.
+   * **Takes the ids rather than reading the collection.** The emulator is
+   * shared by every worker in the run, so an unscoped read would return another
+   * test's reports and a "no reports were written" assertion would fail for
+   * something the test did not do. Question ids are unique per test, so
+   * filtering on them *is* the isolation.
    */
   async getQuestionReports(questionIds: string[]): Promise<QuestionReportRecord[]> {
     if (questionIds.length === 0) {

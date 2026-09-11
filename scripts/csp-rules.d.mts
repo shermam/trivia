@@ -1,6 +1,6 @@
 /**
- * Types for `csp-rules.mjs`, so the Cypress spec that shares the rule can
- * import it under `strict` without `allowJs` loosening the whole project.
+ * Types for `csp-rules.mjs`, so the e2e spec that shares the rule can import it
+ * under `strict` without `allowJs` loosening the whole project.
  */
 
 /** `[projectId, which deployment it is]`. */

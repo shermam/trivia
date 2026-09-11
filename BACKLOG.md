@@ -279,7 +279,7 @@ What it needs: inject `SwUpdate`, subscribe to `unrecoverable`, surface a plain 
 
 **Watch out for:**
 
-- **`SwUpdate.isEnabled` is `false` in dev and under Cypress.** `app.config.ts` gates registration on `!isDevMode() && !navigator.webdriver`, so anything written here must tolerate a disabled `SwUpdate` rather than assume its observables ever emit. That is also why the one existing spec that needs a real worker (`service-worker-oauth-origins.cy.ts`) registers it by hand and runs preview-only — see `ci-cd.md` §4.3, including what leaving it registered costs other specs.
+- **`SwUpdate.isEnabled` is `false` in dev and under Cypress.** `app.config.ts` gates registration on `!isDevMode() && !navigator.webdriver`, so anything written here must tolerate a disabled `SwUpdate` rather than assume its observables ever emit. That is also why the one existing spec that needs a real worker (`e2e/specs/unauthenticated/service-worker-oauth-origins.spec.ts`) registers it by hand and runs preview-only — see `ci-cd.md` §4.3, including what leaving it registered costs other specs.
 - **A prompt that appears on a wedged app has to work on a wedged app.** Whatever renders the message must not depend on a lazy route chunk the broken cache is what failed to serve.
 - The matching entry in `docs/known-gaps.md` §6 gets struck when this ships, per the note at the top of this file.
 

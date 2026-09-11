@@ -53,8 +53,8 @@ export async function waitForPlayRoute(page: Page): Promise<void> {
  * Clicks the answer whose text is exactly this, on the active quiz question.
  *
  * **Scoped to `[data-cy=answer-option]`, and that scoping is the whole
- * helper.** The Cypress original was a substring match that silently took the
- * first hit in DOM order, and the top bar sits above the quiz: a signed-in
+ * helper.** An unscoped text match takes the first hit in DOM order, and the
+ * top bar sits above the quiz: a signed-in
  * account chip renders the display name or email inside its trigger button, so
  * against an address like `stats-1787954295926-k3x@example.com` "answer 4"
  * clicked the account chip and opened the auth menu.

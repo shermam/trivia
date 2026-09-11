@@ -58,7 +58,29 @@ import { readFileSync, readdirSync } from 'node:fs';
  * specs went red at once. `test` now pins it explicitly.
  */
 
-const PRODUCTION_PROJECT_ID = 'intellectura-3b26a';
+/**
+ * The production project id, read from `.firebaserc` rather than restated
+ * here.
+ *
+ * `.firebaserc` is where it lives — check 2 below exists to keep it the only
+ * place a developer's machine can reach it — so a copy in this file would be a
+ * second thing to update if the project is ever renamed, and the copy that
+ * went stale would be this checker, waving through every file naming the id it
+ * was written to catch. `e2e/fixtures/firebase-preview-target.ts` derives its
+ * own refusal from the same file for the same reason.
+ */
+const PRODUCTION_PROJECT_ID = (() => {
+  const config = JSON.parse(readFileSync('.firebaserc', 'utf8'));
+  const projectId = config.projects?.default;
+  if (!projectId) {
+    console.error(
+      '\n  .firebaserc names no default project, so there is no production id to check ' +
+        'anything against. That file is where it lives; this check cannot run without it.\n',
+    );
+    process.exit(1);
+  }
+  return projectId;
+})();
 
 /** Build configurations that must not run against production. */
 const NON_PRODUCTION_BUILDS = ['development', 'e2e', 'lighthouse', 'dev-project'];

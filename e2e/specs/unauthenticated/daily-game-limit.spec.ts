@@ -124,8 +124,7 @@ test.describe('daily free game limit', () => {
    * nothing here can establish that it is. The IndexedDB read resolves on its
    * own schedule, and the row says *the same sentence* either side of it (the
    * counter starts at 0 in the signal and reads back 0 from an empty database),
-   * so there is no DOM state to wait for the absence of. Inherited from
-   * Cypress, where the same two-point shape had the same hole.
+   * so there is no DOM state to wait for the absence of.
    *
    * Watching every frame removes the ordering requirement instead of trying to
    * satisfy it: the first sample is the first frame in which the button exists,

@@ -43,11 +43,10 @@ import { expect, test } from '../../fixtures/test';
  * from the page, because they are about a *response header*, and reading a
  * header is not something a page can do for itself. The in-browser test is the
  * other half: it proves the worker really intercepts and re-fetches, which is
- * what makes the header matter. (The Cypress original needed `cy.request` for a
- * second reason that does not apply here — Cypress strips
- * `Content-Security-Policy` from documents it loads, so its in-browser half
- * could not have seen a violation at all. Playwright serves the page's real
- * headers, so the policy is genuinely enforced against the probes below.)
+ * what makes the header matter. The page is served its real headers here, so
+ * the policy is genuinely enforced against the in-browser probes below rather
+ * than being stripped on the way in — worth knowing, because a runner that
+ * strips it leaves that half asserting nothing at all.
  */
 
 /**
@@ -195,8 +194,8 @@ test.describe('service worker: OAuth origins stay reachable (PR #112)', () => {
     const { authDomain } = await deploymentIdentity(request);
 
     // `app.config.ts` gates registration on `!navigator.webdriver`, which is
-    // true under Playwright as it was under Cypress — so the worker this spec
-    // is about never registers on its own here and has to be asked for by name.
+    // true under any browser-automation framework — so the worker this spec is
+    // about never registers on its own here and has to be asked for by name.
     await page.goto('/');
     await page.evaluate(async () => {
       await navigator.serviceWorker.register('/ngsw-worker.js');
@@ -261,11 +260,10 @@ test.describe('service worker: OAuth origins stay reachable (PR #112)', () => {
       });
     }
 
-    // No teardown. The Cypress original unregistered the worker and deleted its
-    // `ngsw:` caches in an `after()`, because `testIsolation` left the
-    // registration in place for every later spec on the same origin — the cost
-    // `app.config.ts` documents at ~7 s → 46 s+. Here the registration belongs
-    // to this test's own `BrowserContext` and is discarded with it, so there is
-    // nothing to undo and nothing for a forgotten hook to leak.
+    // No teardown, and it is worth saying why rather than leaving it looking
+    // forgotten: the registration belongs to this test's own `BrowserContext`
+    // and is discarded with it. A runner that shared one origin across specs
+    // would need an explicit unregister plus a sweep of the `ngsw:` caches, or
+    // every later spec pays the cost `app.config.ts` documents at ~7 s → 46 s+.
   });
 });

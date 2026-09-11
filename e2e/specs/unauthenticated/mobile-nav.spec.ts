@@ -322,10 +322,10 @@ test.describe('the top bar on a phone', () => {
     await tapBackdropRightEdge(page);
 
     // Two assertions on the same element, each re-resolving its own locator so
-    // neither can move the subject out from under the other — which is what
-    // `should('have.attr', name)` did in Cypress, where the chained
-    // `have.class` ran against the attribute's string value and failed with
-    // "neither a DOM object nor a jQuery object" (`CLAUDE.md` §4.6).
+    // neither can move the subject out from under the other. `toHaveAttribute`
+    // never reassigns the subject the way a chained attribute assertion can
+    // (`CLAUDE.md` §4.6), and writing them apart keeps that true whatever is
+    // added between them.
     const overlay = page.getByTestId('nav-menu-overlay');
     await expect(overlay, 'dismissed drawer still interactive').toHaveAttribute('inert', '');
     await expect(overlay, 'dismissed drawer still taking pointer events').toHaveClass(

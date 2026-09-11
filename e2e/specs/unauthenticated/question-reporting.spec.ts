@@ -19,7 +19,7 @@ import { questionsFixture, stubExtraCategory, stubOpenTrivia } from '../../suppo
  * the escape hatch for "I noticed but didn't flag it", so it lists everything.
  *
  * **Every test seeds its own two questions under a category it invented**, and
- * that is what replaces Cypress's `resetBackend()`. These tests assert on
+ * that is the whole of its isolation. These tests assert on
  * *exactly* the questions they seeded — that the dialog offers both, that a
  * report was filed for one and none for the other — and the emulator is shared
  * by every worker in the run, so the game has to be served from a slice of the
@@ -69,7 +69,7 @@ async function startCustomGame(
   await stubOpenTrivia(page);
   await stubExtraCategory(page, seed.category);
   await page.goto('/');
-  // Stands in for Cypress's `cy.wait('@categories')`, and does more: the
+  // Stands in for a wait on the categories request, and does more: the
   // invented category has to be in the dropdown before it can be selected.
   await expect(page.locator('#category')).toContainText(seed.category);
   await page.locator('#amount').selectOption({ label: '5' });
