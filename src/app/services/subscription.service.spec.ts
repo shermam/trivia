@@ -2,7 +2,12 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
-import { SubscriptionService } from './subscription.service';
+import { FirestoreRestError } from './firestore-rest/firestore-rest.client';
+import {
+  SubscriptionError,
+  SubscriptionService,
+  subscriptionFailureMessage,
+} from './subscription.service';
 
 /**
  * `SubscriptionService` is the payment path, so the parts of it worth pinning
@@ -408,7 +413,10 @@ describe('SubscriptionService session handshake', () => {
   it('gives up with an actionable message once every slot in the window is spent', async () => {
     const fake = fakeFirestore({ deniedIds: slotIds() });
 
-    await expect(configure(user).service.openBillingPortal()).rejects.toThrow(/Reload the page/);
+    const pending = configure(user).service.openBillingPortal();
+    await expect(pending).rejects.toThrow(/Reload the page/);
+    // The type is what gets that message onto the screen (`subscriptionFailureMessage`).
+    await expect(pending).rejects.toBeInstanceOf(SubscriptionError);
     expect(fake.writes).toHaveLength(0);
   });
 
@@ -417,16 +425,22 @@ describe('SubscriptionService session handshake', () => {
   it('does not retry a failure that is not a permission denial', async () => {
     const fake = fakeFirestore({ failWriteWith: 'server-error' });
 
-    await expect(configure(user).service.openBillingPortal()).rejects.toThrow(/INTERNAL/);
+    const pending = configure(user).service.openBillingPortal();
+    await expect(pending).rejects.toThrow(/INTERNAL/);
+    // ...and hands it on as the transport failure it is, not as a cause this
+    // service explained — a component shows its generic line for it, not
+    // "INTERNAL".
+    await expect(pending).rejects.not.toBeInstanceOf(SubscriptionError);
     expect(fake.writes).toHaveLength(0);
   });
 
   it('surfaces the error the Cloud Function writes back', async () => {
     fakeFirestore({ writeBack: { error: { message: 'Could not start checkout.' } } });
 
-    await expect(configure(user).service.openBillingPortal()).rejects.toThrow(
-      'Could not start checkout.',
-    );
+    const pending = configure(user).service.openBillingPortal();
+    await expect(pending).rejects.toThrow('Could not start checkout.');
+    // The function wrote that message for the screen (`clientMessageFor`).
+    await expect(pending).rejects.toBeInstanceOf(SubscriptionError);
   });
 
   it('refuses an anonymous caller before writing anything', async () => {
@@ -435,6 +449,7 @@ describe('SubscriptionService session handshake', () => {
 
     await expect(service.openBillingPortal()).rejects.toThrow('Sign in before managing');
     await expect(service.startProCheckout()).rejects.toThrow('Sign in before subscribing');
+    await expect(service.startProCheckout()).rejects.toBeInstanceOf(SubscriptionError);
     expect(fake.writes).toHaveLength(0);
   });
 
@@ -488,8 +503,12 @@ describe('SubscriptionService handshake polling', () => {
 
     const pending = service.openBillingPortal();
     const assertion = expect(pending).rejects.toThrow(/Timed out/);
+    // A deadline reached with every read answering is a cause this service
+    // has verified, so the timeout reaches the screen in those words.
+    const explained = expect(pending).rejects.toBeInstanceOf(SubscriptionError);
     await vi.runAllTimersAsync();
     await assertion;
+    await explained;
   });
 
   /**
@@ -546,8 +565,12 @@ describe('SubscriptionService handshake polling', () => {
 
     const pending = service.openBillingPortal();
     const assertion = expect(pending).rejects.toThrow(/UNAVAILABLE/);
+    // ...as the transport's own error, whose cause nobody verified — so the
+    // component shows its generic line rather than a raw status.
+    const unexplained = expect(pending).rejects.toBeInstanceOf(FirestoreRestError);
     await vi.runAllTimersAsync();
     await assertion;
+    await unexplained;
   });
 
   it('hands each read the budget that is left, not the whole budget', async () => {
@@ -711,12 +734,17 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
     expect(writtenPrice(fake)).toBe('price_monthly');
   });
 
-  it('reports an actionable error when the catalog has no Pro price', async () => {
+  // What an environment looks like before its Stripe webhook has delivered a
+  // single catalog event (`dev-environment.md` §3.1 steps 8–9). The message
+  // has to say Pro is not on sale, in words meant for the screen: "please try
+  // again" is wrong here, since nothing the user does can populate the catalog.
+  it('explains an empty catalog as Pro not being on sale', async () => {
     fakeFirestore({ products: [{ id: 'prod_pro', role: 'pro', active: true, prices: [] }] });
 
-    await expect(
-      configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout(),
-    ).rejects.toThrow(/check the Stripe Dashboard/i);
+    const pending = configure({ uid: 'user-1', isAnonymous: false }).service.startProCheckout();
+
+    await expect(pending).rejects.toBeInstanceOf(SubscriptionError);
+    await expect(pending).rejects.toThrow(/no active monthly Pro price/i);
   });
 });
 
@@ -923,5 +951,48 @@ describe('SubscriptionService.awaitProActivation', () => {
 
     await expect(pending).resolves.toBeUndefined();
     expect(service.isProUser()).toBe(false);
+  });
+});
+
+/**
+ * The client half of `clientMessageFor` (`functions/src/checkout-request.ts`):
+ * what a component shows for a rejection, decided by the error's type rather
+ * than by reading its message.
+ */
+describe('subscriptionFailureMessage', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('shows the message the service wrote for the screen, and logs nothing', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const message = subscriptionFailureMessage(
+      new SubscriptionError('Sign in before subscribing.'),
+      'Could not start checkout. Please try again.',
+    );
+
+    expect(message).toBe('Sign in before subscribing.');
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  // A `FirestoreRestError` message is Google's canonical status or a raw HTTP
+  // line — true, but not a story a user can act on, and picking one to tell
+  // would be narrating a cause nobody verified (`CLAUDE.md` §4.4).
+  it('stays generic for a transport failure and keeps its real cause in the console', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = new FirestoreRestError('UNAVAILABLE', 0, 'Failed to fetch');
+
+    const message = subscriptionFailureMessage(
+      error,
+      'Could not start checkout. Please try again.',
+    );
+
+    expect(message).toBe('Could not start checkout. Please try again.');
+    expect(consoleError).toHaveBeenCalledWith(expect.any(String), error);
+  });
+
+  it('stays generic for a rejection that is not an Error at all', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(subscriptionFailureMessage('boom', 'generic')).toBe('generic');
   });
 });

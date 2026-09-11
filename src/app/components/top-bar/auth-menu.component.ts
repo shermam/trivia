@@ -17,7 +17,10 @@ import {
   SECONDARY_OAUTH_PROVIDERS,
 } from '../../services/auth.service';
 import { AccountService } from '../../services/account.service';
-import { SubscriptionService } from '../../services/subscription.service';
+import {
+  SubscriptionService,
+  subscriptionFailureMessage,
+} from '../../services/subscription.service';
 import { IconComponent } from '../icon/icon.component';
 import { ProviderIconComponent } from './provider-icon.component';
 
@@ -182,8 +185,12 @@ export class AuthMenuComponent {
       // Redirects the page to the Stripe billing portal on success, so
       // there's nothing further to do here in the happy path.
       await this.subscriptionService.openBillingPortal();
-    } catch {
-      this.errorMessage.set('Could not open the billing portal. Please try again.');
+    } catch (error) {
+      // Same rule as `downloadMyData` below: the service's own message when it
+      // has verified a cause, the generic line only when it has not.
+      this.errorMessage.set(
+        subscriptionFailureMessage(error, 'Could not open the billing portal. Please try again.'),
+      );
       this.isOpeningPortal.set(false);
     }
   }
