@@ -10,7 +10,7 @@ These apply to every session in this repository. Follow them without being asked
   git pull origin main
   git checkout -b <type>/<short-description>   # e.g. feature/..., fix/..., docs/..., ci/..., chore/...
   ```
-- Once the change is complete and the verification suite in §3 is green, push the branch and open a PR against `main` (`gh pr create`). Don't push straight to `main` and don't merge the PR yourself unless explicitly asked to.
+- Once the change is complete and the verification suite in §3 is green, push the branch and open a PR against `main` (`gh pr create`). Don't push straight to `main`, and don't merge the PR yourself unless explicitly asked to — §0b is the standing case where you are.
 
 ## 0a. Reporting back
 
@@ -23,6 +23,16 @@ These apply to every session in this repository. Follow them without being asked
 - A correction is one sentence and then the correct thing.
 
 This is not a licence to do less or to check less. Everything in §3 still runs, and §2's documentation duties are what make the short reply honest rather than merely brief.
+
+## 0b. Administrator sessions and sub-agents
+
+Shermam runs this repository's larger pieces of work through an **administrator session** that plans, delegates, reviews and merges, and **implementation sub-agents** that write the code. Standing rules, set by Shermam on 2026-09-11:
+
+- **The administrator reviews and merges.** A PR opened by a sub-agent, or by the administrator itself, is merged by the administrator once every CI check on its head is green, the review found nothing that must change, and `main` has no conflict with it — without waiting for Shermam. Merge with a merge commit (the repository's convention; the merge deletes the branch).
+- **Sub-agents run on Opus 5, never on Fable.** The administrator does no implementation itself — it keeps the Fable quota for reviewing and steering — and every sub-agent report opens with the model ID it ran on, so the rule is checked rather than assumed.
+- **Everything in §1–§4 binds a sub-agent exactly as it binds any session**: the documents, the verification suite, the invariants. The administrator's review checks that, not only the diff.
+- **Some things only Shermam can unblock** — a decision on scope, a console step, a credential, a change to the branch ruleset. The administrator raises those with a push notification and a one-line ask; it never waits silently and never guesses on Shermam's behalf.
+- **At the end of a large piece of work the administrator reports once**, with what is relevant: what merged, what was decided on the way, what remains.
 
 ## 1. Before starting any task
 
