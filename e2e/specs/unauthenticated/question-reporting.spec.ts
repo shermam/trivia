@@ -111,7 +111,10 @@ async function playRemainingQuestions(
   const answered = new Set<string>();
   const heading = page.getByTestId('question-text');
 
-  for (let index = 0; index < seed.questions.length; index++) {
+  // One pass per seeded question, ignoring which one this is: the loop reads
+  // what is on screen rather than indexing into the list, because the bank is
+  // served in an order this test does not control.
+  for (const _ of seed.questions) {
     await expect
       .poll(async () => answered.has((await heading.textContent())?.trim() ?? ''), {
         message: `a question other than the ${answered.size} already answered is on screen`,

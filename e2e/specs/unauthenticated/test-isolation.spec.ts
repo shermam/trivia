@@ -29,10 +29,14 @@ import { stubOpenTrivia } from '../../support/open-trivia';
  * `page` is test-scoped, so the second test gets a new one, which is exactly
  * the thing under test.
  *
- * Mutation-verified in the only way available here: pin the two tests to one
- * context (`test.use({ storageState })` replaying the first test's storage) and
- * the second fails on the resume banner — the failure a real order-dependent
- * bug would eventually produce somewhere far less obvious.
+ * **Mutation-verified by removing the context boundary**: run the two bodies
+ * back to back inside *one* test and every assertion below fails — the resume
+ * banner is present (count 1), the saved game reads back, the uid is the same
+ * one, and `localStorage` already holds `firebase:authUser:…` before a line of
+ * app code runs. That is the failure a real order-dependent bug would
+ * eventually produce somewhere far less obvious. The four are ordered with the
+ * storage read last on purpose, because it is the one that fires first when
+ * state leaks and would otherwise mask the other three.
  */
 test.describe.configure({ mode: 'serial' });
 
@@ -96,7 +100,6 @@ test.describe('browser state does not leak between tests', () => {
     const storageAtStart = await page.evaluate(
       () => (window as unknown as { __storageAtStart?: string[] }).__storageAtStart ?? null,
     );
-    expect(storageAtStart, 'localStorage before the app booted').toEqual([]);
 
     // A positive anchor before the negative assertions: an empty page satisfies
     // "no resume banner" and would pass against the very regression this
@@ -113,5 +116,10 @@ test.describe('browser state does not leak between tests', () => {
       .poll(() => authUids.uids().length, { message: 'this test signed in anonymously' })
       .toBeGreaterThanOrEqual(1);
     expect(authUids.uids(), 'a uid inherited from the previous test').not.toContain(firstUid);
+
+    // Asserted last, though it is read first: it is the assertion that trips
+    // soonest when state leaks, so putting it up here would mask the three
+    // above it and report one symptom instead of four.
+    expect(storageAtStart, 'localStorage before the app booted').toEqual([]);
   });
 });

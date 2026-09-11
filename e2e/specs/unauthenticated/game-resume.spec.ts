@@ -263,9 +263,10 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
 
     await page.reload();
 
-    await expect(page.getByTestId('question-text'), 'the same question is back on screen').toHaveText(
-      flaggedQuestion!,
-    );
+    await expect(
+      page.getByTestId('question-text'),
+      'the same question is back on screen',
+    ).toHaveText(flaggedQuestion!);
     // The flag is a promise to the player — it says they will be asked for
     // detail at game over — so a reload that dropped it would break that
     // promise with nothing on screen to say so.
