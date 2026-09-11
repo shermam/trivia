@@ -32,8 +32,10 @@ export default defineConfig({
   /**
    * Four workers, one per vCPU on the runners this has to fit.
    *
-   * Measured on a 4-vCPU box, wall clock for the ported specs: **2 workers
-   * 67s, 4 workers 45s, 6 workers 33s, 8 workers 33s.** So the knee is at six,
+   * Measured on a 4-vCPU box, wall clock over a **fourteen-test slice** of the
+   * suite — the two specs that existed when the sweep was run, not the suite as
+   * it stands: **2 workers 67s, 4 workers 45s, 6 workers 33s, 8 workers 33s.**
+   * So on that slice the knee is at six,
    * not four, and the reason is that these tests are *wait*-bound rather than
    * CPU-bound — a five-question game spends ten of its twelve seconds sitting
    * out the result banner's 2s pause, doing nothing a core could help with.

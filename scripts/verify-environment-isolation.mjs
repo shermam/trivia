@@ -66,15 +66,23 @@ const NON_PRODUCTION_BUILDS = ['development', 'e2e', 'lighthouse', 'dev-project'
 /**
  * Files a developer's machine can reach that must never name production.
  *
- * `e2e/fixtures/firebase-target.ts` is here because it is the one place that
- * decides which Firebase project the end-to-end suite's Admin SDK talks to,
- * and that SDK bypasses `firestore.rules` entirely — it seeds users and
- * documents and, for the preview target, deletes them again. A project id is
- * one edited string away from pointing all of that at the real database, and
- * nothing else in the pipeline would notice: the suite would go green,
- * against production.
+ * **Every** `e2e/fixtures/*.ts` is covered, rather than the one file that
+ * happens to decide the project id today. Those fixtures are where the
+ * end-to-end suite's Admin SDK is configured and used, and that SDK bypasses
+ * `firestore.rules` entirely — it seeds users and documents and, for the
+ * preview target, deletes them again. A project id is one edited string away
+ * from pointing all of that at the real database, and nothing else in the
+ * pipeline would notice: the suite would go green, against production. Naming
+ * a single path would have checked whichever file was written first and waved
+ * the next one through.
  */
-const DEV_FACING_FILES = ['src/proxy.conf.json', 'package.json', 'e2e/fixtures/firebase-target.ts'];
+const DEV_FACING_FILES = [
+  'src/proxy.conf.json',
+  'package.json',
+  ...readdirSync('e2e/fixtures')
+    .filter((file) => file.endsWith('.ts'))
+    .map((file) => `e2e/fixtures/${file}`),
+];
 
 /**
  * CI that writes to a Firebase project, and must write to the dev one.

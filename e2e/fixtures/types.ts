@@ -52,3 +52,45 @@ export interface QuestionReportRecord {
   reportedBy: string;
   createdAt: number;
 }
+
+/**
+ * The boards, one per timing constraint (finding G7). Must match `isValidBoard`
+ * in `firestore.rules`. Seeding and cleanup both have to visit every one of
+ * them, so the list lives here rather than at each call site.
+ */
+export const LEADERBOARD_BOARDS = ['15', '30', 'unlimited'] as const;
+
+export interface LeaderboardSeed {
+  uid: string;
+  name: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  createdAt?: number;
+  /** Which board to seed into. Defaults to the 15-second board. */
+  timeLimit?: string;
+}
+
+/** Grants (or explicitly withholds) the moderation role for one account. */
+export interface ReviewerSeed {
+  uid: string;
+  /** `false` is a distinct fixture from absent — it is the H6 shape. */
+  reviewer: boolean;
+}
+
+/** Which uid (and optionally which contributed question) to inspect after an account deletion. */
+export interface AccountStateQuery {
+  uid: string;
+  questionId?: string;
+}
+
+/** What `inspectAccountState` reports back — see the method for why it reads all five at once. */
+export interface AccountState {
+  authUserExists: boolean;
+  leaderboardExists: boolean;
+  customerExists: boolean;
+  questionExists: boolean;
+  questionCreatedBy: string | null;
+  /** `users/{uid}` in full, or null when the account has never finished a game. */
+  gameplayStats: Record<string, unknown> | null;
+}

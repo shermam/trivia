@@ -4,7 +4,7 @@ import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
 import { expectRadiosAreGrouped } from '../../support/a11y';
 import { answerQuestion, optionLabel, startGame, waitForPlayRoute } from '../../support/game';
-import { questionsFixture, stubOpenTrivia } from '../../support/open-trivia';
+import { questionsFixture, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
 
 /**
  * Finding H4 — the reporting path for community questions, driven as an
@@ -26,7 +26,7 @@ import { questionsFixture, stubOpenTrivia } from '../../support/open-trivia';
  * bank that is this test's alone. The Category dropdown is built from the
  * stubbed Open Trivia response and its value goes straight into the
  * `custom_questions` query, so inventing a category and picking it is the whole
- * mechanism (see `stubOpenTrivia`). The ids are unique per test for the same
+ * mechanism (see `stubExtraCategory`). The ids are unique per test for the same
  * reason, which is also what lets `getQuestionReports` be scoped rather than a
  * read of the whole collection.
  */
@@ -66,7 +66,8 @@ async function startCustomGame(
   seed: ReturnType<typeof seedFor>,
 ): Promise<void> {
   await firebase.seedCustomQuestions(seed.questions);
-  await stubOpenTrivia(page, { extraCategories: [seed.category] });
+  await stubOpenTrivia(page);
+  await stubExtraCategory(page, seed.category);
   await page.goto('/');
   // Stands in for Cypress's `cy.wait('@categories')`, and does more: the
   // invented category has to be in the dropdown before it can be selected.

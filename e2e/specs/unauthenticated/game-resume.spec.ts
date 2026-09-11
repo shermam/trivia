@@ -1,7 +1,7 @@
 import { expect, test } from '../../fixtures/test';
 import { answerQuestion, optionLabel, startGame, waitForPlayRoute } from '../../support/game';
 import { readSavedGame } from '../../support/offline-storage';
-import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { CORRECT_ANSWERS, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
 
 /**
  * Finding B8's resume path, in a browser — which, until finding B11, nothing
@@ -196,7 +196,7 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
   test('keeps the flag, and the chosen time limit, across a reload', async ({ page, firebase }) => {
     // Unique per test, not merely per run: workers share one emulator, so the
     // ids **and** the category have to be this test's alone — see the category
-    // note in `stubOpenTrivia`. Against the preview target the same uniqueness
+    // note on `stubExtraCategory`. Against the preview target the same uniqueness
     // is what keeps the real bank from colliding with itself.
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const category = `Resume Flags ${runId}`;
@@ -225,7 +225,8 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
     // because its id is minted per fetch and a report about one could never be
     // acted on.
     await firebase.seedCustomQuestions(customQuestions);
-    await stubOpenTrivia(page, { extraCategories: [category] });
+    await stubOpenTrivia(page);
+    await stubExtraCategory(page, category);
     await page.goto('/');
     await expect(page.locator('#category')).toContainText(category);
 
