@@ -49,10 +49,9 @@ export interface AuthUidTracker {
 /**
  * Installs the tracker on every document this context will ever load.
  *
- * `addInitScript` is the Playwright equivalent of Cypress's
- * `window:before:load`: it runs before any application code, on the first
- * navigation and on every one after it, in each page of the context. It only
- * observes — the original `setItem` is always called.
+ * `addInitScript` runs before any application code, on the first navigation
+ * and on every one after it, in each page of the context. It only observes —
+ * the original `setItem` is always called.
  */
 export async function installAuthUidTracker(context: BrowserContext): Promise<AuthUidTracker> {
   const seen = new Set<string>();

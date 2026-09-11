@@ -54,7 +54,7 @@ function productionProjectId(): string {
  * The repository root, found by walking up for `.firebaserc`.
  *
  * `process.cwd()` is the root already when the suite is started the supported
- * way (`npm run pw:e2e:preview`, and npm runs scripts from the package
+ * way (`npm run e2e:preview`, and npm runs scripts from the package
  * directory), so the walk is only there so that running `playwright test` by
  * hand from a subdirectory does not turn into a confusing "cannot find
  * `.firebaserc`". Not finding it at all throws rather than falling back,

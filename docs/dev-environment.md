@@ -45,7 +45,7 @@ required `lint` check) is what stops all three coming back.
 > which on a phone is the centre track of a three-column grid already close to
 > full: measured at 320px it pushed the brand 32px into the account chip, and
 > at 390px it cleared by 2.5px. Nothing would have caught it —
-> `mobile-nav.cy.ts` asserts exactly that clearance but runs at 390, and the
+> `mobile-nav.spec.ts` asserts exactly that clearance but runs at 390, and the
 > badge never renders in an e2e build at all. On a phone the URL is the signal
 > instead: `localhost`, or a `*.web.app` preview channel, neither of which can
 > be mistaken for the production domain.
@@ -168,8 +168,8 @@ are not enabled here.
 **That is sufficient for CI and insufficient for one kind of manual check**, so
 it is worth being precise about which:
 
-- The preview e2e suites — Cypress and Playwright both run the same slice
-  (`ci-cd.md` §4.3) — need **Anonymous** (every visitor gets an anonymous uid
+- The preview e2e slice (`ci-cd.md` §4.3) needs **Anonymous** (every visitor
+  gets an anonymous uid
   on load) and **Email/Password** (`sign-in-save-score`, `profile`). Both
   enabled. `service-worker-oauth-origins` looks like a third requirement and is
   not: it checks that the CSP and the service worker leave `apis.google.com`
@@ -269,13 +269,12 @@ domain, which dev does not have.
     the `get` and fails at the next step.
 
 11. ✅ **Repoint the preview workflow** — done in code, not by hand. Every job
-    (deploy, both e2e jobs, cleanup) uses `trivimind-dev` and the secret from
-    step 10, and the Node side of each suite —
-    `cypress/tasks/firebase-preview-tasks.ts` and
-    `e2e/fixtures/firebase-preview-target.ts` — takes the project from
-    `FIREBASE_PREVIEW_PROJECT_ID` with **no default**: each throws if the
-    variable is missing, and throws again if it is set to production, because
-    both hold Admin-SDK credentials and bypass `firestore.rules`.
+    (deploy, e2e, cleanup) uses `trivimind-dev` and the secret from step 10, and
+    the Node side of the suite — `e2e/fixtures/firebase-preview-target.ts` —
+    takes the project from `FIREBASE_PREVIEW_PROJECT_ID` with **no default**: it
+    throws if the variable is missing, and throws again if it is set to
+    production, because it holds Admin-SDK credentials and bypasses
+    `firestore.rules`.
     `npm run env:verify` fails if the workflow ever names production again, and
     if any `e2e/fixtures/*.ts` does.
 12. **Leave `e2e.yml` and `lighthouse.yml` alone.** They already run under

@@ -52,8 +52,8 @@ test.describe('lifetime gameplay totals', () => {
     // `waitForGameplayStats` rather than a single read: the call is
     // fire-and-forget so nothing in the DOM changes when it lands, and an
     // Admin-SDK read is not a retrying query — an assertion written against one
-    // reads the database exactly once. These three tests passed that way under
-    // Cypress, and passing by luck is not the same as passing.
+    // reads the database exactly once, and passing by luck is not the same as
+    // passing.
     const stats = await waitForGameplayStats(firebase, uid);
     expect(stats).toMatchObject({
       gamesPlayed: 1,

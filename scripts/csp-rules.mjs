@@ -7,7 +7,7 @@
  *
  * - `verify-csp.mjs` applies it to the policy **written in `firebase.json`**,
  *   in `lint.yml`, before anything is built.
- * - `cypress/e2e/unauthenticated/service-worker-oauth-origins.cy.ts` applies it
+ * - `e2e/specs/unauthenticated/service-worker-oauth-origins.spec.ts` applies it
  *   to the policy **actually served by a deployed Hosting channel**, which is a
  *   different question: a headers rule that stops matching `**`, a deploy that
  *   didn't take, or a CDN rewriting the header are all invisible on disk.
@@ -22,8 +22,9 @@
  * origin written only in `default-src` that the script caught. Neither would
  * have been wrong about its own copy. That is the whole argument for this file.
  *
- * Keep it dependency-free. The spec is bundled into a browser by Cypress, so
- * anything imported here has to survive that.
+ * Keep it dependency-free and free of Node built-ins. The spec that imports it
+ * runs under a test runner that transpiles rather than bundles, and the
+ * assertions it feeds are made about a page in a real browser.
  */
 
 /**

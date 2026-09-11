@@ -17,7 +17,7 @@ test.describe('segmented radio groups (G4)', () => {
   test('labels the question-source picker on the setup screen', async ({ page }) => {
     await stubOpenTrivia(page);
     await page.goto('/');
-    // Stands in for Cypress's `cy.wait('@categories')`: the dropdown is built
+    // Stands in for a wait on the categories request: the dropdown is built
     // from the stubbed response, so a stubbed name appearing in it means the
     // setup *screen* is really rendered, which is the screen this test names.
     // The sweep below waits for the radios itself, so this is not what keeps it

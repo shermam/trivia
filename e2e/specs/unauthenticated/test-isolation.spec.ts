@@ -4,21 +4,17 @@ import { readSavedGame } from '../../support/offline-storage';
 import { stubOpenTrivia } from '../../support/open-trivia';
 
 /**
- * The suite's own test isolation — which under this runner is a different
- * claim from the one the Cypress spec made, about a different mechanism.
+ * The suite's own test isolation.
  *
- * **The mechanism this replaces no longer exists.** Cypress's `testIsolation`
- * clears cookies, `localStorage` and `sessionStorage` and has no IndexedDB
- * equivalent — there is no `cy.clearAllIndexedDb()` — so `OfflineDbService`'s
- * database survived from one test into the next, saved in-progress game and
- * all, and had to be deleted by hand from a `beforeEach` timed against the
- * app's own open connection (`cypress/support/offline-storage.ts` records the
- * two placements that looked right and were not). Playwright gives every test
- * a fresh `BrowserContext`: fresh cookies, fresh `localStorage`, fresh
- * IndexedDB, and therefore a fresh anonymous uid, because the Firebase session
- * is persisted in that same storage. There is no hook to place, so there is no
- * hook to test. What is left worth pinning is the *consequence* the whole suite
- * leans on, which is what these two tests assert.
+ * **There is no hook here to test, which is why the tests are shaped as they
+ * are.** Playwright gives every test a fresh `BrowserContext`: fresh cookies,
+ * fresh `localStorage`, fresh IndexedDB, and therefore a fresh anonymous uid,
+ * because the Firebase session is persisted in that same storage. Nothing in
+ * this repository clears any of it — a runner without that guarantee would need
+ * `OfflineDbService`'s database deleted by hand from a `beforeEach` timed
+ * against the app's own open connection, and that hand-written version is what
+ * used to be worth pinning. What is left worth pinning is the *consequence* the
+ * whole suite leans on, which is what these two tests assert.
  *
  * **They are ordered, and deliberately so.** That is normally the thing to
  * avoid, which is the point: the first leaves state behind on purpose so the

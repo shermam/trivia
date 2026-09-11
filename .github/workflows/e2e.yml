@@ -1,9 +1,22 @@
 name: E2E Tests
 
-# Runs the Cypress suite against a real (local, ephemeral) Firebase Emulator
+# Runs the Playwright suite against a real (local, ephemeral) Firebase Emulator
 # Suite instance on every PR targeting main, plus main itself as a safety net
 # — this is what actually gives us confidence a merge won't break the
 # unauthenticated or authenticated flows, independent of `npm test`.
+#
+# **Two shards, two runners, one gate.** The suite is split with
+# `playwright test --shard=n/2`, each shard on its own runner with its own
+# emulators and the config's four workers. Runner minutes are free on this
+# public repository, so the second runner costs nothing; what it buys is wall
+# clock — roughly half — without pushing a single runner past four workers,
+# where the app's own 15-second per-question countdown starts losing questions
+# to a starved worker and failing tests for a reason that is not the code.
+#
+# The `e2e` job below is the gate, and it is the context main's ruleset
+# requires. A matrix job's contexts carry the matrix value in their names
+# (`e2e-shard (1)`), so no shard can be the required check on its own; the gate
+# is a job with a fixed name that fails unless every shard succeeded.
 on:
   pull_request:
     branches: [main]
@@ -11,8 +24,16 @@ on:
     branches: [main]
 
 jobs:
-  e2e:
+  e2e-shard:
+    name: E2E shard ${{ matrix.shard }}/2
     runs-on: ubuntu-latest
+    strategy:
+      # One shard's failure must not cancel the other: a red build should say
+      # which tests failed across the whole suite, not stop at the first runner
+      # to report.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,11 +59,17 @@ jobs:
           path: ~/.cache/firebase/emulators
           key: firebase-emulators-${{ runner.os }}
 
-      - name: Cache Cypress binary
+      # Keyed on the lockfile, because the lockfile is what decides which
+      # Chromium build `playwright install` fetches: the browser revision is a
+      # property of the pinned `@playwright/test` version, not something chosen
+      # here. A bumped version therefore misses the cache and downloads the
+      # browser that version expects, which is the behaviour that keeps the
+      # runner and a developer's machine on the same build.
+      - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/Cypress
-          key: cypress-binary-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         run: npm ci
@@ -50,16 +77,55 @@ jobs:
       - name: Install Cloud Functions dependencies
         run: npm ci --prefix functions
 
-      # The Cloud Functions unit tests used to run here too; they now have
-      # their own workflow (functions-tests.yml) so a functions-test failure
-      # reports under its own name instead of as "e2e failed".
-      - name: Run Cypress e2e suite (unauthenticated + authenticated flows)
+      # `--with-deps` installs the system libraries headless Chromium needs.
+      # It is a no-op for the browser itself when the cache hit above already
+      # provided it.
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The shard is passed as an environment variable rather than as a
+      # `--shard` flag, because the command line belongs to the emulator
+      # wrapper: `npm run e2e -- --shard=1/2` appends the flag to
+      # `firebase emulators:exec`, not to the `playwright test` it wraps.
+      # `playwright.config.ts` reads it, so `npm run e2e` stays the one entry
+      # point here and locally.
+      - name: Run Playwright e2e suite (shard ${{ matrix.shard }} of 2)
+        env:
+          PLAYWRIGHT_SHARD: ${{ matrix.shard }}/2
         run: npm run e2e
 
-      - name: Upload Cypress screenshots on failure
+      # The trace of a failed test is the thing worth having here: it replays
+      # the run frame by frame with the DOM at every step, which is what makes
+      # a CI-only failure diagnosable without reproducing it. Named per shard,
+      # since two jobs upload from the same paths.
+      - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cypress-screenshots
-          path: cypress/screenshots
+          name: playwright-report-shard-${{ matrix.shard }}
+          path: |
+            playwright-report
+            test-results
           if-no-files-found: ignore
+
+  # NOTE: this job id is the status-check context (`e2e`), and it is required
+  # by main's ruleset. Don't add a `name:` here: that would replace the context
+  # and silently detach the requirement, letting PRs merge without the suite.
+  e2e:
+    needs: e2e-shard
+    runs-on: ubuntu-latest
+    # `always()`, so a shard that fails or is cancelled still reaches this job
+    # and turns it red. Without it the gate would be *skipped* on a shard
+    # failure — and branch protection treats a skipped job as success, which is
+    # the exact shape of a check that silently stops gating.
+    if: always()
+    steps:
+      - name: Fail unless every shard passed
+        env:
+          RESULT: ${{ needs.e2e-shard.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "At least one e2e shard did not succeed (matrix result: $RESULT)." >&2
+            exit 1
+          fi
+          echo "Both e2e shards passed."

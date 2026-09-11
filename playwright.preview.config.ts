@@ -3,10 +3,9 @@ import { E2EWorkerOptions } from './e2e/fixtures/test';
 import baseConfig from './playwright.config';
 
 /**
- * The Playwright suite against a **real deployed Firebase Hosting preview
- * channel** instead of the local emulators — the counterpart of
- * `cypress.preview.config.ts`, driven by the `e2e-preview-playwright` job in
- * `.github/workflows/firebase-preview.yml`.
+ * The suite against a **real deployed Firebase Hosting preview channel**
+ * instead of the local emulators, driven by the `e2e-preview` job (display
+ * name `E2E (preview)`) in `.github/workflows/firebase-preview.yml`.
  *
  * Everything not listed below is inherited from `playwright.config.ts`: the
  * same workers, the same zero retries, the same timeouts, the same Chromium,
@@ -47,8 +46,19 @@ export default defineConfig<object, E2EWorkerOptions>({
    * The slice that is safe against a real, persistent, publicly-readable
    * project: all of `unauthenticated/` bar the two below, plus the two
    * authenticated specs whose entire footprint is accounts and rows the sweep
-   * can delete. It is the scope `cypress.preview.config.ts` runs, spec for
-   * spec.
+   * can delete.
+   *
+   * **The unauthenticated half is opt-out**, and that asymmetry is deliberate
+   * but worth knowing before adding a spec: a new file under
+   * `unauthenticated/` reaches the real project on the next PR unless
+   * `testIgnore` below names it, while a new one under `authenticated/` runs
+   * nowhere near it until it is listed here. Opt-out is right for the
+   * unauthenticated specs — they visit pages and play games, so the default
+   * footprint is the anonymous account every page load mints, which the sweep
+   * already tracks — but "the default is safe" is a claim about today's specs,
+   * not a property of the glob. A new unauthenticated spec that seeds
+   * something, or writes through a path no sweep list covers, has to be
+   * excluded here in the same PR.
    *
    * **What keeps the rest out is the same question asked three ways**, and it
    * is worth having the answers here rather than deriving them again:
@@ -101,8 +111,8 @@ export default defineConfig<object, E2EWorkerOptions>({
      * serves hashed JS as `max-age=31536000, immutable` — so against a real
      * channel an earlier spec has already loaded the app and the browser
      * satisfies the script from its own HTTP cache. Nothing reaches the network
-     * and the route never matches, which is exactly how the Cypress file failed
-     * on its first CI run. That is a property of the deployment rather than
+     * and the route never matches, which is exactly how this spec failed on
+     * its first CI run here. That is a property of the deployment rather than
      * something the spec can be written around; the cost is that the preview
      * suite does not check the recovery notice is absent on a healthy boot,
      * which the emulator suite does.

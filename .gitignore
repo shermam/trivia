@@ -51,11 +51,6 @@ ui-debug.log
 *-debug.log
 .runtimeconfig.json
 
-# Cypress
-/cypress/videos
-/cypress/screenshots
-/cypress/downloads
-
 # Lighthouse CI
 /.lighthouseci
 /lighthouse-reports

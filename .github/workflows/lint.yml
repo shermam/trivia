@@ -6,7 +6,7 @@
 # gain. Same family of mistake as the job-name warning below.
 name: Lint & Format
 
-# Static checks — Prettier formatting, ESLint, and the two e2e typechecks — on
+# Static checks — Prettier formatting, ESLint, and the e2e typecheck — on
 # every PR targeting main, plus main itself as a safety net.
 #
 # Its own workflow rather than extra steps inside unit-tests.yml, matching
@@ -29,11 +29,10 @@ name: Lint & Format
 # `functions-tests` has been sitting in. Making a check real today beat
 # making it tidy and inert.
 #
-# It covers `cypress/` and `e2e/` because those are the only trees nothing
-# else typechecks: `src/` goes through `ng build`/`ng test`, and `functions/`
-# through the `tsc` that `functions:test` runs first. Neither runner's own
-# command typechecks its specs — Cypress and Playwright both transpile without
-# checking — so a type error in either suite would otherwise surface as a
+# It covers `e2e/` because that is the only tree nothing else typechecks:
+# `src/` goes through `ng build`/`ng test`, and `functions/` through the `tsc`
+# that `functions:test` runs first. `playwright test` transpiles its specs
+# without typechecking them, so a type error there would otherwise surface as a
 # runtime failure in a job that takes minutes, or not at all in a branch no
 # test reaches.
 on:
@@ -73,10 +72,7 @@ jobs:
       - name: Lint (ESLint + angular-eslint)
         run: npm run lint
 
-      - name: Typecheck the Cypress suite
-        run: npm run typecheck:cypress
-
-      - name: Typecheck the Playwright suite
+      - name: Typecheck the e2e suite
         run: npm run typecheck:e2e
 
       # Measures the committed PNGs against the `purpose` the manifest

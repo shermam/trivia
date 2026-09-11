@@ -15,9 +15,9 @@ import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
  * that a decision made in the browser is accepted by the real rules — which is
  * the seam `AuthService` has already produced three bugs in.
  *
- * **Everything this file touches carries a per-test tag**, and that is what
- * replaces the `resetBackend()` the Cypress original opened with. Workers share
- * one emulator, so `custom_questions` holds every other test's contributions
+ * **Everything this file touches carries a per-test tag**, and that is the
+ * whole of its isolation. Workers share one emulator, so `custom_questions`
+ * holds every other test's contributions
  * and the queue lists all of them: a count of rows, a game drawn from the bank,
  * and an email address are all global unless the test makes them its own. The
  * tag goes in the question text (so rows can be counted), the document ids, the
@@ -91,9 +91,9 @@ test.describe('the review queue', () => {
     await myRows(page).getByTestId('approve-question').click();
 
     // Gone from Pending — and *both* of this test's questions are, rather than
-    // merely the one string being absent. The Cypress original could assert the
-    // tab was globally empty, which a shared bank makes meaningless: the rows
-    // this test owns are the strongest form of that claim available here.
+    // merely the one string being absent. A globally empty tab would be the
+    // stronger claim and a meaningless one against a shared bank: the rows this
+    // test owns are the strongest form of it available here.
     await expect(myRows(page)).toHaveCount(0);
 
     // ...and the write actually landed, rather than only the row disappearing
@@ -262,7 +262,8 @@ async function startCustomGame(page: Page, category: string): Promise<void> {
   await page.goto('/');
   await page.locator('#amount').selectOption({ label: '5' });
   // Retries until the stubbed category list has actually populated the picker,
-  // which is what the Cypress original's wait on the categories request bought.
+  // which is the thing a wait on the categories request would be standing in
+  // for.
   await page.locator('#category').selectOption(category);
   await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
   await page.getByRole('button', { name: 'Start Game', exact: true }).click();

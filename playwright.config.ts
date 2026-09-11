@@ -1,16 +1,43 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * The Playwright end-to-end suite, run against the local Firebase Emulator
- * Suite exactly as the Cypress suite is: `npm run pw:e2e` wraps this in
- * `firebase emulators:exec --project demo-trivia-app-e2e`, so the emulators are
- * started and torn down outside the runner and no real project is ever
- * touched. The Angular dev server is the one thing Playwright starts itself,
- * through `webServer` below.
+ * The end-to-end suite, run against the local Firebase Emulator Suite:
+ * `npm run e2e` wraps this in `firebase emulators:exec --project
+ * demo-trivia-app-e2e`, so the emulators are started and torn down outside the
+ * runner and no real project is ever touched. The Angular dev server is the
+ * one thing Playwright starts itself, through `webServer` below.
  *
- * `docs/ci-cd.md` §4.3 carries the rest: which suite runs where, and why there
- * are two of them at the moment.
+ * `docs/ci-cd.md` §4.3 carries the rest: the fixtures, the isolation model and
+ * the slice that runs against a real deployed channel instead.
  */
+
+/**
+ * CI splits the suite across two runners with `PLAYWRIGHT_SHARD=n/2`.
+ *
+ * An environment variable rather than the `--shard` flag, because the command
+ * line belongs to the emulator wrapper: `npm run e2e -- --shard=1/2` appends
+ * the flag to `firebase emulators:exec`, not to the `playwright test` it wraps.
+ * A variable passes through unchanged, which keeps `npm run e2e` the single
+ * entry point on CI and locally.
+ *
+ * A malformed value throws rather than being ignored: silently running the
+ * whole suite on both runners would double the wall clock this exists to halve
+ * and look like a pass.
+ */
+function shardFromEnvironment(): { current: number; total: number } | null {
+  const value = process.env['PLAYWRIGHT_SHARD'];
+  if (!value) {
+    return null;
+  }
+  const match = /^(\d+)\/(\d+)$/.exec(value);
+  if (!match) {
+    throw new Error(
+      `PLAYWRIGHT_SHARD is "${value}", which is not of the form "<current>/<total>" (e.g. "1/2").`,
+    );
+  }
+  return { current: Number(match[1]), total: Number(match[2]) };
+}
+
 export default defineConfig({
   testDir: './e2e/specs',
 
@@ -44,24 +71,30 @@ export default defineConfig({
   /**
    * Four workers, one per vCPU on the runners this has to fit.
    *
-   * Measured on a 4-vCPU box, wall clock over a **fourteen-test slice** of the
-   * suite — the two specs that existed when the sweep was run, not the suite as
-   * it stands: **2 workers 67s, 4 workers 45s, 6 workers 33s, 8 workers 33s.**
-   * So on that slice the knee is at six,
-   * not four, and the reason is that these tests are *wait*-bound rather than
-   * CPU-bound — a five-question game spends ten of its twelve seconds sitting
-   * out the result banner's 2s pause, doing nothing a core could help with.
+   * Six is faster on a 4-vCPU box — measured over the full suite, 4 workers
+   * 134s wall against 6 workers 109s — because these tests are *wait*-bound
+   * rather than CPU-bound: a five-question game spends ten of its twelve
+   * seconds sitting out the result banner's 2s pause, doing nothing a core
+   * could help with.
    *
-   * Four is still the setting, and the argument is the one thing over-
-   * subscription puts at risk here: the app's own **15-second per-question
-   * countdown** is a real deadline, so a worker starved past it loses the
-   * question and fails a test for a reason that has nothing to do with the
-   * code. With `retries: 0` that is a red build, and the evidence for six is
-   * two runs of a fourteen-test slice — thin next to a suite that is going to
-   * be several times larger and therefore more contended, not less. Revisit
-   * the number against the whole suite, not against this one.
+   * Four is still the setting, and the argument is the one thing
+   * over-subscription puts at risk here: the app's own **15-second
+   * per-question countdown** is a real deadline, so a worker starved past it
+   * loses the question and fails a test for a reason that has nothing to do
+   * with the code. With `retries: 0` that is a red build. CI buys its wall
+   * clock by sharding across two runners instead (`.github/workflows/e2e.yml`),
+   * which is more parallelism without more contention per runner — the same
+   * ~20% the sixth worker offered, without spending the countdown's headroom
+   * to get it.
    */
   workers: 4,
+
+  /**
+   * Set by CI to split the suite across two runners; `null` locally, where the
+   * whole suite runs in one process. Playwright shards whole parallel groups,
+   * so a `mode: 'serial'` file stays intact on one runner.
+   */
+  shard: shardFromEnvironment(),
 
   /**
    * **Zero retries, here and on CI.** A retry turns a real intermittent defect
@@ -92,9 +125,11 @@ export default defineConfig({
     baseURL: 'http://localhost:4200',
 
     /**
-     * `getByTestId()` resolves `data-cy`, so every attribute already in the
-     * templates works unchanged and neither suite has to grow a second set of
-     * hooks while both exist.
+     * `getByTestId()` resolves `data-cy`, which is the attribute the templates
+     * carry. The name is historical and the attributes are the test ids: they
+     * are what every spec addresses a clickable element by (`CLAUDE.md` §4.6),
+     * so renaming them across `src/` would be a large, entirely mechanical
+     * diff through the application for no change in behaviour.
      */
     testIdAttribute: 'data-cy',
 
@@ -104,9 +139,9 @@ export default defineConfig({
   },
 
   /**
-   * Chromium only, matching what Cypress ran. Cross-browser coverage is a
-   * separate question from this migration and is not answered by switching
-   * runners.
+   * Chromium only. Cross-browser coverage is a separate question from what this
+   * suite is for, and adding browsers multiplies a suite that is already the
+   * slowest check on a PR.
    *
    * The browser binary is **not** pinned here to a path. `@playwright/test` is
    * pinned to an exact version instead, and that version decides which

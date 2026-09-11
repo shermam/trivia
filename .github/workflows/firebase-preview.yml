@@ -7,13 +7,13 @@ name: Deploy Preview Channel
 # firebase-deploy.yml, which is merge-to-deploy only).
 #
 # **That project is `trivimind-dev`, and until FEAT-012 it was production.**
-# Not read-only, either: both e2e jobs here create real Auth users, real
+# Not read-only, either: the e2e job here creates real Auth users, real
 # `custom_questions` documents and real `leaderboards/{limit}/entries` rows,
 # swept afterwards — on every PR, from any contributor whose PR a maintainer
 # approved for workflow runs. It was the single largest production exposure in
 # the repo, and it was invisible because the sweep mostly worked, which is why
-# the Playwright sweep fails the job rather than reporting nothing when it
-# cannot delete something.
+# that sweep now fails the job rather than reporting nothing when it cannot
+# delete something.
 #
 # `trivimind-dev` runs the same production build against the same rules, the
 # same indexes and the same `firebase.json` headers, so what the preview
@@ -108,90 +108,21 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
   e2e-preview:
+    # NOTE: this `name` is the status-check context (`E2E (preview)`), and it is
+    # required by main's ruleset. Don't change it — a required context is stored
+    # by name, so renaming silently detaches the requirement and lets PRs merge
+    # without the preview suite having run.
     name: E2E (preview)
     needs: deploy-preview
-    # Redundant today — `needs` on a skipped job skips this one too — and
-    # deliberately stated anyway. This job also reads the service account (for
-    # the preview-cleanup tasks), so the guard should not depend on a cascade
-    # that an `if: always()` or a dropped `needs:` would quietly remove.
-    if: github.actor != 'dependabot[bot]' && github.event.action != 'closed'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            functions/package-lock.json
-
-      - name: Cache Cypress binary
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/Cypress
-          key: cypress-binary-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      # Only the seed/cleanup Node-side tasks (cypress/tasks/firebase-preview-tasks.ts)
-      # use this — the app itself under test still fetches its Firebase
-      # config from the deployed preview channel's own /__/firebase/init.json
-      # (patched around at the browser level, see cypress/support/e2e.preview.ts
-      # — Cypress's own reserved-path handling collides with Firebase Hosting's
-      # `/__/` namespace), same as a real visitor otherwise.
-      # `env`, not `${{ }}` inside `run:` — see firebase-deploy.yml (A11).
-      - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
-        env:
-          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
-          # Read by `cypress/tasks/firebase-preview-tasks.ts`, which refuses to
-          # start without it rather than defaulting to anything. There is no
-          # value it could safely default *to*: the only obvious one is the
-          # project it used to be hard-coded to.
-          FIREBASE_PREVIEW_PROJECT_ID: trivimind-dev
-        run: |
-          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npm run e2e:preview
-
-      - name: Clean up service account credentials
-        if: always()
-        run: rm -f "${{ runner.temp }}/firebase-service-account.json"
-
-      - name: Upload Cypress screenshots on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cypress-preview-screenshots
-          path: cypress/screenshots
-          if-no-files-found: ignore
-
-  e2e-preview-playwright:
-    name: E2E preview (Playwright)
-    needs: deploy-preview
-    # The same slice as `E2E (preview)` above, on the runner the suite is being
-    # migrated to. Both run against the same deployed channel and the same real
-    # project on every PR, and that is the point rather than duplication: while
-    # the port is under way the Cypress job is the one `main`'s ruleset
-    # requires, so it keeps gating merges, and a ported spec that disagrees with
-    # its original is caught by the two disagreeing. At cutover this job's steps
-    # move into `e2e-preview` and this one goes; the *name* `E2E (preview)`
-    # never changes hands, so the ruleset is never edited. See docs/ci-cd.md
-    # §4.3.
+    # A scoped slice of the suite (docs/ci-cd.md §4.3) against the channel
+    # `deploy-preview` has just published, and therefore against the real
+    # `trivimind-dev` project — which is what makes it worth running next to the
+    # emulator suite in e2e.yml: real headers, a real service worker, real rules
+    # and real Cloud Functions. One runner, no shard; the slice is 79 tests and
+    # takes under two minutes.
     #
-    # Deliberately **not** named `E2E (preview)`: taking that context over
-    # before the port is finished would drop the coverage this arrangement
-    # exists to keep.
-    #
-    # Stated rather than inherited, exactly as on the job above: this one also
-    # reads the service account (the preview sweep deletes the accounts and
+    # Stated rather than inherited from `deploy-preview`'s own guard: this job
+    # reads the service account too (the sweep deletes the accounts and
     # documents the run created), so the Dependabot guard should not depend on a
     # `needs` cascade that an `if: always()` would quietly remove.
     if: github.actor != 'dependabot[bot]' && github.event.action != 'closed'
@@ -237,7 +168,7 @@ jobs:
       # below is for the Node side only — `e2e/fixtures/firebase-preview-target.ts`,
       # which seeds what the specs need and sweeps it all up afterwards.
       # `env`, not `${{ }}` inside `run:` — see firebase-deploy.yml (A11).
-      - name: Run Playwright against the deployed preview (unauthenticated + limited authenticated flows)
+      - name: Run the preview slice against the deployed channel (unauthenticated + limited authenticated flows)
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
@@ -249,7 +180,7 @@ jobs:
           FIREBASE_PREVIEW_PROJECT_ID: trivimind-dev
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npm run pw:e2e:preview
+          npm run e2e:preview
 
       - name: Clean up service account credentials
         if: always()

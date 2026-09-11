@@ -27,9 +27,8 @@ test.describe('verified user saves a score to the leaderboard', () => {
      * addresses a row by the text it shows. Both preview suites seed a rival
      * and save a score on every PR, so a fixed "Reigning Champ" put two
      * identical rows on one board — which Playwright reports as a strict-mode
-     * violation and Cypress would have swallowed by matching the first, i.e.
-     * passing against the *other* suite's row while proving nothing about its
-     * own.
+     * violation rather than quietly matching the first, which would have passed
+     * against another run's row while proving nothing about its own.
      *
      * A **short** tag rather than `unique()`: `firestore.rules` caps a
      * leaderboard name at 30 characters and the input carries `maxlength="30"`,

@@ -1,13 +1,12 @@
 import { Page } from '@playwright/test';
-import categoriesFixture from '../../cypress/fixtures/open-trivia-categories.json';
-import questionsFixture from '../../cypress/fixtures/open-trivia-questions.json';
+import categoriesFixture from '../fixtures/open-trivia-categories.json';
+import questionsFixture from '../fixtures/open-trivia-questions.json';
 
 /**
- * The two Open Trivia DB fixtures, read from where the Cypress suite keeps
- * them so that both suites assert against **one** copy while both exist. They
- * move under `e2e/` when `cypress/` goes; duplicating them in the meantime
- * would let the two suites drift apart on the very data their scoring
- * assertions are derived from.
+ * The two recorded Open Trivia DB responses every stubbed game is served from.
+ * Re-exported rather than copied into the specs that need it, because the
+ * scoring assertions are derived from this data — two copies would let a test
+ * assert against answers the app was never shown.
  */
 export { questionsFixture };
 

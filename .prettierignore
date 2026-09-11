@@ -17,9 +17,6 @@ functions/package-lock.json
 .lighthouseci/
 lighthouse-reports/
 coverage/
-cypress/videos/
-cypress/screenshots/
-cypress/downloads/
 playwright-report/
 test-results/
 *-debug.log

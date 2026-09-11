@@ -54,7 +54,7 @@ export interface FirebaseTarget {
  * `src/app/services/firebase-app.service.ts` — that is the project the app
  * connects to (via the `e2e` build config) when `useEmulators` is true, and it
  * is also the project the Firebase Emulator Suite is started against (see the
- * `pw:e2e` npm script). The `demo-` prefix keeps the emulators fully offline,
+ * `e2e` npm script). The `demo-` prefix keeps the emulators fully offline,
  * and `isDemoProject()` in `functions/` keys the mock-checkout gate on it, so
  * the prefix is load-bearing rather than cosmetic. `npm run env:verify` checks
  * that this file never names the production project.
