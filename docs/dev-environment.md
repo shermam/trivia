@@ -168,11 +168,12 @@ are not enabled here.
 **That is sufficient for CI and insufficient for one kind of manual check**, so
 it is worth being precise about which:
 
-- The preview e2e suite needs **Anonymous** (every visitor gets an anonymous
-  uid on load) and **Email/Password** (`sign-in-save-score.cy.ts`,
-  `profile.cy.ts`). Both enabled. `service-worker-oauth-origins.cy.ts` looks
-  like a third requirement and is not: it checks that the CSP and the service
-  worker leave `apis.google.com` reachable, and never performs a sign-in.
+- The preview e2e suites — Cypress and Playwright both run the same slice
+  (`ci-cd.md` §4.3) — need **Anonymous** (every visitor gets an anonymous uid
+  on load) and **Email/Password** (`sign-in-save-score`, `profile`). Both
+  enabled. `service-worker-oauth-origins` looks like a third requirement and is
+  not: it checks that the CSP and the service worker leave `apis.google.com`
+  reachable, and never performs a sign-in.
 - **Validating a change to the "more sign-in options" disclosure cannot be done
   on dev.** Those five providers will fail with `auth/operation-not-allowed`.
   A green dev run says nothing about them — which is the failure mode a dev
@@ -267,13 +268,16 @@ domain, which dev does not have.
     which needs `setIamPolicy` on it; `roles/secretmanager.viewer` fixes only
     the `get` and fails at the next step.
 
-11. ✅ **Repoint the preview workflow** — done in code, not by hand. All three
-    jobs (deploy, e2e, cleanup) now use `trivimind-dev` and the secret from
-    step 10, and `cypress/tasks/firebase-preview-tasks.ts` takes the project
-    from `FIREBASE_PREVIEW_PROJECT_ID` with **no default** — it throws if the
+11. ✅ **Repoint the preview workflow** — done in code, not by hand. Every job
+    (deploy, both e2e jobs, cleanup) uses `trivimind-dev` and the secret from
+    step 10, and the Node side of each suite —
+    `cypress/tasks/firebase-preview-tasks.ts` and
+    `e2e/fixtures/firebase-preview-target.ts` — takes the project from
+    `FIREBASE_PREVIEW_PROJECT_ID` with **no default**: each throws if the
     variable is missing, and throws again if it is set to production, because
-    those tasks hold Admin-SDK credentials and bypass `firestore.rules`.
-    `npm run env:verify` fails if the workflow ever names production again.
+    both hold Admin-SDK credentials and bypass `firestore.rules`.
+    `npm run env:verify` fails if the workflow ever names production again, and
+    if any `e2e/fixtures/*.ts` does.
 12. **Leave `e2e.yml` and `lighthouse.yml` alone.** They already run under
     `demo-trivia-app-e2e` on emulators and hold no credential. The spec's claim
     that "CI runs against production credentials" was wrong about these two and

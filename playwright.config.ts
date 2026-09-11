@@ -15,6 +15,18 @@ export default defineConfig({
   testDir: './e2e/specs',
 
   /**
+   * `service-worker-oauth-origins.spec.ts` is preview-only, and this runner has
+   * nothing for it to test: `ng serve --configuration=e2e` sets no
+   * `serviceWorker` in `angular.json`, so no `ngsw-worker.js` is emitted to
+   * register, and a dev server sends none of `firebase.json`'s headers. It runs
+   * against a real deployed Hosting channel only —
+   * `playwright.preview.config.ts` replaces this list with its own, which does
+   * not name it. Excluding at discovery rather than skipping inside the spec
+   * means naming the file on the command line cannot run it here either.
+   */
+  testIgnore: ['**/service-worker-oauth-origins.spec.ts'],
+
+  /**
    * Every test file runs in parallel, against **one shared emulator**. There is
    * no `resetBackend()` between tests here and there deliberately never will
    * be: a blanket wipe from one worker would delete the users and documents

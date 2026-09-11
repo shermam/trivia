@@ -7,12 +7,13 @@ name: Deploy Preview Channel
 # firebase-deploy.yml, which is merge-to-deploy only).
 #
 # **That project is `trivimind-dev`, and until FEAT-012 it was production.**
-# Not read-only, either: the Cypress tasks here create real Auth users, real
+# Not read-only, either: both e2e jobs here create real Auth users, real
 # `custom_questions` documents and real `leaderboards/{limit}/entries` rows,
-# swept afterwards by a best-effort `finalCleanup` — on every PR, from any
-# contributor whose PR a maintainer approved for workflow runs. It was the
-# single largest production exposure in the repo, and it was invisible because
-# the sweep mostly worked.
+# swept afterwards — on every PR, from any contributor whose PR a maintainer
+# approved for workflow runs. It was the single largest production exposure in
+# the repo, and it was invisible because the sweep mostly worked, which is why
+# the Playwright sweep fails the job rather than reporting nothing when it
+# cannot delete something.
 #
 # `trivimind-dev` runs the same production build against the same rules, the
 # same indexes and the same `firebase.json` headers, so what the preview
@@ -170,6 +171,101 @@ jobs:
         with:
           name: cypress-preview-screenshots
           path: cypress/screenshots
+          if-no-files-found: ignore
+
+  e2e-preview-playwright:
+    name: E2E preview (Playwright)
+    needs: deploy-preview
+    # The same slice as `E2E (preview)` above, on the runner the suite is being
+    # migrated to. Both run against the same deployed channel and the same real
+    # project on every PR, and that is the point rather than duplication: while
+    # the port is under way the Cypress job is the one `main`'s ruleset
+    # requires, so it keeps gating merges, and a ported spec that disagrees with
+    # its original is caught by the two disagreeing. At cutover this job's steps
+    # move into `e2e-preview` and this one goes; the *name* `E2E (preview)`
+    # never changes hands, so the ruleset is never edited. See docs/ci-cd.md
+    # §4.3.
+    #
+    # Deliberately **not** named `E2E (preview)`: taking that context over
+    # before the port is finished would drop the coverage this arrangement
+    # exists to keep.
+    #
+    # Stated rather than inherited, exactly as on the job above: this one also
+    # reads the service account (the preview sweep deletes the accounts and
+    # documents the run created), so the Dependabot guard should not depend on a
+    # `needs` cascade that an `if: always()` would quietly remove.
+    if: github.actor != 'dependabot[bot]' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      # Keyed on the lockfile, because the lockfile is what decides which
+      # Chromium build `playwright install` fetches: the browser revision is a
+      # property of the pinned `@playwright/test` version, not something chosen
+      # here. A bumped version therefore misses the cache and downloads the
+      # browser that version expects.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `--with-deps` installs the system libraries headless Chromium needs. It
+      # is a no-op for the browser itself when the cache hit above already
+      # provided it.
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+
+      # No emulators and no dev server: the app under test is the channel that
+      # was just deployed, fetching its own Firebase config from that channel's
+      # `/__/firebase/init.json` exactly as a real visitor does. The credential
+      # below is for the Node side only — `e2e/fixtures/firebase-preview-target.ts`,
+      # which seeds what the specs need and sweeps it all up afterwards.
+      # `env`, not `${{ }}` inside `run:` — see firebase-deploy.yml (A11).
+      - name: Run Playwright against the deployed preview (unauthenticated + limited authenticated flows)
+        env:
+          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          # Read by `e2e/fixtures/firebase-preview-target.ts`, which refuses to
+          # start without it rather than defaulting to anything. There is no
+          # value it could safely default *to*: the only obvious one is the
+          # project it used to be hard-coded to.
+          FIREBASE_PREVIEW_PROJECT_ID: trivimind-dev
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npm run pw:e2e:preview
+
+      - name: Clean up service account credentials
+        if: always()
+        run: rm -f "${{ runner.temp }}/firebase-service-account.json"
+
+      # The trace of a failed test replays the run frame by frame with the DOM
+      # at every step, which is what makes a failure that only happens against a
+      # real deployment diagnosable without reproducing it.
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-preview-report
+          path: |
+            playwright-report
+            test-results
           if-no-files-found: ignore
 
   cleanup-preview:

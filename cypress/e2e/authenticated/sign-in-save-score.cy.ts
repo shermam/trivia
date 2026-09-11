@@ -15,6 +15,22 @@ describe('verified user saves a score to the leaderboard', () => {
   // Unique per run so concurrent CI runs (e.g. two preview deploys against
   // the same real project) never race on the same doc.
   const existingLeaderUid = `existing-leader-${Date.now()}`;
+  // Unique per run for a *different* reason, and the one that bites harder: a
+  // unique uid stops two runs writing the same document, and does nothing for
+  // an assertion that addresses a row by the text it shows. Both preview
+  // suites — this one and the Playwright job beside it — seed a rival and save
+  // a score against the same real board on every PR, so a fixed "Reigning
+  // Champ" puts two identical rows on it. `cy.contains` would then match
+  // whichever came first in DOM order and pass against the *other* suite's
+  // row, proving nothing about this one (`CLAUDE.md` §4.6).
+  //
+  // A short tag rather than the uid above: `firestore.rules` caps a leaderboard
+  // name at 30 characters and the input carries `maxlength="30"`, so a long
+  // suffix is truncated by the browser before it is ever written, and the
+  // assertion then looks for a string nothing shows.
+  const nameTag = Math.random().toString(36).slice(2, 8);
+  const rivalName = `Reigning Champ ${nameTag}`;
+  const playerName = `Test Player ${nameTag}`;
 
   beforeEach(() => {
     email = `player-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
@@ -24,7 +40,7 @@ describe('verified user saves a score to the leaderboard', () => {
   it('shows the save-score form once fully authenticated and records the entry', () => {
     cy.seedLeaderboardEntry({
       uid: existingLeaderUid,
-      name: 'Reigning Champ',
+      name: rivalName,
       score: 5,
       totalQuestions: 5,
       percentage: 100,
@@ -74,7 +90,7 @@ describe('verified user saves a score to the leaderboard', () => {
     // G6: the leaderboard name is data about the user (the `nickname`
     // purpose), so a browser can prefill it from the profile it knows.
     cy.get('input[name=playerName]').should('have.attr', 'autocomplete', 'nickname');
-    cy.get('input[name=playerName]').clear().type('Test Player');
+    cy.get('input[name=playerName]').clear().type(playerName);
     cy.contains('button', 'Save Score').click();
 
     cy.get('[data-cy="score-saved"]').should('be.visible');
@@ -84,8 +100,8 @@ describe('verified user saves a score to the leaderboard', () => {
         'card height moved when the score saved',
       ).to.be.closeTo(signedOutHeight, 0.5);
     });
-    cy.contains('Reigning Champ');
-    cy.contains('Test Player');
+    cy.contains(rivalName);
+    cy.contains(playerName);
   });
 
   it('surfaces a friendly message when the new score does not beat the existing best', () => {
