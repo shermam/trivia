@@ -1,4 +1,4 @@
-import { App, getApps, initializeApp } from 'firebase-admin/app';
+import { App, deleteApp, initializeApp } from 'firebase-admin/app';
 
 /**
  * Everything one Playwright worker brought into existence, handed to the
@@ -12,6 +12,13 @@ import { App, getApps, initializeApp } from 'firebase-admin/app';
 export interface CreatedState {
   readonly authUids: ReadonlySet<string>;
   readonly customQuestionIds: ReadonlySet<string>;
+  /**
+   * Uids whose leaderboard rows were seeded directly, as distinct from the
+   * accounts above — a row can belong to a uid that was never an Auth user
+   * (`sign-in-save-score.spec.ts` seeds a reigning champion that way), so the
+   * sweep cannot reach it by walking `authUids` alone.
+   */
+  readonly leaderboardUids: ReadonlySet<string>;
 }
 
 /**
@@ -68,20 +75,29 @@ const FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
 export const emulatorTarget: FirebaseTarget = {
   projectId: EMULATOR_PROJECT_ID,
 
+  /**
+   * **Named, rather than the process-wide default app.** The Admin SDK keys its
+   * app registry by name, so an unnamed `initializeApp` is a singleton per
+   * process and any "reuse whatever app exists" shortcut hands the *second*
+   * target in a worker the *first* one's credentials and project — silently,
+   * because nothing about the returned app looks wrong. Naming it after the
+   * project makes two targets two apps by construction.
+   */
   createAdminApp(): App {
     process.env['FIREBASE_AUTH_EMULATOR_HOST'] = AUTH_EMULATOR_HOST;
     process.env['FIRESTORE_EMULATOR_HOST'] = FIRESTORE_EMULATOR_HOST;
 
-    const existing = getApps()[0];
-    if (existing) {
-      return existing;
-    }
-    return initializeApp({ projectId: EMULATOR_PROJECT_ID });
+    return initializeApp({ projectId: EMULATOR_PROJECT_ID }, EMULATOR_PROJECT_ID);
   },
 
-  cleanup(): Promise<void> {
-    // Nothing to sweep: `firebase emulators:exec` discards the whole database
-    // when the run ends, users and documents alike.
-    return Promise.resolve();
+  /**
+   * Nothing to sweep — `firebase emulators:exec` discards the whole database
+   * when the run ends, users and documents alike — but the app itself is still
+   * closed. It holds gRPC channels and a metadata-server lookup that keeps
+   * retrying for the life of the process, which is where the
+   * `MetadataLookupWarning` spam at the end of a run came from.
+   */
+  async cleanup(app: App): Promise<void> {
+    await deleteApp(app);
   },
 };

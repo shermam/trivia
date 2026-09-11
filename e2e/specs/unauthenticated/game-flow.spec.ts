@@ -43,10 +43,19 @@ test.describe('anonymous game flow (open_trivia source)', () => {
 
     await expect(page).toHaveURL(/\/game-over$/);
     await expect(page.getByRole('heading', { name: 'Game Over!', exact: true })).toBeVisible();
+    // **Exact, because the leaderboard on this same screen renders scores in the
+    // same words.** A row reads `5 / 5 (100%)`, so the substring form of either
+    // of these resolves to the score summary *plus* every entry that happens to
+    // have played a perfect round — a strict-mode failure that says nothing
+    // about the app. It is latent rather than theoretical: it depends entirely
+    // on what else is on the board, which is another spec's business against a
+    // shared emulator and the owner's real data against the preview project.
+    // Exact matching addresses the summary and nothing else, because a row's
+    // text carries its percentage in brackets and the summary's does not.
     await expect(
-      page.getByText(`${CORRECT_ANSWERS.length} / ${CORRECT_ANSWERS.length}`),
+      page.getByText(`${CORRECT_ANSWERS.length} / ${CORRECT_ANSWERS.length}`, { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText('100%')).toBeVisible();
+    await expect(page.getByText('100%', { exact: true })).toBeVisible();
 
     // Anonymous players can view the leaderboard but are prompted to sign in
     // instead of getting a save-score form.
@@ -282,7 +291,11 @@ test.describe('anonymous game flow (open_trivia source)', () => {
     }
 
     await expect(page).toHaveURL(/\/game-over$/);
-    await expect(page.getByText(`${restCorrect.length} / ${CORRECT_ANSWERS.length}`)).toBeVisible();
+    // Exact for the reason given on the same assertion in the first test: a
+    // leaderboard row reading `4 / 5 (80%)` matches the substring form too.
+    await expect(
+      page.getByText(`${restCorrect.length} / ${CORRECT_ANSWERS.length}`, { exact: true }),
+    ).toBeVisible();
   });
 
   /**
@@ -473,9 +486,10 @@ test.describe('anonymous game flow (open_trivia source)', () => {
     }
 
     await expect(page).toHaveURL(/\/game-over$/);
-    // Four right out of five, not four out of four.
-    await expect(page.getByText('4 / 5')).toBeVisible();
-    await expect(page.getByText('80%')).toBeVisible();
+    // Four right out of five, not four out of four. Exact, so that neither of
+    // these can be satisfied by a leaderboard row reading `4 / 5 (80%)`.
+    await expect(page.getByText('4 / 5', { exact: true })).toBeVisible();
+    await expect(page.getByText('80%', { exact: true })).toBeVisible();
   });
 
   // Hidden rather than disabled, because there is no countdown to extend.
