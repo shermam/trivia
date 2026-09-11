@@ -110,7 +110,7 @@ Each guardrail is tagged with the mechanism that catches a violation:
 - **[functions tests]** — `npm run functions:test` fails. **Live now**, reported by the `functions-tests` CI check.
 - **[motion verify]** — `npm run motion:verify` fails (`scripts/verify-motion.mjs`). **Live now**, reported by the `lint` CI check.
 - **[csp:verify]** — `npm run csp:verify` fails. **Live now**, part of the `lint` CI check, which is required.
-- **[preview e2e]** — `cypress/e2e/unauthenticated/service-worker-oauth-origins.cy.ts` fails, reported by the `E2E (preview)` check. It runs **only** against a real deployed Hosting channel, because it is the only place the real headers and a real service worker exist together (`ci-cd.md` §4.3).
+- **[preview e2e]** — `service-worker-oauth-origins` fails. It exists on both runners (`cypress/e2e/unauthenticated/` and `e2e/specs/unauthenticated/`), reported by the `E2E (preview)` check and by `E2E preview (Playwright)` beside it — the first is the required one. It runs **only** against a real deployed Hosting channel, because it is the only place the real headers and a real service worker exist together (`ci-cd.md` §4.3).
 
 **Reporting is not the same as gating.** Every suite above runs on each PR, but a workflow cannot add itself to a branch ruleset — a new check reports without blocking until a repo admin adds it under Settings → Rules (`functions-tests` is currently in that state; `lint` and `rules-tests` went through the same lifecycle and are required today). Check which are actually required before treating a green PR as proof; see `docs/ci-cd.md` §4.2a for the current list.
 

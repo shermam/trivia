@@ -1,7 +1,30 @@
 import { test as base } from '@playwright/test';
 import { AuthUidTracker, installAuthUidTracker } from '../support/auth-uid-tracker';
 import { FirebaseBackend } from './firebase-backend';
-import { emulatorTarget } from './firebase-target';
+import { previewTarget } from './firebase-preview-target';
+import { FirebaseTarget, emulatorTarget } from './firebase-target';
+
+/**
+ * Which backend the `firebase` fixture writes to, named rather than passed.
+ *
+ * A Playwright config's `use` block is serialised to the worker processes, so
+ * the thing a config can choose is a name; the target object itself, methods
+ * and all, would not survive the trip. Naming it in the config rather than
+ * reading an environment variable here keeps "which project does this run
+ * write to" a property of the config that started the run — visible in
+ * `playwright.preview.config.ts`, next to the base URL it belongs with.
+ */
+export type FirebaseTargetName = 'emulator' | 'preview';
+
+/** Worker-scoped options a config may set in its `use` block. */
+export interface E2EWorkerOptions {
+  firebaseTarget: FirebaseTargetName;
+}
+
+const TARGETS: Record<FirebaseTargetName, FirebaseTarget> = {
+  emulator: emulatorTarget,
+  preview: previewTarget,
+};
 
 /**
  * The `test` every spec imports, carrying the `firebase` fixture.
@@ -22,16 +45,22 @@ import { emulatorTarget } from './firebase-target';
  * connection. Here the isolation is a property of the context, so there is no
  * hook to place and no connection to race.
  */
-export const test = base.extend<{ authUids: AuthUidTracker }, { firebase: FirebaseBackend }>({
+export const test = base.extend<
+  { authUids: AuthUidTracker },
+  { firebase: FirebaseBackend } & E2EWorkerOptions
+>({
+  /**
+   * The emulator unless a config says otherwise, so the default is the
+   * throwaway backend and reaching the real project takes a deliberate line in
+   * a config file rather than an omission.
+   */
+  firebaseTarget: ['emulator', { scope: 'worker', option: true }],
+
   firebase: [
-    // Playwright reads the *source text* of this parameter to work out which
-    // fixtures the function depends on, and rejects anything that is not a
-    // destructuring pattern — so the empty pattern is required here rather
-    // than stylistic, even though nothing is taken out of it.
-    // eslint-disable-next-line no-empty-pattern
-    async ({}, use) => {
-      const app = emulatorTarget.createAdminApp();
-      const backend = new FirebaseBackend(emulatorTarget, app);
+    async ({ firebaseTarget }, use) => {
+      const target = TARGETS[firebaseTarget];
+      const app = target.createAdminApp();
+      const backend = new FirebaseBackend(target, app);
       await use(backend);
       await backend.cleanup();
     },
