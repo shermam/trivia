@@ -9,6 +9,7 @@ import {
   LEADERBOARD_BOARDS,
   LeaderboardSeed,
   ProSubscriptionSeed,
+  QuestionReportRecord,
   ReviewerSeed,
   VerifiedUserSeed,
 } from './types';
@@ -82,6 +83,31 @@ export class FirebaseBackend {
         return this.firestore.collection('custom_questions').doc(docId).set(seeded);
       }),
     );
+  }
+
+  /**
+   * The reports filed against these questions, read through the Admin SDK
+   * because `firestore.rules` forbids **every** client read of
+   * `question_reports` — so the UI saying "Reported" proves nothing about the
+   * write on its own (finding H4).
+   *
+   * **Takes the ids rather than reading the collection**, which is the one way
+   * it differs from the Cypress task it replaces. That task read every
+   * document and could, because `resetBackend()` had just emptied the
+   * emulator. Here the emulator is shared by every worker in the run, so an
+   * unscoped read would return another test's reports and an "no reports were
+   * written" assertion would fail for something the test did not do. Question
+   * ids are unique per test, so filtering on them *is* the isolation.
+   */
+  async getQuestionReports(questionIds: string[]): Promise<QuestionReportRecord[]> {
+    if (questionIds.length === 0) {
+      return [];
+    }
+    const snapshot = await this.firestore
+      .collection('question_reports')
+      .where('questionId', 'in', questionIds)
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as QuestionReportRecord);
   }
 
   /**
