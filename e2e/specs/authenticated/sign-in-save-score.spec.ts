@@ -20,11 +20,31 @@ test.describe('verified user saves a score to the leaderboard', () => {
     page,
     firebase,
   }) => {
+    /**
+     * The **displayed names** are unique per run, not only the uids behind
+     * them, and that is the half that was missing. A unique uid stops two runs
+     * writing the same document; it does nothing for an assertion that
+     * addresses a row by the text it shows. Both preview suites seed a rival
+     * and save a score on every PR, so a fixed "Reigning Champ" put two
+     * identical rows on one board — which Playwright reports as a strict-mode
+     * violation and Cypress would have swallowed by matching the first, i.e.
+     * passing against the *other* suite's row while proving nothing about its
+     * own.
+     *
+     * A **short** tag rather than `unique()`: `firestore.rules` caps a
+     * leaderboard name at 30 characters and the input carries `maxlength="30"`,
+     * so a long suffix is truncated by the browser before it is ever written
+     * and the assertion then looks for a string nothing shows.
+     */
+    const tag = Math.random().toString(36).slice(2, 8);
+    const rival = `Reigning Champ ${tag}`;
+    const player = `Test Player ${tag}`;
+
     const email = `player-${unique()}@example.com`;
     await firebase.createVerifiedUser({ email, password });
     await firebase.seedLeaderboardEntry({
       uid: `existing-leader-${unique()}`,
-      name: 'Reigning Champ',
+      name: rival,
       score: 5,
       totalQuestions: 5,
       percentage: 100,
@@ -70,13 +90,13 @@ test.describe('verified user saves a score to the leaderboard', () => {
       'autocomplete',
       'nickname',
     );
-    await page.locator('input[name=playerName]').fill('Test Player');
+    await page.locator('input[name=playerName]').fill(player);
     await page.getByRole('button', { name: 'Save Score', exact: true }).click();
 
     await expect(page.getByTestId('score-saved')).toBeVisible();
     await expectCardHeightUnmoved(card, signedOutHeight, 'card height moved when the score saved');
-    await expect(page.getByText('Reigning Champ')).toBeVisible();
-    await expect(page.getByText('Test Player')).toBeVisible();
+    await expect(page.getByText(rival)).toBeVisible();
+    await expect(page.getByText(player)).toBeVisible();
   });
 
   test('surfaces a friendly message when the new score does not beat the existing best', async ({
