@@ -51,7 +51,13 @@ test.describe('pricing / Stripe checkout', () => {
     // both default to `false` before the first auth state resolves.
     await page.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }).click();
 
-    await expect(page).toHaveURL(/#mock-checkout-session-/);
+    // Anchored at the start of the **hash**, not matched loosely anywhere in
+    // the URL: the claim is that the app navigated to the mock checkout target
+    // and nothing else, and an unanchored match over the whole URL would also
+    // be satisfied by that string turning up in a path or a query parameter.
+    await expect
+      .poll(() => new URL(page.url()).hash, { message: 'the mock checkout redirect target' })
+      .toMatch(/^#mock-checkout-session-/);
   });
 
   test('shows the Pro badge once subscribed and hides the Subscribe button', async ({

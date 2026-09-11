@@ -97,3 +97,19 @@ export async function answerQuestion(page: Page, answerText: string): Promise<vo
 export function optionLabel(page: Page, radio: Locator): Locator {
   return page.locator('label').filter({ has: radio });
 }
+
+/**
+ * Starts another game without revisiting the page — for replaying within one
+ * test, where the app is already loaded and back on `/`.
+ *
+ * The Open Trivia stub belongs to the page rather than to the visit: a
+ * `page.route` handler outlives every navigation in the test, so the caller's
+ * earlier `stubOpenTrivia` (or `startGame`) still serves this game's
+ * questions.
+ */
+export async function startNewGame(page: Page, amount: QuestionCount = 5): Promise<void> {
+  await expect(page).toHaveURL(/\/$/);
+  await selectQuestionCount(page, amount);
+  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
+  await waitForPlayRoute(page);
+}

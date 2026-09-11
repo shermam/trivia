@@ -38,6 +38,33 @@ export async function stubOpenTrivia(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Serves the category list with one extra name appended.
+ *
+ * The setup screen builds its Category dropdown from that response whatever
+ * the question source is, so this is how a spec gets a **unique** category
+ * into the picker — which is the only way to make a *custom*-source game
+ * deterministic against a question bank every other worker is also writing to.
+ * Call it after `stubOpenTrivia`: Playwright matches route handlers in reverse
+ * registration order, so the later one wins.
+ */
+export async function stubExtraCategory(page: Page, name: string): Promise<void> {
+  await page.route('https://opentdb.com/api_category.php', (route) =>
+    route.fulfill({
+      json: {
+        trivia_categories: [
+          ...categoriesFixture.trivia_categories,
+          { id: EXTRA_CATEGORY_ID, name },
+        ],
+      },
+      headers: CORS_HEADERS,
+    }),
+  );
+}
+
+/** Outside Open Trivia DB's own id range, so it can never collide with a real one. */
+const EXTRA_CATEGORY_ID = 9000;
+
 const CORS_HEADERS = {
   'content-type': 'application/json',
   'access-control-allow-origin': '*',

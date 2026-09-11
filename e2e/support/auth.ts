@@ -44,3 +44,45 @@ export async function signInViaUi(page: Page, email: string, password: string): 
   // the next command against the in-flight sign-in call.
   await expect(panel).toHaveCount(0);
 }
+
+/**
+ * Drives the real sign-up UI. The auth menu opens in sign-up mode already, so
+ * unlike `signInViaUi` there is no mode to switch out of first.
+ */
+export async function signUpViaUi(page: Page, email: string, password: string): Promise<void> {
+  await openAuthMenu(page);
+  const panel = authMenu(page);
+  await fillEmailForm(panel, email, password);
+  await panel.getByRole('button', { name: 'Sign up', exact: true }).click();
+  // The menu stays open after sign-up, but the panel it shows next varies —
+  // still anonymous on failure, an "awaiting verification" panel with no form
+  // at all on success — so "Please wait…" disappearing is the one signal
+  // common to every outcome. Wait for that rather than racing the caller's
+  // next assertion against the in-flight call.
+  await expect(panel).not.toContainText('Please wait');
+}
+
+/**
+ * Opens the auth menu through game-over's own "Sign in" prompt rather than the
+ * top bar, then signs in.
+ *
+ * That is the gesture a player actually makes at the end of a round, and the
+ * opener matters to more than realism: closing the menu returns focus to
+ * whatever opened it, and this button is hidden (not removed) by the very
+ * sign-in that closes the menu — which is the case
+ * `sign-in-save-score.spec.ts` asserts on.
+ */
+export async function signInFromGameOver(
+  page: Page,
+  email: string,
+  password: string,
+): Promise<void> {
+  await page.getByTestId('open-sign-in').click();
+  const panel = authMenu(page);
+  await panel
+    .getByRole('button', { name: 'Already have an account? Sign in', exact: true })
+    .click();
+  await fillEmailForm(panel, email, password);
+  await panel.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(panel).toHaveCount(0);
+}
