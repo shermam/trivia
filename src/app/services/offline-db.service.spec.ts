@@ -6,6 +6,7 @@ import {
   OFFLINE_DB_NAME,
   OfflineDbService,
   QUESTIONS_STORE,
+  SEEN_QUESTIONS_STORE,
 } from './offline-db.service';
 
 /**
@@ -34,7 +35,7 @@ let dbCounter = 0;
  * keyed it, plus (from v3) a `game-state` row, so a migration can be observed
  * rather than inferred.
  */
-function seedOldDatabase(name: string, version: 2 | 3 | 4): Promise<void> {
+function seedOldDatabase(name: string, version: 2 | 3 | 4 | 5): Promise<void> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open(name, version);
     open.onupgradeneeded = () => {
@@ -47,6 +48,9 @@ function seedOldDatabase(name: string, version: 2 | 3 | 4): Promise<void> {
       store.createIndex('cachedAt', 'cachedAt');
       if (version >= 3) {
         db.createObjectStore(GAME_STATE_STORE, { keyPath: 'id' });
+      }
+      if (version >= 5) {
+        db.createObjectStore(DAILY_LIMIT_STORE, { keyPath: 'id' });
       }
     };
     open.onsuccess = () => {
@@ -134,7 +138,7 @@ describe('OfflineDbService schema (B8)', () => {
 
     const db = await openViaService();
 
-    expect(db.version).toBe(5);
+    expect(db.version).toBe(6);
     expect(await countQuestions(db)).toBe(0);
     expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
   });
@@ -144,9 +148,10 @@ describe('OfflineDbService schema (B8)', () => {
 
     const db = await openViaService();
 
-    expect(db.version).toBe(5);
+    expect(db.version).toBe(6);
     expect(db.objectStoreNames.contains(GAME_STATE_STORE)).toBe(true);
     expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
+    expect(db.objectStoreNames.contains(SEEN_QUESTIONS_STORE)).toBe(true);
     expect(await countQuestions(db)).toBe(0);
   });
 
@@ -156,7 +161,26 @@ describe('OfflineDbService schema (B8)', () => {
     expect(db.objectStoreNames.contains(QUESTIONS_STORE)).toBe(true);
     expect(db.objectStoreNames.contains(GAME_STATE_STORE)).toBe(true);
     expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
+    expect(db.objectStoreNames.contains(SEEN_QUESTIONS_STORE)).toBe(true);
     expect(await countQuestions(db)).toBe(0);
+  });
+
+  /**
+   * The v6 addition, from a database that predates it — the in-place upgrade a
+   * fresh-install test cannot reach. Both the offline pool and the saved game
+   * survive it: the seen-set is purely additive, and a browser that loses its
+   * questions to gain one has been made worse off by a feature that only
+   * decides which of them to serve.
+   */
+  it('adds the seen-questions store to an existing v5 database, keeping what is there', async () => {
+    await seedOldDatabase(dbName, 5);
+
+    const db = await openViaService();
+
+    expect(db.version).toBe(6);
+    expect(db.objectStoreNames.contains(SEEN_QUESTIONS_STORE)).toBe(true);
+    expect(await countQuestions(db)).toBe(1);
+    expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
   });
 
   /**
@@ -169,7 +193,7 @@ describe('OfflineDbService schema (B8)', () => {
 
     const db = await openViaService();
 
-    expect(db.version).toBe(5);
+    expect(db.version).toBe(6);
     expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
     expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
   });

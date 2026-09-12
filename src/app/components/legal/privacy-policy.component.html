@@ -289,6 +289,15 @@
       personal information beyond the game itself.
     </li>
     <li>
+      <strong>IndexedDB, once you have answered a question</strong> — a list of the questions you
+      have already answered, so that a later game can ask you something else. Each entry is an
+      identifier and the moment you answered: for a question from the community bank the identifier
+      is that question's own reference, and for one from Open Trivia DB it is a short fingerprint of
+      its wording. Nothing records which answer you gave or whether you were right. It holds at most
+      2,000 entries and the oldest go first. It stays on this device: it is never sent anywhere, it
+      is not tied to your account, and playing on another device starts again.
+    </li>
+    <li>
       <strong>Service worker cache</strong> — the app's own files (scripts, styles, icons), so it
       loads offline and can be installed to your home screen.
     </li>

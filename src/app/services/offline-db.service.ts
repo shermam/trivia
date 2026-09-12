@@ -44,8 +44,11 @@ export const OFFLINE_DB_NAME = new InjectionToken<string>('OFFLINE_DB_NAME', {
  * - **5** — adds `daily-limit`, the free tier's per-device game counter
  *   (`FEAT-014`). Purely additive: nothing existing is touched, and a browser
  *   arriving from any earlier version keeps its questions and its saved game.
+ * - **6** — adds `seen-questions`, the device-local set of questions the
+ *   player has already answered (`FEAT-034`). Purely additive on the same
+ *   terms: an empty set simply means nothing is suppressed yet.
  */
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 /** Rolling pool of prefetched questions (`OfflineQuestionsService`). Keyed by question text. */
 export const QUESTIONS_STORE = 'questions';
@@ -68,6 +71,20 @@ export const DAILY_LIMIT_STORE = 'daily-limit';
 
 /** There is only ever one counter, so it always occupies the same key. */
 export const DAILY_LIMIT_KEY = 'today';
+
+/**
+ * Questions this device has already answered (`SeenQuestionsService`,
+ * `FEAT-034`). Keyed by the source-aware seen key; carries `seenAt` so the
+ * draw can fall back to the least-recently-seen and the store can evict the
+ * oldest.
+ *
+ * A second store rather than a flag on {@link QUESTIONS_STORE}, because the
+ * two sets are not the same set and conflating them is the mistake the feature
+ * exists to avoid: the offline pool holds questions that were *fetched*,
+ * including up to 50 per prefetch run that nobody has ever been shown, so
+ * reading it as a seen-set would suppress questions the player has never met.
+ */
+export const SEEN_QUESTIONS_STORE = 'seen-questions';
 
 /**
  * Opens the app's IndexedDB database, shared by every store in it.
@@ -150,5 +167,13 @@ function upgrade(db: IDBDatabase, oldVersion: number): void {
   // allowance anyway, so there is nothing to migrate into it.
   if (!db.objectStoreNames.contains(DAILY_LIMIT_STORE)) {
     db.createObjectStore(DAILY_LIMIT_STORE, { keyPath: 'id' });
+  }
+
+  // Added in v6. Nothing to migrate into it either — an empty seen-set is
+  // exactly what a device that has never answered a question has, and the
+  // pool in `questions` deliberately cannot stand in for it.
+  if (!db.objectStoreNames.contains(SEEN_QUESTIONS_STORE)) {
+    const seen = db.createObjectStore(SEEN_QUESTIONS_STORE, { keyPath: 'key' });
+    seen.createIndex('seenAt', 'seenAt');
   }
 }

@@ -13,9 +13,11 @@ import {
   TriviaQuestion,
 } from '../models/question.model';
 import { decodeHtmlEntities } from '../utils/html-entities.util';
+import { seenKeyFor } from '../utils/seen-key.util';
 import { shuffleArray } from '../utils/shuffle.util';
 import { FirebaseService } from './firebase.service';
 import { OfflineQuestionsService } from './offline-questions.service';
+import { SeenQuestionsService } from './seen-questions.service';
 
 export interface TriviaCategory {
   id: number;
@@ -29,6 +31,103 @@ const OPEN_TRIVIA_CATEGORIES_URL = 'https://opentdb.com/api_category.php';
 const OFFLINE_POOL_TARGET = 100;
 /** Open Trivia DB rejects `amount` values much above this, so a single refill run never asks for more. */
 const MAX_PREFETCH_BATCH = 50;
+
+/**
+ * How much wider than the game itself a **deduplicating** draw reads from the
+ * shared question bank, and the hard ceiling on that (`FEAT-034`).
+ *
+ * **Why the query has to read more than it serves.** The custom draw's `limit`
+ * is the game's own question count, so a filter applied strictly inside that
+ * page has nothing to substitute *with*: dropping a question the player has
+ * already answered would shorten the game rather than replace it. Reading a
+ * bounded multiple is what turns the filter into a choice. It leaves every
+ * property finding C1 was about intact — there is still a `where`, still a
+ * `limit`, still one query with a random cursor (`CLAUDE.md` §4.1) — and the
+ * ceiling is a constant rather than a share of the collection, so the read
+ * does not grow as the bank does. At most fifty documents, which is the same
+ * bound the background prefetch already reads under.
+ *
+ * **It is only paid by a device that can use it.** A browser with an empty
+ * seen-set draws exactly the game's count, as it always has.
+ *
+ * Open Trivia DB deliberately gets no equivalent, and not for want of a
+ * reservoir: its `amount` is a *requirement*, not a ceiling, so asking for
+ * fifty questions in a category holding eight returns `response_code: 1` and
+ * no questions at all — turning a playable narrow game into "no questions were
+ * found". Its substitutions come from the offline pool instead, which is what
+ * the background prefetch fills.
+ */
+const DEDUPE_DRAW_MULTIPLIER = 2;
+const MAX_DEDUPE_DRAW = 50;
+
+/** What this device has answered: seen key → when it last answered it. */
+type SeenSet = ReadonlyMap<string, number>;
+
+/**
+ * Chooses the questions a game is actually played with, preferring ones this
+ * device has never answered (`FEAT-034`).
+ *
+ * Candidates arrive from two places — the page just fetched, and the matching
+ * part of the offline pool — and are collapsed by seen key first, so a
+ * question present in both is one candidate rather than two and can never be
+ * served twice in the same round.
+ *
+ * **`amount` is the caller's cap, and the caller sets it to what the network
+ * actually returned.** The pool substitutes; it never supplies. Letting it
+ * lengthen a draw would change two behaviours that are deliberate: a
+ * legitimate "no questions match this filter" would become a game served
+ * silently from cache with no offline banner to say so (`getQuestions`), and a
+ * question a reviewer has since rejected could come back out of the pool into
+ * an online game.
+ *
+ * **A short game is never the answer.** Unseen questions come first, shuffled;
+ * if there are not enough of them the remainder is topped up with the
+ * *least-recently* seen, oldest first. With a small bank every question is
+ * eventually seen, and a draw that failed or shrank at that point would make
+ * the feature worse than not having it — so the fallback is "the ones you are
+ * least likely to remember", which is the only honest ordering available
+ * without asking the player anything.
+ *
+ * **The result is deliberately not shuffled a second time.** Doing so would
+ * hide where a round stops being fresh, which is a small gain, and it costs
+ * something real: it makes the order of a returning player's game unstable
+ * against a source order that is already arbitrary — Open Trivia DB randomises
+ * its own page, `fetchCustomQuestions` shuffles the bank's, and a mixed game
+ * shuffles the merge. Leaving it alone means new material comes first, which
+ * is the right way round for a player who abandons a round halfway, and it
+ * keeps a second game reproducible enough to be asserted on.
+ */
+function preferUnseen(
+  candidates: readonly TriviaQuestion[],
+  amount: number,
+  seen: SeenSet,
+): TriviaQuestion[] {
+  const byKey = new Map<string, TriviaQuestion>();
+  for (const question of candidates) {
+    const key = seenKeyFor(question);
+    if (!byKey.has(key)) {
+      byKey.set(key, question);
+    }
+  }
+
+  const unseen: TriviaQuestion[] = [];
+  const alreadySeen: { question: TriviaQuestion; seenAt: number }[] = [];
+  for (const [key, question] of byKey) {
+    const seenAt = seen.get(key);
+    if (seenAt === undefined) {
+      unseen.push(question);
+    } else {
+      alreadySeen.push({ question, seenAt });
+    }
+  }
+
+  const drawn = shuffleArray(unseen).slice(0, amount);
+  if (drawn.length < amount) {
+    alreadySeen.sort((a, b) => a.seenAt - b.seenAt);
+    drawn.push(...alreadySeen.slice(0, amount - drawn.length).map((entry) => entry.question));
+  }
+  return drawn;
+}
 
 /**
  * Decodes the HTML entities Open Trivia DB encodes its text with (`&quot;`,
@@ -58,6 +157,7 @@ export class TriviaService {
   private readonly http = inject(HttpClient);
   private readonly firebaseService = inject(FirebaseService);
   private readonly offlineQuestionsService = inject(OfflineQuestionsService);
+  private readonly seenQuestionsService = inject(SeenQuestionsService);
 
   private categoriesPromise: Promise<TriviaCategory[]> | null = null;
   private offlinePrefetchScheduled = false;
@@ -115,7 +215,14 @@ export class TriviaService {
    */
   async getQuestions(config: GameConfig): Promise<TriviaQuestion[]> {
     try {
-      const questions = await this.fetchQuestions(config);
+      // One read of the device's seen-set per draw, shared by both halves of a
+      // mixed game (`FEAT-034`). Started here and passed down **unawaited**,
+      // so the network request goes out first and a local IndexedDB read never
+      // sits in front of it. `null` means there is nothing to deduplicate
+      // against — an untouched device, a cleared browser, or storage that will
+      // not open — and every branch below then behaves exactly as it did
+      // before the feature existed.
+      const questions = await this.fetchQuestions(config, this.seenQuestionsService.readSeenSet());
       this.playingOffline.set(false);
       return questions;
     } catch (error) {
@@ -174,16 +281,24 @@ export class TriviaService {
         return;
       }
 
-      const questions = await this.fetchQuestions({
-        amount: Math.min(deficit, MAX_PREFETCH_BATCH),
-        category: '',
-        difficulty: '',
-        source: 'mixed',
-        // Irrelevant here — this is the background prefetch topping up the
-        // offline pool, not a game. Fetching does not read the limit; the
-        // player picks one when they actually start playing.
-        timeLimit: DEFAULT_TIME_LIMIT,
-      });
+      const questions = await this.fetchQuestions(
+        {
+          amount: Math.min(deficit, MAX_PREFETCH_BATCH),
+          category: '',
+          difficulty: '',
+          source: 'mixed',
+          // Irrelevant here — this is the background prefetch topping up the
+          // offline pool, not a game. Fetching does not read the limit; the
+          // player picks one when they actually start playing.
+          timeLimit: DEFAULT_TIME_LIMIT,
+        },
+        // Deliberately not deduplicated. This is filling the pool the
+        // deduplicating draw *substitutes from*, and a refill that skipped
+        // everything the player had answered would still be caching questions
+        // for offline play — but it would also read wider and trim its own
+        // batch for no benefit, since nothing here is being served to anybody.
+        Promise.resolve(null),
+      );
       await this.offlineQuestionsService.saveQuestions(questions);
     } catch {
       // Best-effort background task — a failed refill just leaves the existing pool as-is;
@@ -191,26 +306,109 @@ export class TriviaService {
     }
   }
 
-  private async fetchQuestions(config: GameConfig): Promise<TriviaQuestion[]> {
+  /**
+   * The draw. `seen` resolves to the device's seen-set, or to `null` for a
+   * draw that does not deduplicate at all — the background prefetch, and any
+   * device with nothing in the set.
+   *
+   * Each source deduplicates over its own half of a mixed game rather than
+   * over the merged result, because the reservoir each substitutes from is
+   * source-scoped: `getMatchingQuestions` never crosses `source`, for the same
+   * reason the offline draw never does.
+   */
+  private async fetchQuestions(
+    config: GameConfig,
+    seen: Promise<SeenSet | null>,
+  ): Promise<TriviaQuestion[]> {
     const { amount, category, difficulty, source } = config;
 
     if (source === 'open_trivia') {
-      return this.fetchOpenTriviaQuestions(amount, category, difficulty);
+      return this.drawOpenTriviaQuestions(amount, category, difficulty, seen);
     }
 
     if (source === 'custom') {
-      return this.fetchCustomQuestions(amount, category, difficulty);
+      return this.drawCustomQuestions(amount, category, difficulty, seen);
     }
 
     const openTriviaAmount = Math.ceil(amount / 2);
     const customAmount = amount - openTriviaAmount;
 
     const [openTriviaQuestions, customQuestions] = await Promise.all([
-      this.fetchOpenTriviaQuestions(openTriviaAmount, category, difficulty).catch(() => []),
-      this.fetchCustomQuestions(customAmount, category, difficulty),
+      this.drawOpenTriviaQuestions(openTriviaAmount, category, difficulty, seen).catch(() => []),
+      this.drawCustomQuestions(customAmount, category, difficulty, seen),
     ]);
 
     return shuffleArray([...openTriviaQuestions, ...customQuestions]).slice(0, amount);
+  }
+
+  /**
+   * Open Trivia DB, deduplicated against the offline pool.
+   *
+   * **The request is exactly the one this always made** — one call, asking for
+   * the game's own question count, issued before anything is awaited. Open
+   * Trivia DB rate-limits a client to one request every five seconds, so a
+   * second call to widen the candidate list would be refused outright rather
+   * than merely cost something, and raising `amount` is not a substitute (see
+   * {@link DEDUPE_DRAW_MULTIPLIER}). What makes substitution possible here is
+   * the offline pool, which the background prefetch keeps topped up to a
+   * hundred questions for exactly the reason it is useful here too: they are
+   * already paid for.
+   */
+  private async drawOpenTriviaQuestions(
+    amount: number,
+    category: string,
+    difficulty: Difficulty | '',
+    seen: Promise<SeenSet | null>,
+  ): Promise<TriviaQuestion[]> {
+    const [fetched, seenSet] = await Promise.all([
+      this.fetchOpenTriviaQuestions(amount, category, difficulty),
+      seen,
+    ]);
+    if (!seenSet || fetched.length === 0) {
+      return fetched;
+    }
+    const reserve = await this.offlineQuestionsService.getMatchingQuestions(
+      'open_trivia',
+      category,
+      difficulty,
+    );
+    return preferUnseen([...fetched, ...reserve], Math.min(amount, fetched.length), seenSet);
+  }
+
+  /**
+   * The shared bank, drawn wider than the game when there is a seen-set to
+   * filter against.
+   *
+   * This one has to know the seen-set *before* it queries, because the
+   * seen-set is what decides how wide to read — so unlike the Open Trivia
+   * draw above, the local read genuinely precedes the network one here. It is
+   * an IndexedDB `getAll` of at most two thousand small records against a
+   * Firestore round trip, and it happens while the other half of a mixed game
+   * is already in flight.
+   */
+  private async drawCustomQuestions(
+    amount: number,
+    category: string,
+    difficulty: Difficulty | '',
+    seen: Promise<SeenSet | null>,
+  ): Promise<TriviaQuestion[]> {
+    if (amount <= 0) {
+      return [];
+    }
+    const seenSet = await seen;
+    if (!seenSet) {
+      return this.fetchCustomQuestions(amount, category, difficulty);
+    }
+
+    const [fetched, reserve] = await Promise.all([
+      this.fetchCustomQuestions(
+        Math.min(amount * DEDUPE_DRAW_MULTIPLIER, MAX_DEDUPE_DRAW),
+        category,
+        difficulty,
+      ),
+      this.offlineQuestionsService.getMatchingQuestions('custom', category, difficulty),
+    ]);
+    return preferUnseen([...fetched, ...reserve], Math.min(amount, fetched.length), seenSet);
   }
 
   private async fetchOpenTriviaQuestions(
@@ -251,12 +449,17 @@ export class TriviaService {
     );
   }
 
+  /**
+   * One page of the shared bank. `limit` is how many documents to *read*,
+   * which is the game's own question count except on a deduplicating draw —
+   * see {@link DEDUPE_DRAW_MULTIPLIER} for why those differ and by how much.
+   */
   private async fetchCustomQuestions(
-    amount: number,
+    limit: number,
     category: string,
     difficulty: Difficulty | '',
   ): Promise<TriviaQuestion[]> {
-    if (amount <= 0) {
+    if (limit <= 0) {
       return [];
     }
 
@@ -264,7 +467,7 @@ export class TriviaService {
     // the whole collection and filter here, which billed for every document
     // anyone had ever contributed on every custom or mixed game (finding C1).
     const docs = await firstValueFrom(
-      this.firebaseService.getCustomQuestions({ category, difficulty, limit: amount }),
+      this.firebaseService.getCustomQuestions({ category, difficulty, limit }),
     );
 
     // Still shuffled: the query returns document-ID order, which is stable
