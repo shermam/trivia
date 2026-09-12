@@ -2,14 +2,16 @@ import { isDemoProject } from './environment';
 
 /**
  * Validation of the two fields a client is allowed to put in a checkout- or
- * portal-session document.
+ * portal-session document, plus the other decisions a session handler makes
+ * that are worth testing on their own: which of the customer's stale Checkout
+ * Sessions to clear out of the way, and what a refused buyer is told.
  *
- * `firestore.rules` bounds the *shape* of both (see `isValidCheckoutSession`
- * there), but shape is all rules can do: they cannot know which hostnames
- * belong to this deployment, and they cannot look a price ID up in a catalog.
- * So every value that reaches Stripe is checked a second time here, against
- * things only the server knows. Rules keep the junk out; this keeps the
- * plausible-but-wrong out.
+ * `firestore.rules` bounds the *shape* of both fields (see
+ * `isValidCheckoutSession` there), but shape is all rules can do: they cannot
+ * know which hostnames belong to this deployment, and they cannot look a price
+ * ID up in a catalog. So every value that reaches Stripe is checked a second
+ * time here, against things only the server knows. Rules keep the junk out;
+ * this keeps the plausible-but-wrong out.
  *
  * Kept pure and dependency-free so each decision is unit-tested directly,
  * same as `role.ts` and `account-policy.ts`.
@@ -33,13 +35,71 @@ export class RejectedRequestError extends Error {}
  * an origin that isn't ours, a client still sending the old payload) are not
  * distinguishable to the person reading it and are not separately actionable.
  * A genuine backend failure keeps its own message — "No Stripe customer found
- * for this account yet." is worth more to a user than any generic.
+ * for this account yet." is worth more to a user than any generic — except
+ * where Stripe's own wording is a worse answer than one this code can verify,
+ * which so far is the currency conflict below.
  */
 export function clientMessageFor(error: unknown, refusalMessage: string): string {
   if (error instanceof RejectedRequestError) {
     return refusalMessage;
   }
-  return error instanceof Error ? error.message : refusalMessage;
+  return (
+    currencyConflictMessage(error) ?? (error instanceof Error ? error.message : refusalMessage)
+  );
+}
+
+/**
+ * Stripe's refusal to mix currencies on one customer, rewritten as something
+ * the person who clicked Subscribe can act on — or `null` when the failure is
+ * anything else.
+ *
+ * A Stripe customer is billed in **one currency**, and the first thing that
+ * commits them to it wins: a live subscription, an invoice item, a completed
+ * payment — or merely an *open* subscription-mode Checkout Session, which
+ * holds the currency for as long as it lives. That last one is an abandoned
+ * attempt rather than a real commitment, which is why `createCheckoutSession`
+ * expires those before it creates anything (`stack.md` §2.4). A refusal that
+ * survives the expiry is therefore the real thing: this customer has actually
+ * transacted in that currency and cannot be moved off it, so the honest
+ * instruction is to buy in it.
+ *
+ * Stripe states that as a list of everything it might be — "You cannot
+ * combine currencies on a single customer. This customer has an active
+ * subscription, subscription schedule, discount, quote, invoice item or
+ * active subscription mode checkout session with currency usd." — which is
+ * accurate, unactionable, and otherwise shown verbatim to the buyer.
+ *
+ * Two things about *how* it is recognised, both of them §4.4 ("never narrate
+ * a cause you did not verify") rather than style:
+ *
+ * - **Matched on the message, because there is no code to match on.** Stripe
+ *   returns this as a plain `invalid_request_error` carrying no documented
+ *   `code`, so the sentence is the only handle. That makes the match the part
+ *   that can rot — and it rots safely: a reworded message stops matching, and
+ *   the caller falls back to Stripe's own text rather than to a confident
+ *   wrong story.
+ * - **The currency is read out of that same sentence**, which is Stripe's own
+ *   statement about this customer, made by the request that just refused —
+ *   not from a second `customers.retrieve`, which is another round trip,
+ *   another way to fail, and an answer to a question asked a moment later. If
+ *   the phrase matches but no code can be read from it, the message says "a
+ *   different currency" and names none: that the currencies differ is
+ *   established by the refusal itself, which one is not.
+ */
+export function currencyConflictMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : '';
+  if (!/cannot combine currencies/i.test(message)) {
+    return null;
+  }
+  const currency = /\bwith currency ([a-z]{3})\b/i.exec(message)?.[1];
+  if (!currency) {
+    return (
+      'Your account is already set up to pay in a different currency, ' +
+      'so Pro can only be bought in that currency from this account.'
+    );
+  }
+  const code = currency.toUpperCase();
+  return `Your account is already set up to pay in ${code}, so Pro can only be bought in ${code} from this account.`;
 }
 
 const MAX_ORIGIN_LENGTH = 200;
@@ -151,4 +211,37 @@ export function isSellableProPrice(
   price: Record<string, unknown> | undefined,
 ): boolean {
   return product?.['active'] === true && product?.['role'] === 'pro' && price?.['active'] === true;
+}
+
+/**
+ * Which of the customer's Checkout Sessions to expire before a new one is
+ * created, given the sessions Stripe listed.
+ *
+ * **Every open one, not only the ones in another currency.** Two reasons, and
+ * the second is what makes this more than housekeeping:
+ *
+ * - A click on Subscribe is a request for a *fresh* session. Anything still
+ *   open belongs to an attempt already abandoned — a card declined twice, a
+ *   tab closed — and nobody is going back to it; Stripe would expire it
+ *   itself, up to 24 hours later.
+ * - Deciding "another currency" needs a currency to compare against, and a
+ *   listed session's own `currency` is not that value: it is unset until
+ *   Checkout has settled on one, and Adaptive Pricing can present a session
+ *   in a currency that is not its price's. Filtering on it would be a guess,
+ *   and a guess that spares one session spares the currency pin with it —
+ *   a single open session is enough to block the customer, so a partial
+ *   clear is no clear at all.
+ *
+ * `status` is checked here as well as passed to `list`, because `expire`
+ * accepts only an open session and errors on anything else. The caller's
+ * query parameter is a request; this function's contract should not rest on
+ * the remote end having honoured it.
+ */
+export function openCheckoutSessionIdsToExpire(
+  sessions: readonly { id?: unknown; status?: unknown }[],
+): string[] {
+  return sessions
+    .filter((session) => session.status === 'open')
+    .map((session) => session.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
