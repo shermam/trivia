@@ -71,6 +71,8 @@
         <button
           type="button"
           (click)="goToPricing()"
+          (mouseenter)="subscriptionService.primePricing()"
+          (focus)="subscriptionService.primePricing()"
           class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
         >
           Upgrade to Pro

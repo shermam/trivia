@@ -28,9 +28,16 @@ function setup(
   checkout: string | null,
   startProCheckout: () => Promise<void> = () => Promise.resolve(),
   prices: ProPriceOption[] = [],
+  /**
+   * Everything the pre-creation effect gates on. Defaults describe the reader
+   * it is *for* — signed in, verified, not yet subscribed — so only a test
+   * about somebody else has to say so.
+   */
+  who: { authReady?: boolean; isFullyAuthenticated?: boolean; isProUser?: boolean } = {},
 ) {
   const awaitProActivation = vi.fn(() => Promise.resolve());
   const loadProPrices = vi.fn(() => Promise.resolve());
+  const prepareCheckout = vi.fn(() => Promise.resolve());
   const proPriceOptions = signal<readonly ProPriceOption[]>(prices);
   const selectedCurrency = signal<string | null>(prices[0]?.currency ?? null);
   const selectedProPrice = computed(
@@ -49,10 +56,11 @@ function setup(
       {
         provide: SubscriptionService,
         useValue: {
-          isProUser: signal(false),
+          isProUser: signal(who.isProUser ?? false),
           awaitProActivation,
           startProCheckout,
           loadProPrices,
+          prepareCheckout,
           proPriceOptions,
           selectedCurrency,
           selectedProPrice,
@@ -62,9 +70,9 @@ function setup(
       {
         provide: AuthService,
         useValue: {
-          authReady: signal(true),
+          authReady: signal(who.authReady ?? true),
           isAnonymous: signal(false),
-          isFullyAuthenticated: signal(true),
+          isFullyAuthenticated: signal(who.isFullyAuthenticated ?? true),
         },
       },
     ],
@@ -73,7 +81,14 @@ function setup(
   // behaviour under test is entirely in the constructor, and rendering the
   // whole pricing template would drag in half the app to observe one call.
   const component = TestBed.runInInjectionContext(() => new PricingComponent());
-  return { component, awaitProActivation, loadProPrices, selectedCurrency };
+  return {
+    component,
+    awaitProActivation,
+    loadProPrices,
+    prepareCheckout,
+    proPriceOptions,
+    selectedCurrency,
+  };
 }
 
 describe('PricingComponent post-checkout activation', () => {
@@ -245,5 +260,121 @@ describe('PricingComponent price and currency', () => {
     ]);
 
     expect(view(component).priceAmount()).toBe('¥500');
+  });
+});
+
+/**
+ * When the page asks for a Checkout Session to be created ahead of the click.
+ *
+ * The service decides *whether* — it owns the eligibility rule and the
+ * budget — and this component decides *when*, which is the part with a timer
+ * in it. Two things have to hold. A session must not be created for a reader
+ * still in the middle of choosing a currency, because each one expires the
+ * last and spends a slot of the `firestore.rules` volume cap. And the wait
+ * must not survive the component, because a timer firing into a page the
+ * reader has navigated away from is exactly the leak `CLAUDE.md` §4.4 is
+ * about.
+ */
+describe('PricingComponent pre-created checkout', () => {
+  const usd: ProPriceOption = { priceId: 'price_usd', currency: 'usd', unitAmount: 99 };
+  const brl: ProPriceOption = { priceId: 'price_brl', currency: 'brl', unitAmount: 590 };
+
+  beforeEach(() => vi.useFakeTimers());
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('asks for one a second after the currency settles', () => {
+    const { prepareCheckout } = setup(null, () => Promise.resolve(), [usd]);
+    TestBed.tick();
+
+    vi.advanceTimersByTime(999);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(prepareCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The reason for the delay at all. Without it, somebody comparing the two
+   * prices before deciding would create a Stripe session per glance — and
+   * since each one expires the previous, the only one that survives is the
+   * last, which makes every earlier one pure waste of a capped resource.
+   */
+  it('starts the wait again when the reader changes currency', () => {
+    const { prepareCheckout, selectedCurrency } = setup(null, () => Promise.resolve(), [usd, brl]);
+    TestBed.tick();
+
+    vi.advanceTimersByTime(900);
+    selectedCurrency.set('brl');
+    TestBed.tick();
+    vi.advanceTimersByTime(900);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(100);
+    expect(prepareCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * `authReady()` is false before Firebase's first auth callback, and
+   * everything derived from it reads as the signed-out answer meanwhile —
+   * which is exactly the state §4.4 says to treat as "not yet" rather than as
+   * an answer. Asking here would be asking on behalf of a reader nobody has
+   * identified.
+   */
+  it('waits for auth to resolve before asking for anything', () => {
+    const { prepareCheckout } = setup(null, () => Promise.resolve(), [usd], { authReady: false });
+    TestBed.tick();
+
+    vi.advanceTimersByTime(5_000);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+  });
+
+  it('asks for nothing on behalf of a subscriber', () => {
+    const { prepareCheckout } = setup(null, () => Promise.resolve(), [usd], { isProUser: true });
+    TestBed.tick();
+
+    vi.advanceTimersByTime(5_000);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+  });
+
+  it('asks for nothing until the email is verified', () => {
+    const { prepareCheckout } = setup(null, () => Promise.resolve(), [usd], {
+      isFullyAuthenticated: false,
+    });
+    TestBed.tick();
+
+    vi.advanceTimersByTime(5_000);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+  });
+
+  // Nothing to check out against yet — and asking anyway would create a
+  // session for whichever price landed first rather than the one the reader
+  // ends up being quoted.
+  it('asks for nothing while the catalog is still loading', () => {
+    const { prepareCheckout, proPriceOptions } = setup(null, () => Promise.resolve(), []);
+    TestBed.tick();
+
+    vi.advanceTimersByTime(5_000);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+
+    proPriceOptions.set([usd]);
+    TestBed.tick();
+    vi.advanceTimersByTime(1_000);
+    expect(prepareCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire into a page the reader has left', () => {
+    const { prepareCheckout } = setup(null, () => Promise.resolve(), [usd]);
+    TestBed.tick();
+
+    vi.advanceTimersByTime(900);
+    TestBed.resetTestingModule();
+    vi.advanceTimersByTime(5_000);
+
+    expect(prepareCheckout).not.toHaveBeenCalled();
   });
 });

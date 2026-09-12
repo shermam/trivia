@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
@@ -11,6 +18,24 @@ import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 
 type CheckoutQueryStatus = 'success' | 'cancelled' | null;
+
+/**
+ * How long the currency has to stand still before a Checkout Session is
+ * created for it.
+ *
+ * A session is created per price, and creating one expires the customer's
+ * previous open session — so a reader flicking between USD and BRL while they
+ * decide would otherwise spend one Stripe session and one slot of the
+ * `firestore.rules` volume cap per flick. A second is long enough that
+ * deciding costs one session and short enough that it has finished well before
+ * anybody has read the feature list and reached the button.
+ *
+ * It also covers the page's own late answers: the country arrives up to two
+ * seconds after the catalog and can move the selection, and the wait restarts
+ * each time it does, so the session is created for the currency the reader is
+ * actually looking at.
+ */
+const CHECKOUT_PREPARE_DELAY_MS = 1_000;
 
 @Component({
   selector: 'app-pricing',
@@ -88,9 +113,9 @@ export class PricingComponent {
   constructor() {
     // The pricing page is the one screen that has to *show* the price, so the
     // catalog read happens here on load rather than on the Subscribe click.
-    // Roughly two public reads per page load — the lookup is memoised for the
-    // service's lifetime, so navigating back here costs none. See
-    // `loadProPrices()` for the trade.
+    // It renders from this browser's own copy first and revalidates behind
+    // that, so a returning visitor waits for nothing — see `loadProPrices()`
+    // for what that costs and what it cannot promise.
     void this.subscriptionService.loadProPrices();
 
     // Landing here from Stripe's `success_url` means the payment went through,
@@ -103,6 +128,35 @@ export class PricingComponent {
     if (this.checkoutStatus() === 'success') {
       void this.subscriptionService.awaitProActivation();
     }
+
+    // Create the Checkout Session while the reader is still reading, so
+    // Subscribe is a redirect rather than a wait (`SubscriptionService.prepareCheckout`,
+    // which decides for itself whether this reader is one it is worth doing
+    // for). The effect reads every signal that can change the answer —
+    // whether auth has resolved, whether they are already Pro, whether they
+    // are a real verified account, and which price is selected — so each
+    // change restarts the wait rather than racing it.
+    //
+    // `onCleanup` is the teardown `CLAUDE.md` §4.4 asks for, and it is doing
+    // real work rather than satisfying a rule: it is what turns a stream of
+    // selection changes into one session instead of one per change, and what
+    // stops a timer firing into a destroyed component when the reader
+    // navigates away mid-wait.
+    effect((onCleanup) => {
+      const ready = this.authReady();
+      const isPro = this.isProUser();
+      const verified = this.authService.isFullyAuthenticated();
+      const priceId = this.subscriptionService.selectedProPrice()?.priceId;
+      if (!ready || isPro || !verified || !priceId) {
+        return;
+      }
+
+      const timer = setTimeout(
+        () => void this.subscriptionService.prepareCheckout(),
+        CHECKOUT_PREPARE_DELAY_MS,
+      );
+      onCleanup(() => clearTimeout(timer));
+    });
   }
 
   // `AuthService.isAnonymous`/`isFullyAuthenticated` both default to `false`
