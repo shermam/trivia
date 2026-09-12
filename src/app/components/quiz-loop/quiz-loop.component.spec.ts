@@ -807,6 +807,35 @@ describe('QuizLoopComponent — lifelines (FEAT-002)', () => {
   });
 
   /*
+   * `FEAT-048`. The toolbar sits below the answers, and DOM order is what makes
+   * that true for a keyboard and a screen reader as well as for the eye: the
+   * row is moved in the template rather than repositioned with CSS, so Tab
+   * reaches the answers before the help and a reader is not offered a lifeline
+   * for a question it has not read out yet.
+   *
+   * `querySelectorAll` returns document order whatever order the selectors are
+   * written in, so the one query is the assertion. jsdom has no layout, so the
+   * pixels — that the row is visually below the grid and that nothing moves
+   * when a lifeline is spent — are `game-flow.spec.ts`'s half of this.
+   */
+  it('places the toolbar after the answers and above the result banner', () => {
+    const { queryAll } = setup({ question: fourAnswers() });
+
+    const order = queryAll(
+      '[data-cy="answer-option"], [data-cy="lifelines"], [data-cy="result-banner"]',
+    ).map((element) => element.getAttribute('data-cy'));
+
+    expect(order).toEqual([
+      'answer-option',
+      'answer-option',
+      'answer-option',
+      'answer-option',
+      'lifelines',
+      'result-banner',
+    ]);
+  });
+
+  /*
    * Hidden, not disabled — there is no countdown to extend, and the spec is
    * right that a control which visibly does nothing is worse than one that is
    * not there. Safe from the §4.4 sizing rule precisely because the limit is
