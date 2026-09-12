@@ -85,6 +85,31 @@ export interface QuestionReportRecord {
 }
 
 /**
+ * A board entry as Firestore holds it, read back for assertions.
+ *
+ * The whole document rather than "does a row exist", because the thing worth
+ * checking about a save is the numbers it wrote: a score, its denominator and
+ * the accuracy derived from neither. `timeLimit` is included because the entry
+ * carries the board it belongs to as a field as well as in its path
+ * (`docs/data-model.md`), and the two disagreeing is a real failure mode.
+ */
+export interface LeaderboardEntryRecord {
+  name: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  createdAt: number;
+  timeLimit: string;
+}
+
+/** Which entry to read back. One document per account per board. */
+export interface LeaderboardEntryQuery {
+  uid: string;
+  /** Which board to read. Defaults to the 15-second board. */
+  timeLimit?: string;
+}
+
+/**
  * The boards, one per timing constraint (finding G7). Must match `isValidBoard`
  * in `firestore.rules`. Seeding and cleanup both have to visit every one of
  * them, so the list lives here rather than at each call site.

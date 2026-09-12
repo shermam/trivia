@@ -9,6 +9,8 @@ import {
   CustomQuestionSeed,
   GameplayStatsSeed,
   LEADERBOARD_BOARDS,
+  LeaderboardEntryQuery,
+  LeaderboardEntryRecord,
   LeaderboardSeed,
   ProPriceSeed,
   ProSubscriptionSeed,
@@ -245,6 +247,26 @@ export class FirebaseBackend {
     await this.firestore
       .doc(`leaderboards/${board}/entries/${entry.uid}`)
       .set({ createdAt: Date.now(), ...entry, timeLimit: board });
+  }
+
+  /**
+   * One account's entry on one board, or `null` when it has none.
+   *
+   * **A spec asserting that a score was saved has to read it here rather than
+   * off the screen.** The board renders the top ten by score, and against the
+   * real `trivimind-dev` project that is a shared, permanent ranking that only
+   * ever grows — so "my row is visible" is a claim about everybody else's
+   * scores as much as about the save under test, and it stops being true the
+   * moment ten better entries exist. Reading the document says exactly what
+   * the app wrote, for exactly the account the test created, whatever else is
+   * on the board.
+   */
+  async getLeaderboardEntry({
+    uid,
+    timeLimit = '15',
+  }: LeaderboardEntryQuery): Promise<LeaderboardEntryRecord | null> {
+    const snapshot = await this.firestore.doc(`leaderboards/${timeLimit}/entries/${uid}`).get();
+    return snapshot.exists ? (snapshot.data() as LeaderboardEntryRecord) : null;
   }
 
   /**
