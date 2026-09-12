@@ -211,16 +211,41 @@
           </p>
         }
 
+        <div class="grid gap-2.5 sm:grid-cols-2">
+          @for (answer of question.all_answers; track answer.id; let i = $index) {
+            <button
+              type="button"
+              data-cy="answer-option"
+              [attr.data-eliminated]="isEliminated(answer) ? '' : null"
+              (click)="selectAnswer(answer)"
+              [disabled]="isAnswered() || isEliminated(answer)"
+              class="flex items-center gap-3 text-left rounded-xl border-[1.5px] px-4 py-3.5 font-medium transition-colors disabled:cursor-not-allowed"
+              [ngClass]="answerClass(answer)"
+            >
+              <span
+                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors"
+                [ngClass]="answerBadgeClass(answer)"
+                >{{ answerLabel(i) }}</span
+              >
+              <span>{{ answer.text }}</span>
+            </button>
+          }
+        </div>
+
         <!--
-          **Lifelines** (`FEAT-002`). Below the question and above the options,
-          which is where the spec asks for them and also where they are read
-          after the question rather than instead of it.
+          **Lifelines** (`FEAT-002`). Below the answer options and above the
+          reserved result banner, so the card reads question → answers → help:
+          the row is within reach without standing between a question and its
+          own answers. It is moved in the template rather than repositioned with
+          CSS, so the Tab order and a screen reader's reading order are the
+          visual order — everybody meets the answers first.
 
           Two rules from `CLAUDE.md` §4.4 shape what is rendered:
 
-          - **Spent lifelines are disabled, never removed.** A three-button row
-            that becomes a two-button row moves the answer options up, mid-round,
-            while the clock runs.
+          - **Spent lifelines are disabled, never removed.** The buttons are
+            `flex-1`, so a three-button row turning into a two-button one would
+            re-widen the survivors under the finger that just spent one, while
+            the clock runs.
           - **Extra Time is absent for the whole game on an unlimited run**, not
             disabled — there is no countdown to extend, and the spec is right
             that a control which visibly does nothing is worse than one that
@@ -234,7 +259,7 @@
           stops the click.
         -->
         <div
-          class="mb-5 flex items-stretch gap-2"
+          class="mt-5 flex items-stretch gap-2"
           role="group"
           aria-label="Lifelines"
           data-cy="lifelines"
@@ -297,27 +322,6 @@
         <p role="status" aria-live="polite" data-cy="lifeline-status" class="sr-only">
           {{ lifelineAnnouncement() }}
         </p>
-
-        <div class="grid gap-2.5 sm:grid-cols-2">
-          @for (answer of question.all_answers; track answer.id; let i = $index) {
-            <button
-              type="button"
-              data-cy="answer-option"
-              [attr.data-eliminated]="isEliminated(answer) ? '' : null"
-              (click)="selectAnswer(answer)"
-              [disabled]="isAnswered() || isEliminated(answer)"
-              class="flex items-center gap-3 text-left rounded-xl border-[1.5px] px-4 py-3.5 font-medium transition-colors disabled:cursor-not-allowed"
-              [ngClass]="answerClass(answer)"
-            >
-              <span
-                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors"
-                [ngClass]="answerBadgeClass(answer)"
-                >{{ answerLabel(i) }}</span
-              >
-              <span>{{ answer.text }}</span>
-            </button>
-          }
-        </div>
 
         <!--
           Rendered always, empty until there is a result, rather than appearing
