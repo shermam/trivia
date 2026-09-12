@@ -6,6 +6,7 @@ import {
   SubscriptionService,
   subscriptionFailureMessage,
 } from '../../services/subscription.service';
+import { formatUnitAmount } from '../../utils/money.util';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 
@@ -37,7 +38,59 @@ export class PricingComponent {
     (this.route.snapshot.queryParamMap.get('checkout') as CheckoutQueryStatus) ?? null,
   );
 
+  /**
+   * What Pro costs, in the currency this reader is being quoted.
+   *
+   * The amount is read from the mirrored Stripe catalog rather than written
+   * into the template, because there is now more than one right answer: each
+   * currency is its own Stripe Price (`SubscriptionService`), and a literal
+   * would be wrong for whoever is not being charged in it.
+   */
+  protected readonly currencyOptions = this.subscriptionService.proPriceOptions;
+  protected readonly selectedCurrency = this.subscriptionService.selectedCurrency;
+
+  /** The formatted amount, or `null` until the catalog has answered. */
+  protected readonly priceAmount = computed(() => {
+    const price = this.subscriptionService.selectedProPrice();
+    return price ? formatUnitAmount(price.unitAmount, price.currency) : null;
+  });
+
+  /**
+   * Whether there is a choice to offer. One currency is not a choice, and a
+   * control with a single option is a control that only looks like one.
+   */
+  protected readonly hasCurrencyChoice = computed(() => this.currencyOptions().length > 1);
+
+  /**
+   * The currency code shown when there is no choice to offer.
+   *
+   * A non-breaking space while the catalog is still loading, rather than an
+   * empty string: the cell is a flex box whose height comes from its own line
+   * box, and an empty one collapses — which would put the very layout jump
+   * this row exists to prevent back into the card.
+   */
+  protected readonly currencyLabel = computed(
+    () => this.selectedCurrency()?.toUpperCase() ?? '\u00A0',
+  );
+
+  /**
+   * The Subscribe button's label, which names the price when there is one.
+   *
+   * It drops to a bare "Subscribe" rather than quoting a placeholder amount:
+   * a button that offers to charge you "—" is worse than one that just says
+   * what it does.
+   */
+  protected readonly subscribeLabel = computed(() => {
+    const amount = this.priceAmount();
+    return amount ? `Subscribe — ${amount}/mo` : 'Subscribe';
+  });
+
   constructor() {
+    // The pricing page is the one screen that has to *show* the price, so the
+    // catalog read happens here on load rather than on the Subscribe click.
+    // Roughly two public reads per visit; see `loadProPrices()` for the trade.
+    void this.subscriptionService.loadProPrices();
+
     // Landing here from Stripe's `success_url` means the payment went through,
     // but not that our own `stripeWebhook` has finished mirroring the
     // subscription document yet — the redirect and the webhook delivery race,
@@ -60,6 +113,10 @@ export class PricingComponent {
   protected readonly needsVerification = computed(
     () => !this.authService.isAnonymous() && !this.authService.isFullyAuthenticated(),
   );
+
+  protected selectCurrency(currency: string): void {
+    this.subscriptionService.selectCurrency(currency);
+  }
 
   protected dismissCheckoutStatus(): void {
     this.checkoutStatus.set(null);

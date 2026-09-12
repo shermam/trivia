@@ -1,8 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
-import { SubscriptionError, SubscriptionService } from '../../services/subscription.service';
+import {
+  type ProPriceOption,
+  SubscriptionError,
+  SubscriptionService,
+} from '../../services/subscription.service';
 import { PricingComponent } from './pricing.component';
 
 /**
@@ -23,8 +27,18 @@ import { PricingComponent } from './pricing.component';
 function setup(
   checkout: string | null,
   startProCheckout: () => Promise<void> = () => Promise.resolve(),
+  prices: ProPriceOption[] = [],
 ) {
   const awaitProActivation = vi.fn(() => Promise.resolve());
+  const loadProPrices = vi.fn(() => Promise.resolve());
+  const proPriceOptions = signal<readonly ProPriceOption[]>(prices);
+  const selectedCurrency = signal<string | null>(prices[0]?.currency ?? null);
+  const selectedProPrice = computed(
+    () =>
+      proPriceOptions().find((option) => option.currency === selectedCurrency()) ??
+      proPriceOptions()[0] ??
+      null,
+  );
   TestBed.configureTestingModule({
     providers: [
       {
@@ -34,7 +48,16 @@ function setup(
       { provide: Router, useValue: { navigate: vi.fn() } },
       {
         provide: SubscriptionService,
-        useValue: { isProUser: signal(false), awaitProActivation, startProCheckout },
+        useValue: {
+          isProUser: signal(false),
+          awaitProActivation,
+          startProCheckout,
+          loadProPrices,
+          proPriceOptions,
+          selectedCurrency,
+          selectedProPrice,
+          selectCurrency: (currency: string) => selectedCurrency.set(currency),
+        },
       },
       {
         provide: AuthService,
@@ -50,7 +73,7 @@ function setup(
   // behaviour under test is entirely in the constructor, and rendering the
   // whole pricing template would drag in half the app to observe one call.
   const component = TestBed.runInInjectionContext(() => new PricingComponent());
-  return { component, awaitProActivation };
+  return { component, awaitProActivation, loadProPrices, selectedCurrency };
 }
 
 describe('PricingComponent post-checkout activation', () => {
@@ -122,5 +145,105 @@ describe('PricingComponent checkout failure message', () => {
     expect(view(component).errorMessage()).toBe('Could not start checkout. Please try again.');
     expect(view(component).isSubscribing()).toBe(false);
     expect(consoleError).toHaveBeenCalledWith(expect.any(String), error);
+  });
+});
+
+/**
+ * What the card and the button quote.
+ *
+ * The amount used to be `$0.99` written into the template. It cannot be any
+ * more: each currency is its own Stripe Price, so a literal is wrong for
+ * whoever is not being charged in it — and the formatting is not incidental
+ * either, since R$ 5,90 rendered with US conventions reads as a different
+ * number.
+ */
+describe('PricingComponent price and currency', () => {
+  const usd: ProPriceOption = { priceId: 'price_usd', currency: 'usd', unitAmount: 99 };
+  const brl: ProPriceOption = { priceId: 'price_brl', currency: 'brl', unitAmount: 590 };
+
+  const view = (component: PricingComponent) =>
+    component as unknown as {
+      priceAmount(): string | null;
+      subscribeLabel(): string;
+      hasCurrencyChoice(): boolean;
+      currencyLabel(): string;
+      selectCurrency(currency: string): void;
+    };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('reads the catalog as the page loads, because the page has to show a price', () => {
+    const { loadProPrices } = setup(null, () => Promise.resolve(), [usd]);
+    expect(loadProPrices).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the amount in the currency the reader is quoted', () => {
+    const { component } = setup(null, () => Promise.resolve(), [usd]);
+
+    expect(view(component).priceAmount()).toBe('$0.99');
+    expect(view(component).subscribeLabel()).toBe('Subscribe — $0.99/mo');
+  });
+
+  // The conventions belong to the currency, not to the reader's browser: a
+  // price is a fact about the charge, and R$ 5,90 shown as "R$5.90" is the
+  // same number wearing somebody else's punctuation.
+  it('renders a Brazilian amount with Brazilian conventions', () => {
+    const { component } = setup(null, () => Promise.resolve(), [brl]);
+
+    // A non-breaking space is what `pt-BR` puts after the symbol.
+    expect(view(component).priceAmount()).toBe('R$\u00A05,90');
+    expect(view(component).subscribeLabel()).toBe('Subscribe — R$\u00A05,90/mo');
+  });
+
+  it('switches the quoted amount when another currency is chosen', () => {
+    const { component } = setup(null, () => Promise.resolve(), [usd, brl]);
+    expect(view(component).priceAmount()).toBe('$0.99');
+
+    view(component).selectCurrency('brl');
+
+    expect(view(component).priceAmount()).toBe('R$\u00A05,90');
+    expect(view(component).currencyLabel()).toBe('BRL');
+  });
+
+  // One currency is not a choice, and a control with a single option is a
+  // control that only looks like one. (Two tests rather than two `setup()`
+  // calls in one: `TestBed` refuses to be configured twice in a test.)
+  it('offers no choice when the catalog sells in one currency', () => {
+    const { component } = setup(null, () => Promise.resolve(), [usd]);
+    expect(view(component).hasCurrencyChoice()).toBe(false);
+  });
+
+  it('offers a choice once the catalog sells in two', () => {
+    const { component } = setup(null, () => Promise.resolve(), [usd, brl]);
+    expect(view(component).hasCurrencyChoice()).toBe(true);
+  });
+
+  /*
+   * Before the catalog answers there is no price to show, and the button must
+   * not offer to charge a placeholder (`CLAUDE.md` §4.4: the least alarming
+   * outcome, not the most specific one). The currency cell falls back to a
+   * non-breaking space rather than an empty string, because an empty flex cell
+   * collapses and takes the row's reserved height with it — which is the very
+   * layout jump the row exists to prevent.
+   */
+  it('quotes nothing at all until the catalog has answered', () => {
+    const { component } = setup(null, () => Promise.resolve(), []);
+
+    expect(view(component).priceAmount()).toBeNull();
+    expect(view(component).subscribeLabel()).toBe('Subscribe');
+    expect(view(component).currencyLabel()).toBe('\u00A0');
+  });
+
+  // Stripe stores an amount in the currency's smallest unit, and "divide by
+  // 100" is only right for the currencies that have one.
+  it('does not assume every currency has cents', () => {
+    const { component } = setup(null, () => Promise.resolve(), [
+      { priceId: 'price_jpy', currency: 'jpy', unitAmount: 500 },
+    ]);
+
+    expect(view(component).priceAmount()).toBe('¥500');
   });
 });

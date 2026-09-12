@@ -202,7 +202,7 @@ export class AuthService {
       // later call reuses the rejection, so `onAuthStateChanged` is never
       // registered, `authReadySignal` is never set, and auth is permanently
       // dead. `FirebaseAppService.getApp()` and
-      // `SubscriptionService.getProPriceId()` both already clear on failure;
+      // `SubscriptionService.getProPrices()` both already clear on failure;
       // this one was missed.
       this.authPromise.catch(() => {
         this.authPromise = null;

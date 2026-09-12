@@ -137,13 +137,78 @@
         <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
           Contribute questions and shape the game.
         </p>
-        <p class="flex items-baseline gap-1 mb-6">
+        <!--
+          The amount comes from the mirrored Stripe catalog, never from this
+          template: each currency is its own Price on the Pro product, so a
+          literal here would be wrong for whoever is not being charged in it.
+          The em-dash holds the line until the catalog answers — a 4xl span is
+          rendered either way, so the row's height never changes (§4.4).
+        -->
+        <p class="flex items-baseline gap-1 mb-4">
           <span
+            data-cy="pro-price"
             class="text-4xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight"
-            >$0.99</span
+            >{{ priceAmount() ?? '—' }}</span
           >
           <span class="text-sm font-medium text-slate-400 dark:text-slate-500">/month</span>
         </p>
+
+        <!--
+          Currency row. Rendered in all three states — loading, one currency,
+          a choice of several — because the alternative is a card that grows by
+          the height of a control the moment the catalog lands, moving the
+          Subscribe button under whoever was reaching for it (§4.4). The pill
+          on the right is the same box with the same fixed-size cells inside in
+          every state, so the heights match by construction rather than by
+          happening to agree; only the pill's own width changes, and nothing
+          outside this row moves with it.
+        -->
+        <div class="flex items-center justify-between gap-3 mb-6">
+          <span
+            id="pro-currency-label"
+            class="text-sm font-semibold text-slate-500 dark:text-slate-400"
+            >Currency</span
+          >
+          @if (hasCurrencyChoice()) {
+            <div
+              role="radiogroup"
+              aria-labelledby="pro-currency-label"
+              data-cy="currency-choice"
+              class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+            >
+              @for (option of currencyOptions(); track option.currency) {
+                <label
+                  class="flex items-center justify-center rounded-lg px-3 py-1 text-sm font-semibold cursor-pointer transition-colors"
+                  [class.bg-emerald-100]="selectedCurrency() === option.currency"
+                  [class.dark:bg-emerald-500/20]="selectedCurrency() === option.currency"
+                  [class.text-emerald-700]="selectedCurrency() === option.currency"
+                  [class.dark:text-emerald-400]="selectedCurrency() === option.currency"
+                  [class.text-slate-600]="selectedCurrency() !== option.currency"
+                  [class.dark:text-slate-400]="selectedCurrency() !== option.currency"
+                >
+                  <input
+                    type="radio"
+                    name="pro-currency"
+                    class="sr-only"
+                    [attr.data-cy]="'currency-' + option.currency"
+                    [attr.value]="option.currency"
+                    [checked]="selectedCurrency() === option.currency"
+                    (change)="selectCurrency(option.currency)"
+                  />
+                  {{ option.currency.toUpperCase() }}
+                </label>
+              }
+            </div>
+          } @else {
+            <div class="flex gap-0.5 rounded-xl p-1">
+              <span
+                data-cy="pro-currency"
+                class="flex items-center justify-center rounded-lg px-3 py-1 text-sm font-semibold text-slate-600 dark:text-slate-400"
+                >{{ currencyLabel() }}</span
+              >
+            </div>
+          }
+        </div>
 
         <div class="h-px bg-emerald-600/10 dark:bg-emerald-400/15 mb-6"></div>
 
@@ -214,7 +279,7 @@
               Sign in to subscribe
             } @else {
               <app-icon name="sparkles" [size]="16" />
-              Subscribe — $0.99/mo
+              {{ subscribeLabel() }}
             }
           </button>
         }

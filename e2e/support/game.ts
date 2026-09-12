@@ -84,8 +84,9 @@ export async function answerQuestion(page: Page, answerText: string): Promise<vo
 }
 
 /**
- * The visible `<label>` that owns one of the setup screen's segmented-picker
- * radios.
+ * The visible `<label>` that owns one of a segmented picker's radios — the
+ * setup screen's source and time-limit pickers, and the pricing page's
+ * currency switch.
  *
  * The radios themselves are `sr-only` — a 1×1 clipped box — so they are what a
  * screen reader reads and what `getByRole('radio')` addresses, but they are
