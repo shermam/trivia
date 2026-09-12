@@ -487,6 +487,19 @@
       </a>
     }
 
+    <!-- Offered to everyone, like Pricing beneath it and for the same reason:
+         the page explains what a signed-out reader has to do, which is a
+         better answer than a link that appears once auth resolves and shifts
+         the rows under it. -->
+    <a
+      routerLink="/profile"
+      (click)="closeNav()"
+      data-cy="nav-menu-stats-link"
+      class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+    >
+      Your stats
+    </a>
+
     <a
       routerLink="/pricing"
       (click)="closeNav()"

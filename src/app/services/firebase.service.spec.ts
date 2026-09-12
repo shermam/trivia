@@ -845,3 +845,92 @@ describe('FirebaseService: the review queue (item 4b-ii)', () => {
     await expect(service.setQuestionStatus('p1', 'approved')).rejects.toThrow();
   });
 });
+
+describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
+  const TOTALS = {
+    gamesPlayed: 4,
+    questionsAnswered: 40,
+    correctAnswers: 31,
+    bestStreak: 9,
+    statsSince: 1_755_000_000_000,
+    // Bookkeeping the callable keeps and the profile screen has no use for.
+    lastGameId: 'game-7',
+    updatedAt: 1_755_000_100_000,
+    rateWindowStart: 1_755_000_000_000,
+    gamesInWindow: 4,
+  };
+
+  /**
+   * A single-document `get` on a known path, never a query. It is the only
+   * shape `firestore.rules` permits — `users` allows `get` to the owner and
+   * refuses `list` to everybody — so a query here would be refused rather than
+   * merely expensive, and the assertion is on the request as well as on what
+   * came back (`CLAUDE.md` §4.1).
+   */
+  it('reads exactly one document, at the caller’s own path', async () => {
+    const { service, queries } = setup([{ id: 'user-1', data: { ...TOTALS } }]);
+
+    await service.getGameplayStats('user-1');
+
+    expect(queries).toHaveLength(0);
+    const urls = vi.mocked(fetch).mock.calls.map((call) => String(call[0]));
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain(`${RESOURCE_ROOT}/users/user-1`);
+  });
+
+  it('returns the five totals the profile renders, and nothing else', async () => {
+    const { service } = setup([{ id: 'user-1', data: { ...TOTALS } }]);
+
+    expect(await service.getGameplayStats('user-1')).toEqual({
+      gamesPlayed: 4,
+      questionsAnswered: 40,
+      correctAnswers: 31,
+      bestStreak: 9,
+      statsSince: 1_755_000_000_000,
+    });
+  });
+
+  /**
+   * `null` means "no games banked yet" and has to mean only that: the empty
+   * state on `/profile` is built on it, and a failed read arriving as `null`
+   * would tell a player with perfectly good totals that they had never
+   * finished a game (`CLAUDE.md` §4.4).
+   */
+  it('returns null for an account that has never finished a game', async () => {
+    const { service } = setup([]);
+
+    expect(await service.getGameplayStats('user-1')).toBeNull();
+  });
+
+  /**
+   * The collection deliberately carries no `hasOnly()` allowlist and no
+   * rules-level schema, which is what lets a server-written field be added
+   * without a migration (`docs/data-model.md`). The price is that a reader may
+   * not assume a field is present — so a document written before `statsSince`
+   * existed reads as "no date" rather than as `Invalid Date` on the screen.
+   */
+  it('survives a document written before a field existed', async () => {
+    const { service } = setup([{ id: 'user-1', data: { gamesPlayed: 2 } }]);
+
+    expect(await service.getGameplayStats('user-1')).toEqual({
+      gamesPlayed: 2,
+      questionsAnswered: 0,
+      correctAnswers: 0,
+      bestStreak: 0,
+      statsSince: null,
+    });
+  });
+
+  it('propagates a refused read rather than reporting an empty profile', async () => {
+    const { service } = setup([]);
+    // The 404 the fake answers an unseeded path with is the *absence* case.
+    // This one is a refusal, and the two must not collapse into each other.
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: { status: 'PERMISSION_DENIED', message: 'refused' } }),
+    } as never);
+
+    await expect(service.getGameplayStats('user-1')).rejects.toThrow();
+  });
+});
