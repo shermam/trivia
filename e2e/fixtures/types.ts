@@ -85,6 +85,16 @@ export interface QuestionReportRecord {
 }
 
 /**
+ * A report written straight into the collection, for a spec that needs more of
+ * them than filing them through the UI could reasonably produce — paging.
+ *
+ * Identical to what is read back, and the **ID is the caller's** rather than
+ * generated, because the queue orders by document ID: a spec that wants to know
+ * which of its reports land on which page has to choose where they sort.
+ */
+export type QuestionReportSeed = QuestionReportRecord;
+
+/**
  * A board entry as Firestore holds it, read back for assertions.
  *
  * The whole document rather than "does a row exist", because the thing worth

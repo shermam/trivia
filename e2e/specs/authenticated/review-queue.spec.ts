@@ -2,7 +2,7 @@ import { Locator, Page } from '@playwright/test';
 import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
-import { optionLabel, waitForPlayRoute } from '../../support/game';
+import { answerQuestion, optionLabel, waitForPlayRoute } from '../../support/game';
 import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
 
 /**
@@ -144,6 +144,139 @@ test.describe('the review queue', () => {
 
     await expect(page.getByText('This page is for question reviewers')).toBeVisible();
     await expect(page.getByText(pendingText)).toHaveCount(0);
+    // Not a tab in sight, the reports one included — so there is no control
+    // offering a read `firestore.rules` would refuse anyway (`FEAT-026`).
+    await expect(page.getByTestId('review-tab')).toHaveCount(0);
+  });
+
+  /**
+   * `FEAT-026`, end to end: a player files a report and a reviewer acts on it.
+   *
+   * The whole point of the feature is the seam between those two people, and
+   * this is the only test that crosses it. The rules suite proves the read is
+   * refused for everyone but a reviewer; the unit specs prove the service drops
+   * `reportedBy` and the component pairs each report with its question. None of
+   * them can show that a report written by one session through the reporting
+   * form is the one a *different* account reads back through the real rules.
+   *
+   * The reporter is the anonymous session every page load mints, because that
+   * is who reports in practice (finding H4) — and it is also the strongest
+   * version of the test, since an anonymous uid cannot be a reviewer and the
+   * report is therefore unreadable by the account that filed it.
+   */
+  test('shows a filed report to a reviewer, who rejects the question from it', async ({
+    page,
+    firebase,
+  }) => {
+    // Exactly one question in this category is approved, so the game is
+    // deterministic and the report is about a question this test owns.
+    await startCustomGame(page, category);
+    await answerQuestion(page, 'Yes');
+    await expect(page).toHaveURL(/\/game-over$/);
+    await expect(page.getByText('Game Over!').first()).toBeVisible();
+
+    const questionId = `approved-${tag}`;
+    const detail = `The answer is not Yes (${tag}).`;
+    await page.getByTestId('open-report-dialog').click();
+    await page.getByTestId(`report-question-${questionId}`).click();
+    await page.getByRole('radio', { name: 'The answer is wrong', exact: true }).check();
+    await page.locator('textarea[name="report-detail"]').fill(detail);
+    await page.getByTestId(`send-report-${questionId}`).click();
+    await expect(page.getByTestId(`reported-badge-${questionId}`)).toHaveText('Reported');
+
+    // Whose report it is, read through the Admin SDK: the uid belongs to the
+    // anonymous session and is not knowable from the browser afterwards, and
+    // the reviewer's screen must not show it.
+    const [filed] = await firebase.getQuestionReports([questionId]);
+    expect(filed.reportedBy).toBeTruthy();
+
+    await signInAsReviewer(page, firebase);
+    await page.goto('/review');
+    await reviewTab(page, 'reports').click();
+
+    // Scoped to this test's own report. The emulator is shared, so the tab
+    // lists every worker's complaints and a count of rows would be about all of
+    // them.
+    const row = page.getByTestId('review-report').filter({ hasText: tag });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('The answer is wrong');
+    await expect(row).toContainText(detail);
+    await expect(row).toContainText(approvedText);
+    // The complaint, not the complainant.
+    await expect(row).not.toContainText(filed.reportedBy);
+
+    // The decision the report exists to prompt, made from the report itself.
+    await row.getByTestId('reject-question').click();
+    await expect(row.getByTestId('question-status')).toHaveText('rejected');
+    // The report stays — it is the record that somebody complained, not a task
+    // that has been ticked off.
+    await expect(row).toHaveCount(1);
+
+    // ...and the write landed under the real rules, rather than only the row
+    // repainting from memory.
+    await reviewTab(page, 'rejected').click();
+    await expect(page.getByText(approvedText)).toBeVisible();
+  });
+
+  /**
+   * Paging the reports tab, against a real Firestore.
+   *
+   * This is the half of the cursor no unit test can reach: whether a
+   * `__name__`-descending query with an inclusive `startAt` actually returns
+   * the next page. A faked `runQuery` proves the arguments and nothing about
+   * what Firestore does with them.
+   *
+   * **The seeds are backdated on purpose.** The queue orders by `createdAt`
+   * descending, so timestamps an hour old put all of them *below* anything
+   * another worker files during the run — which is what keeps this test from
+   * pushing other specs' reports off their own first page, and what makes its
+   * own assertions independent of how many other reports exist.
+   *
+   * `PAGE` mirrors `REPORTS_PAGE_SIZE` in `reviewer.service.ts` deliberately
+   * rather than importing it: e2e specs compile under their own tsconfig and
+   * none of them reaches into `src/`. If the two drift, the last assertion
+   * fails loudly — which is the point of writing `PAGE + 1` seeds.
+   */
+  test('pages the reports tab with a cursor, keeping the rows already read', async ({
+    page,
+    firebase,
+  }) => {
+    const PAGE = 25;
+    const backdated = Date.now() - 3_600_000;
+    const seeded = Array.from({ length: PAGE + 1 }, (_, index) => ({
+      // Report 0 is the oldest, report 25 the newest — the order the
+      // assertions below reason about. The ID keeps the `{window}-{slot}-{uid}`
+      // shape a real report has, though nothing here depends on it.
+      id: `${Math.floor(backdated / 300_000)}-${String(index).padStart(2, '0')}-${tag}`,
+      questionId: `approved-${tag}`,
+      reason: 'spam' as const,
+      detail: `Seeded report ${index} (${tag})`,
+      reportedBy: `seed-${tag}`,
+      createdAt: backdated + index,
+    }));
+    await firebase.seedQuestionReports(seeded);
+
+    await signInAsReviewer(page, firebase);
+    await page.goto('/review');
+    await reviewTab(page, 'reports').click();
+
+    const mine = page.getByTestId('review-report').filter({ hasText: tag });
+    const newest = page.getByTestId('review-report').filter({ hasText: `report ${PAGE} (${tag})` });
+    const oldest = page.getByTestId('review-report').filter({ hasText: `report 0 (${tag})` });
+
+    // The oldest of the 26 cannot be on a 25-row first page, whatever else the
+    // emulator holds: this test's own 25 newer reports sort above it.
+    await expect(newest).toHaveCount(1);
+    await expect(oldest).toHaveCount(0);
+
+    await page.getByTestId('show-more-reports').click();
+
+    // All 26, once — the rows already read are kept rather than replaced, and
+    // the cursor's own row is not repeated, which an inclusive `startAt` does
+    // by default.
+    await expect(oldest).toHaveCount(1);
+    await expect(newest).toHaveCount(1);
+    await expect(mine).toHaveCount(PAGE + 1);
   });
 
   /**
@@ -270,9 +403,9 @@ async function startCustomGame(page: Page, category: string): Promise<void> {
   await waitForPlayRoute(page);
 }
 
-/** The Pending / Approved / Rejected filter, by its status rather than its label. */
-function reviewTab(page: Page, status: 'pending' | 'approved' | 'rejected'): Locator {
-  return page.locator(`[data-cy="review-tab"][data-status="${status}"]`);
+/** The Pending / Approved / Rejected / Reports picker, by view rather than by label. */
+function reviewTab(page: Page, view: 'pending' | 'approved' | 'rejected' | 'reports'): Locator {
+  return page.locator(`[data-cy="review-tab"][data-status="${view}"]`);
 }
 
 /**
