@@ -301,6 +301,80 @@ describe('FirestoreRestClient.runQuery', () => {
     expect(query['limit']).toBe(10);
   });
 
+  /**
+   * `__name__` is compared against a **reference**, never a string — and a
+   * string there is not rejected, it just matches nothing. So the failure this
+   * pins is silent: a query that returns an empty page and reads exactly like a
+   * collection holding no such document.
+   */
+  it('expands a __name__ IN filter into full resource references', async () => {
+    respondWith([]);
+    await makeClient().runQuery({
+      collectionPath: 'custom_questions',
+      where: [{ field: DOCUMENT_ID_FIELD, op: 'IN', value: ['q1', 'q2'] }],
+    });
+
+    expect(structuredQuery()['where']).toEqual({
+      fieldFilter: {
+        field: { fieldPath: '__name__' },
+        op: 'IN',
+        value: {
+          arrayValue: {
+            values: [
+              { referenceValue: `${RESOURCE_ROOT}/custom_questions/q1` },
+              { referenceValue: `${RESOURCE_ROOT}/custom_questions/q2` },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  it('expands a single __name__ EQUAL filter the same way', async () => {
+    respondWith([]);
+    await makeClient().runQuery({
+      collectionPath: 'custom_questions',
+      where: [{ field: DOCUMENT_ID_FIELD, op: 'EQUAL', value: 'q1' }],
+    });
+
+    expect(structuredQuery()['where']).toEqual({
+      fieldFilter: {
+        field: { fieldPath: '__name__' },
+        op: 'EQUAL',
+        value: { referenceValue: `${RESOURCE_ROOT}/custom_questions/q1` },
+      },
+    });
+  });
+
+  it('leaves an ordinary field filter as a plain value', async () => {
+    respondWith([]);
+    await makeClient().runQuery({
+      collectionPath: 'custom_questions',
+      where: [{ field: 'status', op: 'EQUAL', value: 'pending' }],
+    });
+
+    expect(structuredQuery()['where']).toEqual({
+      fieldFilter: {
+        field: { fieldPath: 'status' },
+        op: 'EQUAL',
+        value: { stringValue: 'pending' },
+      },
+    });
+  });
+
+  // A path where a bare ID belongs would be expanded twice and match nothing,
+  // which is the same silent empty page as above — so it throws at the call
+  // site instead.
+  it('refuses a __name__ filter given a path rather than a document ID', async () => {
+    respondWith([]);
+    await expect(
+      makeClient().runQuery({
+        collectionPath: 'custom_questions',
+        where: [{ field: DOCUMENT_ID_FIELD, op: 'EQUAL', value: 'custom_questions/q1' }],
+      }),
+    ).rejects.toThrow(/bare document ID/);
+  });
+
   it('turns a startAt document ID into an inclusive reference cursor', async () => {
     respondWith([]);
     await makeClient().runQuery({
@@ -315,6 +389,59 @@ describe('FirestoreRestClient.runQuery', () => {
       values: [{ referenceValue: `${RESOURCE_ROOT}/custom_questions/cursor-id` }],
       before: true,
     });
+  });
+
+  /**
+   * The cursor that pages a query ordered by anything but the document ID.
+   *
+   * Two details are pinned because getting either wrong is silent: the values
+   * are **positional against `orderBy`**, so a `__name__` entry has to become a
+   * reference while its neighbour stays a plain value; and `before: false` is
+   * the exclusive form, where `true` would repeat the cursor's own row on every
+   * page boundary.
+   */
+  it('encodes a startAfter cursor positionally, with __name__ as a reference', async () => {
+    respondWith([]);
+    await makeClient().runQuery({
+      collectionPath: 'question_reports',
+      orderBy: [
+        { field: 'createdAt', direction: 'DESCENDING' },
+        { field: DOCUMENT_ID_FIELD, direction: 'DESCENDING' },
+      ],
+      startAfterValues: [1_760_000_000_000, 'r24'],
+    });
+
+    expect(structuredQuery()['startAt']).toEqual({
+      values: [
+        { integerValue: '1760000000000' },
+        { referenceValue: `${RESOURCE_ROOT}/question_reports/r24` },
+      ],
+      before: false,
+    });
+  });
+
+  it('refuses a startAfter cursor with more values than the query is ordered by', async () => {
+    respondWith([]);
+    await expect(
+      makeClient().runQuery({
+        collectionPath: 'question_reports',
+        orderBy: [{ field: 'createdAt', direction: 'DESCENDING' }],
+        startAfterValues: [1, 'r24'],
+      }),
+    ).rejects.toThrow(/one per orderBy field/);
+  });
+
+  // Both write the same `startAt`, so passing both means one silently wins.
+  it('refuses two start cursors at once', async () => {
+    respondWith([]);
+    await expect(
+      makeClient().runQuery({
+        collectionPath: 'custom_questions',
+        orderBy: [{ field: DOCUMENT_ID_FIELD }],
+        startAtDocumentId: 'a',
+        startAfterValues: ['b'],
+      }),
+    ).rejects.toThrow(/not both/);
   });
 
   it('turns an endBefore document ID into an exclusive end cursor', async () => {

@@ -14,6 +14,7 @@ import {
   FirestoreRestClient,
   RestFieldFilter,
   RestQuery,
+  isDocumentId,
   isFirestorePermissionDenied,
 } from './firestore-rest/firestore-rest.client';
 
@@ -97,6 +98,13 @@ const QUOTA_WRITE_ATTEMPTS = 3;
  * whole class of deploy risk — for that is the right way round.
  */
 export const REVIEW_PAGE_SIZE = 50;
+
+/**
+ * How many document IDs one `IN` filter may carry. Firestore's own limit is 30
+ * comparison values per `IN`; a query built with more is rejected outright, so
+ * `getQuestionsByIds` batches rather than assuming its caller stayed under it.
+ */
+const QUESTION_ID_BATCH_SIZE = 30;
 
 /**
  * Every `{window}-{slot}` document ID was refused. Usually that means the
@@ -341,6 +349,64 @@ export class FirebaseService {
       return docs
         .map((doc) => ({ id: doc.id, ...asDocumentData<CustomQuestionDoc>(doc.data) }))
         .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    });
+  }
+
+  /**
+   * The questions a page of reports is about, by document ID (`FEAT-026`).
+   *
+   * **One query per 30 ids rather than one read per report.** Firestore accepts
+   * up to 30 comparison values in an `IN`, and `__name__` is a filterable field
+   * like any other, so a page of reports costs a bounded handful of queries
+   * instead of a round trip each. Ids are deduplicated first: several reports
+   * about the same question are the expected case, and are the reason a queue
+   * exists at all.
+   *
+   * A reviewer may read a question in any status (`firestore.rules` —
+   * `status == 'approved' || isReviewer()`), which is what makes this usable
+   * for reports about questions that are pending or already rejected.
+   *
+   * **A missing id is simply absent from the result**, never an error: a report
+   * can outlive the question it names, because `custom_questions` is deletable
+   * from the console and `question_reports` has no cascade. The caller renders
+   * the report and says the question is gone.
+   *
+   * **An id that cannot address a document is dropped rather than sent**, and
+   * that is the same promise rather than a second one. These ids are read out
+   * of documents this app did not necessarily write — `question_reports` is
+   * also writable from the console, where nothing validates `questionId` — so
+   * an empty string or one carrying a `/` can reach here. A `__name__` filter
+   * refuses both (`isDocumentId`), and the throw would propagate out of the
+   * whole batched read: one malformed document would take every report on the
+   * page down with it and leave a "could not load" that retrying can never
+   * clear. Dropped, it falls through to the absent case above and the row that
+   * names it says the question is gone, which is what the reviewer needs to
+   * know about it anyway.
+   */
+  getQuestionsByIds(ids: string[]): Observable<(CustomQuestionDoc & { id: string })[]> {
+    return defer(async () => {
+      const unique = [...new Set(ids.filter(isDocumentId))];
+      const batches: string[][] = [];
+      for (let start = 0; start < unique.length; start += QUESTION_ID_BATCH_SIZE) {
+        batches.push(unique.slice(start, start + QUESTION_ID_BATCH_SIZE));
+      }
+
+      const pages = await Promise.all(
+        batches.map((batch) =>
+          this.rest.runQuery(
+            {
+              collectionPath: CUSTOM_QUESTIONS_COLLECTION,
+              where: [{ field: DOCUMENT_ID_FIELD, op: 'IN', value: batch }],
+              limit: batch.length,
+            },
+            { timeoutMs: FIRESTORE_TIMEOUT_MS },
+          ),
+        ),
+      );
+
+      return pages
+        .flat()
+        .map((doc) => ({ id: doc.id, ...asDocumentData<CustomQuestionDoc>(doc.data) }));
     });
   }
 
