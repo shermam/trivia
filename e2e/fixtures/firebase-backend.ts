@@ -7,6 +7,7 @@ import {
   AccountStateQuery,
   CheckoutSessionRecord,
   CustomQuestionSeed,
+  GameplayStatsSeed,
   LEADERBOARD_BOARDS,
   LeaderboardSeed,
   ProPriceSeed,
@@ -221,6 +222,20 @@ export class FirebaseBackend {
    */
   async seedReviewer({ uid, reviewer }: ReviewerSeed): Promise<void> {
     await this.firestore.doc(`user_roles/${uid}`).set({ reviewer });
+  }
+
+  /**
+   * Writes one account's lifetime totals, as the `recordGameResult` callable
+   * would have.
+   *
+   * Through the Admin SDK because that is the only way they can be written at
+   * all — `users` has no client write rule, by design (`docs/data-model.md`).
+   * Nothing is tracked here beyond the uid the caller already created:
+   * `users/{uid}` is keyed by the account, so the preview sweep reaches it by
+   * walking `authUids`.
+   */
+  async seedGameplayStats({ uid, ...totals }: GameplayStatsSeed): Promise<void> {
+    await this.firestore.doc(`users/${uid}`).set({ ...totals, updatedAt: Date.now() });
   }
 
   /** Writes a single board entry, bypassing Firestore rules. */

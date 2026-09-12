@@ -18,6 +18,7 @@ import {
 } from './firestore-rest/firestore-rest.client';
 
 const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
+const USERS_COLLECTION = 'users';
 /**
  * The per-timing-constraint boards (finding G7). Entries live at
  * `leaderboards/{board}/entries/{uid}` — a subcollection rather than a
@@ -124,6 +125,35 @@ export class QuestionQuotaExceededError extends Error {
         'Please try again later.',
     );
   }
+}
+
+/**
+ * One player's lifetime totals, as `recordGameResult` banks them into
+ * `users/{uid}` (`docs/data-model.md`).
+ *
+ * Only the five fields `/profile` renders. The document carries four more —
+ * `lastGameId`, `updatedAt` and the `rateWindowStart`/`gamesInWindow` pair —
+ * which are bookkeeping for the callable rather than anything to show a
+ * player, and naming them here would invite a screen to grow around them.
+ *
+ * `statsSince` is nullable because the reader has to survive a document
+ * written before a field existed: the collection deliberately has no
+ * `hasOnly()` allowlist and no rules-level schema, which is what lets a
+ * server-written field be added without a migration — and the price of that
+ * is that a reader may not assume every field is there.
+ */
+export interface GameplayStats {
+  gamesPlayed: number;
+  questionsAnswered: number;
+  correctAnswers: number;
+  bestStreak: number;
+  /** Epoch ms the first game was banked, or `null` on a document without one. */
+  statsSince: number | null;
+}
+
+/** A count Firestore returned untyped, or 0 when the field is absent or not a number. */
+function asCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 /** What to draw from the shared question bank. `limit` is mandatory on purpose — see `getCustomQuestions`. */
@@ -482,6 +512,43 @@ export class FirebaseService {
     return document
       ? { id: document.id, ...asDocumentData<Omit<LeaderboardEntry, 'id'>>(document.data) }
       : null;
+  }
+
+  /**
+   * The caller's own lifetime totals, or `null` when they have never finished
+   * a game while signed in.
+   *
+   * A single-document `get` on a known path — `CLAUDE.md` §4.1's bounded read
+   * in its cheapest form, and the only shape `firestore.rules` permits here:
+   * `users` allows `get` for the owner and refuses `list` to everybody, so
+   * there is no query over this collection to write by accident.
+   *
+   * **`null` means "no games banked yet", and nothing else.** `getDocument`
+   * turns a 404 into `null` and lets a 403 or a transport failure throw, which
+   * is what keeps `/profile`'s empty state from standing in for a refused
+   * read (`CLAUDE.md` §4.4 — an error message must not narrate a cause nobody
+   * verified).
+   *
+   * Every count is coerced rather than asserted. The document is written only
+   * by the Admin SDK, so the types are not in doubt today; `asCount` is here
+   * because the screen divides one of these by another, and an accuracy of
+   * `NaN%` shown to a real person is a worse outcome than a zero.
+   */
+  async getGameplayStats(uid: string): Promise<GameplayStats | null> {
+    const document = await this.rest.getDocument(`${USERS_COLLECTION}/${uid}`, {
+      timeoutMs: FIRESTORE_TIMEOUT_MS,
+    });
+    if (!document) {
+      return null;
+    }
+    const statsSince = document.data['statsSince'];
+    return {
+      gamesPlayed: asCount(document.data['gamesPlayed']),
+      questionsAnswered: asCount(document.data['questionsAnswered']),
+      correctAnswers: asCount(document.data['correctAnswers']),
+      bestStreak: asCount(document.data['bestStreak']),
+      statsSince: typeof statsSince === 'number' && Number.isFinite(statsSince) ? statsSince : null,
+    };
   }
 
   /**

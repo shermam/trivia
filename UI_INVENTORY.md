@@ -18,7 +18,7 @@ Every route renders inside a fixed shell:
 <app-root>
  ├─ <app-top-bar>          (hidden entirely when ?embed=1 is in the URL)
  └─ <main>
-     └─ <router-outlet>    (one of the 5 routed screens below)
+     └─ <router-outlet>    (one of the routed screens below)
 ```
 
 ### 0.1 Top Bar (`TopBarComponent`)
@@ -31,7 +31,7 @@ Sticky header, present on every screen except in **embed mode**.
   - **≥ 640px** — the original row: brand on the left; "Review" (reviewers only), "Pricing", the theme toggle and the account trigger on the right.
   - **< 640px** — three zones: a **hamburger button** on the left, the brand **centred**, and the account trigger on the right. "Review", "Pricing" and the theme toggle move into the drawer the hamburger opens; they are the _same_ elements hidden by `sm:` classes, not duplicates.
   - The centring is a `minmax(0,1fr) auto minmax(0,1fr)` grid, so the two side tracks are equal and the brand sits at the true centre of the bar whatever the account chip weighs. `auto 1fr auto` looks right and is not: it centres the brand between its neighbours, which measured 21px off.
-- **Nav drawer** (`< 640px` only): left slide-out panel, full viewport height, 18rem wide (max 80%), over a 40%-black backdrop. Holds a "MENU" label and a close (✕) button, then "Review" (reviewers only), "Pricing", and a **"Dark mode" / "Light mode"** button with a sun/moon icon. Following a link closes it; toggling the theme deliberately does not, since the page recolours around you and you may want to change back.
+- **Nav drawer** (`< 640px` only): left slide-out panel, full viewport height, 18rem wide (max 80%), over a 40%-black backdrop. Holds a "MENU" label and a close (✕) button, then "Review" (reviewers only), "Your stats", "Pricing", and a **"Dark mode" / "Light mode"** button with a sun/moon icon. Following a link closes it; toggling the theme deliberately does not, since the page recolours around you and you may want to change back. "Your stats" is offered to everybody rather than only to signed-in accounts — the page itself explains what a signed-out reader has to do, where a link appearing when auth resolves would shift the rows beneath it.
 - **Pricing nav link**: text link "Pricing" → `/pricing`, next to the account trigger at `sm` and above; in the drawer below it.
 - **Account trigger, every viewport: the avatar alone.** The display name and PRO badge are `sr-only` rather than removed — taking them out of the DOM would leave the button announced as a single letter, and a screen reader still reads "B Bartholomew Featherstonehaugh PRO". A signed-in chip is 42px on a phone and 70px with the chevron above `sm`, and it is the same width while auth is still settling, so it never moves. This was a phone-only rule until the desktop exception turned out to be the last layout shift: the name arrives when auth resolves and the PRO badge a beat later when the Stripe claim does, which at 1024px moved a 123.4px skeleton to 104.4px (short name), 144px (short name + PRO) or 277.5px (a 29-character name). Reserving space instead was measured and rejected — a slot sized to "Sign in" fits four characters and an ellipsis; a slot sized to the widest name leaves a signed-out user looking at ~150px of nothing. The anonymous state keeps its visible "Sign in" text, which is short and is a call to action rather than a label.
 - **Account trigger: the chip widens on a phone when it resolves to "Sign in".** Below `sm` the chip has exactly two widths — avatar-only (42px) and avatar-plus-"Sign in" (95px) — and everything except the signed-out state is the first, so the movement only ever widens and only ever happens when there is something to offer. A returning player's chip resolves without moving; a signed-out one grows a call to action in the corner of the eye. Animated by transitioning the label region's `max-width` from `0` to a 4rem cap (a content-driven `width: auto` has no property to transition), gated on `motion-safe:`, 600ms ease-out — the cap and duration are paired, because the motion stops as soon as the cap passes the label's own width. At `sm` and above nothing moves: the skeleton bar is already the width of the label it becomes.
@@ -91,6 +91,7 @@ A single panel (white card, rounded-2xl, shadowed, ~320px wide, small "x" close 
 - **Field label**: "Display name"
 - **Input** (text, prefilled with current display name, max 30 chars) + **"Save" button** (indigo) alongside it — on a successful save, the button transiently shows a checkmark + "Saved!" (green) for 2 seconds before reverting
 - **Account email line**: shows the account's email; if it's a password account, appends "✓ Verified" (green)
+- **Link**: "Your stats" (outlined, full width, trophy icon) — routes to `/profile` (§8)
 - **Link/button**: "Add a question" (outlined, full width) — routes to `/add-question`; carries a **PRO badge** next to the label (indigo/filled if the user is Pro, grey/muted if not)
 - Below that, one of:
   - Not Pro: text link "Upgrade to Pro to add questions" → `/pricing`
@@ -410,16 +411,45 @@ A "← Back to game" link (→ `/`) sits above the header.
 
 ---
 
-## 8. Cross-cutting elements & patterns
+## 8. Route: `/profile` — Your stats (`ProfileStatsComponent`)
 
-### 8.1 PRO badge
+A single card on a light slate background. **No route guard** — access is decided in-page, so an anonymous visitor gets an explanation rather than a silent redirect, the same choice `/review` and `/add-question` make.
+
+### Hierarchy
+
+- **Back link**: "← Back to game" → `/`
+- **Title**: "Your stats", with a subtitle — "Your lifetime totals across every game you have finished while signed in. Only you can see them."
+- **Status line**: one line inside the card, above the numbers, saying which state the card is in (below)
+- **Stat grid**: five tiles — **Games played**, **Questions answered**, **Correct answers**, **Accuracy**, **Best streak** — each an icon, a small grey label and a large number. Two columns on a phone, three at `sm` and above.
+- **Action**: exactly one button per state, below the grid
+
+### States
+
+| State                      | Status line                                                                                        | Numbers    | Action       |
+| -------------------------- | -------------------------------------------------------------------------------------------------- | ---------- | ------------ |
+| **Auth still resolving**   | "Loading your lifetime totals…"                                                                    | all "—"    | Start a game |
+| **Signed out / anonymous** | "Sign in and your totals start counting from the next game you finish."                            | all "—"    | Sign in      |
+| **Read in flight**         | "Loading your lifetime totals…"                                                                    | all "—"    | Start a game |
+| **No games banked yet**    | "Nothing banked yet — finish a game and your totals will show up here."                            | all "—"    | Start a game |
+| **Loaded**                 | "Tracking since {{date}}." (or "Tracking your lifetime totals." when the document carries no date) | the totals | Start a game |
+| **Read failed**            | "Could not load your stats just now." (red)                                                        | all "—"    | Try again    |
+
+**Every state is the same height**, and the construction is what makes that true rather than a measurement: each number is rendered from first paint as an em-dash, the five distinct status sentences are stacked in one grid cell so the space reserved is the tallest of them, and the three actions are one grid cell holding the same button box three times. Accuracy shows "—" rather than "0%" when no questions have been answered — `0 / 0` is `NaN`.
+
+Two details a test has to know about. **"Sign in" is not rendered under `?embed=1`** (§9.7) — it opens the top bar's auth menu, and an embed has no top bar; the signed-out state is then the sentence alone, at the same height. And **"Try again" hands focus to the status line before it re-reads**, because the retry puts the card back into its loading state and hides the button that was focused; the status line is where the answer to the retry appears, and "Try again" is one Tab away from it if the second read fails too.
+
+---
+
+## 9. Cross-cutting elements & patterns
+
+### 9.1 PRO badge
 
 A small rounded pill, bold uppercase "PRO" text. Two visual variants used consistently everywhere it appears (game-setup footer link, Auth Menu "Add a question" link, top-bar account trigger):
 
 - **Locked** (non-Pro user): grey background, muted grey text
 - **Unlocked** (Pro user): indigo-100 background, indigo-600 text (indigo-600/white on the "Add a question" button itself, which is solid indigo)
 
-### 8.2 Buttons
+### 9.2 Buttons
 
 Consistent visual vocabulary across the whole app:
 
@@ -430,7 +460,7 @@ Consistent visual vocabulary across the whole app:
 - **Danger-adjacent text buttons**: none — errors are always shown as banners, not button color changes
 - **Destructive-looking dark button**: "Play Again" uses a dark slate fill (distinct from primary indigo), signaling a full reset action
 
-### 8.3 Inline banners (consistent 3-color system across every screen)
+### 9.3 Inline banners (consistent 3-color system across every screen)
 
 - **Red** (`bg-red-50`/`border-red-200`/`text-red-700`): hard errors (failed save, failed load, failed submit)
 - **Amber** (`bg-amber-50`/`border-amber-200`/`text-amber-700`): soft warnings / non-fatal notices (categories failed to load but game still playable; checkout cancelled; existing best score was already higher)
@@ -438,50 +468,51 @@ Consistent visual vocabulary across the whole app:
 - **Indigo** (`bg-indigo-50`/`bg-indigo-100`): neutral call-to-action prompts, not errors (sign-in prompts, verify-email prompts, Pro upsell box, save-score prompt)
 - Most banners now carry a small leading icon reinforcing their color (triangle-alert/circle-alert for amber/red, circle-check-big for green, mail for the verify-email prompt)
 
-### 8.4 Loading / busy conventions
+### 9.4 Loading / busy conventions
 
 - Buttons that trigger an async action disable themselves and swap their label to a present-participle phrase ending in an ellipsis: "Loading Questions…", "Saving…", "Please wait…", "Redirecting…", "Opening billing portal…"
 - The top bar and Pricing's Subscribe button both guard on `authReady()` specifically (distinct from "anonymous") to avoid a one-frame flash of the wrong state before Firebase's first auth callback resolves — shown as "Loading…" in both places.
 
-### 8.5 Form field conventions
+### 9.5 Form field conventions
 
 - All labels are `<label>` elements, small, semibold, slate-500/600, positioned directly above their control with a small gap
 - All text/select inputs share the same shape: `rounded-xl` corners, thin slate border, indigo focus ring; `<select>`s use a custom chevron-down icon (native arrow hidden via `appearance-none`)
 - Segmented "pill" radio groups (Question Source, Question Type, True/False, Multiple/True-False question type) are used instead of native radio buttons or dropdowns wherever the option set is small (2–3 choices) — the underlying `<input type="radio">` is visually hidden (`sr-only`) and its wrapping `<label>` is styled as the visible control, with the selected option getting an indigo-100 fill + indigo-600 bold text; unselected labels use slate-600 (not a lighter grey) to keep body text at a readable contrast ratio against the segmented control's slate-100 track
 
-### 8.6 Elevation & shape tokens
+### 9.6 Elevation & shape tokens
 
 Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s shadow scale so every surface pulls from the same set: `shadow-card` (subtle card shadow), `shadow-card-lg` (quiz/game-over/leaderboard cards), `shadow-hero-card` (game-setup's large gradient-backed card), `shadow-dropdown` (auth menu), `shadow-cta`/`shadow-cta-hover` (primary gradient buttons), `shadow-pro-card` (pricing's Pro card). Corner radii follow Tailwind's default scale: `rounded-3xl` (24px, cards), `rounded-2xl` (16px, dropdowns/sub-cards), `rounded-xl` (12px, buttons/inputs/segmented controls).
 
-### 8.7 Embed mode (`?embed=1`)
+### 9.7 Embed mode (`?embed=1`)
 
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
-- On Game Over, the "Sign in" button in the anonymous-player prompt is also hidden (there's nowhere for it to open a menu into), leaving just the explanatory text.
-- All other screens/logic behave identically; this only affects the top bar's presence and that one button.
+- Every other button that opens the auth menu is hidden with it, since there is nowhere for it to open a menu into: Game Over's "Sign in" in the anonymous-player prompt (§3), and `/profile`'s "Sign in" in the signed-out state (§8). Both leave the explanatory text, at the same height.
+- All other screens/logic behave identically; this only affects the top bar's presence and those auth-menu openers.
 
 ---
 
-## 9. Full route table
+## 10. Full route table
 
-| Path            | Component                 | Guard                                            | Purpose                                         |
-| --------------- | ------------------------- | ------------------------------------------------ | ----------------------------------------------- |
-| `/`             | `GameSetupComponent`      | none                                             | Configure & start a game                        |
-| `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory | Answer questions against a timer                |
-| `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory  | Final score, save to leaderboard, view top 10   |
-| `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)  | Submit a question to the custom bank (Pro only) |
-| `/pricing`      | `PricingComponent`        | none                                             | Compare Starter vs. Pro, subscribe via Stripe   |
-| `/review`       | `ReviewQueueComponent`    | none (in-page gating on the reviewer role)       | Approve or reject submitted questions           |
-| `/privacy`      | `PrivacyPolicyComponent`  | none                                             | Published Privacy Policy                        |
-| `/terms`        | `TermsOfServiceComponent` | none                                             | Published Terms of Service                      |
-| `*` (unmatched) | —                         | redirects to `/`                                 | —                                               |
+| Path            | Component                 | Guard                                             | Purpose                                         |
+| --------------- | ------------------------- | ------------------------------------------------- | ----------------------------------------------- |
+| `/`             | `GameSetupComponent`      | none                                              | Configure & start a game                        |
+| `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory  | Answer questions against a timer                |
+| `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory   | Final score, save to leaderboard, view top 10   |
+| `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)   | Submit a question to the custom bank (Pro only) |
+| `/profile`      | `ProfileStatsComponent`   | none (in-page gating on a signed-in real account) | A player's own lifetime gameplay totals         |
+| `/pricing`      | `PricingComponent`        | none                                              | Compare Starter vs. Pro, subscribe via Stripe   |
+| `/review`       | `ReviewQueueComponent`    | none (in-page gating on the reviewer role)        | Approve or reject submitted questions           |
+| `/privacy`      | `PrivacyPolicyComponent`  | none                                              | Published Privacy Policy                        |
+| `/terms`        | `TermsOfServiceComponent` | none                                              | Published Terms of Service                      |
+| `*` (unmatched) | —                         | redirects to `/`                                  | —                                               |
 
 ---
 
-## 10. Full copy inventory (verbatim strings)
+## 11. Full copy inventory (verbatim strings)
 
 Grouped by screen, for quick reference when building Figma text styles / content models.
 
-**Global / Top Bar / Auth Menu**: Trivimind · Pricing · Review · Menu · Close menu · Site menu · Dark mode · Light mode · Loading… · Sign in · Sign up · Create an account · Continue with Google · or · Email · Password · Please wait… · Already have an account? Sign in · Don't have an account? Sign up · More sign-in options · Hide other sign-in options · Facebook · GitHub · Microsoft · Apple · Twitter / X · Yahoo · Account created! We've sent a verification link to your email. · Verify your email · We sent a verification link to {{email}}. Verify it to finish signing in and save scores to the leaderboard. · Resend verification email · Verification email sent — check your inbox. · Sign out · Your profile · Display name · Save · Saved! · Verified · Add a question · Upgrade to Pro to add questions · Manage subscription · Opening billing portal… · Could not update your name. Please try again. · Could not open the billing portal. Please try again. · Sign in before managing your subscription. · Timed out waiting for the billing portal to open. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not send the verification email. Please try again.
+**Global / Top Bar / Auth Menu**: Trivimind · Pricing · Review · Your stats · Menu · Close menu · Site menu · Dark mode · Light mode · Loading… · Sign in · Sign up · Create an account · Continue with Google · or · Email · Password · Please wait… · Already have an account? Sign in · Don't have an account? Sign up · More sign-in options · Hide other sign-in options · Facebook · GitHub · Microsoft · Apple · Twitter / X · Yahoo · Account created! We've sent a verification link to your email. · Verify your email · We sent a verification link to {{email}}. Verify it to finish signing in and save scores to the leaderboard. · Resend verification email · Verification email sent — check your inbox. · Sign out · Your profile · Display name · Save · Saved! · Verified · Add a question · Upgrade to Pro to add questions · Manage subscription · Opening billing portal… · Could not update your name. Please try again. · Could not open the billing portal. Please try again. · Sign in before managing your subscription. · Timed out waiting for the billing portal to open. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not send the verification email. Please try again.
 
 **Game Setup**: Trivimind · Configure your quiz and test your knowledge · Could not load categories from Open Trivia DB. You can still start with "Any Category". · No questions were found for the selected options. Try a different category, difficulty, or source. · Failed to load questions. Please check your connection and try again. · Number of Questions · Category · Any Category · Difficulty · Any Difficulty · Easy · Medium · Hard · Question Source · Open Trivia · Custom · Mixed · Start Game · Loading Questions… · + Create custom question
 
@@ -494,6 +525,8 @@ Grouped by screen, for quick reference when building Figma text styles / content
 **Pricing**: Back to game · Pricing · Play free forever, or go Pro to contribute your own questions. · Subscription started! It may take a few seconds to finish activating. · Start playing · Dismiss · Checkout was cancelled — no charge was made. · Starter · Everything you need to play and compete. · Free ($0/month) · Play unlimited games · Submit scores to the global leaderboard · Your current plan · Pro · Contribute questions and shape the game. · {amount}/month · Currency · USD · BRL · Everything in Starter · Create and add custom questions to the global question bank · More features coming soon · You're subscribed · Loading… · Sign in to subscribe · Redirecting… · Subscribe · Subscribe — {amount}/mo · Verify your email first, then come back to subscribe. · Could not start checkout. Please try again. · Sign in before subscribing. · Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later. · Timed out waiting for Stripe checkout to start. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not start checkout. Please reload the page and try again. · Your account is already set up to pay in {currency}, so Pro can only be bought in {currency} from this account. · Cancel anytime. No hidden fees.
 
 **Review Queue**: Review Queue · Back to game · Filter by status · Pending · Approved · Rejected · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Author: · Approve · Reject
+
+**Your stats**: Back to game · Your stats · Your lifetime totals across every game you have finished while signed in. Only you can see them. · Loading your lifetime totals… · Sign in and your totals start counting from the next game you finish. · Nothing banked yet — finish a game and your totals will show up here. · Could not load your stats just now. · Tracking since {{date}}. · Tracking your lifetime totals. · Games played · Questions answered · Correct answers · Accuracy · Best streak · Start a game · Sign in · Try again · Your stats are ready. · No finished games yet. · Signed out. Stats are only kept for a signed-in account. · Could not load your stats.
 
 **Legal pages (`/privacy`, `/terms`)**: Back to Trivimind · Last updated: {{date}} · In force, but not yet reviewed by a lawyer · This document applies to your use of the service today, and everything it says about what the app does with your information was written by reading the application's own source code — so it describes real behaviour rather than what a template assumes. What it has not had is a professional legal review. If you spot something wrong, unclear, or missing, please write to {{contactEmail}} — that is genuinely useful and it will be fixed.
 
