@@ -105,6 +105,24 @@ export class OfflineDbService {
         request.onupgradeneeded = (event) => upgrade(request.result, event.oldVersion);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error as Error);
+        // **`blocked` is a third outcome, and it is neither of the other two.**
+        // An older tab holding this database open at a lower version stops the
+        // upgrade: the browser fires `blocked` and then simply waits, so a
+        // handler that only covers `success` and `error` leaves a promise that
+        // never settles. That is worse than a failure, because everything
+        // downstream is written to degrade on a *rejected* open and nothing is
+        // written to degrade on one that hangs — the whole draw would sit
+        // behind it, and Start Game would spin for as long as the other tab
+        // stayed open. Rejecting turns a version skew across a deploy into
+        // "this tab plays without its local storage", which is the same
+        // outcome as a private window.
+        request.onblocked = () =>
+          reject(
+            new Error(
+              `IndexedDB "${this.dbName}" is open at an older version in another tab; ` +
+                'close it to let this one upgrade.',
+            ),
+          );
       });
       // A failed open must not be memoized as a permanent failure — same
       // reasoning as TriviaService.getCategories (finding B3).

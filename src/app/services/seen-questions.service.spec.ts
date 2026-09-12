@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
 import { TriviaQuestion } from '../models/question.model';
 import { seenKeyFor } from '../utils/seen-key.util';
-import { OfflineDbService, SEEN_QUESTIONS_STORE } from './offline-db.service';
+import { OFFLINE_DB_NAME, OfflineDbService, SEEN_QUESTIONS_STORE } from './offline-db.service';
 import { MAX_SEEN_QUESTIONS, SeenQuestionsService } from './seen-questions.service';
 
 /**
@@ -52,6 +52,16 @@ async function fillSeenStore(count: number): Promise<void> {
     }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error as Error);
+  });
+}
+
+/** An old tab's connection: a database at a lower version, left open. */
+function openAtVersion(name: string, version: number): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    request.onupgradeneeded = () => undefined;
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error as Error);
   });
 }
 
@@ -167,6 +177,34 @@ describe('SeenQuestionsService', () => {
     const seen = await service.readSeenSet();
     expect(seen?.size).toBe(1);
     expect(seen?.has(seenKeyFor(tuesday))).toBe(true);
+  });
+
+  /**
+   * The failure the schema bump introduces, driven against a real blocked
+   * upgrade rather than a stubbed rejection.
+   *
+   * A tab left open on the previous bundle holds the database at the old
+   * version; this tab asks for the new one; the browser fires `blocked` and
+   * waits. Because the seen-set is read on the way into a draw, an open that
+   * never settles is not a lost feature but a Start Game button that spins for
+   * as long as the other tab stays open — which is why `OfflineDbService`
+   * rejects on `blocked`, and why what this asserts is that the *draw's* read
+   * comes back, promptly, with nothing.
+   */
+  it('reads as nothing to deduplicate against while an older tab blocks the upgrade', async () => {
+    const dbName = `trivia-offline-blocked-${crypto.randomUUID()}`;
+    const stale = await openAtVersion(dbName, 1);
+
+    try {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [{ provide: OFFLINE_DB_NAME, useValue: dbName }],
+      });
+
+      expect(await TestBed.inject(SeenQuestionsService).readSeenSet()).toBeNull();
+    } finally {
+      stale.close();
+    }
   });
 
   /**

@@ -67,18 +67,21 @@ type SeenSet = ReadonlyMap<string, number>;
  * Chooses the questions a game is actually played with, preferring ones this
  * device has never answered (`FEAT-034`).
  *
- * Candidates arrive from two places — the page just fetched, and the matching
- * part of the offline pool — and are collapsed by seen key first, so a
- * question present in both is one candidate rather than two and can never be
- * served twice in the same round.
+ * Candidates are collapsed by seen key first, so a question reaching the draw
+ * twice — from the fetched page and from the offline pool, or twice from the
+ * same Open Trivia DB page under two spellings that normalise alike — is one
+ * candidate rather than two and can never be served twice in one round. That
+ * has a cost worth knowing: collapsing a genuine duplicate inside a page of
+ * exactly `amount` questions leaves the game one question short, because there
+ * is nothing behind it to promote. It is the right trade — a repeat inside a
+ * single round is more noticeable than a four-question five — and it is the
+ * one path here that can shorten a game.
  *
  * **`amount` is the caller's cap, and the caller sets it to what the network
- * actually returned.** The pool substitutes; it never supplies. Letting it
- * lengthen a draw would change two behaviours that are deliberate: a
- * legitimate "no questions match this filter" would become a game served
- * silently from cache with no offline banner to say so (`getQuestions`), and a
- * question a reviewer has since rejected could come back out of the pool into
- * an online game.
+ * actually returned.** Where a reserve is supplied at all it substitutes; it
+ * never supplies. Letting it lengthen a draw would turn a legitimate "no
+ * questions match this filter" into a game served silently from cache with no
+ * offline banner to say so (`getQuestions`).
  *
  * **A short game is never the answer.** Unseen questions come first, shuffled;
  * if there are not enough of them the remainder is topped up with the
@@ -352,7 +355,16 @@ export class TriviaService {
    * {@link DEDUPE_DRAW_MULTIPLIER}). What makes substitution possible here is
    * the offline pool, which the background prefetch keeps topped up to a
    * hundred questions for exactly the reason it is useful here too: they are
-   * already paid for.
+   * already paid for. Unlike the bank, nothing about a pooled Open Trivia DB
+   * question can go stale — there is no moderation state to have changed.
+   *
+   * **How much it can do varies with the filters, and can be nothing.** The
+   * reserve is the pool narrowed to this game's own category and difficulty,
+   * and the prefetch fills the pool with unfiltered batches — so a game with
+   * no filters draws on most of it and a narrow one on little. A category
+   * invented by a contributor is the extreme: no Open Trivia DB question
+   * carries it, so the reserve is empty and this half of a mixed game simply
+   * does not deduplicate.
    */
   private async drawOpenTriviaQuestions(
     amount: number,
@@ -379,10 +391,21 @@ export class TriviaService {
    * The shared bank, drawn wider than the game when there is a seen-set to
    * filter against.
    *
+   * **The offline pool is deliberately not a reserve here**, unlike the Open
+   * Trivia draw above, and the reason is moderation rather than cost. A pooled
+   * question was approved when it was fetched and may have been rejected
+   * since; the pool stores no `status` and no client may re-check one, so
+   * substituting from it would put a withdrawn question back into an online
+   * game — the exact outcome review-before-publish exists to prevent. The
+   * widened read is this source's substitute supply and it needs no second
+   * source: every candidate it produces came from a query that filtered on
+   * `status == 'approved'` moments ago. The pool keeps its other job, which is
+   * the fallback when the network fails outright.
+   *
    * This one has to know the seen-set *before* it queries, because the
    * seen-set is what decides how wide to read — so unlike the Open Trivia
-   * draw above, the local read genuinely precedes the network one here. It is
-   * an IndexedDB `getAll` of at most two thousand small records against a
+   * draw, the local read genuinely precedes the network one here. It is an
+   * IndexedDB `getAll` of at most two thousand small records against a
    * Firestore round trip, and it happens while the other half of a mixed game
    * is already in flight.
    */
@@ -400,15 +423,12 @@ export class TriviaService {
       return this.fetchCustomQuestions(amount, category, difficulty);
     }
 
-    const [fetched, reserve] = await Promise.all([
-      this.fetchCustomQuestions(
-        Math.min(amount * DEDUPE_DRAW_MULTIPLIER, MAX_DEDUPE_DRAW),
-        category,
-        difficulty,
-      ),
-      this.offlineQuestionsService.getMatchingQuestions('custom', category, difficulty),
-    ]);
-    return preferUnseen([...fetched, ...reserve], Math.min(amount, fetched.length), seenSet);
+    const fetched = await this.fetchCustomQuestions(
+      Math.min(amount * DEDUPE_DRAW_MULTIPLIER, MAX_DEDUPE_DRAW),
+      category,
+      difficulty,
+    );
+    return preferUnseen(fetched, Math.min(amount, fetched.length), seenSet);
   }
 
   private async fetchOpenTriviaQuestions(

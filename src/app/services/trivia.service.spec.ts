@@ -716,6 +716,22 @@ describe('TriviaService deduplication (FEAT-034)', () => {
     return { amount, category: '', difficulty: '', source: 'custom', timeLimit: 15 } as const;
   }
 
+  function openTriviaGame(amount: number) {
+    return { amount, category: '', difficulty: '', source: 'open_trivia', timeLimit: 15 } as const;
+  }
+
+  /** One Open Trivia DB result, as the API shapes it. */
+  function openTriviaResult(question: string) {
+    return {
+      category: 'Science',
+      type: 'multiple',
+      difficulty: 'easy',
+      question,
+      correct_answer: 'A',
+      incorrect_answers: ['B', 'C', 'D'],
+    };
+  }
+
   /** Ids, sorted — `preferUnseen` shuffles, so the order is not something to assert on. */
   function ids(questions: TriviaQuestion[]): string[] {
     return questions.map((question) => question.id).sort();
@@ -778,16 +794,55 @@ describe('TriviaService deduplication (FEAT-034)', () => {
   });
 
   it('never serves the same question twice in one round, whichever side it came from', async () => {
-    const { service } = configure({
-      seen: {},
-      bank: ['c1', 'c2'].map(customDoc),
-      // The pool holds the same document the bank just returned — one
-      // candidate, not two, or a five-question game could be three questions
-      // and two repeats.
-      pool: [{ ...poolQuestion('c1', 'Question c1?'), source: 'custom' }],
+    const { service, httpMock } = configure({
+      seen: { 'otdb:whatever': 100 },
+      // The pool holds the same question the API just returned. One candidate,
+      // not two — otherwise the reserve could put a copy of the fetched
+      // question back into the round it was already in.
+      pool: [poolQuestion('cached', 'Who wrote Hamlet?')],
     });
 
-    expect(ids(await service.getQuestions(customGame(2)))).toEqual(['c1', 'c2']);
+    const promise = service.getQuestions(openTriviaGame(2));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        results: [openTriviaResult('Who wrote Hamlet?'), openTriviaResult('Who wrote Macbeth?')],
+      });
+
+    // Sorted: both are unseen, and the unseen are shuffled among themselves.
+    const drawn = await promise;
+    expect(drawn.map((question) => question.question).sort()).toEqual([
+      'Who wrote Hamlet?',
+      'Who wrote Macbeth?',
+    ]);
+    httpMock.verify();
+  });
+
+  /**
+   * The one path in the draw that can hand back a shorter game than the bank
+   * could have filled, and it is the right trade rather than an oversight.
+   * Two questions in one Open Trivia DB page whose wording normalises alike
+   * are one candidate — collapsing them is the whole point of a content hash —
+   * and inside a page of exactly `amount` there is nothing behind them to
+   * promote. A repeat inside a single round is more noticeable than a
+   * four-question five.
+   */
+  it('collapses two identically-worded questions in one page, one question short', async () => {
+    const { service, httpMock } = configure({ seen: { 'otdb:whatever': 100 } });
+
+    const promise = service.getQuestions(openTriviaGame(2));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        // Same question, different spacing and case — which is exactly what
+        // `normaliseQuestionText` exists to see through.
+        results: [openTriviaResult('Who wrote Hamlet?'), openTriviaResult('who  wrote hamlet? ')],
+      });
+
+    expect(await promise).toHaveLength(1);
+    httpMock.verify();
   });
 
   /**
@@ -830,43 +885,78 @@ describe('TriviaService deduplication (FEAT-034)', () => {
   });
 
   /**
-   * **The pool substitutes; it never supplies.** Two deliberate behaviours ride
-   * on that, and both would break silently if the reserve were allowed to
-   * lengthen a draw: "no questions match this filter" is a real result that
-   * `getQuestions` leaves alone rather than falling back on (the fallback is
-   * for a *failed* fetch, and it raises the offline banner), and a question a
-   * reviewer has since rejected is still sitting in the pool where it could
-   * come back into an online game.
+   * **A community question is never substituted from the pool, and this is a
+   * moderation rule rather than a cost one.** A pooled question was approved
+   * when it was fetched and may have been rejected since; the pool stores no
+   * `status` and no client may re-check one, so a draw that reached for it
+   * would put a withdrawn question back into an online game — the outcome
+   * review-before-publish exists to prevent. The widened bank read is this
+   * source's substitute supply, and every candidate it yields came from a
+   * query filtered on `status == 'approved'` moments earlier.
+   *
+   * Asserted as "the pool is not even read", not as "the result happens to
+   * hold no pooled question": the second passes whenever the pool is empty,
+   * which is most of the time.
    */
-  it('an empty result from the bank stays empty, whatever the pool holds', async () => {
-    const { service } = configure({
-      seen: { 'custom:c1': 100 },
-      bank: [],
-      pool: [{ ...poolQuestion('cached', 'Cached question?'), source: 'custom' }],
-    });
-
-    expect(await service.getQuestions(customGame(5))).toEqual([]);
-  });
-
-  it('a short result from the bank stays short', async () => {
-    const { service } = configure({
+  it('never draws on the offline pool for a community question, seen-set or not', async () => {
+    const { service, getMatchingQuestions } = configure({
       seen: { 'custom:c1': 100, 'custom:c2': 200 },
       bank: ['c1', 'c2'].map(customDoc),
-      pool: [
-        { ...poolQuestion('cached-1', 'Cached one?'), source: 'custom' as const },
-        { ...poolQuestion('cached-2', 'Cached two?'), source: 'custom' as const },
-        { ...poolQuestion('cached-3', 'Cached three?'), source: 'custom' as const },
-      ],
+      pool: [{ ...poolQuestion('cached-1', 'Cached one?'), source: 'custom' as const }],
     });
 
-    // Both questions the bank returned have been answered and the pool holds
-    // three that have not, so both slots are substituted — but there are still
-    // only two slots, because two is what the network was able to supply.
-    // *Which* two of the three unseen fill them is a shuffle, so the assertion
-    // is that neither repeat survived rather than which replacement won.
     const drawn = await service.getQuestions(customGame(5));
-    expect(drawn).toHaveLength(2);
-    expect(drawn.every((question) => question.id.startsWith('cached-'))).toBe(true);
+
+    expect(getMatchingQuestions).not.toHaveBeenCalled();
+    // Both were answered and there is nothing else approved to swap in, so the
+    // round repeats them — which is the honest outcome when the bank is
+    // exhausted, and better than serving something nobody has vouched for.
+    expect(ids(drawn)).toEqual(['c1', 'c2']);
+  });
+
+  /**
+   * **The pool substitutes; it never supplies** — live for Open Trivia DB,
+   * which is the one source that has a reserve. Letting it lengthen a draw
+   * would turn "no questions match this filter", a real result `getQuestions`
+   * deliberately leaves alone, into a game served silently from cache with no
+   * offline banner to say so; the fallback is for a *failed* fetch.
+   */
+  it('an empty Open Trivia response stays empty, whatever the pool holds', async () => {
+    const { service, httpMock } = configure({
+      seen: { 'otdb:whatever': 100 },
+      pool: [poolQuestion('cached', 'Cached question?')],
+    });
+
+    const promise = service.getQuestions(openTriviaGame(5));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({ response_code: 1, results: [] });
+
+    expect(await promise).toEqual([]);
+    httpMock.verify();
+  });
+
+  it('a short Open Trivia page stays short', async () => {
+    const seenText = 'Served before?';
+    const { service, httpMock } = configure({
+      seen: { [seenKeyFor(makeOfflineQuestion(seenText))]: 100 },
+      pool: [poolQuestion('cached-1', 'Cached one?'), poolQuestion('cached-2', 'Cached two?')],
+    });
+
+    const promise = service.getQuestions(openTriviaGame(5));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({ response_code: 0, results: [openTriviaResult(seenText)] });
+
+    // The one question the API returned has been answered and the pool holds
+    // two that have not, so its slot is substituted — but there is still only
+    // one slot, because one is what the network supplied. *Which* of the two
+    // unseen fills it is a shuffle, so the assertion is that the repeat did
+    // not survive rather than which replacement won.
+    const drawn = await promise;
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].id.startsWith('cached-')).toBe(true);
+    httpMock.verify();
   });
 
   /**

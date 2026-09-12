@@ -34,8 +34,18 @@ let dbCounter = 0;
  * Builds an older database by hand: `questions` keyed the way that version
  * keyed it, plus (from v3) a `game-state` row, so a migration can be observed
  * rather than inferred.
+ *
+ * The seeding connection is closed before resolving, because an open one
+ * blocks the upgrade every other test here is about. `keepOpen` is the
+ * exception that proves it: pass an array and the connection is handed over
+ * still open, which is exactly the older tab the `blocked` case needs, and the
+ * suite's `afterEach` closes it.
  */
-function seedOldDatabase(name: string, version: 2 | 3 | 4 | 5): Promise<void> {
+function seedOldDatabase(
+  name: string,
+  version: 2 | 3 | 4 | 5,
+  options: { keepOpen?: IDBDatabase[] } = {},
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open(name, version);
     open.onupgradeneeded = () => {
@@ -68,8 +78,13 @@ function seedOldDatabase(name: string, version: 2 | 3 | 4 | 5): Promise<void> {
         tx.objectStore(GAME_STATE_STORE).put({ id: 'current', score: 7 });
       }
       tx.oncomplete = () => {
-        // Must close, or this connection blocks the upgrade below.
-        db.close();
+        // Must close, or this connection blocks the upgrade below — which is
+        // precisely what `keepOpen` asks for.
+        if (options.keepOpen) {
+          options.keepOpen.push(db);
+        } else {
+          db.close();
+        }
         resolve();
       };
       tx.onerror = () => {
@@ -196,6 +211,35 @@ describe('OfflineDbService schema (B8)', () => {
     expect(db.version).toBe(6);
     expect(db.objectStoreNames.contains(DAILY_LIMIT_STORE)).toBe(true);
     expect(await readGameState(db)).toEqual({ id: 'current', score: 7 });
+  });
+
+  /**
+   * **`blocked` is a third outcome, and a handler covering only `success` and
+   * `error` turns it into a promise that never settles.**
+   *
+   * The scenario is a deploy, not an exotic one: a tab left open on the
+   * previous bundle holds the database at the old version, the new tab asks
+   * for the new one, and the browser fires `blocked` and then waits. Every
+   * caller here is written to degrade on a *rejected* open — no saved game, no
+   * allowance count, no deduplication — and not one of them is written to
+   * degrade on one that hangs. Since the seen-set is read on the way into a
+   * draw, hanging is the difference between "this tab plays without its local
+   * storage" and Start Game spinning for as long as the other tab stays open.
+   *
+   * The old connection is deliberately left open for the assertion; closing it
+   * is what a real user does eventually, and by then this tab has already been
+   * told.
+   */
+  it('rejects rather than hanging when an older tab is holding the database open', async () => {
+    await seedOldDatabase(dbName, 5, { keepOpen: opened });
+
+    TestBed.configureTestingModule({
+      providers: [{ provide: OFFLINE_DB_NAME, useValue: dbName }],
+    });
+
+    await expect(TestBed.inject(OfflineDbService).open()).rejects.toThrow(
+      /open at an older version in another tab/,
+    );
   });
 
   it('opens once and shares the connection', async () => {
