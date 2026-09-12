@@ -279,11 +279,13 @@
   <p><strong>Trivimind sets no cookies.</strong> It uses your browser's own storage instead:</p>
   <ul>
     <li>
-      <strong>Local storage</strong> — your light/dark theme preference; your sign-in session
-      (managed by Firebase Authentication); and, once you have opened the pricing page, what Pro
-      costs in each currency it is sold in, together with the two-letter country code described
-      above. Those last two are kept so the page can show you a price straight away on your next
-      visit instead of asking again, and both are discarded after 24 hours.
+      <strong>Local storage</strong> — your light/dark theme preference; whether you have muted the
+      game's sound effects, which is a single yes-or-no that stays on this device and is sent
+      nowhere; your sign-in session (managed by Firebase Authentication); and, once you have opened
+      the pricing page, what Pro costs in each currency it is sold in, together with the two-letter
+      country code described above. Those last two are kept so the page can show you a price
+      straight away on your next visit instead of asking again, and both are discarded after 24
+      hours.
     </li>
     <li>
       <strong
@@ -301,6 +303,15 @@
       game can start with no network connection; and a snapshot of a game in progress, so a reload
       or a crash doesn't lose it. The saved game is discarded after six hours. Neither contains
       personal information beyond the game itself.
+    </li>
+    <li>
+      <strong>IndexedDB, once you have answered a question</strong> — a list of the questions you
+      have already answered, so that a later game can ask you something else. Each entry is an
+      identifier and the moment you answered: for a question from the community bank the identifier
+      is that question's own reference, and for one from Open Trivia DB it is a short fingerprint of
+      its wording. Nothing records which answer you gave or whether you were right. It holds at most
+      2,000 entries and the oldest go first. It stays on this device: it is never sent anywhere, it
+      is not tied to your account, and playing on another device starts again.
     </li>
     <li>
       <strong>Service worker cache</strong> — the app's own files (scripts, styles, icons), so it

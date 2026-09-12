@@ -126,6 +126,17 @@ export default defineConfig<object, E2EWorkerOptions>({
      * which the emulator suite does.
      */
     '**/unauthenticated/boot-fallback.spec.ts',
+    /*
+     * Emulator-only because it buys nothing here and costs something. Its
+     * subject is device-local IndexedDB — which questions this browser has
+     * answered — and the emulator exercises that identically; the query shape
+     * and rules it rides on are already covered against the real project by
+     * `game-flow.spec.ts`'s custom-source game. Against `trivimind-dev` it
+     * would instead put seven approved questions into the shared bank on every
+     * PR and spend three full games of real Firestore reads restating a result
+     * the emulator already has.
+     */
+    '**/unauthenticated/question-dedup.spec.ts',
   ],
 
   use: {
