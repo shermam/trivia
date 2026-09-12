@@ -436,18 +436,20 @@ A single card on a light slate background. **No route guard** — access is deci
 
 **Every state is the same height**, and the construction is what makes that true rather than a measurement: each number is rendered from first paint as an em-dash, the five distinct status sentences are stacked in one grid cell so the space reserved is the tallest of them, and the three actions are one grid cell holding the same button box three times. Accuracy shows "—" rather than "0%" when no questions have been answered — `0 / 0` is `NaN`.
 
+Two details a test has to know about. **"Sign in" is not rendered under `?embed=1`** (§9.7) — it opens the top bar's auth menu, and an embed has no top bar; the signed-out state is then the sentence alone, at the same height. And **"Try again" hands focus to the status line before it re-reads**, because the retry puts the card back into its loading state and hides the button that was focused; the status line is where the answer to the retry appears, and "Try again" is one Tab away from it if the second read fails too.
+
 ---
 
 ## 9. Cross-cutting elements & patterns
 
-### 8.1 PRO badge
+### 9.1 PRO badge
 
 A small rounded pill, bold uppercase "PRO" text. Two visual variants used consistently everywhere it appears (game-setup footer link, Auth Menu "Add a question" link, top-bar account trigger):
 
 - **Locked** (non-Pro user): grey background, muted grey text
 - **Unlocked** (Pro user): indigo-100 background, indigo-600 text (indigo-600/white on the "Add a question" button itself, which is solid indigo)
 
-### 8.2 Buttons
+### 9.2 Buttons
 
 Consistent visual vocabulary across the whole app:
 
@@ -458,7 +460,7 @@ Consistent visual vocabulary across the whole app:
 - **Danger-adjacent text buttons**: none — errors are always shown as banners, not button color changes
 - **Destructive-looking dark button**: "Play Again" uses a dark slate fill (distinct from primary indigo), signaling a full reset action
 
-### 8.3 Inline banners (consistent 3-color system across every screen)
+### 9.3 Inline banners (consistent 3-color system across every screen)
 
 - **Red** (`bg-red-50`/`border-red-200`/`text-red-700`): hard errors (failed save, failed load, failed submit)
 - **Amber** (`bg-amber-50`/`border-amber-200`/`text-amber-700`): soft warnings / non-fatal notices (categories failed to load but game still playable; checkout cancelled; existing best score was already higher)
@@ -466,26 +468,26 @@ Consistent visual vocabulary across the whole app:
 - **Indigo** (`bg-indigo-50`/`bg-indigo-100`): neutral call-to-action prompts, not errors (sign-in prompts, verify-email prompts, Pro upsell box, save-score prompt)
 - Most banners now carry a small leading icon reinforcing their color (triangle-alert/circle-alert for amber/red, circle-check-big for green, mail for the verify-email prompt)
 
-### 8.4 Loading / busy conventions
+### 9.4 Loading / busy conventions
 
 - Buttons that trigger an async action disable themselves and swap their label to a present-participle phrase ending in an ellipsis: "Loading Questions…", "Saving…", "Please wait…", "Redirecting…", "Opening billing portal…"
 - The top bar and Pricing's Subscribe button both guard on `authReady()` specifically (distinct from "anonymous") to avoid a one-frame flash of the wrong state before Firebase's first auth callback resolves — shown as "Loading…" in both places.
 
-### 8.5 Form field conventions
+### 9.5 Form field conventions
 
 - All labels are `<label>` elements, small, semibold, slate-500/600, positioned directly above their control with a small gap
 - All text/select inputs share the same shape: `rounded-xl` corners, thin slate border, indigo focus ring; `<select>`s use a custom chevron-down icon (native arrow hidden via `appearance-none`)
 - Segmented "pill" radio groups (Question Source, Question Type, True/False, Multiple/True-False question type) are used instead of native radio buttons or dropdowns wherever the option set is small (2–3 choices) — the underlying `<input type="radio">` is visually hidden (`sr-only`) and its wrapping `<label>` is styled as the visible control, with the selected option getting an indigo-100 fill + indigo-600 bold text; unselected labels use slate-600 (not a lighter grey) to keep body text at a readable contrast ratio against the segmented control's slate-100 track
 
-### 8.6 Elevation & shape tokens
+### 9.6 Elevation & shape tokens
 
 Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s shadow scale so every surface pulls from the same set: `shadow-card` (subtle card shadow), `shadow-card-lg` (quiz/game-over/leaderboard cards), `shadow-hero-card` (game-setup's large gradient-backed card), `shadow-dropdown` (auth menu), `shadow-cta`/`shadow-cta-hover` (primary gradient buttons), `shadow-pro-card` (pricing's Pro card). Corner radii follow Tailwind's default scale: `rounded-3xl` (24px, cards), `rounded-2xl` (16px, dropdowns/sub-cards), `rounded-xl` (12px, buttons/inputs/segmented controls).
 
-### 8.7 Embed mode (`?embed=1`)
+### 9.7 Embed mode (`?embed=1`)
 
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
-- On Game Over, the "Sign in" button in the anonymous-player prompt is also hidden (there's nowhere for it to open a menu into), leaving just the explanatory text.
-- All other screens/logic behave identically; this only affects the top bar's presence and that one button.
+- Every other button that opens the auth menu is hidden with it, since there is nowhere for it to open a menu into: Game Over's "Sign in" in the anonymous-player prompt (§3), and `/profile`'s "Sign in" in the signed-out state (§8). Both leave the explanatory text, at the same height.
+- All other screens/logic behave identically; this only affects the top bar's presence and those auth-menu openers.
 
 ---
 

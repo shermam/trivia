@@ -1,7 +1,9 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, GameplayStats } from '../../services/firebase.service';
 import { ProfileStatsComponent } from './profile-stats.component';
 
@@ -46,14 +48,21 @@ function stats(overrides: Partial<GameplayStats> = {}): GameplayStats {
   };
 }
 
-function setup(
-  options: {
-    user?: FakeUser | null;
-    authReady?: boolean;
-    result?: GameplayStats | null;
-    fails?: boolean;
-  } = {},
-) {
+interface SetupOptions {
+  user?: FakeUser | null;
+  authReady?: boolean;
+  result?: GameplayStats | null;
+  fails?: boolean;
+  embedded?: boolean;
+}
+
+/**
+ * Providers only — no component. `setup()` below drives an instance built by
+ * hand, and `render()` at the bottom needs the same doubles behind a real
+ * fixture; creating a component here would give the rendered tests a second
+ * instance and let them assert against the one they are not driving.
+ */
+function configure(options: SetupOptions = {}) {
   const { user = { uid: 'u1', isAnonymous: false }, authReady = true } = options;
 
   const userSignal = signal<FakeUser | null>(user);
@@ -70,6 +79,9 @@ function setup(
 
   TestBed.configureTestingModule({
     providers: [
+      // The template's two `routerLink`s need an `ActivatedRoute`; nothing here
+      // navigates, so the route table is empty.
+      provideRouter([]),
       { provide: FirebaseService, useValue: { getGameplayStats } },
       {
         provide: AuthService,
@@ -80,8 +92,20 @@ function setup(
         },
       },
       { provide: AuthMenuStateService, useValue: { open } },
+      // The real service reads `window.location.search` once, at construction,
+      // so embed mode is not something a test can turn on afterwards.
+      {
+        provide: EmbedModeService,
+        useValue: { isEmbedded: () => options.embedded ?? false },
+      },
     ],
   });
+
+  return { getGameplayStats, userSignal, authReadySignal, open };
+}
+
+function setup(options: SetupOptions = {}) {
+  const doubles = configure(options);
 
   const component = TestBed.runInInjectionContext(
     () => new ProfileStatsComponent(),
@@ -89,7 +113,7 @@ function setup(
 
   // The read is started from an effect, so nothing has happened yet — every
   // test drives `settle()` below before asserting.
-  return { component, getGameplayStats, userSignal, authReadySignal, open };
+  return { component, ...doubles };
 }
 
 /** Runs pending effects, then drains the microtask queue the read resolves on. */
@@ -290,5 +314,75 @@ describe('ProfileStatsComponent', () => {
     component.openSignIn();
 
     expect(open).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * The cases above drive the class; these two need the template, because what
+ * they are about is which elements exist and where focus is — neither of which
+ * a signal can answer.
+ *
+ * jsdom has no layout and no stylesheet, so `invisible` is inert here: an
+ * element the browser would hide is still focusable in these tests. That makes
+ * the focus case below a test of the *deliberate* move and not of the fallout
+ * from it — the fallout is what `profile-stats.spec.ts` measures in Chromium.
+ */
+describe('ProfileStatsComponent (rendered)', () => {
+  async function render(options: SetupOptions = {}) {
+    const doubles = configure(options);
+    const fixture = TestBed.createComponent(ProfileStatsComponent);
+    fixture.detectChanges();
+    await settle();
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    return {
+      ...doubles,
+      fixture,
+      query: (selector: string) => host.querySelector<HTMLElement>(selector),
+    };
+  }
+
+  it('offers the signed-out visitor a sign-in button', async () => {
+    const { query } = await render({ user: { uid: 'anon', isAnonymous: true } });
+
+    expect(query('[data-cy="stats-signed-out"]')).not.toBeNull();
+    expect(query('[data-cy="stats-sign-in"]')).not.toBeNull();
+  });
+
+  /**
+   * `?embed=1` removes the top bar, and with it the auth menu this button
+   * opens — so rendering it in an embed puts a control on the page that
+   * cannot do the thing it names. Game-over's identical opener is gated the
+   * same way. The explanation stays: it is the half that still applies.
+   */
+  it('drops the sign-in button in an embed, where there is no menu to open', async () => {
+    const { query } = await render({
+      user: { uid: 'anon', isAnonymous: true },
+      embedded: true,
+    });
+
+    expect(query('[data-cy="stats-sign-in"]')).toBeNull();
+    expect(query('[data-cy="stats-signed-out"]')).not.toBeNull();
+  });
+
+  /**
+   * Retrying puts the card back into its loading state, which turns "Try
+   * again" `visibility: hidden` — and focus on a hidden element does not stay
+   * put, it drops silently to `<body>` (`CLAUDE.md` §4.4). A keyboard user
+   * would then be at the top of the document, tabbing back down to a button
+   * they had already reached once.
+   */
+  it('moves focus to the status line when a retry hides the button it was on', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { query, fixture } = await render({ fails: true });
+
+    const retry = query('[data-cy="stats-retry"]')!;
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+
+    retry.click();
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(query('[data-cy="stats-status"]'));
   });
 });

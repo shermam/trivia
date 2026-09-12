@@ -3,12 +3,15 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, GameplayStats } from '../../services/firebase.service';
 import { IconComponent, IconName } from '../icon/icon.component';
 
@@ -81,6 +84,17 @@ export class ProfileStatsComponent {
   private readonly firebaseService = inject(FirebaseService);
   private readonly authService = inject(AuthService);
   private readonly authMenuState = inject(AuthMenuStateService);
+  protected readonly embedMode = inject(EmbedModeService);
+
+  /**
+   * The block of stacked messages, focused when a retry starts — see `retry()`.
+   *
+   * A `viewChild` of an element that is rendered unconditionally and visible in
+   * every state, which is what makes a plain `focus()` in the click handler
+   * correct here rather than an `afterRenderEffect`: nothing about this element
+   * depends on the binding that is changing (`CLAUDE.md` §4.4).
+   */
+  private readonly statusRegion = viewChild<ElementRef<HTMLElement>>('statusRegion');
 
   private readonly statsSignal = signal<GameplayStats | null>(null);
   private readonly hasReadSignal = signal(false);
@@ -241,12 +255,25 @@ export class ProfileStatsComponent {
     });
   }
 
-  /** Re-runs a read that failed. The only action the failed state offers. */
+  /**
+   * Re-runs a read that failed. The only action the failed state offers.
+   *
+   * **It moves focus before it starts the read**, because starting the read is
+   * what takes the focused element away: the view goes back to `loading`, "Try
+   * again" turns `visibility: hidden`, and focus on a hidden element silently
+   * drops to `<body>` (`CLAUDE.md` §4.4) — sending a keyboard user back to the
+   * top of the document to reach a second "Try again". Focus goes to the block
+   * of messages rather than the page heading: it is visible in every state, it
+   * carries the sentence that answers the retry, and it sits directly above the
+   * tiles and the action row, so the button is one Tab away if this fails too.
+   */
   protected retry(): void {
     const uid = this.signedInUid();
-    if (uid !== null) {
-      void this.read(uid);
+    if (uid === null) {
+      return;
     }
+    this.statusRegion()?.nativeElement.focus();
+    void this.read(uid);
   }
 
   /**

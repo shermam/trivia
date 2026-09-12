@@ -20,9 +20,11 @@
 
     <!-- Everything on this card arrives after a round trip, and none of it
          changes anything a screen reader is told unless it is announced (G3,
-         `CLAUDE.md` §4.5). Permanent and only its text changes: a live region
-         inserted into the DOM already carrying its message is routinely
-         missed. -->
+         `CLAUDE.md` §4.5). It mounts with the route and empty, and only ever
+         changes its text — which is what makes every later state change
+         announced: a live region that arrives in the DOM already carrying its
+         message is routinely missed, so a region created when the answer lands
+         would announce nothing at all. -->
     <p role="status" class="sr-only">{{ statusAnnouncement() }}</p>
 
     <div
@@ -39,8 +41,11 @@
         laid out, which is what reserves the height, while the text drops out
         of the accessibility tree and out of `innerText` so only the live state
         is ever read out.
+
+        `tabindex="-1"` is not decoration: `retry()` hands focus here, because
+        the button it is called from is about to be hidden. See its comment.
       -->
-      <div class="grid mb-6">
+      <div #statusRegion tabindex="-1" data-cy="stats-status" class="grid mb-6 focus:outline-none">
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
           [class.invisible]="view() !== 'loading'"
@@ -135,15 +140,23 @@
           <app-icon name="zap" [size]="15" />
           Start a game
         </a>
-        <button
-          type="button"
-          data-cy="stats-sign-in"
-          (click)="openSignIn()"
-          class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
-          [class.invisible]="view() !== 'signedOut'"
-        >
-          Sign in
-        </button>
+        <!-- Gated exactly as game-over's identical opener is: this opens the
+             top bar's auth menu, and `?embed=1` removes the top bar, so in an
+             embed the button would be a control that does nothing. Removing it
+             costs no reserved height — the other two controls are the same box
+             and stay laid out while invisible, so the row keeps the height
+             they give it. -->
+        @if (!embedMode.isEmbedded()) {
+          <button
+            type="button"
+            data-cy="stats-sign-in"
+            (click)="openSignIn()"
+            class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
+            [class.invisible]="view() !== 'signedOut'"
+          >
+            Sign in
+          </button>
+        }
         <button
           type="button"
           data-cy="stats-retry"

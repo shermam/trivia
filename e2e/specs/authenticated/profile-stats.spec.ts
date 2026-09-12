@@ -164,6 +164,68 @@ test.describe('profile — lifetime stats', () => {
   });
 
   /**
+   * A read that fails is the one state with an action of its own, and the two
+   * halves of it are easy to get wrong in opposite directions: showing "you
+   * have not finished a game yet" to somebody whose totals are merely
+   * unreachable (`CLAUDE.md` §4.4), and dropping focus when the retry hides
+   * the button it was pressed from.
+   *
+   * The focus half needs a real browser and cannot be faked: `invisible` is
+   * `visibility: hidden`, which jsdom does not compute and does not enforce
+   * for `focus()` — so the unit case proves the move is deliberate, and this
+   * proves it is necessary.
+   */
+  test('offers a retry when the read fails, and does not drop focus doing it', async ({
+    page,
+    firebase,
+  }) => {
+    const email = uniqueEmail();
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    await firebase.seedGameplayStats({
+      uid,
+      gamesPlayed: 4,
+      questionsAnswered: 40,
+      correctAnswers: 31,
+      bestStreak: 9,
+      statsSince: Date.UTC(2026, 0, 15),
+    });
+
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+
+    // Installed after signing in, so the only read it can reach is the one
+    // `/profile` makes.
+    const stats = await breakStatsRead(page);
+    await page.goto('/profile');
+
+    await expect(page.getByTestId('stats-failed')).toBeVisible();
+    await expect(page.getByTestId('stats-retry')).toBeVisible();
+    // The account has totals. Saying "nothing banked yet" here would be a
+    // cause nobody verified, told to somebody whose numbers are fine.
+    await expect(page.getByTestId('stats-empty')).toBeHidden();
+    await expect(page.getByTestId('stat-games-played')).toHaveText('—');
+
+    const retry = page.getByTestId('stats-retry');
+    await retry.focus();
+    await expect(retry).toBeFocused();
+
+    stats.recover();
+    await retry.click();
+
+    // The button that was clicked is now hidden, and focus has to have been
+    // put somewhere on purpose: asked to stay on a hidden element it goes to
+    // `<body>` silently, which is the top of the document.
+    await expect(page.getByTestId('stats-status')).toBeFocused();
+
+    await expect(page.getByTestId('stat-games-played')).toHaveText('4');
+    await expect(page.getByTestId('stats-since')).toBeVisible();
+
+    // The intercept is load-bearing: one that stopped matching would leave
+    // this asserting the happy path twice (`CLAUDE.md` §4.6).
+    expect(stats.broken.reads, 'stats reads the intercept refused').toBeGreaterThan(0);
+  });
+
+  /**
    * An anonymous visitor has no document and never will — the callable refuses
    * to create one, because nothing would ever delete it (`docs/data-model.md`)
    * — so the screen explains that rather than showing zeroes, and offers the
@@ -225,4 +287,32 @@ async function holdStatsRead(page: Page) {
   });
 
   return { release: () => release(), held };
+}
+
+/**
+ * Refuses the `users/{uid}` read until `recover()` is called, so the failed
+ * state can be driven rather than waited for.
+ *
+ * One handler with a flag rather than `page.unroute`: unrouting races the
+ * click that triggers the next read, and the point of the test is what happens
+ * on the read *after* the refusal.
+ */
+async function breakStatsRead(page: Page) {
+  const broken = { reads: 0, failing: true };
+
+  await page.route(STATS_READ, async (route) => {
+    if (broken.failing) {
+      broken.reads += 1;
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  return {
+    broken,
+    recover: () => {
+      broken.failing = false;
+    },
+  };
 }
