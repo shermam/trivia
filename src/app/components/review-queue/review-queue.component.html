@@ -146,6 +146,16 @@
               -->
               <app-source-link [url]="question.sourceUrl" [title]="question.sourceTitle" />
 
+              <!--
+                The contributor's justification, when they gave one. This is
+                the card's reason to exist for a tricky question: the source
+                says where to check, the justification says what the
+                contributor believes the source shows — and a reviewer who has
+                both can approve on evidence rather than on plausibility.
+                Renders nothing when there is none, which is the common case.
+              -->
+              <app-question-justification [text]="question.explanation" />
+
               <div class="flex gap-2 mt-4">
                 @if (activeStatus() !== 'approved') {
                   <button

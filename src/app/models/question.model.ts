@@ -100,6 +100,18 @@ export interface TriviaQuestion {
   sourceUrl?: string;
   /** A human label for `sourceUrl`, or a citation with no link at all. */
   sourceTitle?: string;
+  /**
+   * The contributor's own justification for the question, its correct answer
+   * and its distractors — for the "tricky" question where none of that is
+   * obvious even to somebody who knows the subject.
+   *
+   * Named for `FEAT-006`, which owns this field's later life: a reviewer will
+   * be able to edit it at review time. The form labels it **Justification**,
+   * which is what a contributor is being asked for; the field keeps the name
+   * the two features share so the second one does not have to introduce a
+   * near-duplicate.
+   */
+  explanation?: string;
 }
 
 /**
@@ -191,6 +203,13 @@ export interface CustomQuestionContent {
   sourceUrl?: string;
   /** A label for `sourceUrl`, or a citation with no link — a book, an edition. */
   sourceTitle?: string;
+  /**
+   * The contributor's justification for the question and its answers
+   * (`FEAT-006`'s `explanation`, offered on the form as **Justification**).
+   * Optional; `firestore.rules` caps it at 1000 characters and refuses an
+   * empty string, so "none given" is an absent key.
+   */
+  explanation?: string;
 }
 
 /**

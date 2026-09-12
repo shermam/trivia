@@ -311,13 +311,15 @@ export class TriviaService {
         })),
       ]),
       source,
-      // Carried through only when present, and only a `custom` question can
-      // have one — Open Trivia DB exposes no citation. Spread rather than
-      // assigned so the key is absent rather than `undefined`, which keeps a
-      // question that has no source from serialising one into the saved-game
-      // snapshot and the offline pool.
+      // The three optional fields a contributor may attach (`FEAT-022`), all
+      // of which only a `custom` question can carry — Open Trivia DB exposes
+      // neither a citation nor a justification. Spread rather than assigned so
+      // each key is absent rather than `undefined`, which keeps a question
+      // that has none from serialising them into the saved-game snapshot and
+      // the offline pool.
       ...('sourceUrl' in raw && raw.sourceUrl ? { sourceUrl: raw.sourceUrl } : {}),
       ...('sourceTitle' in raw && raw.sourceTitle ? { sourceTitle: raw.sourceTitle } : {}),
+      ...('explanation' in raw && raw.explanation ? { explanation: raw.explanation } : {}),
     };
   }
 }

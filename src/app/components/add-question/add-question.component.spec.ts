@@ -83,6 +83,7 @@ function setup(
         type: { setValue: (v: string) => void };
         sourceUrl: { setValue: (v: string) => void };
         sourceTitle: { setValue: (v: string) => void };
+        explanation: { setValue: (v: string) => void };
         incorrectAnswers: { controls: { setValue: (v: string) => void }[] };
       };
     };
@@ -302,6 +303,81 @@ describe('AddQuestionComponent source attribution', () => {
   });
 });
 
+/**
+ * The Justification box (`explanation`). Optional like the source fields, and
+ * for the same reason: a contributor who thinks it is required will write
+ * something, and reasoning invented to fill a box is worse than none.
+ */
+describe('AddQuestionComponent justification', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('writes no key at all when the box is left alone', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('explanation' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  it('writes the justification, trimmed, when one is given', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('  Water is two hydrogens and an oxygen.  ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0]).toMatchObject({
+      explanation: 'Water is two hydrogens and an oxygen.',
+    });
+  });
+
+  it('keeps the line breaks a multi-paragraph justification was written with', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('CO2 is carbon dioxide.\nO2 is oxygen gas.');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].explanation).toBe(
+      'CO2 is carbon dioxide.\nO2 is oxygen gas.',
+    );
+  });
+
+  it('drops a whitespace-only justification rather than writing one the rules refuse', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('   \n  ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('explanation' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  it('accepts a justification exactly at the 1000-character cap the rules set', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('j'.repeat(1000));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a justification past that cap, before it reaches the rules', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('j'.repeat(1001));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+    expect(component.validationSummary()).toMatch(/justification/i);
+  });
+});
+
 describe('AddQuestionComponent submit failures', () => {
   afterEach(() => TestBed.resetTestingModule());
 
@@ -399,6 +475,33 @@ describe('AddQuestionComponent rendered feedback', () => {
     const input: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl');
     expect(input?.getAttribute('aria-invalid')).toBe('true');
     expect(input?.getAttribute('aria-describedby')).toBe('sourceUrl-error');
+  });
+
+  /**
+   * Same regression as the source controls, one field along: a control missing
+   * from `fieldLabels` is invisible to both the summary and the focus move, so
+   * an over-long justification would block the submit while naming nothing.
+   * The box is the last control on the form and the easiest to have scrolled
+   * past, which is exactly when "nothing happened" is least diagnosable.
+   */
+  it('names and focuses an over-long justification', async () => {
+    const { fixture, component, fillValidForm } = setup();
+    fixture.detectChanges();
+    fillValidForm();
+    component.form.controls.explanation.setValue('j'.repeat(1001));
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    expect(component.validationSummary()).toMatch(/justification/i);
+    expect(document.activeElement?.id).toBe('explanation');
+
+    const error: HTMLElement | null = fixture.nativeElement.querySelector('#explanation-error');
+    expect(error?.textContent).toMatch(/1000 characters or fewer/);
+    const box: HTMLElement | null = fixture.nativeElement.querySelector('#explanation');
+    expect(box?.tagName).toBe('TEXTAREA');
+    expect(box?.getAttribute('aria-invalid')).toBe('true');
+    expect(box?.getAttribute('aria-describedby')).toBe('explanation-error');
   });
 
   it('moves focus to the first invalid field so the problem is unmissable', async () => {

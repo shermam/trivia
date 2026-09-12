@@ -1401,6 +1401,26 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     expect(rows[1].querySelector('[data-cy="question-source"]')).toBeNull();
   });
 
+  it("offers the contributor's justification on the row that carries one", () => {
+    const explained = recapQuestion('q0', {
+      explanation: 'CO2 and O2 are both real molecules, which is what makes this one tricky.',
+    });
+    const { open, queryAll } = render({
+      questions: [explained, q1],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    expect(rows[0].querySelector('[data-cy="question-justification"]')?.textContent).toContain(
+      'both real molecules',
+    );
+
+    // The common case: no justification, and therefore no row furniture at
+    // all — no heading, no reserved empty block.
+    expect(rows[1].querySelector('[data-cy="question-justification"]')).toBeNull();
+  });
+
   it('shows a citation with no link as plain text', () => {
     const cited = recapQuestion('q0', { sourceTitle: 'Feynman Lectures, Vol. II' });
     const { open, queryAll } = render({

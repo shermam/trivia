@@ -416,6 +416,53 @@
           }
         </div>
 
+        <!--
+          The Justification box (`FEAT-006`'s `explanation` field). For the
+          "tricky" question where neither the right answer nor the wrong ones
+          are obvious to somebody who already knows the subject — the reviewer
+          reads it before deciding, and the player reads it in the recap after
+          answering.
+
+          No native `maxlength`: nothing else on this form has one, and a
+          silently truncated paste is a worse failure than a named error. The
+          `maxLength` validator mirrors `firestore.rules`' 1000-character cap
+          and reports against the field.
+        -->
+        <div>
+          <label
+            for="explanation"
+            class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+          >
+            Justification
+            <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+          </label>
+          <textarea
+            id="explanation"
+            rows="3"
+            formControlName="explanation"
+            data-cy="justification"
+            placeholder="Why is the right answer right, and why are the others wrong?"
+            [attr.aria-invalid]="showsError(form.controls.explanation)"
+            [attr.aria-describedby]="
+              showsError(form.controls.explanation) ? 'explanation-error' : null
+            "
+            class="w-full rounded-xl border-[1.5px] border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-emerald-600 focus:outline-none transition-colors"
+          ></textarea>
+          @if (showsError(form.controls.explanation)) {
+            <p
+              id="explanation-error"
+              data-cy="justification-error"
+              class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+            >
+              {{ errorFor(form.controls.explanation, 'Justification', 1000) }}
+            </p>
+          }
+          <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+            Only needed for a tricky question — where knowing the subject still isn't enough to see
+            why the right answer is right. Reviewers see it, and so do players after they answer.
+          </p>
+        </div>
+
         @if (submitError()) {
           <p
             class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"

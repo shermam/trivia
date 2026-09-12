@@ -23,12 +23,14 @@ export interface CustomQuestionSeed {
   status?: 'approved' | 'pending' | 'rejected';
   createdAt?: number;
   /**
-   * Optional source attribution (`FEAT-022`). Optional in the schema too, not
-   * merely here — almost no question in the bank has one, so a spec asserting
-   * the *absence* of a source link is testing the common case.
+   * The optional contributor fields (`FEAT-022`): where the answer comes from,
+   * and why it is the answer. Optional in the schema too, not merely here —
+   * almost no question in the bank carries any of them, so a spec asserting
+   * their *absence* is testing the common case.
    */
   sourceUrl?: string;
   sourceTitle?: string;
+  explanation?: string;
 }
 
 export interface VerifiedUserSeed {

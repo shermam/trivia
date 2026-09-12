@@ -92,6 +92,13 @@ export class AddQuestionComponent implements OnInit {
     // that silently did nothing. Whitespace-only needs no validator of its
     // own: it trims to '' and is omitted from the write.
     sourceTitle: ['', [Validators.maxLength(200)]],
+    // The "Justification" box, for a question whose answer is not obvious even
+    // to somebody who knows the subject. Optional for the same reason the two
+    // above are, and bounded at 1000 to match `firestore.rules` — twice the
+    // question's own cap, because it has to explain the question, the right
+    // answer and the wrong ones. No `nonBlank`: whitespace-only trims to '' and
+    // is dropped from the write rather than making the whole form invalid.
+    explanation: ['', [Validators.maxLength(1000)]],
     // Required only for a "multiple" question — for a boolean one these three
     // are irrelevant and hidden, and the opposite value is derived instead.
     // The validators are therefore applied and cleared as `type` changes
@@ -190,6 +197,7 @@ export class AddQuestionComponent implements OnInit {
     const isBoolean = raw.type === 'boolean';
     const sourceUrl = raw.sourceUrl.trim();
     const sourceTitle = raw.sourceTitle.trim();
+    const explanation = raw.explanation.trim();
     const incorrectAnswers = isBoolean
       ? [raw.correctAnswer.trim() === 'True' ? 'False' : 'True']
       : raw.incorrectAnswers.map((answer) => answer.trim());
@@ -237,10 +245,11 @@ export class AddQuestionComponent implements OnInit {
       createdBy: author.uid,
       createdAt: Date.now(),
       // Omitted entirely when blank rather than written as an empty string:
-      // `firestore.rules` refuses an empty `sourceTitle`, and a key that is
-      // absent is the honest representation of "no citation given".
+      // `firestore.rules` refuses an empty `sourceTitle` or `explanation`, and
+      // a key that is absent is the honest representation of "not given".
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(sourceTitle ? { sourceTitle } : {}),
+      ...(explanation ? { explanation } : {}),
     };
 
     this.isSubmitting.set(true);
@@ -319,6 +328,7 @@ export class AddQuestionComponent implements OnInit {
     // a different route.
     { control: this.form.controls.sourceUrl, id: 'sourceUrl', label: 'Source link' },
     { control: this.form.controls.sourceTitle, id: 'sourceTitle', label: 'Source name' },
+    { control: this.form.controls.explanation, id: 'explanation', label: 'Justification' },
   ];
 
   private describeMissingFields(): string {

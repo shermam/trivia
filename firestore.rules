@@ -241,7 +241,7 @@ service cloud.firestore {
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
                  'incorrect_answers', 'createdBy', 'createdAt', 'status',
-                 'sourceUrl', 'sourceTitle']
+                 'sourceUrl', 'sourceTitle', 'explanation']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
             && data.type in ['multiple', 'boolean']
@@ -277,6 +277,21 @@ service cloud.firestore {
                 || (data.sourceTitle is string
                     && data.sourceTitle.size() > 0
                     && data.sourceTitle.size() <= 200))
+            // The contributor's justification for a question whose answer is
+            // not obvious even to somebody who knows the subject (`FEAT-006`
+            // owns this field's later life, where a reviewer may edit it —
+            // which is why it carries that spec's name rather than the label
+            // the form shows). Optional like the two above, and bounded at
+            // 1000 rather than the 500 a question gets: it has to hold a
+            // paragraph explaining the question, the correct answer *and* the
+            // distractors, which is strictly more text than the question
+            // itself. Non-empty when present, so "no justification" is an
+            // absent key rather than a blank one there is no way to tell from
+            // a deleted one.
+            && (!('explanation' in data)
+                || (data.explanation is string
+                    && data.explanation.size() > 0
+                    && data.explanation.size() <= 1000))
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
             // click against `correct_answer` by text, so the wrong option

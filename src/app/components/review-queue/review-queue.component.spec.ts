@@ -264,4 +264,19 @@ describe('ReviewQueueComponent source attribution', () => {
 
     expect(cards[0].querySelector('[data-cy="question-source"]')).toBeNull();
   });
+
+  it("shows the contributor's justification, which is what a tricky question is approved on", async () => {
+    const cards = await render([
+      question('p1', { explanation: 'Every distractor is a real molecule, which is the trick.' }),
+    ]);
+
+    const justification = cards[0].querySelector('[data-cy="question-justification"]');
+    expect(justification?.textContent).toContain('Every distractor is a real molecule');
+  });
+
+  it('renders no justification block on a card that carries none', async () => {
+    const cards = await render([question('p1')]);
+
+    expect(cards[0].querySelector('[data-cy="question-justification"]')).toBeNull();
+  });
 });

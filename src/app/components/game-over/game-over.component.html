@@ -701,6 +701,17 @@
                       [url]="row.question.sourceUrl"
                       [title]="row.question.sourceTitle"
                     />
+
+                    <!--
+                      And the contributor's justification, for a question whose
+                      answer is not obvious even to somebody who knows the
+                      subject. The recap is the right place for it: the player
+                      has already answered, so nothing can be given away, and
+                      this is the screen someone reaches when they doubt a
+                      result. Absent on almost every question, and renders
+                      nothing when it is.
+                    -->
+                    <app-question-justification [text]="row.question.explanation" />
                   </div>
                 </div>
               </li>

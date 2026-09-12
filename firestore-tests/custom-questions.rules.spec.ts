@@ -105,15 +105,17 @@ describe('custom_questions: read — approved is public, the rest is reviewers o
 });
 
 /**
- * `FEAT-022`. Two optional fields carrying where a contributed question came
- * from. Both directions, because a suite of nothing but `assertFails` passes
- * against a rule that denies everything (`CLAUDE.md` §4.6).
+ * `FEAT-022`. Three optional fields a contributor may attach: where the
+ * question came from (`sourceUrl`, `sourceTitle`) and why its answers are what
+ * they are (`explanation`, rendered as **Justification**). Both directions,
+ * because a suite of nothing but `assertFails` passes against a rule that
+ * denies everything (`CLAUDE.md` §4.6).
  *
  * The accept cases are the load-bearing ones here: the whole feature is
  * optional fields, so a rule that refused them all would look exactly like a
  * rule that worked, on every question written so far.
  */
-describe('custom_questions: source attribution (FEAT-022)', () => {
+describe('custom_questions: contributor attribution (FEAT-022)', () => {
   it('accepts a question with no source at all — the normal case', async () => {
     await assertSucceeds(
       submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: validQuestion('pro') }),
@@ -236,6 +238,106 @@ describe('custom_questions: source attribution (FEAT-022)', () => {
         status: 'approved',
         sourceUrl: 'https://example.org/injected',
       }),
+    );
+  });
+
+  it('accepts a justification on its own, with no source at all', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', {
+          explanation: 'Water is H2O because each molecule bonds two hydrogens to one oxygen.',
+        }),
+      }),
+    );
+  });
+
+  it('accepts a justification alongside a source', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', {
+          sourceUrl: 'https://en.wikipedia.org/wiki/Water',
+          sourceTitle: 'Water — Wikipedia',
+          explanation: 'The distractors are all real molecules, which is what makes it tricky.',
+        }),
+      }),
+    );
+  });
+
+  /** A justification is prose, and prose has paragraphs. */
+  it('accepts a multi-line justification at the length cap', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { explanation: `a\n${'b'.repeat(998)}` }),
+      }),
+    );
+  });
+
+  it('refuses an empty justification', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { explanation: '' }),
+      }),
+    );
+  });
+
+  it('refuses a justification one character past the cap', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { explanation: 'j'.repeat(1001) }),
+      }),
+    );
+  });
+
+  it('refuses a non-string justification', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { explanation: { text: 'nope' } }),
+      }),
+    );
+  });
+
+  /**
+   * The same regression as the source fields, and the one `FEAT-006` will
+   * deliberately reverse when it ships edit-and-approve: **until it does**,
+   * widening the create allowlist must not let a reviewer write prose onto
+   * somebody else's question while approving it. `hasOnly(['status'])` is the
+   * only thing standing between the two.
+   */
+  it('does not let a reviewer add or change a justification', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'q1'), validQuestion('author'));
+    });
+    await grantReviewer(env, 'mod');
+
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), {
+        explanation: 'Words the author never wrote.',
+      }),
+    );
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), {
+        status: 'approved',
+        explanation: 'Words the author never wrote.',
+      }),
+    );
+  });
+
+  it('does not let the author rewrite their own justification after submitting', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { explanation: 'The original reasoning.' }),
+      );
+    });
+
+    await assertFails(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), { explanation: 'Something else entirely.' }),
     );
   });
 

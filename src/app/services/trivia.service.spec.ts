@@ -487,7 +487,7 @@ describe('TriviaService entity decoding is per source', () => {
  * key has to stay *absent*, not become `undefined`, because `undefined` is
  * what a `hasOnly()`-shaped write would later reject.
  */
-describe('TriviaService source attribution passes through the mapper', () => {
+describe('TriviaService contributor attribution passes through the mapper', () => {
   function configure(customQuestions: unknown[]) {
     TestBed.configureTestingModule({
       providers: [
@@ -527,13 +527,22 @@ describe('TriviaService source attribution passes through the mapper', () => {
     expect(question.sourceTitle).toBe('Example Journal');
   });
 
-  it('leaves both keys absent when the document has no source', async () => {
+  it('leaves every key absent when the document has none of them', async () => {
     configure([base]);
 
     const [question] = await play();
 
     expect('sourceUrl' in question).toBe(false);
     expect('sourceTitle' in question).toBe(false);
+    expect('explanation' in question).toBe(false);
+  });
+
+  it('carries the justification through to the question the recap renders', async () => {
+    configure([{ ...base, explanation: 'Each molecule bonds two hydrogens to one oxygen.' }]);
+
+    const [question] = await play();
+
+    expect(question.explanation).toBe('Each molecule bonds two hydrogens to one oxygen.');
   });
 
   it('does not decode entities in a source title, the way it leaves every other Firestore field alone', async () => {

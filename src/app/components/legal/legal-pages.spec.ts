@@ -192,16 +192,17 @@ describe('legal pages', () => {
    * `FEAT-022` falsified an enumeration rather than a claim, which is the
    * quieter way one of these documents goes stale. The policy listed what a
    * published question exposes — "its text, the answers, the category and the
-   * difficulty" — and reads as exhaustive, so shipping two more published
+   * difficulty" — and reads as exhaustive, so shipping three more published
    * fields made it wrong without touching a sentence anyone would think to
-   * re-read. This pins both halves: that the list names the source fields, and
-   * that the outbound-link paragraph's `noreferrer` promise is still one the
-   * app keeps (`SourceLinkComponent` asserts the attribute itself).
+   * re-read. This pins both halves: that the list names the source fields and
+   * the justification, and that the outbound-link paragraph's `noreferrer`
+   * promise is still one the app keeps (`SourceLinkComponent` asserts the
+   * attribute itself).
    */
-  it('lists the source fields among what a published question exposes', async () => {
+  it('lists every optional contributor field among what a published question exposes', async () => {
     const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
 
-    expect(text).toContain('the source link and source name');
+    expect(text).toContain('the source link, the source name and the justification');
     expect(text).toContain('your browser sends no referrer');
   });
 
