@@ -88,6 +88,40 @@ const checks = [
     },
   },
   {
+    // The one Hosting **rewrite** to a function, so it is the one path where a
+    // deployed, healthy function is still invisible to the browser: a rewrite
+    // that stops matching answers `200 text/html` with the SPA shell instead,
+    // which no status-code check can tell from success. The client degrades to
+    // its time-zone fallback rather than breaking, so nothing else would ever
+    // report it — the pricing page would simply stop pre-selecting BRL for
+    // Brazilian visitors and go back to declining their cards.
+    //
+    // The country itself is not asserted: this runs from a GitHub Actions
+    // runner, so the honest expectation is a well-formed answer, not a
+    // particular one.
+    name: 'the /api/geo rewrite reaches its function and answers JSON',
+    async run() {
+      const response = await get('/api/geo');
+      expect(response.status === 200, `expected 200, got ${response.status}`);
+      const type = response.headers.get('content-type') ?? '';
+      expect(
+        type.includes('application/json'),
+        `expected JSON, got "${type}" — the rewrite fell through to the SPA shell`,
+      );
+      const body = JSON.parse(response.body);
+      expect(
+        body.country === null || /^[A-Z]{2}$/.test(body.country),
+        `expected a two-letter country or null, got ${JSON.stringify(body.country)}`,
+      );
+      // A shared cache holding one visitor's country and serving it to the
+      // next is the only way this endpoint can be actively wrong.
+      expect(
+        (response.headers.get('cache-control') ?? '').includes('no-store'),
+        'the geo response is cacheable',
+      );
+    },
+  },
+  {
     // Proves the functions package is deployed *and* that its authorisation
     // boundary holds, without executing anything: the callable rejects an
     // unauthenticated caller before it does any work. A 404 here is exactly the

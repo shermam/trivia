@@ -58,6 +58,75 @@ async function holdCatalogRead(page: Page) {
 }
 
 /**
+ * Answers `/api/geo` with a country, as a real deployment does.
+ *
+ * The endpoint does not exist under `ng serve` — it is a Firebase Hosting
+ * rewrite to a Cloud Function, and the dev server has neither — so every
+ * unmocked test in this file exercises the "unknown" path by construction,
+ * which is the same path a PR preview channel runs (`docs/ci-cd.md` §4.2a).
+ * That makes this the only way to drive the server branch here, and it is also
+ * the only way to drive it *deterministically* anywhere: the real answer
+ * depends on where the runner is.
+ *
+ * `status` fulfils with a failure instead, for the case where Hosting is fine
+ * and the function is not.
+ */
+async function mockGeo(
+  page: Page,
+  options: { country?: string | null; status?: number } = {},
+): Promise<void> {
+  await page.route('**/api/geo', async (route) => {
+    if (options.status && options.status !== 200) {
+      await route.fulfill({ status: options.status, contentType: 'text/plain', body: 'nope' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ country: options.country ?? null }),
+    });
+  });
+}
+
+/**
+ * The same, but held until the test lets it go — so the window between the
+ * catalog rendering the control and the server saying where the reader is can
+ * be widened to whatever the test needs to do inside it.
+ *
+ * Two details are deliberate. The count is returned because the intercept is
+ * load-bearing: one that silently stopped matching would leave the test
+ * measuring the unmocked path and passing by luck (`CLAUDE.md` §4.6). And the
+ * `fulfill` is guarded, because the client arms a two-second
+ * `AbortSignal.timeout` on this request — a slow runner can cancel it before
+ * the release, which is not a failure of anything the test is asserting.
+ */
+async function holdGeoRead(page: Page, country: string) {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = { requests: 0, fulfilled: false };
+
+  await page.route('**/api/geo', async (route) => {
+    held.requests += 1;
+    await released;
+    try {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ country }),
+      });
+    } catch {
+      // The page gave up on it first. The client's fallback chain is then what
+      // answers, which every caller below accounts for.
+    }
+    held.fulfilled = true;
+  });
+
+  return { release: () => release(), held };
+}
+
+/**
  * **Serial, and the `products` catalog is why.** Workers share one emulator
  * and `products` is a single global collection, so the currency tests below —
  * which seed a second price and then take it away again — decide what every
@@ -204,6 +273,15 @@ test.describe('pricing / choosing a currency', () => {
   const password = 'correct horse battery staple';
   const BRL_PRICE_ID = 'price_test_pro_brl';
 
+  /**
+   * A time zone the app does not price specially, so every test below that
+   * does not say otherwise opens on the dollar price for a stated reason
+   * rather than because of where the runner happens to be. The fallback chain
+   * reads this exact signal, so leaving it to the machine would make half this
+   * file assert about the CI runner's clock.
+   */
+  test.use({ timezoneId: 'America/New_York' });
+
   const uniqueEmail = () =>
     `currency-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 
@@ -309,21 +387,188 @@ test.describe('pricing / choosing a currency', () => {
   });
 
   /**
-   * A Brazilian browser gets the Brazilian price without touching anything —
+   * A Brazilian visitor gets the Brazilian price without touching anything —
    * which is the point, since the reader who most needs BRL is the one least
    * likely to go looking for a currency control.
    *
-   * `test.use({ locale })` sets the context's `navigator.language(s)`, which
-   * is exactly the signal `defaultProCurrency` reads.
+   * Three tests because there are three ways the app can find out, and they
+   * fail independently: the server's answer, the browser's time zone when the
+   * server did not answer, and the time zone again when the server answered
+   * badly. The first of the three is the one that actually shipped as a bug —
+   * the default used to come from `navigator.language`, so a Brazilian
+   * browsing in English was quoted dollars and had the card declined. The
+   * language is deliberately left at Playwright's `en-US` default throughout,
+   * because that is exactly the reader the old rule got wrong.
    */
-  test.describe('a Brazilian browser', () => {
-    test.use({ locale: 'pt-BR' });
+  test.describe('a Brazilian visitor', () => {
+    test('opens on the Brazilian price when the server places them in Brazil', async ({ page }) => {
+      await mockGeo(page, { country: 'BR' });
 
-    test('opens on the Brazilian price', async ({ page }) => {
       await page.goto('/pricing');
 
       await expect(page.getByTestId('currency-brl')).toBeChecked();
       await expect(page.getByTestId('pro-price')).toHaveText(/^R\$\s5,90$/);
+    });
+
+    /**
+     * No `mockGeo` here, on purpose: `ng serve` has no `/api/geo`, so this is
+     * the real "the server could not say" path rather than a simulated one —
+     * the same path a PR preview channel takes, since preview channels deploy
+     * Hosting only.
+     */
+    test.describe('with no server to ask', () => {
+      test.use({ timezoneId: 'America/Sao_Paulo' });
+
+      test('opens on the Brazilian price from the time zone alone', async ({ page }) => {
+        await page.goto('/pricing');
+
+        await expect(page.getByTestId('currency-brl')).toBeChecked();
+        await expect(page.getByTestId('pro-price')).toHaveText(/^R\$\s5,90$/);
+      });
+    });
+
+    test.describe('when the endpoint fails', () => {
+      test.use({ timezoneId: 'America/Recife' });
+
+      test('falls back to the time zone rather than losing the currency', async ({ page }) => {
+        await mockGeo(page, { status: 503 });
+
+        await page.goto('/pricing');
+
+        await expect(page.getByTestId('currency-brl')).toBeChecked();
+        await expect(page.getByTestId('pro-price')).toHaveText(/^R\$\s5,90$/);
+      });
+    });
+  });
+
+  /**
+   * The server outranks the clock, and it is not an academic ordering: a
+   * laptop still set to São Paulo in a New York hotel is a Brazilian clock and
+   * an American card, and the address is the half that decides whether the
+   * charge goes through.
+   */
+  test.describe('a Brazilian clock in another country', () => {
+    test.use({ timezoneId: 'America/Sao_Paulo' });
+
+    test('is quoted what the server says, not what the clock says', async ({ page }) => {
+      await mockGeo(page, { country: 'US' });
+
+      await page.goto('/pricing');
+
+      await expect(page.getByTestId('currency-usd')).toBeChecked();
+      await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+    });
+  });
+
+  /**
+   * What happens in the window between the two answers, which is the whole
+   * reason this feature needed care: the catalog renders the control, and the
+   * server says where the reader is up to two seconds later.
+   *
+   * Both directions are here because only having one of them would pass
+   * against a broken implementation. Without the "moves" test, an
+   * implementation that simply ignored the server's answer would look correct;
+   * without the "keeps" test, one that applied it unconditionally would.
+   */
+  test.describe('when the answer arrives after the page has rendered', () => {
+    /**
+     * **Two visits rather than one held response, and the client's own
+     * deadline is why.** The obvious way to write this is to hold the answer
+     * open, assert the dollar price, release, and assert the change — but the
+     * client arms a two-second `AbortSignal.timeout` on that request the
+     * moment the page starts loading, so everything before the release has to
+     * fit inside a budget the test has no control over. On a loaded runner it
+     * would not, the request would be abandoned, and the test would fail for a
+     * reason that has nothing to do with what it is checking.
+     *
+     * So the answer is never held. It is answered immediately both times and
+     * *changed* in between, which reproduces the same thing the reader
+     * experiences — a control already on screen and checked, and then the
+     * server's answer moving it — with no deadline in the loop at all.
+     *
+     * Leaving and coming back re-runs the lookup **inside the same document**,
+     * which is what makes the second visit a continuation rather than a fresh
+     * start: `SubscriptionService` has the catalog memoised so nothing is
+     * re-read, and `GeoService` asks the server again because its first answer
+     * was `null` and a failure is deliberately not cached (`CLAUDE.md` §4.4).
+     * The request count is asserted for that reason — if the memo ever started
+     * caching a `null`, this would fail on the count rather than mysteriously
+     * on the currency.
+     *
+     * Nothing is measured here. The card's height across a change of currency
+     * is already pinned by the test above, which drives the same state change
+     * through the control.
+     */
+    test('moves the checked radio', async ({ page }) => {
+      let country: string | null = null;
+      const geo = { requests: 0 };
+      await page.route('**/api/geo', async (route) => {
+        geo.requests += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ country }),
+        });
+      });
+
+      // The server cannot say yet, so the page settles on the dollar price —
+      // the state a reader is in for as long as the answer is outstanding.
+      await page.goto('/pricing');
+      await expect(page.getByTestId('currency-usd')).toBeChecked();
+      await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+
+      country = 'BR';
+      await page.getByRole('link', { name: 'Back to game', exact: true }).click();
+      await expect(page).toHaveURL(/\/$/);
+      await page.goBack();
+
+      await expect(page.getByTestId('currency-brl')).toBeChecked();
+      await expect(page.getByTestId('pro-price')).toHaveText(/^R\$\s5,90$/);
+      expect(geo.requests, 'geo requests the page made').toBeGreaterThan(1);
+    });
+
+    /**
+     * A choice made inside that window has to survive it. Silently undoing a
+     * deliberate click is the worst thing this feature could do — the control
+     * exists precisely to overrule the guess, and a reader who watched it
+     * revert has no way to make it stick.
+     *
+     * The time zone is Brazilian **as well as** the held answer, so the
+     * assertion does not depend on the release winning a race against the
+     * client's own deadline: if the request is abandoned first, the fallback
+     * says `BR` too, and the reader's dollars have to survive that identically.
+     */
+    test.describe('and the reader has already chosen', () => {
+      test.use({ timezoneId: 'America/Sao_Paulo' });
+
+      test('keeps the currency they picked', async ({ page }) => {
+        const geo = await holdGeoRead(page, 'BR');
+
+        await page.goto('/pricing');
+        await expect(page.getByTestId('currency-brl')).toBeChecked();
+
+        await optionLabel(page, page.getByTestId('currency-usd')).click();
+        await expect(page.getByTestId('currency-usd')).toBeChecked();
+
+        geo.release();
+
+        // There is nothing to wait *for*, because the claim is that something
+        // does **not** happen — and an assertion that ran before the page had
+        // the chance to act would pass against the very regression it exists
+        // to catch. So: wait until the answer has actually been handed to the
+        // browser, then give it real time to act on it. Half a second is far
+        // more than the microtask chain between the response and the signal
+        // write needs, and there is no observable event in between to wait on
+        // instead (`adjustable-timer.spec.ts` waits in real time for the same
+        // reason).
+        await expect
+          .poll(() => geo.held.fulfilled, { message: 'the held country answer being delivered' })
+          .toBe(true);
+        await page.waitForTimeout(500);
+
+        await expect(page.getByTestId('currency-usd')).toBeChecked();
+        await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+      });
     });
   });
 });

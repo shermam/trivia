@@ -123,6 +123,28 @@
     see below.
   </p>
 
+  <h3>Which country you are in &mdash; on the pricing page, and nowhere else</h3>
+  <p>
+    When you open the pricing page, the app asks <strong>its own server</strong> which country your
+    IP address maps to, so it can show you the price in a currency your card can actually be charged
+    in. Firebase Hosting works that out at its edge and passes it to us as a two-letter country
+    code;
+    <strong
+      >that code is the whole of what we receive and the whole of what is sent back to your
+      browser</strong
+    >
+    &mdash; not your IP address, not a city, and nothing read from your device's own location
+    services, which the app never asks for.
+  </p>
+  <p>
+    <strong>None of it is kept.</strong> The code is read off the request, sent to your browser and
+    forgotten: not written to the database, not written to a log, not attached to your account, and
+    not put in a cookie &mdash; there are none. All it does is decide which currency the page opens
+    on, and you can change that with the switch beside the price. No third-party geolocation service
+    is involved, because the request goes to Trivimind's own address: nobody outside the services
+    listed further down learns that you looked at the page.
+  </p>
+
   <h2>Why we handle it, and on what basis</h2>
   <p>
     Where the GDPR, UK GDPR or Brazil's LGPD apply to you, these are the grounds we rely on. We do
@@ -155,6 +177,14 @@
         <td>Performance of a contract</td>
       </tr>
       <tr>
+        <td>Work out which country you are in when you open the pricing page</td>
+        <td>
+          Quoting a price in a currency your card can be charged in &mdash; a card issued in Brazil
+          is declined outright if it is charged in dollars
+        </td>
+        <td>Legitimate interests</td>
+      </tr>
+      <tr>
         <td>Record who contributed each question</td>
         <td>So an abuse report can be acted on, and so contributors can be credited</td>
         <td>Legitimate interests</td>
@@ -185,9 +215,12 @@
   </table>
   <p>
     <strong>No automated decision-making and no profiling.</strong> Nothing here makes a decision
-    about you automatically. We do keep running totals of your own play, described above, and show
-    them only to you &mdash; they are not used to categorise you, to predict anything about you, or
-    to change what the app does.
+    about you that has a legal effect or anything similarly significant. One thing is decided
+    automatically and it is not one of those: which currency the pricing page opens on, from the
+    country described above. It is a pre-selection you can change with the switch beside the price,
+    it changes only the amount you are shown, and it is not recorded. We do keep running totals of
+    your own play, described above, and show them only to you &mdash; they are not used to
+    categorise you, to predict anything about you, or to change what the app does.
   </p>
 
   <h2>Payments</h2>
@@ -326,6 +359,11 @@
       account identifier, and are not removed when you delete your account. A report is a record
       that something needed looking at; if it vanished when its author left, the abuse signal would
       go with it.
+    </li>
+    <li>
+      <strong>The country your IP address maps to</strong> is not kept for any length of time,
+      because it is not kept at all &mdash; it is read from the request that asks for it and
+      discarded with the answer.
     </li>
     <li>
       <strong>Anonymous accounts</strong> that are never signed in to hold no personal information,

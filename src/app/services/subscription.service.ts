@@ -6,6 +6,7 @@ import {
   isFirestorePermissionDenied,
   type RestDocument,
 } from './firestore-rest/firestore-rest.client';
+import { GeoService } from './geo.service';
 
 const CUSTOMERS_COLLECTION = 'customers';
 const PRODUCTS_COLLECTION = 'products';
@@ -71,7 +72,7 @@ const ACTIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
 const PRO_ROLE = 'pro';
 
 /**
- * The currency a visitor in this region has to be offered, when the catalog
+ * The currency a visitor in this country has to be offered, when the catalog
  * carries a price in it.
  *
  * **Not a preference — a requirement.** This Stripe account is registered in
@@ -82,16 +83,23 @@ const PRO_ROLE = 'pro';
  * (`functions/src/checkout-sessions.ts`). So a Brazilian buyer needs a real
  * BRL price, and this is what puts them on it by default.
  *
- * The region comes from the browser's own language tags, which is a UI signal
- * and nothing more (`CLAUDE.md` §4.2): it decides which of the catalog's
- * prices is preselected, and the visitor can switch. What is actually charged
- * is decided by the price ID the session document carries, which the Cloud
- * Function validates against the mirrored catalog either way.
+ * The country comes from `GeoService` — the app's own server first, the
+ * browser's time zone second — and is a UI signal and nothing more
+ * (`CLAUDE.md` §4.2): it decides which of the catalog's prices is preselected,
+ * and the visitor can switch. What is actually charged is decided by the price
+ * ID the session document carries, which the Cloud Function validates against
+ * the mirrored catalog either way.
+ *
+ * **The input is a country and not a locale**, which is the whole reason
+ * `GeoService` exists: a Brazilian reading English browses in `en-US`, so a
+ * rule keyed on language quotes them dollars and their card is declined.
+ * Language says what somebody reads; it says nothing about where their bank
+ * is.
  */
-const REGION_CURRENCIES: Record<string, string> = { BR: 'brl' };
+const COUNTRY_CURRENCIES: Record<string, string> = { BR: 'brl' };
 
 /**
- * Preferred when the visitor's own region asks for nothing in particular.
+ * Preferred when the visitor's own country asks for nothing in particular.
  * The catalog decides what exists; this only decides which of several it opens
  * on.
  */
@@ -164,33 +172,28 @@ export interface ProPriceOption {
 }
 
 /**
- * Which currency to open on, given what the catalog offers and what the
- * browser says about where the reader is.
+ * Which currency to open on, given what the catalog offers and where the
+ * reader appears to be.
  *
  * Pure and exported so the rule is testable without a Firestore fake: the
- * `pt-BR` case is the entire point of this feature and it must not depend on
+ * Brazilian case is the entire point of this feature and it must not depend on
  * the machine running the suite.
  *
- * `Intl.Locale` rather than a string match on the tag, because the region is a
- * subtag and `startsWith('pt')` would be wrong twice — `pt-PT` is not Brazil,
- * and `pt` alone is (it maximises to `pt-Latn-BR`).
- *
- * **Every tag is looked at, not just the first**, because a Brazilian who
- * prefers English browses with `['en-US', 'pt-BR']` and quoting them USD ends
- * in a declined card, while quoting BRL to somebody who merely reads
- * Portuguese is a charge their card can take and one click undoes. The
- * recoverable mistake is the one to make.
+ * **The country only decides anything when the catalog can honour it.** A
+ * mapping to a currency nothing is priced in would leave the Subscribe button
+ * quoting a price that does not exist, so an unmatched country falls through
+ * to the same default as an unknown one — which is also what `null` means
+ * here, and there are three ways to get it: the server was not asked, could
+ * not tell, or the reader is simply somewhere the app prices normally.
  */
 export function defaultProCurrency(
   options: readonly ProPriceOption[],
-  locales: readonly string[],
+  country: string | null,
 ): string | null {
   const offered = new Set(options.map((option) => option.currency));
-  for (const tag of locales) {
-    const required = REGION_CURRENCIES[regionOf(tag) ?? ''];
-    if (required && offered.has(required)) {
-      return required;
-    }
+  const required = country ? COUNTRY_CURRENCIES[country.toUpperCase()] : undefined;
+  if (required && offered.has(required)) {
+    return required;
   }
   if (offered.has(FALLBACK_CURRENCY)) {
     return FALLBACK_CURRENCY;
@@ -229,36 +232,6 @@ function firstPerCurrency(options: readonly ProPriceOption[]): ProPriceOption[] 
     seen.add(option.currency);
     return true;
   });
-}
-
-/**
- * The reader's language tags, in their own preference order.
- *
- * `navigator.languages` is the ordered list and `navigator.language` the
- * single most-preferred one; older or unusual browsers populate only the
- * second, and a browser that offers neither gets an empty list and the
- * catalog's own default currency.
- */
-function browserLocales(): readonly string[] {
-  const languages = navigator.languages ?? [];
-  if (languages.length > 0) {
-    return languages;
-  }
-  return navigator.language ? [navigator.language] : [];
-}
-
-function regionOf(tag: string): string | undefined {
-  try {
-    const locale = new Intl.Locale(tag);
-    // `pt` carries no region of its own; `maximize()` supplies the likeliest
-    // one (`pt` → `pt-Latn-BR`), which is the whole reason a bare language tag
-    // is usable here at all.
-    return locale.region ?? locale.maximize().region;
-  } catch {
-    // A malformed tag throws a RangeError. `navigator.languages` is not ours
-    // to trust any more than any other browser-supplied value.
-    return undefined;
-  }
 }
 
 /**
@@ -340,6 +313,7 @@ export function subscriptionFailureMessage(error: unknown, fallback: string): st
 export class SubscriptionService {
   private readonly authService = inject(AuthService);
   private readonly rest = inject(FirestoreRestClient);
+  private readonly geoService = inject(GeoService);
 
   private readonly hasActiveSubscriptionDocSignal = signal(false);
   private trackedUid: string | null = null;
@@ -347,6 +321,22 @@ export class SubscriptionService {
 
   private readonly proPriceOptionsSignal = signal<readonly ProPriceOption[]>([]);
   private readonly selectedCurrencySignal = signal<string | null>(null);
+
+  /**
+   * Whether the currency on screen was chosen by the reader rather than
+   * guessed for them.
+   *
+   * The two signals this feature runs on arrive at different times — the
+   * catalog, then the server's answer about where the visitor is, up to two
+   * seconds later — and the reader can click in between. A default that landed
+   * after that click would silently undo it, on the one control whose whole
+   * purpose is to let them override the guess. So a manual choice is recorded
+   * and every later default defers to it.
+   *
+   * It is cleared when the chosen currency stops being on sale, because at
+   * that point there is no choice left to respect.
+   */
+  private currencyChosenByReader = false;
 
   /**
    * Every currency the Pro tier is on sale in, in catalog order. Empty until
@@ -518,8 +508,21 @@ export class SubscriptionService {
    * question nobody asked (`CLAUDE.md` §4.4). The cause is still reported the
    * moment it matters — clicking Subscribe re-runs the same lookup and shows
    * the `SubscriptionError` it throws.
+   *
+   * **The country lookup is started first and awaited last**, so the two round
+   * trips overlap instead of queueing. The catalog decides when the card can
+   * render at all, so it is what the page waits on; the country only decides
+   * which radio is checked, and arriving late costs nothing more than moving
+   * it. Where the server answers before the catalog does — the common case,
+   * since it is one small response against two Firestore queries — both
+   * selections are computed from the same answer and the reader never sees an
+   * intermediate one.
    */
   async loadProPrices(): Promise<void> {
+    // Started before the await below, not inside it: this is the whole reason
+    // the two waits cost one wait.
+    const country = this.geoService.resolveCountry();
+
     let options: readonly ProPriceOption[];
     try {
       options = await this.getProPrices();
@@ -527,17 +530,38 @@ export class SubscriptionService {
       return;
     }
     this.proPriceOptionsSignal.set(options);
-    // The postcondition is that the selection is a currency the catalog
-    // offers — not merely that a selection exists. Keeping a currency the
-    // catalog has stopped carrying would leave the radiogroup with nothing
-    // checked (each radio asks whether it *is* the selection) while
-    // `selectedProPrice` quietly fell back to the first price, so the page
-    // would quote an amount no radio claimed. Re-defaulting puts the two back
-    // in step, and costs nothing while the catalog keeps its answer.
-    const selected = this.selectedCurrencySignal();
-    if (!options.some((option) => option.currency === selected)) {
-      this.selectedCurrencySignal.set(defaultProCurrency(options, browserLocales()));
+    // A currency is chosen from what is known *now* — the browser's time zone,
+    // which needs no request — rather than holding the radiogroup unchecked
+    // until the server answers. A control with nothing checked for up to two
+    // seconds is worse than one that moves once, and on a Brazilian machine
+    // this is already the right answer, so it does not move at all.
+    this.applyDefaultCurrency(options, this.geoService.timeZoneCountry());
+    this.applyDefaultCurrency(options, await country);
+  }
+
+  /**
+   * Puts the selection back in step with the catalog and the best country
+   * signal so far — unless the reader has already answered the question
+   * themselves.
+   *
+   * The postcondition is that the selection is a currency the catalog
+   * **offers**, not merely that a selection exists. Keeping a currency the
+   * catalog has stopped carrying would leave the radiogroup with nothing
+   * checked (each radio asks whether it *is* the selection) while
+   * `selectedProPrice` quietly fell back to the first price, so the page would
+   * quote an amount no radio claimed.
+   */
+  private applyDefaultCurrency(options: readonly ProPriceOption[], country: string | null): void {
+    const stillOffered = options.some(
+      (option) => option.currency === this.selectedCurrencySignal(),
+    );
+    if (stillOffered && this.currencyChosenByReader) {
+      return;
     }
+    // A choice whose currency has left the catalog is not a choice any more,
+    // so the next default is free to overwrite it.
+    this.currencyChosenByReader = false;
+    this.selectedCurrencySignal.set(defaultProCurrency(options, country));
   }
 
   /**
@@ -546,11 +570,14 @@ export class SubscriptionService {
    * A currency the catalog does not carry is ignored rather than stored: the
    * selection decides which price ID checkout is started with, and a selection
    * with no price behind it would turn the Subscribe button into a button that
-   * cannot work.
+   * cannot work. It is also not recorded as a choice — the reader has not
+   * successfully chosen anything, and pretending otherwise would freeze the
+   * default they never saw.
    */
   selectCurrency(currency: string): void {
     if (this.proPriceOptionsSignal().some((option) => option.currency === currency)) {
       this.selectedCurrencySignal.set(currency);
+      this.currencyChosenByReader = true;
     }
   }
 
