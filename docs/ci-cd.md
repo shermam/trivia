@@ -209,11 +209,13 @@ npm run e2e            # functions:build, then the Playwright e2e suite (headles
 npm run e2e:open       # same, but in Playwright's UI mode
 npm run e2e:preview    # the scoped slice against a real deployed preview (needs PREVIEW_URL + FIREBASE_PREVIEW_PROJECT_ID, and GOOGLE_APPLICATION_CREDENTIALS to seed)
 npm run typecheck:e2e  # tsc over e2e/ — nothing else typechecks it
-npm run motion:verify  # fails on an animation not gated on prefers-reduced-motion
+npm run motion:verify  # fails on an animation not gated on prefers-reduced-motion, in a template or a computed class string
 npm run lighthouse     # build:prod, then Lighthouse CI against a local static server
 npm run firebase:emulate  # build:prod, functions:build, then firebase emulators:start
 npm run firebase:deploy   # build:prod, then firebase deploy --only hosting,firestore,functions
 ```
+
+**`motion:verify` scans `src/app/**/*.{html,ts}`, not the templates alone.** A Tailwind class list is as often computed in a component as written in a template — a `switch` returning one string per state, a `[ngClass]` binding built in TypeScript — and a `.html`-only glob cannot see any of it. That is the difference between a guardrail and a comment: the rule it enforces is invisible to whoever breaks it (an ungated animation looks perfect to the author, the reviewer, Lighthouse and the e2e suite unless the OS setting happens to be on), so a hole the size of "put the class in a variable" would not be noticed from the outside. The same patterns run over both file types; turning the TypeScript half on found no offence other than the one it was added for.
 
 **Both deploying builds go through `scripts/build-with-commit.mjs`**, which passes the current commit to `ng build --define` so `src/app/build-info.ts` can name it and the footer can show it on hover. Three decisions worth not re-litigating:
 

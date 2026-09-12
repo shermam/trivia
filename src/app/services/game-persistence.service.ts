@@ -38,10 +38,17 @@ export interface PersistedGame {
    * **Redundant with `points` below, and written anyway.** It is the one field
    * in this record that a build predating `FEAT-004` requires: that build reads
    * `score` and validates it, so dropping it in favour of `points` alone would
-   * make every new save unreadable to a browser still running a cached bundle,
-   * losing the game rather than the streak. Nothing reads it back here — the
-   * total is recomputed from `points` — so the two cannot drift into
-   * disagreeing about anything the app acts on.
+   * make every new save unreadable to a browser still running a cached bundle.
+   *
+   * **It only rescues the unmultiplied rounds, and that is the whole of its
+   * reach.** The old parser also refuses a `score` above the question count, so
+   * a round that actually earned a multiplier is discarded by a stale bundle
+   * whatever is written here — which is the right outcome, since that build has
+   * nowhere to put the streak either. What the field buys is the common case: a
+   * game whose run never reached three still resumes on a tab that has not
+   * picked up the new bundle. Nothing reads it back here — the total is
+   * recomputed from `points` — so the two cannot drift into disagreeing about
+   * anything the app acts on.
    */
   score: number;
   /**
@@ -290,14 +297,17 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
       ? points
       : score;
 
-  // Clamped to the question count, which the score no longer is. A save
-  // written before the split has neither field and its score *was* the count,
-  // so `score` is the honest fallback — but a new save with a multiplied score
-  // and a corrupt count must not inherit a "correct answers" above the number
-  // of questions, which is the one value `recordGameResult` refuses outright.
-  const restoredCorrect = isCountWithin(correctAnswers, questions.length)
+  // Bounded by the question count *and* by the score, the same way `maxStreak`
+  // below is bounded by the run in progress. Every correct answer is worth at
+  // least a point, so a record claiming more right answers than it has points
+  // is describing a game that cannot have happened — and the count is the one
+  // value `recordGameResult` refuses outright when it exceeds `totalQuestions`.
+  // A save written before the split has neither field and its score *was* the
+  // count, which is what makes `score` the honest fallback rather than a guess.
+  const correctCeiling = Math.min(score, questions.length);
+  const restoredCorrect = isCountWithin(correctAnswers, correctCeiling)
     ? correctAnswers
-    : Math.min(score, questions.length);
+    : correctCeiling;
 
   const restoredStreak = isCountWithin(currentStreak, questions.length) ? currentStreak : 0;
 

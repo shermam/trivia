@@ -406,6 +406,15 @@ describe('leaderboards: the multiplier ceiling (FEAT-004)', () => {
     await assertFails(write({ score: 2, totalQuestions: 10, percentage: 90 }));
   });
 
+  // The boundary itself, one point over: `round(7 * 100 / 10)` is 70, so 70 is
+  // the largest accuracy a score of 7 can carry and 71 is the first refused.
+  // The far-over case above would still pass against a rule that had drifted a
+  // few points loose; this one cannot.
+  it('rejects an accuracy one point above what the score implies', async () => {
+    await assertSucceeds(write({ score: 7, totalQuestions: 10, percentage: 70 }));
+    await assertFails(write({ score: 7, totalQuestions: 10, percentage: 71 }));
+  });
+
   // The other bounds are unchanged, and stay checked alongside the new one so
   // widening the score cannot be mistaken for widening the entry.
   it('rejects a non-integer multiplied score', async () => {

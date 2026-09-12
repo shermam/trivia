@@ -543,6 +543,26 @@ describe('GamePersistenceService (B8)', () => {
       expect((await service.load())?.correctAnswers).toBe(1);
     });
 
+    /*
+     * The other half of the same bound. Every correct answer is worth at least
+     * a point, so a record claiming more right answers than it has points is
+     * describing a game that cannot have happened — and the question count
+     * alone would not catch it, because two is a legitimate count for this
+     * three-question save.
+     */
+    it('never restores more correct answers than the score allows', async () => {
+      await putRaw(
+        validRecord({
+          questions: [makeQuestion('q0'), makeQuestion('q1'), makeQuestion('q2')],
+          score: 1,
+          points: 1,
+          correctAnswers: 2,
+        }),
+      );
+
+      expect((await service.load())?.correctAnswers).toBe(1);
+    });
+
     // A record claiming no best while a run is in progress would under-report
     // the game's streak into the player's lifetime totals.
     it('never restores a best streak below the run in progress', async () => {
