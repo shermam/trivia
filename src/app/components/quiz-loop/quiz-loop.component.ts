@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { Answer, DEFAULT_TIME_LIMIT, LifelineId } from '../../models/question.model';
+import { STREAK_INDICATOR_THRESHOLD, multiplierLabel } from '../../models/scoring';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
@@ -107,6 +108,68 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   private readonly questionDuration = signal<number>(FALLBACK_DURATION_SECONDS);
 
   protected readonly lifelines = this.gameController.lifelines;
+
+  /**
+   * The streak badge (`FEAT-004`).
+   *
+   * **Rendered on every question and only made `invisible`**, never added and
+   * removed, because it sits in the wrapping badge row beside the category and
+   * difficulty pills: a pill that appeared on the third correct answer would
+   * re-wrap that row and move the question text down the screen, mid-round,
+   * while the clock runs (`CLAUDE.md` §4.4).
+   *
+   * Reserving the box is only half of it — the *contents* have to be a
+   * constant width too, or the badge would jostle as the numbers changed. They
+   * are, by construction rather than by a measured minimum: the streak sits in
+   * a two-character `tabular-nums` slot (25 questions is the longest game the
+   * setup screen offers) and the multiplier is always written to one decimal,
+   * so `×1.0` and `×1.5` occupy the same space.
+   */
+  protected readonly showsStreak = computed(
+    () => this.gameController.currentStreak() >= STREAK_INDICATOR_THRESHOLD,
+  );
+
+  protected readonly multiplierLabel = multiplierLabel;
+
+  /**
+   * Tier colour, and the one animation on this screen.
+   *
+   * The pulse is on the top tier alone: it is the "on fire" state the spec
+   * asks to celebrate, it is rare, and scoping it there means no timer to
+   * schedule and no teardown to forget (`CLAUDE.md` §4.4). `motion-safe:`
+   * because a looping animation is exactly what a reader who asked for less
+   * motion asked to be spared — enforced by `npm run motion:verify`, and only
+   * enforced because nobody can see the omission without the OS setting on.
+   */
+  protected readonly streakClass = computed(() => {
+    const base =
+      'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide transition-colors';
+    switch (this.gameController.scoreMultiplier()) {
+      case 3:
+        return `${base} bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300 motion-safe:animate-pulse`;
+      case 2:
+        return `${base} bg-orange-100 dark:bg-orange-500/15 text-orange-700 dark:text-orange-300`;
+      case 1.5:
+        return `${base} bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300`;
+      default:
+        return `${base} bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400`;
+    }
+  });
+
+  /**
+   * What a screen reader is told when the multiplier tier moves.
+   *
+   * **Tier changes only, not every correct answer.** The result region beside
+   * this one already announces "Correct." on each one, and a second region
+   * repeating the running count on top of it would make the useful part — that
+   * answers are now worth more — harder to hear rather than easier.
+   *
+   * Carries the question's position for the reason the flag and lifeline
+   * regions do: signals compare with `Object.is`, so reaching 1.5× twice in a
+   * game would set identical text the second time, and a live region only
+   * announces on mutation.
+   */
+  protected readonly streakAnnouncement = signal('');
 
   /**
    * Extra Time is **hidden** on an unlimited game and 50/50 is **disabled** on
@@ -461,12 +524,31 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
     this.selectedAnswer.set(answer);
     this.isAnswered.set(true);
+    // Read before the answer is registered, so the comparison below is against
+    // the tier this question was played under rather than the one it produced.
+    const multiplierBefore = this.gameController.scoreMultiplier();
     // The whole answer, not `answer?.isCorrect`: only this call site knows
     // *which* option was picked, and a timeout (`null`) is not the same thing
     // as a wrong answer. The recap needs both.
     this.gameController.registerAnswer(answer);
+    this.announceStreakChange(multiplierBefore);
 
     this.advanceTimeoutHandle = setTimeout(() => this.goToNextQuestion(), ANSWER_DELAY_MS);
+  }
+
+  private announceStreakChange(multiplierBefore: number): void {
+    const multiplier = this.gameController.scoreMultiplier();
+    if (multiplier === multiplierBefore) {
+      return;
+    }
+    const position = this.gameController.currentIndex() + 1;
+    this.streakAnnouncement.set(
+      multiplier > multiplierBefore
+        ? `Question ${position}: streak of ${this.gameController.currentStreak()}. ` +
+            `Answers are now worth ${multiplierLabel(multiplier)} times their points.`
+        : `Question ${position}: streak lost. ` +
+            `Answers are back to ${multiplierLabel(multiplier)} times their points.`,
+    );
   }
 
   private goToNextQuestion(): void {
@@ -480,6 +562,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     this.isAnswered.set(false);
     this.selectedAnswer.set(null);
     this.lifelineAnnouncement.set('');
+    this.streakAnnouncement.set('');
     this.startTimer();
   }
 

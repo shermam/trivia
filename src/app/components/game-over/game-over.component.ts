@@ -533,29 +533,6 @@ export class GameOverComponent implements OnInit {
   }
 
   /**
-   * The longest run of consecutive correct answers in this game.
-   *
-   * Derived from the recap rather than tracked during play — the data is
-   * already there, and a second counter maintained in the quiz loop would be a
-   * second thing that can disagree with the score.
-   *
-   * A game restored from a save written before the recap shipped has no
-   * history, so this is 0 while `score` is genuinely non-zero. That is a
-   * knowing under-report rather than a rejection: the server accepts it (see
-   * `game-stats.test.ts`), and the alternative — refusing to bank the game —
-   * would lose more.
-   */
-  private bestStreak(): number {
-    let best = 0;
-    let run = 0;
-    for (const row of this.recap()) {
-      run = row.wasRight ? run + 1 : 0;
-      best = Math.max(best, run);
-    }
-    return best;
-  }
-
-  /**
    * Banks this game into the player's lifetime totals.
    *
    * Fire-and-forget on purpose — the screen is already rendered from local
@@ -568,6 +545,19 @@ export class GameOverComponent implements OnInit {
    * Anonymous and unverified sessions are refused server-side rather than
    * here, so this deliberately does not duplicate that predicate — a client
    * mirror of a server gate is a thing that drifts (H6).
+   *
+   * **Both numbers come from the game's own counters, and neither is the
+   * score.** `correctAnswers` used to be `score()`, correct only while the two
+   * were the same quantity; a multiplied score sent as a correct-answer count
+   * is above `totalQuestions` and `isValidSubmission` refuses the whole
+   * submission. The longest run is likewise the counter the quiz kept rather
+   * than a walk over the recap: a recap-derived run reads a skip as a break,
+   * and `FEAT-004` says a skip does neither.
+   *
+   * A game restored from a save written before those counters existed reports
+   * a streak of 0 while its score is genuinely non-zero. That is a knowing
+   * under-report rather than a rejection — the server accepts it (see
+   * `game-stats.test.ts`), and refusing to bank the game would lose more.
    */
   private recordGameResult(): void {
     const gameId = this.gameController.gameId();
@@ -577,8 +567,8 @@ export class GameOverComponent implements OnInit {
     void this.accountService.recordGameResult({
       gameId,
       totalQuestions: this.gameController.totalQuestions(),
-      correctAnswers: this.gameController.score(),
-      bestStreak: this.bestStreak(),
+      correctAnswers: this.gameController.correctAnswers(),
+      bestStreak: this.gameController.maxStreak(),
     });
   }
 
@@ -739,7 +729,7 @@ export class GameOverComponent implements OnInit {
       if (existing && existing.score >= attemptedScore) {
         this.hasSaved.set(true);
         this.saveError.set(
-          `Your best score is already higher (${existing.score}/${existing.totalQuestions}) — ` +
+          `Your best score is already higher (${existing.score} points) — ` +
             'nice consistency! We kept your existing best.',
         );
         return;

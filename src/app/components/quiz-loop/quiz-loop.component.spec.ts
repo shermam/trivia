@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import {
   ALL_LIFELINES_AVAILABLE,
@@ -10,6 +10,7 @@ import {
   TimeLimitOption,
   TriviaQuestion,
 } from '../../models/question.model';
+import { multiplierForStreak } from '../../models/scoring';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { QuizLoopComponent } from './quiz-loop.component';
@@ -39,9 +40,21 @@ function setup(
     question?: TriviaQuestion;
     timeLimit?: TimeLimitOption;
     lifelines?: LifelineState;
+    currentStreak?: number;
   } = {},
 ) {
-  const registerAnswer = vi.fn();
+  // Mirrors the real service's streak bookkeeping rather than stubbing it
+  // flat: the component reads the multiplier *before* and *after* this call to
+  // decide whether a tier moved, so a `registerAnswer` that changed nothing
+  // would make every announcement test pass against a component that never
+  // announces.
+  const registerAnswer = vi.fn((answer: Answer | null) => {
+    if (answer?.isCorrect === true) {
+      currentStreak.update((value) => value + 1);
+    } else {
+      currentStreak.set(0);
+    }
+  });
   const advanceQuestion = vi.fn();
   const registerSkippedQuestion = vi.fn();
   // The real service's contract: spends the lifeline and reports whether there
@@ -66,6 +79,7 @@ function setup(
     );
     return true;
   });
+  const currentStreak = signal(options.currentStreak ?? 0);
   const gameController = {
     config: signal<GameConfig | null>({
       amount: 1,
@@ -78,6 +92,8 @@ function setup(
     currentIndex: signal(0),
     totalQuestions: signal(1),
     score: signal(0),
+    currentStreak,
+    scoreMultiplier: computed(() => multiplierForStreak(currentStreak())),
     progressPercentage: signal(100),
     isLastQuestion: signal(false),
     flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
@@ -132,6 +148,146 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+/**
+ * `FEAT-004`. The badge itself is the part the service cannot test: it has to
+ * be in the DOM on every question so the wrapping badge row never re-wraps
+ * (`CLAUDE.md` §4.4), and the tier change has to be announced, because
+ * "answers are now worth more" is otherwise conveyed by a colour alone (§4.5).
+ *
+ * jsdom has no layout, so this cannot measure the row — what it *can* pin is
+ * the mechanism that makes the measurement come out right: the element is
+ * always mounted, only `invisible` moves, and the text inside it is the same
+ * length in every tier. The pixels are `streak-multipliers.spec.ts`'s job.
+ */
+describe('QuizLoopComponent — the streak badge (FEAT-004)', () => {
+  it('mounts the badge from the first question, hidden until a streak builds', () => {
+    const { query, fixture } = setup();
+
+    const badge = query('[data-cy="streak-indicator"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.classList.contains('invisible')).toBe(true);
+    fixture.destroy();
+  });
+
+  it('keeps the badge mounted and only drops `invisible` once the streak shows', () => {
+    const { query, fixture, gameController } = setup({ currentStreak: 2 });
+
+    expect(query('[data-cy="streak-indicator"]')?.classList.contains('invisible')).toBe(false);
+
+    gameController.currentStreak.set(0);
+    fixture.detectChanges();
+
+    // Still there — removing it would re-wrap the badge row mid-round.
+    expect(query('[data-cy="streak-indicator"]')).not.toBeNull();
+    expect(query('[data-cy="streak-indicator"]')?.classList.contains('invisible')).toBe(true);
+    fixture.destroy();
+  });
+
+  it('shows the run and the multiplier it earns', () => {
+    const { query, fixture } = setup({ currentStreak: 5 });
+
+    expect(query('[data-cy="streak-count"]')?.textContent?.trim()).toBe('5');
+    expect(query('[data-cy="streak-multiplier"]')?.textContent?.trim()).toBe('×2.0');
+    fixture.destroy();
+  });
+
+  /*
+   * The badge reserves its width by being the same width in every state, not
+   * by a measured minimum — so the multiplier is written to one decimal and the
+   * run sits in a two-character slot. jsdom cannot measure either, but it can
+   * check that the *text* stays one length, which is the property the layout
+   * depends on.
+   */
+  it('writes the multiplier to a constant width at every tier', () => {
+    const { query, fixture, gameController } = setup();
+    const widths = new Set<number>();
+
+    for (const streak of [0, 2, 3, 5, 8]) {
+      gameController.currentStreak.set(streak);
+      fixture.detectChanges();
+      widths.add((query('[data-cy="streak-multiplier"]')?.textContent?.trim() ?? '').length);
+    }
+
+    expect(widths.size).toBe(1);
+    fixture.destroy();
+  });
+
+  // The visual badge is decoration; the live region below it is the accessible
+  // channel, and announcing both would say the same thing twice.
+  it('hides the badge from assistive tech, which has the live region', () => {
+    const { query, fixture } = setup({ currentStreak: 3 });
+
+    expect(query('[data-cy="streak-indicator"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(query('[data-cy="streak-status"]')).not.toBeNull();
+    fixture.destroy();
+  });
+
+  it('announces reaching a new multiplier tier', () => {
+    const { query, fixture, gameController } = setup({ currentStreak: 2 });
+
+    // The third correct answer in a row is the first to earn 1.5x.
+    query('[data-cy="answer-option"]')?.click();
+    fixture.detectChanges();
+
+    expect(gameController.currentStreak()).toBe(3);
+    expect(query('[data-cy="streak-status"]')?.textContent).toContain('streak of 3');
+    expect(query('[data-cy="streak-status"]')?.textContent).toContain('1.5 times');
+    fixture.destroy();
+  });
+
+  /*
+   * Tier changes only. The result region beside this one already announces
+   * "Correct." on every right answer, so a second region repeating the running
+   * count on each one would bury the part that matters rather than add to it.
+   */
+  it('says nothing when a correct answer leaves the tier where it was', () => {
+    const { query, fixture } = setup();
+
+    query('[data-cy="answer-option"]')?.click();
+    fixture.detectChanges();
+
+    expect(query('[data-cy="streak-status"]')?.textContent?.trim()).toBe('');
+    fixture.destroy();
+  });
+
+  it('announces losing a tier, not merely losing the run', () => {
+    const { query, fixture, queryAll } = setup({ currentStreak: 5 });
+
+    // The second option is the wrong one on the default fixture question.
+    queryAll('[data-cy="answer-option"]')[1]?.click();
+    fixture.detectChanges();
+
+    expect(query('[data-cy="streak-status"]')?.textContent).toContain('streak lost');
+    fixture.destroy();
+  });
+
+  /*
+   * The house pattern for a live region (G3): identical text set twice is a
+   * no-op for a signal, and a live region only announces on mutation — so the
+   * position is part of the message, and reaching the same tier on a later
+   * question has to read differently.
+   */
+  it('carries the question position, so the same tier announces twice', () => {
+    // Two components rather than two clicks on one: a question locks once
+    // answered, which is the behaviour under test everywhere else in this file.
+    const first = setup({ currentStreak: 2 });
+    first.query('[data-cy="answer-option"]')?.click();
+    first.fixture.detectChanges();
+    const firstText = first.query('[data-cy="streak-status"]')?.textContent ?? '';
+    first.fixture.destroy();
+    TestBed.resetTestingModule();
+
+    const later = setup({ currentStreak: 2 });
+    later.gameController.currentIndex.set(4);
+    later.query('[data-cy="answer-option"]')?.click();
+    later.fixture.detectChanges();
+
+    expect(firstText).toContain('Question 1:');
+    expect(later.query('[data-cy="streak-status"]')?.textContent).toContain('Question 5:');
+    later.fixture.destroy();
+  });
 });
 
 /**

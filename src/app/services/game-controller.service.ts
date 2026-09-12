@@ -12,6 +12,7 @@ import {
   TriviaQuestion,
   answeredWith,
 } from '../models/question.model';
+import { displayScore, multiplierForStreak, pointsForStreak } from '../models/scoring';
 import { giveUpAfter } from '../utils/give-up-after.util';
 import { shuffleArray } from '../utils/shuffle.util';
 import { DailyGameLimitService } from './daily-game-limit.service';
@@ -58,7 +59,43 @@ export class GameControllerService {
   readonly config = signal<GameConfig | null>(null);
   readonly questions = signal<TriviaQuestion[]>([]);
   readonly currentIndex = signal(0);
-  readonly score = signal(0);
+
+  /**
+   * The exact point total, multipliers included — the source of truth for the
+   * score, and the only place a half point is ever allowed to exist.
+   *
+   * Half points are not a design choice, they are arithmetic: the 1.5× tier
+   * applied to a one-point base produces one. They are kept exactly here and
+   * rounded once, at {@link score}, so a reload cannot change a total by
+   * restoring 4.5 as 5 and then earning another 1.5 on top of it.
+   */
+  readonly points = signal(0);
+
+  /**
+   * How many questions were answered correctly. What `percentage` is built
+   * from, and what is banked as `correctAnswers` in the player's lifetime
+   * totals.
+   *
+   * A separate count rather than something derived from `points`, because the
+   * multiplier makes that derivation impossible: 3 points is three plain
+   * answers or two at 1.5×. It used to *be* the score, which is exactly why
+   * every consumer of "how many did I get right" had to be revisited when the
+   * score stopped meaning that.
+   */
+  readonly correctAnswers = signal(0);
+
+  /**
+   * The run of consecutive correct answers, and the longest one this game
+   * reached (`FEAT-004`).
+   *
+   * A wrong answer or a timeout resets the run; **a skip neither breaks nor
+   * extends it**, which is the one rule here that cannot be derived from the
+   * answer history afterwards — hence a tracked counter rather than a
+   * recomputation on the results screen.
+   */
+  readonly currentStreak = signal(0);
+  readonly maxStreak = signal(0);
+
   readonly isLoading = signal(false);
   readonly loadError = signal<string | null>(null);
   /** True once the final question has been answered — i.e. the player belongs on `/game-over`. */
@@ -146,9 +183,34 @@ export class GameControllerService {
     () => this.questions()[this.currentIndex()] ?? null,
   );
   readonly isLastQuestion = computed(() => this.currentIndex() >= this.totalQuestions() - 1);
-  /** Accuracy: how many were answered correctly. Shown on the game-over screen. */
+
+  /**
+   * The score as everything outside this service sees it: the point total,
+   * rounded to the integer `firestore.rules` requires of a leaderboard entry.
+   *
+   * Rounded here rather than at the leaderboard write, so the number the
+   * player watches climb during the game is the number that ends up on the
+   * board. See `displayScore` for why that trade is the right way round.
+   */
+  readonly score = computed(() => displayScore(this.points()));
+
+  /**
+   * What the answer just scored is worth, as a multiple of the base — the
+   * figure the in-game streak badge shows.
+   */
+  readonly scoreMultiplier = computed(() => multiplierForStreak(this.currentStreak()));
+
+  /**
+   * Accuracy: the share of questions answered correctly, never multiplied.
+   *
+   * Built from `correctAnswers` rather than from `score`, which is the whole
+   * point of keeping the two apart — deriving it from a multiplied score would
+   * publish figures above 100% onto a public board.
+   */
   readonly percentage = computed(() =>
-    this.totalQuestions() === 0 ? 0 : Math.round((this.score() / this.totalQuestions()) * 100),
+    this.totalQuestions() === 0
+      ? 0
+      : Math.round((this.correctAnswers() / this.totalQuestions()) * 100),
   );
 
   /**
@@ -199,6 +261,10 @@ export class GameControllerService {
         questions,
         currentIndex: this.currentIndex(),
         score: this.score(),
+        points: this.points(),
+        correctAnswers: this.correctAnswers(),
+        currentStreak: this.currentStreak(),
+        maxStreak: this.maxStreak(),
         isComplete: this.isComplete(),
         flaggedQuestionIds: [...this.flaggedQuestionIds()],
         answerHistory: [...this.answerHistory()],
@@ -274,7 +340,10 @@ export class GameControllerService {
     this.config.set(saved.config);
     this.questions.set(saved.questions);
     this.currentIndex.set(saved.currentIndex);
-    this.score.set(saved.score);
+    this.points.set(saved.points);
+    this.correctAnswers.set(saved.correctAnswers);
+    this.currentStreak.set(saved.currentStreak);
+    this.maxStreak.set(saved.maxStreak);
     this.isComplete.set(saved.isComplete);
     this.flaggedQuestionIds.set(new Set(saved.flaggedQuestionIds));
     this.answerHistory.set(saved.answerHistory);
@@ -362,7 +431,14 @@ export class GameControllerService {
       this.questions.set(questions);
       this.gameId.set(crypto.randomUUID());
       this.currentIndex.set(0);
-      this.score.set(0);
+      this.points.set(0);
+      this.correctAnswers.set(0);
+      // Same two places as the flags and the history below, and the same
+      // reason: not every route into a new game goes through `clearGameState`.
+      // A leaked streak is the one that pays out, too — a player who abandoned
+      // a game eight correct answers in would start the next one at 3×.
+      this.currentStreak.set(0);
+      this.maxStreak.set(0);
       this.isComplete.set(false);
       // Cleared here as well as in `clearGameState()`, because not every route
       // into a new game goes through one. "Play Again" does (`resetGame`), and
@@ -402,7 +478,18 @@ export class GameControllerService {
    */
   registerAnswer(answer: Answer | null): void {
     if (answer?.isCorrect === true) {
-      this.score.update((value) => value + 1);
+      // Extend the run first, then score against it: the tier table is written
+      // in terms of how many have been answered correctly *including this one*,
+      // so the third consecutive correct answer is the first to earn 1.5×.
+      const streak = this.currentStreak() + 1;
+      this.currentStreak.set(streak);
+      this.maxStreak.update((best) => Math.max(best, streak));
+      this.correctAnswers.update((value) => value + 1);
+      this.points.update((value) => value + pointsForStreak(streak));
+    } else {
+      // A wrong answer and a timeout both end the run. They are different
+      // outcomes for the recap and identical for the streak.
+      this.currentStreak.set(0);
     }
     this.record(answer === null ? TIMED_OUT : answeredWith(answer.id));
   }
@@ -411,17 +498,24 @@ export class GameControllerService {
    * Skip: the question is over, scores nothing, and still counts.
    *
    * **"Advances without penalty" is not the same as "does not count", and the
-   * difference is a leaderboard exploit.** `firestore.rules` validates only
-   * `percentage == math.round(score * 100.0 / totalQuestions)` and
-   * `totalQuestions >= score`, so a skip that shrank the denominator would let
-   * a player skip nine of ten, answer one, and post a perfectly well-formed
-   * 100%. `totalQuestions` is `questions().length` and nothing here touches it,
-   * so the denominator holds by construction rather than by a check — but that
-   * is the property being relied on, which is why it is written down and
-   * pinned by a test. Decided explicitly with the owner, 28 August 2026.
+   * difference is a leaderboard exploit.** Every bound `firestore.rules` puts
+   * on an entry is relative to `totalQuestions` — the score ceiling and the
+   * accuracy it will accept both scale with it — so a skip that shrank the
+   * denominator would let a player skip nine of ten, answer one, and post a
+   * perfectly well-formed 100%. `totalQuestions` is `questions().length` and
+   * nothing here touches it, so the denominator holds by construction rather
+   * than by a check — but that is the property being relied on, which is why it
+   * is written down and pinned by a test. Decided explicitly with the owner,
+   * 28 August 2026.
    *
    * What the lifeline actually buys is the clock and the wrong-answer sting,
    * not a free point.
+   *
+   * **The streak is deliberately untouched** (`FEAT-004`): a skip neither
+   * breaks nor extends it. That is the one thing about the run that cannot be
+   * recovered from the answer history afterwards — a recap-derived longest run
+   * would read a skip as a break — which is why `currentStreak` is tracked
+   * here rather than recomputed on the results screen.
    */
   registerSkippedQuestion(): void {
     this.record(SKIPPED);
@@ -512,7 +606,10 @@ export class GameControllerService {
     this.config.set(null);
     this.questions.set([]);
     this.currentIndex.set(0);
-    this.score.set(0);
+    this.points.set(0);
+    this.correctAnswers.set(0);
+    this.currentStreak.set(0);
+    this.maxStreak.set(0);
     this.isComplete.set(false);
     this.loadError.set(null);
     this.flaggedQuestionIds.set(new Set());

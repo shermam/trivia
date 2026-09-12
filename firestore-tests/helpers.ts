@@ -165,11 +165,17 @@ export function validPortalSession(overrides: Record<string, unknown> = {}) {
  * A schema-valid `leaderboard/{uid}` document; spread over it to build invalid
  * variants.
  *
- * `percentage` must now agree with `score`/`totalQuestions`, so it is derived
- * rather than hardcoded — otherwise overriding `score` alone would produce an
- * entry that fails for an inconsistent percentage instead of the reason the
- * test is actually about, and the test would pass for the wrong reason.
- * Pass `percentage` explicitly to test the consistency rule itself.
+ * `percentage` is bounded by `score`/`totalQuestions`, so it is derived rather
+ * than hardcoded — otherwise overriding `score` alone would produce an entry
+ * that fails for an inconsistent percentage instead of the reason the test is
+ * actually about, and the test would pass for the wrong reason. Pass
+ * `percentage` explicitly to test the consistency rule itself.
+ *
+ * **Clamped at 100, because a multiplied score is not a percentage of
+ * anything** (`FEAT-004`). `score` is a point total that streak bonuses can
+ * carry past the question count, while `percentage` is raw accuracy; deriving
+ * one from the other unclamped would build a 300% entry out of a perfectly
+ * legitimate score and test the clamp instead of whatever the caller meant.
  */
 export function validEntry(uid: string, overrides: Record<string, unknown> = {}) {
   const score = 'score' in overrides ? (overrides['score'] as number) : 7;
@@ -180,7 +186,7 @@ export function validEntry(uid: string, overrides: Record<string, unknown> = {})
     name: 'Ada',
     score,
     totalQuestions,
-    percentage: Math.round((score / totalQuestions) * 100),
+    percentage: Math.min(100, Math.round((score / totalQuestions) * 100)),
     createdAt: Date.now(),
     ...overrides,
   };

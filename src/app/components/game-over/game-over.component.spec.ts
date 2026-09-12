@@ -68,6 +68,8 @@ function setup(options: {
   existingEntry?: LeaderboardEntry | null;
   lookupFails?: boolean;
   score?: number;
+  correctAnswers?: number;
+  maxStreak?: number;
   timeLimit?: TimeLimitOption;
 }) {
   const saveHighScore = vi.fn().mockRejectedValue(options.saveError);
@@ -83,6 +85,8 @@ function setup(options: {
         provide: GameControllerService,
         useValue: {
           score: signal(options.score ?? 7),
+          correctAnswers: signal(options.correctAnswers ?? options.score ?? 7),
+          maxStreak: signal(options.maxStreak ?? 0),
           totalQuestions: signal(10),
           percentage: signal(70),
           questions: signal([]),
@@ -268,6 +272,8 @@ function configureReporting(options: {
         provide: GameControllerService,
         useValue: {
           score: signal(7),
+          correctAnswers: signal(7),
+          maxStreak: signal(4),
           totalQuestions: signal(10),
           percentage: signal(70),
           questions: signal(options.questions),
@@ -801,6 +807,8 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
           provide: GameControllerService,
           useValue: {
             score: signal(7),
+            correctAnswers: signal(7),
+            maxStreak: signal(4),
             totalQuestions: signal(10),
             percentage: signal(70),
             questions: signal([]),
@@ -955,6 +963,8 @@ describe('GameOverComponent — per-board leaderboards', () => {
           provide: GameControllerService,
           useValue: {
             score: signal(7),
+            correctAnswers: signal(7),
+            maxStreak: signal(4),
             totalQuestions: signal(10),
             percentage: signal(70),
             questions: signal([]),
@@ -1043,6 +1053,8 @@ describe('GameOverComponent — per-board leaderboards', () => {
           provide: GameControllerService,
           useValue: {
             score: signal(7),
+            correctAnswers: signal(7),
+            maxStreak: signal(4),
             totalQuestions: signal(10),
             percentage: signal(70),
             questions: signal([]),
@@ -1101,6 +1113,8 @@ describe('GameOverComponent: which face of the score card shows', () => {
           provide: GameControllerService,
           useValue: {
             score: signal(7),
+            correctAnswers: signal(7),
+            maxStreak: signal(4),
             totalQuestions: signal(10),
             percentage: signal(70),
             questions: signal([]),
@@ -1317,6 +1331,8 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
           provide: GameControllerService,
           useValue: {
             score: signal(1),
+            correctAnswers: signal(1),
+            maxStreak: signal(1),
             totalQuestions: signal(options.questions.length),
             percentage: signal(50),
             questions: signal(options.questions),
@@ -1668,8 +1684,8 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
  * Recording a finished game into `users/{uid}`. Rendered through the real
  * component rather than calling the private method, because the two things
  * worth pinning are *when* it fires (on init, unconditionally) and *what it
- * sends* — and the streak is derived from the recap, so a change to the recap
- * silently changes the payload.
+ * sends* — and what it sends is now three numbers that no longer coincide, so
+ * sending the wrong one is a live mistake rather than a hypothetical.
  */
 describe('GameOverComponent lifetime stats recording', () => {
   afterEach(() => TestBed.resetTestingModule());
@@ -1688,6 +1704,8 @@ describe('GameOverComponent lifetime stats recording', () => {
     questions: TriviaQuestion[];
     answerHistory: PickedAnswer[];
     score: number;
+    correctAnswers: number;
+    maxStreak: number;
     gameId?: string | null;
   }) {
     const recordGameResult = vi.fn().mockResolvedValue(undefined);
@@ -1697,6 +1715,8 @@ describe('GameOverComponent lifetime stats recording', () => {
           provide: GameControllerService,
           useValue: {
             score: signal(options.score),
+            correctAnswers: signal(options.correctAnswers),
+            maxStreak: signal(options.maxStreak),
             totalQuestions: signal(options.questions.length),
             percentage: signal(50),
             questions: signal(options.questions),
@@ -1736,17 +1756,20 @@ describe('GameOverComponent lifetime stats recording', () => {
   }
 
   const q = [statsQuestion('q0'), statsQuestion('q1'), statsQuestion('q2'), statsQuestion('q3')];
+  const history: PickedAnswer[] = [
+    answeredWith('q0:right'),
+    answeredWith('q1:right'),
+    answeredWith('q2:wrong'),
+    answeredWith('q3:right'),
+  ];
 
   it('records the finished game on init', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: [
-        answeredWith('q0:right'),
-        answeredWith('q1:right'),
-        answeredWith('q2:wrong'),
-        answeredWith('q3:right'),
-      ],
+      answerHistory: history,
       score: 3,
+      correctAnswers: 3,
+      maxStreak: 2,
     });
 
     expect(recordGameResult).toHaveBeenCalledExactlyOnceWith({
@@ -1758,64 +1781,64 @@ describe('GameOverComponent lifetime stats recording', () => {
   });
 
   /*
-   * The streak is the run, not the total. Pinned with a game whose correct
-   * answers are deliberately non-adjacent, because `bestStreak === score` for
-   * every all-correct game — so an implementation that just returned the score
-   * would pass any simpler fixture.
+   * **The regression this test exists for.** `correctAnswers` was sent as
+   * `score()`, correct only while the two were the same quantity. A streak
+   * multiplier carries the score past the question count, and
+   * `isValidSubmission` refuses a correct-answer count above `totalQuestions`
+   * — so the whole submission would be dropped, silently, for exactly the
+   * games a player most wants counted. All three numbers in this fixture are
+   * deliberately different.
    */
-  it('sends the longest run of correct answers, not the count of them', () => {
+  it('sends the correct-answer count, never the multiplied score', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: [
-        answeredWith('q0:right'),
-        answeredWith('q1:wrong'),
-        answeredWith('q2:right'),
-        answeredWith('q3:right'),
-      ],
-      score: 3,
+      answerHistory: history,
+      score: 9,
+      correctAnswers: 3,
+      maxStreak: 2,
     });
 
-    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(2);
-  });
-
-  it('sends a zero streak for a game with nothing right', () => {
-    const { recordGameResult } = render({
-      questions: q,
-      answerHistory: [
-        answeredWith('q0:wrong'),
-        answeredWith('q1:wrong'),
-        answeredWith('q2:wrong'),
-        answeredWith('q3:wrong'),
-      ],
-      score: 0,
-    });
-
-    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(0);
-  });
-
-  it('breaks the streak on a timeout, same as on a wrong answer', () => {
-    const { recordGameResult } = render({
-      questions: q,
-      answerHistory: [
-        answeredWith('q0:right'),
-        TIMED_OUT,
-        answeredWith('q2:right'),
-        answeredWith('q3:right'),
-      ],
-      score: 3,
-    });
-
-    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(2);
+    expect(recordGameResult.mock.calls[0][0].correctAnswers).toBe(3);
   });
 
   /*
-   * A game restored from a save written before the recap shipped has no
-   * history, so the streak derives as 0 while the score is genuinely 3. The
+   * The streak is the run the quiz counted, not one re-derived from the recap
+   * here. The two disagree by design: a skip leaves the run intact
+   * (`FEAT-004`) and appears in the history as an answer nobody got right, so
+   * a recap-derived walk would under-report exactly the games that spent a
+   * lifeline well. This fixture would derive 2 and must report 3.
+   */
+  it('sends the run the game tracked, not one re-derived from the recap', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [
+        answeredWith('q0:right'),
+        SKIPPED,
+        answeredWith('q2:right'),
+        answeredWith('q3:right'),
+      ],
+      score: 3,
+      correctAnswers: 3,
+      maxStreak: 3,
+    });
+
+    expect(recordGameResult.mock.calls[0][0].bestStreak).toBe(3);
+  });
+
+  /*
+   * A game restored from a save written before the counters existed has no
+   * streak to report, so it banks as 0 while the score is genuinely 3. The
    * game is still banked — a knowing under-report beats losing the totals —
    * and the server accepts it (`game-stats.test.ts` pins the accept case).
    */
-  it('still records a game whose history predates the recap, with a zero streak', () => {
-    const { recordGameResult } = render({ questions: q, answerHistory: [], score: 3 });
+  it('still records a game whose save predates the counters, with a zero streak', () => {
+    const { recordGameResult } = render({
+      questions: q,
+      answerHistory: [],
+      score: 3,
+      correctAnswers: 3,
+      maxStreak: 0,
+    });
 
     expect(recordGameResult).toHaveBeenCalledExactlyOnceWith({
       gameId: 'game-1',
@@ -1834,13 +1857,10 @@ describe('GameOverComponent lifetime stats recording', () => {
   it('records nothing when the game has no id', () => {
     const { recordGameResult } = render({
       questions: q,
-      answerHistory: [
-        answeredWith('q0:right'),
-        answeredWith('q1:right'),
-        answeredWith('q2:right'),
-        answeredWith('q3:right'),
-      ],
+      answerHistory: history,
       score: 4,
+      correctAnswers: 4,
+      maxStreak: 4,
       gameId: null,
     });
 

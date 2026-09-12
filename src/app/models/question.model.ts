@@ -157,8 +157,20 @@ export interface LeaderboardEntry {
   /** Firebase Auth uid — also the Firestore document ID (one entry per user *per board*, best score kept). */
   uid: string;
   name: string;
+  /**
+   * The point total, streak multipliers included (`FEAT-004`) — **not** the
+   * number of correct answers, which it can exceed by up to
+   * `MAX_SCORE_MULTIPLIER`. What ranks the board, and what `firestore.rules`
+   * bounds against `totalQuestions`.
+   */
   score: number;
   totalQuestions: number;
+  /**
+   * Raw accuracy, correct answers over questions asked, and never multiplied —
+   * so it cannot be derived from `score`, and the rules bound it at 100 rather
+   * than deriving it. The number a player compares against themselves, where
+   * `score` is the one they compare against everybody else.
+   */
   percentage: number;
   createdAt: number;
   /**

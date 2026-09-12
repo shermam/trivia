@@ -7,11 +7,22 @@ import { globSync } from 'node:fs';
  *
  * **The convention, in one line: motion is opt-out by default.** Anything that
  * moves, scales or loops is gated on the reader not having asked for less of
- * it — Tailwind's `motion-safe:` variant in a template, or a
+ * it — Tailwind's `motion-safe:` variant wherever the class is written, or a
  * `matchMedia('(prefers-reduced-motion: reduce)')` check for motion driven
  * from TypeScript. This file is where that rule lives, because it is also what
  * enforces it; a convention documented somewhere other than its check is a
  * convention with two places to drift.
+ *
+ * **"Wherever the class is written" is the scope, and it is wider than the
+ * templates.** A class list is as often computed in a component — a `switch`
+ * returning one string per state, a `[ngClass]` binding built in TypeScript —
+ * and a `.html`-only glob cannot see those at all. That is not hypothetical:
+ * the quiz's streak badge picks its tier colours in `quiz-loop.component.ts`
+ * and carries `motion-safe:animate-pulse` in one of those strings, which this
+ * script scanned no part of while claiming in the same breath to enforce the
+ * rule. A guardrail with a hole the size of "put it in a variable" is a
+ * comment. Both file types are scanned now, with the same patterns; the
+ * TypeScript sweep found no other offence when it was turned on.
  *
  * **Why a script and not a paragraph.** The rule is the kind that decays: it is invisible to anyone who does not have "reduce
  * motion" switched on, so a missing `motion-safe:` looks perfect to whoever
@@ -40,7 +51,8 @@ import { globSync } from 'node:fs';
  * A wider rule would need to understand *what* a transition animates in the
  * general case, which means resolving Tailwind's utilities to declarations —
  * far more machinery than the risk warrants. If a transform-based movement is
- * ever added in a template, add it to MOVEMENT_PATTERNS below.
+ * ever added, in a template or in a computed class string, add it to
+ * MOVEMENT_PATTERNS below.
  *
  * **`transition-transform` is swept in, and was added the day something used
  * it** — the nav drawer, which slides a 288px panel across a phone screen and
@@ -79,13 +91,19 @@ const MOVEMENT_PATTERNS = [
 /** The variant that gates a utility on `prefers-reduced-motion: no-preference`. */
 const SAFE_VARIANT = 'motion-safe:';
 
-function templates() {
-  return globSync('src/app/**/*.html', { cwd: process.cwd() }).sort();
+/**
+ * Every file a Tailwind class can be written in: templates, and the components
+ * that compute class strings for them. Specs are included deliberately — a
+ * fixture asserting an ungated `animate-*` is a fixture pinning the wrong
+ * thing.
+ */
+function sources() {
+  return globSync('src/app/**/*.{html,ts}', { cwd: process.cwd() }).sort();
 }
 
 const offences = [];
 
-for (const file of templates()) {
+for (const file of sources()) {
   const source = readFileSync(file, 'utf8');
   const lines = source.split('\n');
 
@@ -124,5 +142,5 @@ if (offences.length > 0) {
 }
 
 console.log(
-  `✓ Motion: every animation across ${templates().length} template(s) is gated on ${SAFE_VARIANT}`,
+  `✓ Motion: every animation across ${sources().length} template(s) and component(s) is gated on ${SAFE_VARIANT}`,
 );

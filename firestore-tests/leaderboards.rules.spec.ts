@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   assertFails,
   assertSucceeds,
@@ -5,7 +6,8 @@ import {
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { MAX_SCORE_MULTIPLIER } from '../src/app/models/scoring';
 import {
   asAnonymous,
   asOAuth,
@@ -239,7 +241,6 @@ describe('leaderboards: the score bounds carry over', () => {
   rejects('a non-string name', { name: 42 });
   rejects('a negative score', { score: -1 });
   rejects('a non-integer score', { score: 1.5 });
-  rejects('totalQuestions below score', { score: 10, totalQuestions: 5 });
   rejects('zero questions', { score: 0, totalQuestions: 0, percentage: 0 });
   rejects('a percentage above 100', { percentage: 101 });
   rejects('a negative percentage', { percentage: -1 });
@@ -289,6 +290,10 @@ describe('leaderboards: the score bounds carry over', () => {
     await assertFails(write({ score: 999999, totalQuestions: 999999, percentage: 100 }));
   });
 
+  // Still refused after the multiplier widened the score bound: accuracy may
+  // fall short of what the score implies (a multiplier inflates one and not the
+  // other), never exceed it, because every correct answer is worth at least a
+  // point.
   it('rejects a percentage inconsistent with score/totalQuestions', async () => {
     await assertFails(write({ score: 1, totalQuestions: 10, percentage: 100 }));
   });
@@ -303,6 +308,140 @@ describe('leaderboards: the score bounds carry over', () => {
 
   it('rejects a backdated createdAt', async () => {
     await assertFails(write({ createdAt: Date.now() - 60 * 60 * 1000 }));
+  });
+});
+
+/**
+ * `FEAT-004`. A streak multiplier carries a score past its own question count,
+ * so the bound became `score <= totalQuestions * MAX_SCORE_MULTIPLIER` and
+ * `percentage` stopped being derived from the score at all.
+ *
+ * **The accept cases carry most of the weight here.** A suite of nothing but
+ * rejections passes against a rule that denies everything, and that is not a
+ * hypothetical on this file — the session-document volume cap shipped 100%
+ * closed and looked perfectly correct doing so (`CLAUDE.md` §4.6). Every
+ * legitimate score a real game can produce has to be accepted, because the
+ * alternative reaches the player as a bare `permission-denied` on the one
+ * screen that cannot honestly explain it.
+ */
+describe('leaderboards: the multiplier ceiling (FEAT-004)', () => {
+  const write = (overrides: Record<string, unknown>) =>
+    setDoc(entryRef(asVerifiedPassword(env, 'u'), '15', 'u'), boardEntry('u', '15', overrides));
+
+  /*
+   * **The constant is duplicated, so it is pinned.** The rules copy is the
+   * authority and the client copy exists only so the app refuses to submit a
+   * score this file would reject; two numbers that can drift is exactly the
+   * shape of a bug nobody sees until a player's perfect run stops saving.
+   * Read out of the rules text rather than restated here, so this test cannot
+   * agree with a number the emulator never loaded.
+   */
+  it('agrees with the client about the ceiling', () => {
+    const rules = readFileSync('firestore.rules', 'utf8');
+    const declared = /function maxScoreMultiplier\(\)\s*\{\s*return\s+(\d+)\s*;/.exec(rules);
+
+    expect(declared, 'maxScoreMultiplier() not found in firestore.rules').not.toBeNull();
+    expect(Number(declared?.[1])).toBe(MAX_SCORE_MULTIPLIER);
+  });
+
+  // The score a real perfect run produces, question count by question count.
+  // These are the entries the feature exists to publish; a rule that refused
+  // them would be invisible to any `assertFails`.
+  for (const [questions, score] of [
+    [5, 7],
+    [10, 20],
+    [25, 65],
+  ] as const) {
+    it(`accepts a perfect ${questions}-question run scoring ${score}`, async () => {
+      await assertSucceeds(write({ score, totalQuestions: questions, percentage: 100 }));
+    });
+  }
+
+  it('accepts a score exactly on the ceiling', async () => {
+    await assertSucceeds(write({ score: 10 * MAX_SCORE_MULTIPLIER, totalQuestions: 10 }));
+  });
+
+  it('accepts a score one under the ceiling', async () => {
+    await assertSucceeds(write({ score: 10 * MAX_SCORE_MULTIPLIER - 1, totalQuestions: 10 }));
+  });
+
+  it('rejects a score one over the ceiling', async () => {
+    await assertFails(write({ score: 10 * MAX_SCORE_MULTIPLIER + 1, totalQuestions: 10 }));
+  });
+
+  it('rejects a score far over the ceiling on the longest game', async () => {
+    await assertFails(write({ score: 25 * MAX_SCORE_MULTIPLIER + 1, totalQuestions: 25 }));
+  });
+
+  // The ceiling scales with the game, so a short game does not inherit a long
+  // game's headroom — the mistake a single constant bound would make.
+  it('rejects a long-game score written against a short game', async () => {
+    await assertFails(write({ score: 20, totalQuestions: 5 }));
+  });
+
+  it('accepts the same score on a game long enough to earn it', async () => {
+    await assertSucceeds(write({ score: 20, totalQuestions: 10 }));
+  });
+
+  /*
+   * `percentage` is raw accuracy now, so it is *not* recomputable from the
+   * score — but it is still bounded by it in one direction, and capped at 100
+   * absolutely. Both halves are load-bearing: without the cap a multiplied
+   * score would license a 300% entry, and without the bound 1 correct out of 10
+   * could still be published as 100%.
+   */
+  it('accepts accuracy below what the score implies', async () => {
+    await assertSucceeds(write({ score: 20, totalQuestions: 10, percentage: 100 }));
+  });
+
+  it('accepts a modest accuracy beside a multiplied score', async () => {
+    await assertSucceeds(write({ score: 12, totalQuestions: 10, percentage: 70 }));
+  });
+
+  it('rejects an accuracy above 100 however large the score', async () => {
+    await assertFails(write({ score: 30, totalQuestions: 10, percentage: 300 }));
+  });
+
+  it('rejects an accuracy above what the score implies', async () => {
+    await assertFails(write({ score: 2, totalQuestions: 10, percentage: 90 }));
+  });
+
+  // The boundary itself, one point over: `round(7 * 100 / 10)` is 70, so 70 is
+  // the largest accuracy a score of 7 can carry and 71 is the first refused.
+  // The far-over case above would still pass against a rule that had drifted a
+  // few points loose; this one cannot.
+  it('rejects an accuracy one point above what the score implies', async () => {
+    await assertSucceeds(write({ score: 7, totalQuestions: 10, percentage: 70 }));
+    await assertFails(write({ score: 7, totalQuestions: 10, percentage: 71 }));
+  });
+
+  // The other bounds are unchanged, and stay checked alongside the new one so
+  // widening the score cannot be mistaken for widening the entry.
+  it('rejects a non-integer multiplied score', async () => {
+    await assertFails(write({ score: 7.5, totalQuestions: 10 }));
+  });
+
+  it('rejects a multiplied score on a game longer than the app can produce', async () => {
+    await assertFails(write({ score: 26, totalQuestions: 26 }));
+  });
+
+  it("rejects a multiplied score written to someone else's entry", async () => {
+    await assertFails(
+      setDoc(
+        entryRef(asVerifiedPassword(env, 'attacker'), '15', 'victim'),
+        boardEntry('victim', '15', { score: 20 }),
+      ),
+    );
+  });
+
+  // The improving-score rule is untouched by the widening: a multiplied score
+  // still has to beat what is on the board, and still cannot replace a better
+  // one just by being multiplied.
+  it('still requires a multiplied score to beat the existing best', async () => {
+    await seedExisting('15', 'u', 20);
+
+    await assertFails(write({ score: 18, totalQuestions: 10 }));
+    await assertSucceeds(write({ score: 21, totalQuestions: 10 }));
   });
 });
 

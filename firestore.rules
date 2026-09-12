@@ -79,6 +79,27 @@ service cloud.firestore {
       return limit in ['15', '30', 'unlimited'];
     }
 
+    // The most a streak multiplier may be worth (`FEAT-004`), and therefore the
+    // factor by which a run may out-score its own question count.
+    //
+    // **This is the authoritative copy.** `MAX_SCORE_MULTIPLIER` in
+    // `src/app/models/scoring.ts` duplicates it so the client can refuse to
+    // submit a score this file would reject, but a client is not a place a
+    // bound can live: Firestore is a public API and the browser is the
+    // attacker's own machine. The two are pinned equal by a test in
+    // `firestore-tests/leaderboards.rules.spec.ts`, which reads this number
+    // out of this file.
+    //
+    // Three, not "whatever the tiers add up to": the rule is a *hard bound* in
+    // the sense of `CLAUDE.md` §4.1, not a re-simulation of the game. It has to
+    // accept every honest run and refuse the implausible ones, and the tier
+    // table is the client's business — a rule that tried to reproduce it would
+    // have to be changed in lockstep with a balance tweak and would reject
+    // honest scores the day it fell behind.
+    function maxScoreMultiplier() {
+      return 3;
+    }
+
     // Everything a leaderboard entry must be, plus the board it is being
     // written to. `timeLimit` is redundant with the path and is required anyway: an
     // exact-key hasOnly() allowlist cannot be widened after the fact without
@@ -86,6 +107,24 @@ service cloud.firestore {
     // admin listing across boards should not have to parse document paths to
     // know what it is looking at. Requiring it to equal the path segment is
     // what keeps the redundancy honest.
+    //
+    // **`score` and `percentage` answer two different questions**, which is why
+    // neither is derived from the other any more. `score` is the point total a
+    // run earned, streak multipliers included, so it can exceed the number of
+    // questions — up to `maxScoreMultiplier()` times it, and no further.
+    // `percentage` is raw accuracy, correct answers over questions asked, and
+    // the multiplier never touches it: a board showing 340% would be a bug
+    // report waiting to happen, and accuracy is the number a player compares
+    // against themselves.
+    //
+    // They are still tied together, just loosely enough to survive the
+    // multiplier. Every correct answer is worth **at least** one point, so the
+    // correct-answer count can never exceed the score — and `math.round()` is
+    // monotonic, so accuracy can never exceed what the score implies either.
+    // `percentage <= math.round(score * 100.0 / totalQuestions)` is exactly the
+    // old equality relaxed along the one axis the multiplier moves: an
+    // unmultiplied run still satisfies it with equality, while 1 correct out of
+    // 10 still cannot be published as 100%.
     function isValidBoardEntry(uid, limit) {
       let data = request.resource.data;
       return data.keys().hasOnly(
@@ -101,9 +140,11 @@ service cloud.firestore {
             && data.totalQuestions is int
             && data.totalQuestions >= 1
             && data.totalQuestions <= 25
-            && data.totalQuestions >= data.score
+            && data.score <= data.totalQuestions * maxScoreMultiplier()
             && data.percentage is int
-            && data.percentage == math.round(data.score * 100.0 / data.totalQuestions)
+            && data.percentage >= 0
+            && data.percentage <= 100
+            && data.percentage <= math.round(data.score * 100.0 / data.totalQuestions)
             && isNearRequestTime(data.createdAt);
     }
 

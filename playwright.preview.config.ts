@@ -78,6 +78,14 @@ export default defineConfig<object, E2EWorkerOptions>({
    * - Can the sweep find everything it writes? `review-queue` submits questions
    *   through the UI, which gives them Firestore auto-ids that reach no list,
    *   and `add-question-pro-gating` does the same.
+   * - Is its subject a `firestore.rules` bound? Rules are per project and a
+   *   preview channel is Hosting only (`docs/ci-cd.md` §4.2a), so a channel
+   *   runs whatever rules `main` last deployed. `streak-leaderboard` exists to
+   *   prove a score sits inside the multiplier ceiling, so on any PR that moves
+   *   that ceiling it would fail here for a reason that is expected — which is
+   *   how a real signal becomes a red reviewers learn to ignore.
+   *   `sign-in-save-score` covers the save path against the real project
+   *   instead, with a score no multiplier touches.
    */
   testMatch: [
     '**/unauthenticated/**/*.spec.ts',
