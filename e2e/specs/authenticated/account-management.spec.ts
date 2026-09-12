@@ -125,6 +125,15 @@ test.describe('account management: export and deletion', () => {
         incorrect_answers: ['No', 'Maybe', 'Perhaps'],
         createdBy: uid,
         createdAt: Date.now(),
+        // The optional contributor fields (`FEAT-022`), seeded here because
+        // the Privacy Policy promises an export of *everything* held and the
+        // export builds each question from the whole stored document. That is
+        // exactly the shape that can stop being true silently — a future
+        // field-by-field rebuild would still pass every other assertion in
+        // this test.
+        sourceUrl: 'https://example.org/contributed',
+        sourceTitle: 'Example Journal',
+        explanation: 'Why this question has the answer it has.',
       },
     ]);
 
@@ -146,7 +155,12 @@ test.describe('account management: export and deletion', () => {
     const exported = JSON.parse(await readFile(await download.path(), 'utf8')) as {
       account: { uid: string; email: string; signInProviders: string[] };
       leaderboardEntries: { board: string; score: number }[];
-      contributedQuestions: { id: string }[];
+      contributedQuestions: {
+        id: string;
+        sourceUrl?: string;
+        sourceTitle?: string;
+        explanation?: string;
+      }[];
       gameplayStats: Record<string, number> | null;
       notHeldHere: string[];
     };
@@ -161,6 +175,12 @@ test.describe('account management: export and deletion', () => {
     expect(exported.leaderboardEntries[0].board).toBe('15');
     expect(exported.leaderboardEntries[0].score).toBe(3);
     expect(exported.contributedQuestions.map((question) => question.id)).toContain(questionId);
+    const exportedQuestion = exported.contributedQuestions.find(
+      (question) => question.id === questionId,
+    );
+    expect(exportedQuestion?.sourceUrl).toBe('https://example.org/contributed');
+    expect(exportedQuestion?.sourceTitle).toBe('Example Journal');
+    expect(exportedQuestion?.explanation).toBe('Why this question has the answer it has.');
     // Present and explicitly null, because this account never finished a game.
     // The key has to be *there*: an absent key reads as "we are not telling
     // you", an explicit null reads as "there is nothing" — the distinction

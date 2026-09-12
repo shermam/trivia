@@ -81,6 +81,9 @@ function setup(
         question: { setValue: (v: string) => void };
         correctAnswer: { setValue: (v: string) => void };
         type: { setValue: (v: string) => void };
+        sourceUrl: { setValue: (v: string) => void };
+        sourceTitle: { setValue: (v: string) => void };
+        explanation: { setValue: (v: string) => void };
         incorrectAnswers: { controls: { setValue: (v: string) => void }[] };
       };
     };
@@ -185,6 +188,215 @@ describe('AddQuestionComponent validation', () => {
   });
 });
 
+/**
+ * `FEAT-022`. Both source fields are optional, and the whole feature turns on
+ * that staying true: the very first version of this made `sourceTitle` invalid
+ * when empty, which left the form permanently invalid for every contributor
+ * who did not cite anything — a Save button that silently did nothing, the
+ * exact symptom finding B4 was about.
+ */
+describe('AddQuestionComponent source attribution', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('submits with no source at all, writing neither key', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    const written = addCustomQuestion.mock.calls[0][0];
+    // Absent, not empty: `firestore.rules` refuses an empty `sourceTitle`, and
+    // a missing key is the honest encoding of "no citation given".
+    expect('sourceUrl' in written).toBe(false);
+    expect('sourceTitle' in written).toBe(false);
+  });
+
+  it('writes both fields when both are given, trimmed', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('  https://example.org/h2o  ');
+    component.form.controls.sourceTitle.setValue('  Example Journal  ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0]).toMatchObject({
+      sourceUrl: 'https://example.org/h2o',
+      sourceTitle: 'Example Journal',
+    });
+  });
+
+  it('accepts a title with no URL — a book has no href', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceTitle.setValue('Feynman Lectures, Vol. II');
+
+    await component.onSubmit();
+
+    const written = addCustomQuestion.mock.calls[0][0];
+    expect(written.sourceTitle).toBe('Feynman Lectures, Vol. II');
+    expect('sourceUrl' in written).toBe(false);
+  });
+
+  it('accepts a URL with no title', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('https://example.org/h2o');
+
+    await component.onSubmit();
+
+    const written = addCustomQuestion.mock.calls[0][0];
+    expect(written.sourceUrl).toBe('https://example.org/h2o');
+    expect('sourceTitle' in written).toBe(false);
+  });
+
+  /**
+   * The mirror of the `sourceTitle` case below, and not a duplicate of it:
+   * `sourceUrl` carries a *validator* as well, so whitespace here has two
+   * ways to go wrong — a blocked submit if `httpsUrl` treated `"  "` as a
+   * malformed address, or an empty string written for a rule that refuses
+   * one. Neither happens; the key is simply absent.
+   */
+  it('drops a whitespace-only link without blocking the submit', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('   ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('sourceUrl' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+    expect(component.validationSummary()).toBeNull();
+  });
+
+  it('drops a whitespace-only title rather than writing one the rules refuse', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceTitle.setValue('    ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('sourceTitle' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  /**
+   * Caught in the form rather than by Firestore on purpose: without this the
+   * contributor's only feedback is a bare `permission-denied` mapped to a
+   * generic "could not save", which names no field and offers no fix.
+   */
+  it.each([
+    ['plain http', 'http://example.org/article'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a bare scheme', 'https://'],
+    ['a bare hostname', 'example.org'],
+  ])('refuses %s before it reaches the rules', async (_label, url) => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue(url);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+    expect(component.validationSummary()).toMatch(/source/i);
+  });
+
+  it('refuses a URL past the length the rules cap', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue(`https://example.org/${'a'.repeat(500)}`);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+  });
+
+  it('refuses a title past the length the rules cap', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceTitle.setValue('t'.repeat(201));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The Justification box (`explanation`). Optional like the source fields, and
+ * for the same reason: a contributor who thinks it is required will write
+ * something, and reasoning invented to fill a box is worse than none.
+ */
+describe('AddQuestionComponent justification', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('writes no key at all when the box is left alone', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('explanation' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  it('writes the justification, trimmed, when one is given', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('  Water is two hydrogens and an oxygen.  ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0]).toMatchObject({
+      explanation: 'Water is two hydrogens and an oxygen.',
+    });
+  });
+
+  it('keeps the line breaks a multi-paragraph justification was written with', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('CO2 is carbon dioxide.\nO2 is oxygen gas.');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].explanation).toBe(
+      'CO2 is carbon dioxide.\nO2 is oxygen gas.',
+    );
+  });
+
+  it('drops a whitespace-only justification rather than writing one the rules refuse', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('   \n  ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('explanation' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  it('accepts a justification exactly at the 1000-character cap the rules set', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('j'.repeat(1000));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a justification past that cap, before it reaches the rules', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.explanation.setValue('j'.repeat(1001));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+    expect(component.validationSummary()).toMatch(/justification/i);
+  });
+});
+
 describe('AddQuestionComponent submit failures', () => {
   afterEach(() => TestBed.resetTestingModule());
 
@@ -256,6 +468,85 @@ describe('AddQuestionComponent rendered feedback', () => {
     const input: HTMLElement | null = fixture.nativeElement.querySelector('#category');
     expect(input?.getAttribute('aria-invalid')).toBe('true');
     expect(input?.getAttribute('aria-describedby')).toBe('category-error');
+  });
+
+  /**
+   * The regression this pins: `fieldLabels` is what the summary and the focus
+   * move are built from, and the two source controls were not in it. A bad
+   * link therefore blocked the submit while naming nothing and focusing
+   * nothing — the same "Save does nothing" experience the whole error-handling
+   * path in this component exists to prevent.
+   */
+  /**
+   * WCAG 1.3.5's neighbour: guidance that only sits next to a control is
+   * guidance a screen-reader user never hears, because the control announces
+   * its label and its *description*. Both hinted fields carry their hint id
+   * from first paint, not only once something is wrong.
+   */
+  it('describes the hinted controls by their help text before anything is wrong', () => {
+    const { fixture } = setup();
+    fixture.detectChanges();
+
+    const url: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl');
+    expect(url?.getAttribute('aria-describedby')).toBe('sourceUrl-hint');
+    expect(fixture.nativeElement.querySelector('#sourceUrl-hint')?.textContent).toMatch(
+      /where the answer comes from/i,
+    );
+
+    const justification: HTMLElement | null = fixture.nativeElement.querySelector('#explanation');
+    expect(justification?.getAttribute('aria-describedby')).toBe('explanation-hint');
+    expect(fixture.nativeElement.querySelector('#explanation-hint')?.textContent).toMatch(
+      /tricky question/i,
+    );
+  });
+
+  it('names and focuses a malformed source link, rather than failing silently', async () => {
+    const { fixture, component, fillValidForm } = setup();
+    fixture.detectChanges();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('example.org');
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    expect(component.validationSummary()).toMatch(/source link/i);
+    expect(document.activeElement?.id).toBe('sourceUrl');
+
+    const error: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl-error');
+    expect(error?.textContent).toMatch(/https:\/\//);
+    const input: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl');
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    // The error **and** the standing hint, error first: the description a
+    // screen reader reads out is the whole list, and the hint has to stay in
+    // it or the guidance disappears at the moment it is most needed.
+    expect(input?.getAttribute('aria-describedby')).toBe('sourceUrl-error sourceUrl-hint');
+  });
+
+  /**
+   * Same regression as the source controls, one field along: a control missing
+   * from `fieldLabels` is invisible to both the summary and the focus move, so
+   * an over-long justification would block the submit while naming nothing.
+   * The box is the last control on the form and the easiest to have scrolled
+   * past, which is exactly when "nothing happened" is least diagnosable.
+   */
+  it('names and focuses an over-long justification', async () => {
+    const { fixture, component, fillValidForm } = setup();
+    fixture.detectChanges();
+    fillValidForm();
+    component.form.controls.explanation.setValue('j'.repeat(1001));
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    expect(component.validationSummary()).toMatch(/justification/i);
+    expect(document.activeElement?.id).toBe('explanation');
+
+    const error: HTMLElement | null = fixture.nativeElement.querySelector('#explanation-error');
+    expect(error?.textContent).toMatch(/1000 characters or fewer/);
+    const box: HTMLElement | null = fixture.nativeElement.querySelector('#explanation');
+    expect(box?.tagName).toBe('TEXTAREA');
+    expect(box?.getAttribute('aria-invalid')).toBe('true');
+    expect(box?.getAttribute('aria-describedby')).toBe('explanation-error explanation-hint');
   });
 
   it('moves focus to the first invalid field so the problem is unmissable', async () => {

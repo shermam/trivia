@@ -18,6 +18,26 @@ import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 
 /**
+ * Optional, but `https://` when present — the same rule `firestore.rules`
+ * enforces, checked here so the contributor gets a field error instead of a
+ * `permission-denied` they cannot act on.
+ *
+ * Deliberately not a full URL regex. The rule this mirrors is a prefix check,
+ * and a client validator stricter than the server's would refuse writes the
+ * backend would have accepted. An empty or whitespace-only value passes: the
+ * field is optional, and the submit drops it rather than writing one.
+ */
+function httpsUrl(control: AbstractControl): ValidationErrors | null {
+  const value = typeof control.value === 'string' ? control.value.trim() : '';
+  if (value.length === 0) {
+    return null;
+  }
+  return value.startsWith('https://') && value.length > 'https://'.length
+    ? null
+    : { httpsUrl: true };
+}
+
+/**
  * `Validators.required` accepts `"   "`, and `firestore.rules` does not: it
  * checks `size() > 0` on the *trimmed* value this component sends. Without a
  * trim-aware check the form would happily submit whitespace and the write
@@ -58,6 +78,28 @@ export class AddQuestionComponent implements OnInit {
     type: ['multiple' as QuestionType, Validators.required],
     question: ['', [Validators.required, nonBlank, Validators.maxLength(500)]],
     correctAnswer: ['', [Validators.required, nonBlank, Validators.maxLength(200)]],
+    // Optional on purpose. Requiring a citation would push contributors toward
+    // pasting *something*, and a bad citation is worse than none because it
+    // looks checked. `https` only, matching `firestore.rules` — the CSP would
+    // not load an `http` page, so the rule refuses what the reader could not
+    // open anyway, and catching it here turns a bare `permission-denied` into
+    // a field error the contributor can act on.
+    sourceUrl: ['', [httpsUrl, Validators.maxLength(500)]],
+    // No `nonBlank` here, unlike every required field above: `nonBlank`
+    // rejects the empty string too, which is exactly right for a control that
+    // must be filled in and exactly wrong for one that may be left alone — it
+    // made the whole form invalid for every contributor who did not cite a
+    // source, i.e. almost all of them, and the symptom was a submit button
+    // that silently did nothing. Whitespace-only needs no validator of its
+    // own: it trims to '' and is omitted from the write.
+    sourceTitle: ['', [Validators.maxLength(200)]],
+    // The "Justification" box, for a question whose answer is not obvious even
+    // to somebody who knows the subject. Optional for the same reason the two
+    // above are, and bounded at 1000 to match `firestore.rules` — twice the
+    // question's own cap, because it has to explain the question, the right
+    // answer and the wrong ones. No `nonBlank`: whitespace-only trims to '' and
+    // is dropped from the write rather than making the whole form invalid.
+    explanation: ['', [Validators.maxLength(1000)]],
     // Required only for a "multiple" question — for a boolean one these three
     // are irrelevant and hidden, and the opposite value is derived instead.
     // The validators are therefore applied and cleared as `type` changes
@@ -154,6 +196,9 @@ export class AddQuestionComponent implements OnInit {
 
     const raw = this.form.getRawValue();
     const isBoolean = raw.type === 'boolean';
+    const sourceUrl = raw.sourceUrl.trim();
+    const sourceTitle = raw.sourceTitle.trim();
+    const explanation = raw.explanation.trim();
     const incorrectAnswers = isBoolean
       ? [raw.correctAnswer.trim() === 'True' ? 'False' : 'True']
       : raw.incorrectAnswers.map((answer) => answer.trim());
@@ -200,6 +245,12 @@ export class AddQuestionComponent implements OnInit {
       // can't be attributed to someone else or backdated.
       createdBy: author.uid,
       createdAt: Date.now(),
+      // Omitted entirely when blank rather than written as an empty string:
+      // `firestore.rules` refuses an empty `sourceTitle` or `explanation`, and
+      // a key that is absent is the honest representation of "not given".
+      ...(sourceUrl ? { sourceUrl } : {}),
+      ...(sourceTitle ? { sourceTitle } : {}),
+      ...(explanation ? { explanation } : {}),
     };
 
     this.isSubmitting.set(true);
@@ -269,6 +320,16 @@ export class AddQuestionComponent implements OnInit {
       id: `incorrect-answer-${index}`,
       label: `Incorrect answer ${index + 1}`,
     })),
+    // Optional fields still belong here. This table is not "the required
+    // fields" — it is what `describeMissingFields()` and
+    // `focusFirstInvalidControl()` can *see*, and a control missing from it is
+    // invisible to both: a malformed source link blocked the submit, produced
+    // the fallback "Please check the form and try again." naming nothing, and
+    // moved focus nowhere. That is the finding-B4 symptom exactly, reached by
+    // a different route.
+    { control: this.form.controls.sourceUrl, id: 'sourceUrl', label: 'Source link' },
+    { control: this.form.controls.sourceTitle, id: 'sourceTitle', label: 'Source name' },
+    { control: this.form.controls.explanation, id: 'explanation', label: 'Justification' },
   ];
 
   private describeMissingFields(): string {
@@ -307,6 +368,9 @@ export class AddQuestionComponent implements OnInit {
     }
     if (control.hasError('maxlength')) {
       return `${label} must be ${maxLength} characters or fewer.`;
+    }
+    if (control.hasError('httpsUrl')) {
+      return `${label} has to be a full address starting with https://.`;
     }
     return '';
   }

@@ -1374,6 +1374,68 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
   const q1 = recapQuestion('q1');
   const q2 = recapQuestion('q2');
 
+  /**
+   * `FEAT-022`. The rendering rules live in `SourceLinkComponent`'s own spec;
+   * what these two pin is the wiring, which is the half a refactor breaks — a
+   * recap row that stops passing the fields through renders exactly the same
+   * as a question that never had a source, and nothing else would notice.
+   */
+  it('offers a source as a link on the row that has one, and nowhere else', () => {
+    const cited = recapQuestion('q0', {
+      sourceUrl: 'https://example.org/h2o',
+      sourceTitle: 'Example Journal',
+    });
+    const { open, queryAll } = render({
+      questions: [cited, q1],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    const link = rows[0].querySelector<HTMLAnchorElement>('[data-cy="question-source-link"]');
+    expect(link?.getAttribute('href')).toBe('https://example.org/h2o');
+    expect(link?.textContent).toContain('Example Journal');
+
+    // The common case: no source, and therefore no row furniture at all — no
+    // badge, no "unverified", no reserved empty line.
+    expect(rows[1].querySelector('[data-cy="question-source"]')).toBeNull();
+  });
+
+  it("offers the contributor's justification on the row that carries one", () => {
+    const explained = recapQuestion('q0', {
+      explanation: 'CO2 and O2 are both real molecules, which is what makes this one tricky.',
+    });
+    const { open, queryAll } = render({
+      questions: [explained, q1],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    expect(rows[0].querySelector('[data-cy="question-justification"]')?.textContent).toContain(
+      'both real molecules',
+    );
+
+    // The common case: no justification, and therefore no row furniture at
+    // all — no heading, no reserved empty block.
+    expect(rows[1].querySelector('[data-cy="question-justification"]')).toBeNull();
+  });
+
+  it('shows a citation with no link as plain text', () => {
+    const cited = recapQuestion('q0', { sourceTitle: 'Feynman Lectures, Vol. II' });
+    const { open, queryAll } = render({
+      questions: [cited],
+      answerHistory: [answeredWith('q0:right')],
+    });
+    open();
+
+    const row = queryAll('[data-cy="recap-row"]')[0];
+    expect(row.querySelector('[data-cy="question-source"]')?.textContent).toContain(
+      'Feynman Lectures',
+    );
+    expect(row.querySelector('[data-cy="question-source-link"]')).toBeNull();
+  });
+
   it('summarises the round on the toggle, and starts collapsed', () => {
     const { query } = render({
       questions: [q0, q1, q2],

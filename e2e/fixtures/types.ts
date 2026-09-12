@@ -22,6 +22,15 @@ export interface CustomQuestionSeed {
    */
   status?: 'approved' | 'pending' | 'rejected';
   createdAt?: number;
+  /**
+   * The optional contributor fields (`FEAT-022`): where the answer comes from,
+   * and why it is the answer. Optional in the schema too, not merely here —
+   * almost no question in the bank carries any of them, so a spec asserting
+   * their *absence* is testing the common case.
+   */
+  sourceUrl?: string;
+  sourceTitle?: string;
+  explanation?: string;
 }
 
 export interface VerifiedUserSeed {

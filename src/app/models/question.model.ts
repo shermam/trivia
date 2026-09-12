@@ -88,6 +88,30 @@ export interface TriviaQuestion {
   incorrect_answers: string[];
   all_answers: Answer[];
   source: 'open_trivia' | 'custom';
+  /**
+   * Where a contributed question says its answer comes from (`FEAT-022`).
+   *
+   * Optional, and absent on the overwhelming majority of questions: Open Trivia
+   * DB exposes no citation, and it is the default source. That is why the UI
+   * shows a link where one exists and **nothing** where one does not — a badge
+   * would read as "the others are unverified", which is a claim about the
+   * upstream API rather than about the question.
+   */
+  sourceUrl?: string;
+  /** A human label for `sourceUrl`, or a citation with no link at all. */
+  sourceTitle?: string;
+  /**
+   * The contributor's own justification for the question, its correct answer
+   * and its distractors — for the "tricky" question where none of that is
+   * obvious even to somebody who knows the subject.
+   *
+   * Named for `FEAT-006`, which owns this field's later life: a reviewer will
+   * be able to edit it at review time. The form labels it **Justification**,
+   * which is what a contributor is being asked for; the field keeps the name
+   * the two features share so the second one does not have to introduce a
+   * near-duplicate.
+   */
+  explanation?: string;
 }
 
 /**
@@ -166,6 +190,26 @@ export interface CustomQuestionContent {
   question: string;
   correct_answer: string;
   incorrect_answers: string[];
+  /**
+   * Where the contributor says the answer comes from (`FEAT-022`). Optional on
+   * both the read and the write shape — unlike `createdBy`, this one is
+   * genuinely optional rather than legacy-optional: a question with no citation
+   * is a normal question, not one predating a field.
+   *
+   * `firestore.rules` requires `https://` and caps the length; `http://` is
+   * refused because the CSP would not load it and a citation the reader cannot
+   * open is worse than none.
+   */
+  sourceUrl?: string;
+  /** A label for `sourceUrl`, or a citation with no link — a book, an edition. */
+  sourceTitle?: string;
+  /**
+   * The contributor's justification for the question and its answers
+   * (`FEAT-006`'s `explanation`, offered on the form as **Justification**).
+   * Optional; `firestore.rules` caps it at 1000 characters and refuses an
+   * empty string, so "none given" is an absent key.
+   */
+  explanation?: string;
 }
 
 /**
