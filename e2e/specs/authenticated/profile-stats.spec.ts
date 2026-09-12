@@ -105,13 +105,10 @@ test.describe('profile — lifetime stats', () => {
     // non-breaking space before the sign in some locales and none in others,
     // and which one the runner is in is not this test's subject.
     //
-    // **The leading and trailing `\s*` are load-bearing, not defensive.**
-    // `toHaveText` normalizes whitespace for a string and **not** for a
-    // RegExp — the matcher skips `normalize()` entirely when one is given — so
-    // the pattern is tested against the element's raw text, newlines and
-    // template indentation included. `/^100\s*%$/` therefore fails against a
-    // `<dd>` whose interpolation sits on its own line, which is every
-    // interpolation Prettier has formatted.
+    // **The leading and trailing `\s*` are load-bearing, not defensive**, for
+    // the reason `CLAUDE.md` §4.6 now records: a pattern is matched against
+    // the element's raw text, template indentation included, where a string
+    // expectation would have been normalized first.
     await expect(page.getByTestId('stat-accuracy')).toHaveText(/^\s*100\s*%\s*$/);
   });
 
