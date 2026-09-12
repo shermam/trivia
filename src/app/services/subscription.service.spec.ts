@@ -824,6 +824,20 @@ describe('SubscriptionService currency selection', () => {
     vi.spyOn(navigator, 'languages', 'get').mockReturnValue(languages);
   }
 
+  /**
+   * Points the fake at a different catalog part-way through a test.
+   *
+   * `fakeFirestore` stubs `fetch`, so a second catalog needs the first stub
+   * out of the way — and `location`, stubbed by `beforeEach`, goes with it and
+   * has to be put back. The language spy deliberately survives: which
+   * currencies are on sale is the variable here, and the browser is not.
+   */
+  function recatalog(products: ProductSeed[]) {
+    vi.unstubAllGlobals();
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+    return fakeFirestore({ products });
+  }
+
   beforeEach(() => {
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
   });
@@ -953,6 +967,38 @@ describe('SubscriptionService currency selection', () => {
     expect(service.selectedCurrency()).toBe('usd');
   });
 
+  /**
+   * What `loadProPrices()` promises is not "a selection exists" but "the
+   * selection is one of the currencies the catalog offers", and the two come
+   * apart when a currency is withdrawn under a reader who had chosen it:
+   * every radio asks whether it *is* the selection, so none of them would be
+   * checked, while `selectedProPrice` falls back to the first price — a card
+   * quoting an amount no control claims.
+   *
+   * **The memo is dropped by hand, because nothing else can drop it.** A
+   * successful lookup is memoised for the service's lifetime and only a
+   * *rejected* one clears the cache, so no sequence of public calls reads the
+   * catalog twice — which is exactly why no reader can walk into this today.
+   * The guard is here so the invariant survives the memo changing (a refresh,
+   * a TTL, a second service instance), and a test that could only be written
+   * after that change would be a test written too late.
+   */
+  it('re-defaults a selection the catalog has stopped offering', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    speaking('en-US');
+    const { service } = configure(user);
+    await service.loadProPrices();
+    service.selectCurrency('brl');
+    expect(service.selectedCurrency()).toBe('brl');
+
+    (service as unknown as { proPricesPromise: unknown }).proPricesPromise = null;
+    recatalog([{ id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_usd')] }]);
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+    expect(service.selectedProPrice()?.currency).toBe('usd');
+  });
+
   // The page shows a placeholder and the Subscribe click reports the cause;
   // what must not happen is the load rejecting into nothing and taking the
   // page's own bootstrap with it.
@@ -974,9 +1020,7 @@ describe('SubscriptionService currency selection', () => {
     await service.loadProPrices();
     expect(first.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(1);
 
-    vi.unstubAllGlobals();
-    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
-    const second = fakeFirestore({ products: bothCurrencies });
+    const second = recatalog(bothCurrencies);
     await service.loadProPrices();
 
     expect(second.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(1);

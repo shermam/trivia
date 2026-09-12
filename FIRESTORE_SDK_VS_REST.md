@@ -215,6 +215,6 @@ Not in the codec, and not in token handling. Two components detected a rules ref
 
 ### What was given up
 
-- **Real-time subscription status across tabs.** A second tab now needs a reload to notice a subscription change. Judged acceptable in §4 and still is: the tier costs $0.99/month and its only entitlement is an "Add a question" link.
+- **Real-time subscription status across tabs.** A second tab now needs a reload to notice a subscription change. Judged acceptable in §4 and still is: the tier costs around a dollar a month in whichever currency it is sold in, and its only entitlement is an "Add a question" link.
 - **The SDK's internal retry.** A failed subscription read is not retried, where a listener would have reconnected. The consequence is bounded because the signal is not the gate — `isProUser` is `claim || document`, so a subscriber whose token already carries `stripeRole` is unaffected.
 - **Nothing else.** `firestore.rules` is untouched; REST requests carry the same ID token through the same rules engine, and the rules suite never had to change.

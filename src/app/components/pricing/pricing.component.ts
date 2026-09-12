@@ -88,7 +88,9 @@ export class PricingComponent {
   constructor() {
     // The pricing page is the one screen that has to *show* the price, so the
     // catalog read happens here on load rather than on the Subscribe click.
-    // Roughly two public reads per visit; see `loadProPrices()` for the trade.
+    // Roughly two public reads per page load — the lookup is memoised for the
+    // service's lifetime, so navigating back here costs none. See
+    // `loadProPrices()` for the trade.
     void this.subscriptionService.loadProPrices();
 
     // Landing here from Stripe's `success_url` means the payment went through,
