@@ -1843,6 +1843,110 @@ describe('SubscriptionService pre-created checkout', () => {
   });
 
   /**
+   * **Never two at once**, and this is the sharp edge of the whole feature.
+   *
+   * `createCheckoutSession` expires the customer's open sessions before
+   * creating its own, so two concurrent invocations race: whichever create
+   * lands second kills the session the first is about to hand back, and
+   * nothing on the client can tell. A currency change while a pre-creation was
+   * in flight is exactly how that happened — the guard used to be keyed on the
+   * price, so a *different* price started a second handshake.
+   */
+  it('starts no second handshake while one is in flight, and covers the new currency after', async () => {
+    const fake = fakeFirestore({ products: bothCurrencies, writeBackAfterReads: 1 });
+    const { service } = configure(user);
+    await service.loadProPrices();
+
+    const inFlight = service.prepareCheckout();
+    await flush();
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.writes[0].data['price']).toBe('price_usd');
+
+    // The reader switches currency while the first handshake is still running.
+    service.selectCurrency('brl');
+    await service.prepareCheckout();
+    expect(fake.writes, 'a second concurrent handshake').toHaveLength(1);
+
+    // …and the currency they actually chose is not simply abandoned: the one
+    // retry fires when the slot is free, so the click still finds a session.
+    await inFlight;
+    await vi.waitFor(() => expect(fake.writes).toHaveLength(2), { timeout: 5_000, interval: 20 });
+    expect(fake.writes.at(-1)?.data['price']).toBe('price_brl');
+  });
+
+  /**
+   * Another tab on the same device is the second way two sessions collide, and
+   * the one no amount of care inside this service can see: the entry therefore
+   * lives in `localStorage` and is re-read on every use, so the tab that
+   * clicks uses whatever is live *now* rather than what it remembered.
+   */
+  describe('when another tab has been on the same page', () => {
+    it('redirects to the session that tab left, not the one this tab remembered', async () => {
+      const fake = fakeFirestore({ products: catalog(priced('price_usd', 'usd')) });
+      const { service } = configure(user);
+      await service.loadProPrices();
+      await service.prepareCheckout();
+
+      // The other tab pre-created for itself. Its create expired the session
+      // this tab was holding; the entry it left behind is the live one.
+      localStorage.setItem(
+        'trivia-checkout-ready',
+        JSON.stringify({
+          uid: user.uid,
+          priceId: 'price_usd',
+          url: 'https://stripe.test/from-the-other-tab',
+          readyAt: Date.now(),
+        }),
+      );
+
+      await service.startProCheckout();
+
+      expect(fake.writes).toHaveLength(1);
+      expect(redirectedTo()).toBe('https://stripe.test/from-the-other-tab');
+    });
+
+    it('creates a fresh session when that tab has taken the waiting one away', async () => {
+      const fake = fakeFirestore({ products: catalog(priced('price_usd', 'usd')) });
+      const { service } = configure(user);
+      await service.loadProPrices();
+      await service.prepareCheckout();
+
+      // The other tab started a handshake of its own, which clears the entry
+      // before its create expires everything open.
+      localStorage.removeItem('trivia-checkout-ready');
+
+      await service.startProCheckout();
+
+      expect(fake.writes).toHaveLength(2);
+      expect(redirectedTo()).toBe('https://stripe.test/s');
+    });
+  });
+
+  /**
+   * A session nobody can find again is a Stripe session and a slot of the
+   * volume cap spent for nothing. A browser that refuses to store the entry
+   * (a private window, a quota refusal) gets the pre-pre-creation behaviour:
+   * the click creates its own.
+   */
+  it('stops pre-creating once it learns the entry cannot be stored', async () => {
+    const fake = fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user);
+    await service.loadProPrices();
+    // Mocked after the catalog is cached, so this is about the checkout entry.
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+    });
+
+    await service.prepareCheckout();
+    expect(fake.writes).toHaveLength(1);
+
+    service.selectCurrency('brl');
+    await service.prepareCheckout();
+
+    expect(fake.writes).toHaveLength(1);
+  });
+
+  /**
    * Changing currency is the one gesture that genuinely invalidates a waiting
    * session: it is a different Stripe Price, and creating the new session
    * expires the old one. Switching *back* therefore cannot reuse the first
@@ -1968,7 +2072,7 @@ describe('SubscriptionService pre-created checkout', () => {
      */
     it('ignores one left over from yesterday', async () => {
       const fake = fakeFirestore({ products: catalog(priced('price_usd', 'usd')) });
-      sessionStorage.setItem(
+      localStorage.setItem(
         'trivia-checkout-ready',
         JSON.stringify({
           uid: user.uid,
@@ -1986,11 +2090,11 @@ describe('SubscriptionService pre-created checkout', () => {
       expect(redirectedTo()).toBe('https://stripe.test/s');
     });
 
-    // `sessionStorage` is per-origin, not per-account: a second person signing
-    // in on the same machine must not be handed the first one's checkout.
+    // The entry is per-device, not per-account: a second person signing in on
+    // the same machine must not be handed the first one's checkout.
     it('refuses a session belonging to another account', async () => {
       const fake = fakeFirestore({ products: catalog(priced('price_usd', 'usd')) });
-      sessionStorage.setItem(
+      localStorage.setItem(
         'trivia-checkout-ready',
         JSON.stringify({
           uid: 'somebody-else',

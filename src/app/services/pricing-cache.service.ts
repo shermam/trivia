@@ -59,10 +59,20 @@ export const PRICING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const READY_CHECKOUT_TTL_MS = 20 * 60 * 60 * 1000;
 
 /**
- * One namespaced key each, matching `trivia-theme`'s convention. The first two
- * are `localStorage` — they are worth keeping across visits — and the third is
- * `sessionStorage`, because a Checkout Session belongs to the tab that started
- * it and should not outlive it.
+ * One namespaced key each, matching `trivia-theme`'s convention. All three are
+ * `localStorage`.
+ *
+ * The checkout entry is the one worth explaining, because `sessionStorage`
+ * looks like the better fit for it — a checkout does feel like a property of
+ * the tab that started it — and is in fact **unsafe**. Stripe allows a
+ * customer one open Checkout Session at a time as far as this app is
+ * concerned, and `createCheckoutSession` expires the customer's open sessions
+ * before creating another. Per-tab storage hides that from the client: a
+ * second tab on `/pricing` sees no entry, pre-creates, and its create kills
+ * the first tab's session while the first tab goes on believing its URL is
+ * live — so clicking Subscribe there lands on Stripe's "this session has
+ * expired" page. One entry per *device* is what makes the second tab reuse the
+ * live session instead of destroying it.
  */
 const CATALOG_KEY = 'trivia-pricing-catalog';
 const COUNTRY_KEY = 'trivia-pricing-country';
@@ -70,7 +80,7 @@ const READY_CHECKOUT_KEY = 'trivia-checkout-ready';
 
 /** A Checkout Session created before anybody clicked Subscribe. */
 export interface ReadyCheckout {
-  /** Whose session it is — a different account in the same tab must not reuse it. */
+  /** Whose session it is — a different account on the same device must not reuse it. */
   readonly uid: string;
   /** Which price it checks out against, so a currency change cannot reuse it. */
   readonly priceId: string;
@@ -109,12 +119,19 @@ function readJson(kind: StorageKind, key: string): unknown {
   }
 }
 
-function writeJson(kind: StorageKind, key: string, value: unknown): void {
+/** Whether the value was actually stored — `false` for unavailable storage or a quota refusal. */
+function writeJson(kind: StorageKind, key: string, value: unknown): boolean {
   try {
-    storage(kind)?.setItem(key, JSON.stringify(value));
+    const store = storage(kind);
+    if (!store) {
+      return false;
+    }
+    store.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
     // Quota exceeded, or storage unavailable. The page carries on doing what
     // it did before this cache existed.
+    return false;
   }
 }
 
@@ -219,20 +236,6 @@ function isNavigableUrl(value: unknown): value is string {
   }
 }
 
-/**
- * Whether a pre-created session is still inside the window this app treats as
- * usable.
- *
- * Exported because the entry is held in two places — this store and
- * `SubscriptionService`'s in-memory copy, which is the only copy a browser
- * with storage disabled has — and one expiry rule has to govern both. A second
- * `Date.now() - readyAt` written at the other call site is how the two would
- * drift.
- */
-export function isReadyCheckoutFresh(entry: ReadyCheckout, now = Date.now()): boolean {
-  return isFresh(entry.readyAt, now, READY_CHECKOUT_TTL_MS);
-}
-
 function parseReadyCheckout(value: unknown, now: number): ReadyCheckout | null {
   if (!isRecord(value) || !isFresh(value['readyAt'], now, READY_CHECKOUT_TTL_MS)) {
     return null;
@@ -275,16 +278,27 @@ export class PricingCacheService {
     writeJson('local', COUNTRY_KEY, { storedAt: now, country });
   }
 
-  /** A Checkout Session waiting from earlier in this tab's life, if usable. */
+  /**
+   * The Checkout Session waiting on this device, if it is still usable.
+   *
+   * Read afresh on every use rather than memoised anywhere, because another
+   * tab can have replaced or cleared it since — which is the entire point of
+   * keeping it here rather than in the tab.
+   */
   readReadyCheckout(now = Date.now()): ReadyCheckout | null {
-    return parseReadyCheckout(readJson('session', READY_CHECKOUT_KEY), now);
+    return parseReadyCheckout(readJson('local', READY_CHECKOUT_KEY), now);
   }
 
-  writeReadyCheckout(entry: ReadyCheckout): void {
-    writeJson('session', READY_CHECKOUT_KEY, entry);
+  /**
+   * Returns whether the entry was actually stored. A caller that cannot store
+   * one gains nothing by creating the session it describes, and the answer is
+   * what lets it stop trying (`SubscriptionService.prepareCheckout`).
+   */
+  writeReadyCheckout(entry: ReadyCheckout): boolean {
+    return writeJson('local', READY_CHECKOUT_KEY, entry);
   }
 
   clearReadyCheckout(): void {
-    removeKey('session', READY_CHECKOUT_KEY);
+    removeKey('local', READY_CHECKOUT_KEY);
   }
 }

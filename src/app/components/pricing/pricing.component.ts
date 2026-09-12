@@ -147,7 +147,12 @@ export class PricingComponent {
       const isPro = this.isProUser();
       const verified = this.authService.isFullyAuthenticated();
       const priceId = this.subscriptionService.selectedProPrice()?.priceId;
-      if (!ready || isPro || !verified || !priceId) {
+      // `checkout=success` is the one page load where `isProUser()` being
+      // false means "the webhook has not landed yet" rather than "this reader
+      // might buy" — they have *just* bought. Preparing here would create a
+      // Stripe session after every completed checkout, for a button that is
+      // about to disappear.
+      if (!ready || isPro || !verified || !priceId || this.checkoutStatus() === 'success') {
         return;
       }
 

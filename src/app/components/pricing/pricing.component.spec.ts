@@ -333,6 +333,31 @@ describe('PricingComponent pre-created checkout', () => {
     expect(prepareCheckout).not.toHaveBeenCalled();
   });
 
+  /**
+   * The one page load where `isProUser()` being false does not mean "this
+   * reader might buy": they have just bought, and the webhook that will say so
+   * is still in flight. Preparing here creates a Stripe session after every
+   * completed checkout, for a button that is about to be replaced by "You're
+   * subscribed".
+   */
+  it('asks for nothing on the page Stripe redirects back to', () => {
+    const { prepareCheckout } = setup('success', () => Promise.resolve(), [usd]);
+    TestBed.tick();
+
+    vi.advanceTimersByTime(5_000);
+    expect(prepareCheckout).not.toHaveBeenCalled();
+  });
+
+  // A cancelled checkout is the opposite case: they did not buy, the button is
+  // still there, and the session is worth having ready for the second attempt.
+  it('still asks after a cancelled checkout', () => {
+    const { prepareCheckout } = setup('cancelled', () => Promise.resolve(), [usd]);
+    TestBed.tick();
+
+    vi.advanceTimersByTime(1_000);
+    expect(prepareCheckout).toHaveBeenCalledTimes(1);
+  });
+
   it('asks for nothing on behalf of a subscriber', () => {
     const { prepareCheckout } = setup(null, () => Promise.resolve(), [usd], { isProUser: true });
     TestBed.tick();

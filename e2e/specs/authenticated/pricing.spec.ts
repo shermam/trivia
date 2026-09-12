@@ -129,6 +129,29 @@ async function seedPricingCache(
 }
 
 /**
+ * Waits until the browser is holding a **usable** pre-created checkout.
+ *
+ * The session document appears the instant the client writes it, which is
+ * before `createCheckoutSession` has written the URL back — and the entry is
+ * only stored once it has. So a test that reloads, or opens a second tab, as
+ * soon as the document exists is racing the handshake: the page it interrupts
+ * stores nothing, and the next one legitimately creates a session of its own.
+ * That cost a failing run before it was written down here. Anything asserting
+ * that the entry is *reused* has to wait for the entry, not for the document.
+ *
+ * The key is restated rather than imported for the same reason
+ * `seedPricingCache` restates the catalog's shape: a helper that read the
+ * app's own constant would keep passing if the app stopped storing it.
+ */
+async function waitForReadyCheckout(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('trivia-checkout-ready')), {
+      message: 'the pre-created checkout the browser is holding',
+    })
+    .not.toBeNull();
+}
+
+/**
  * The same, but held until the test lets it go — so the window between the
  * catalog rendering the control and the server saying where the reader is can
  * be widened to whatever the test needs to do inside it.
@@ -323,11 +346,69 @@ test.describe('pricing / Stripe checkout', () => {
   });
 
   /**
+   * A second tab must reuse the live session rather than destroy it.
+   *
+   * `createCheckoutSession` expires the customer's open sessions before
+   * creating its own, so a tab that could not see the first tab's entry would
+   * pre-create, kill that session, and leave the first tab holding a URL that
+   * now leads to Stripe's "this session has expired" page — with no way for
+   * the client to know. The entry therefore lives in `localStorage` and is
+   * re-read at click time.
+   *
+   * **`context.newPage()`, not a second `BrowserContext`.** A fresh context
+   * has its own storage and its own anonymous session, so it would be a
+   * different device and a different reader: the collision this test is about
+   * could not occur in it, and the test would pass against the bug.
+   */
+  test('reuses the waiting session in a second tab instead of replacing it', async ({
+    page,
+    context,
+    firebase,
+  }) => {
+    const email = uniqueEmail();
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+    await page.goto('/pricing');
+
+    await expect
+      .poll(async () => (await firebase.getCheckoutSessions(uid)).length, {
+        message: 'the session the first tab created',
+      })
+      .toBe(1);
+    // Not merely "the document exists": the second tab must open against a
+    // session this one can actually reuse.
+    await waitForReadyCheckout(page);
+    const [waiting] = await firebase.getCheckoutSessions(uid);
+
+    const second = await context.newPage();
+    await second.goto('/pricing');
+    await expect(
+      second.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }),
+    ).toBeVisible();
+    // Real time, because the claim is that the second tab creates **nothing** —
+    // twice the one-second settle it would otherwise act after, and there is no
+    // event for "decided not to" to wait on.
+    await second.waitForTimeout(2_000);
+    expect(
+      await firebase.getCheckoutSessions(uid),
+      'session documents after a second tab opened the page',
+    ).toHaveLength(1);
+
+    // …and the first tab's click still goes to the session it was holding,
+    // which is the one that is still open on Stripe's side.
+    await page.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }).click();
+    await expect
+      .poll(() => new URL(page.url()).hash, { message: 'the mock checkout redirect target' })
+      .toBe(`#mock-checkout-session-${waiting.id}`);
+  });
+
+  /**
    * Reloading is the commonest thing somebody does on a page they are thinking
    * about, and each reload would otherwise spend one of the ten sessions the
-   * volume cap allows — five refreshes and checkout starts refusing. The URL
-   * therefore lives in `sessionStorage`, which survives a reload and dies with
-   * the tab.
+   * volume cap allows — five refreshes and checkout starts refusing. The entry
+   * therefore lives in `localStorage`, which survives both a reload and a
+   * second tab.
    *
    * The wait is the honest part: the claim is that something does **not**
    * happen, and an assertion made before the page had the chance to act would
@@ -348,6 +429,7 @@ test.describe('pricing / Stripe checkout', () => {
         message: 'the session created before anybody clicked',
       })
       .toBe(1);
+    await waitForReadyCheckout(page);
 
     await page.reload();
     await expect(

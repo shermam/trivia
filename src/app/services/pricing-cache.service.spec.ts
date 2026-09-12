@@ -3,7 +3,6 @@ import {
   PRICING_CACHE_TTL_MS,
   PricingCacheService,
   READY_CHECKOUT_TTL_MS,
-  isReadyCheckoutFresh,
 } from './pricing-cache.service';
 
 /**
@@ -17,7 +16,7 @@ import {
  * is trusted rather than checked is a `TypeError` during a page's first render,
  * or a `location.assign` to whatever somebody typed.
  *
- * Driven against jsdom's real `localStorage`/`sessionStorage` rather than a
+ * Driven against jsdom's real `localStorage` rather than a
  * double: the thing under test *is* the serialisation, and a fake store that
  * kept objects would skip the JSON round trip entirely.
  */
@@ -172,11 +171,34 @@ describe('PricingCacheService', () => {
   });
 
   describe('the pre-created checkout', () => {
-    it('survives a reload in sessionStorage', () => {
+    it('survives a reload', () => {
       const cache = service();
       cache.writeReadyCheckout(READY);
 
       expect(cache.readReadyCheckout(READY.readyAt)).toEqual(READY);
+    });
+
+    /**
+     * The entry is device-wide rather than tab-wide, and that is the whole
+     * point: Stripe allows this customer one open session, so a second tab
+     * that could not see the first one's would pre-create and kill it. Pinned
+     * on the store the two tabs would actually share.
+     */
+    it('is stored where every tab on this device can see it', () => {
+      service().writeReadyCheckout(READY);
+
+      expect(localStorage.getItem('trivia-checkout-ready')).not.toBeNull();
+      expect(sessionStorage.getItem('trivia-checkout-ready')).toBeNull();
+    });
+
+    // What lets a caller stop spending Stripe sessions it will never find again.
+    it('reports whether it could actually store the entry', () => {
+      expect(service().writeReadyCheckout(READY)).toBe(true);
+
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      });
+      expect(service().writeReadyCheckout(READY)).toBe(false);
     });
 
     it('is cleared on request', () => {
@@ -200,8 +222,6 @@ describe('PricingCacheService', () => {
 
       expect(cache.readReadyCheckout(READY.readyAt + READY_CHECKOUT_TTL_MS)).toEqual(READY);
       expect(cache.readReadyCheckout(READY.readyAt + READY_CHECKOUT_TTL_MS + 1)).toBeNull();
-      expect(isReadyCheckoutFresh(READY, READY.readyAt + READY_CHECKOUT_TTL_MS)).toBe(true);
-      expect(isReadyCheckoutFresh(READY, READY.readyAt + READY_CHECKOUT_TTL_MS + 1)).toBe(false);
     });
 
     /**
@@ -212,7 +232,7 @@ describe('PricingCacheService', () => {
      */
     it('refuses a URL that is not an ordinary http(s) address', () => {
       for (const url of ['javascript:alert(1)', 'data:text/html,hi', '/pricing#relative', '']) {
-        sessionStorage.setItem('trivia-checkout-ready', JSON.stringify({ ...READY, url }));
+        localStorage.setItem('trivia-checkout-ready', JSON.stringify({ ...READY, url }));
         expect(service().readReadyCheckout(READY.readyAt), url).toBeNull();
       }
     });
@@ -222,13 +242,13 @@ describe('PricingCacheService', () => {
     // the only checkout that can be tested end to end.
     it('accepts the same-origin http URL mock mode writes', () => {
       const url = 'http://localhost:4200/pricing#mock-checkout-session-1-2';
-      sessionStorage.setItem('trivia-checkout-ready', JSON.stringify({ ...READY, url }));
+      localStorage.setItem('trivia-checkout-ready', JSON.stringify({ ...READY, url }));
 
       expect(service().readReadyCheckout(READY.readyAt)?.url).toBe(url);
     });
 
     it('refuses an entry missing the account it belongs to', () => {
-      sessionStorage.setItem('trivia-checkout-ready', JSON.stringify({ ...READY, uid: '' }));
+      localStorage.setItem('trivia-checkout-ready', JSON.stringify({ ...READY, uid: '' }));
 
       expect(service().readReadyCheckout(READY.readyAt)).toBeNull();
     });

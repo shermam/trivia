@@ -7,11 +7,7 @@ import {
   type RestDocument,
 } from './firestore-rest/firestore-rest.client';
 import { GeoService } from './geo.service';
-import {
-  PricingCacheService,
-  type ReadyCheckout,
-  isReadyCheckoutFresh,
-} from './pricing-cache.service';
+import { PricingCacheService, type ReadyCheckout } from './pricing-cache.service';
 
 const CUSTOMERS_COLLECTION = 'customers';
 const PRODUCTS_COLLECTION = 'products';
@@ -69,6 +65,12 @@ const SESSION_SLOTS_PER_WINDOW = 10;
  * and running out of pre-creations is invisible, because Subscribe simply
  * falls back to creating the session on the click, which is what it did before
  * any of this existed.
+ *
+ * **The count is per page load**, because it lives on this service and the
+ * service dies with the document: a reload starts a fresh three. That is not a
+ * hole, because the reload also *reuses* the stored session rather than making
+ * another one — the real bound is the rules' ten per window, and this ration
+ * only stops the switch-flicking case reaching it.
  */
 const MAX_PRECREATED_SESSIONS_PER_WINDOW = 3;
 
@@ -376,29 +378,36 @@ export class SubscriptionService {
   private proPricesPromise: Promise<readonly ProPriceOption[]> | null = null;
 
   /**
-   * A Checkout Session already created and waiting, and the handshake that is
-   * still creating one.
+   * The handshake currently creating a Checkout Session, if one is running.
    *
-   * Both are *single slots* rather than maps keyed by price, because Stripe
-   * allows a customer exactly one live session at a time as far as this app is
-   * concerned: `createCheckoutSession` expires the customer's open sessions
-   * before creating another (`functions/src/checkout-sessions.ts`, which is
-   * what lets a buyer change their mind about the currency at all). So the
-   * moment a new handshake starts, the URL held here stops working — keeping
-   * it around "in case they switch back" would hand the reader a dead session.
+   * A *single slot*, and at most one may be in flight at a time, because
+   * `createCheckoutSession` expires the customer's open sessions before
+   * creating another (`functions/src/checkout-sessions.ts`, which is what lets
+   * a buyer change their mind about the currency at all). Two concurrent
+   * invocations therefore race: whichever create lands second kills the
+   * session the first one is about to hand back, and nothing on the client can
+   * see that it happened.
    *
-   * `readyCheckoutLoaded` exists because the entry survives a reload in
-   * `sessionStorage` and is read back lazily: reading it in the constructor
-   * would touch storage on every page load, including the overwhelming
-   * majority that never open `/pricing`.
+   * The session that is *ready* is deliberately **not** held here. It lives in
+   * `localStorage` (`PricingCacheService`) and is re-read on every use, because
+   * another tab can have replaced or cleared it since — see `readyCheckoutFor`.
    */
-  private readyCheckout: ReadyCheckout | null = null;
-  private readyCheckoutLoaded = false;
   private pendingCheckout: { uid: string; priceId: string; promise: Promise<string> } | null = null;
 
   /** Pre-creations spent so far in the current `firestore.rules` session window. */
   private precreateWindow = -1;
   private precreatesInWindow = 0;
+
+  /**
+   * Set once a ready entry could not be stored at all.
+   *
+   * Pre-creation is only worth a Stripe session and a slot of the volume cap
+   * if the URL can be found again, and it is found through storage alone. A
+   * browser that refuses to store it (a private window, a quota refusal) gains
+   * nothing from further attempts, so this stops them and the click falls back
+   * to creating its own session — which is what it did before any of this.
+   */
+  private readyCheckoutUnstorable = false;
 
   /** Whether the once-per-page-load idle prime has been scheduled. */
   private idlePrimeScheduled = false;
@@ -478,11 +487,11 @@ export class SubscriptionService {
     this.trackedUid = uid;
     this.hasActiveSubscriptionDocSignal.set(false);
 
-    // Only when an account this tab was *already* tracking is replaced. The
-    // first call of a page load moves from `null` to whoever was restored from
-    // persistence, and clearing there would throw away the pre-created session
-    // on every reload — which is precisely the thing the `sessionStorage` copy
-    // exists to survive.
+    // Only when an account this tab was *already* tracking is replaced — a
+    // sign-out, or a different person signing in. The first call of a page
+    // load moves from `null` to whoever was restored from persistence, and
+    // clearing there would throw away the pre-created session on every reload,
+    // which is precisely what the stored entry exists to survive.
     if (previous !== null) {
       this.pendingCheckout = null;
       this.forgetReadyCheckout();
@@ -953,13 +962,26 @@ export class SubscriptionService {
     if (!uid || !priceId) {
       return;
     }
-    // Already have one, or already making one. Either way there is nothing to
-    // do — and starting a second handshake would expire the session the first
-    // is about to produce.
-    if (this.readyCheckoutFor(uid, priceId) || this.pendingCheckoutFor(uid, priceId)) {
+    // Already have one — nothing to do, and starting a handshake anyway would
+    // expire the very session it would then replace.
+    if (this.readyCheckoutFor(uid, priceId)) {
       return;
     }
-    if (!this.claimPrecreateSlot()) {
+    /**
+     * **Any** handshake in flight, not merely one for this price.
+     *
+     * Two concurrent `createCheckoutSession` invocations race, because each
+     * expires the customer's open sessions before creating its own: whichever
+     * create lands second silently kills the other's session, and the client
+     * that remembers the loser goes on believing its URL is live. A currency
+     * change while a pre-creation was running is exactly how that happened.
+     * Waiting costs the reader nothing worse than the click creating its own
+     * session, which is what it did before pre-creation existed.
+     */
+    if (this.pendingCheckout) {
+      return;
+    }
+    if (this.readyCheckoutUnstorable || !this.claimPrecreateSlot()) {
       return;
     }
 
@@ -1007,12 +1029,20 @@ export class SubscriptionService {
 
     void promise.then(
       (url) => {
-        // `!==` means a newer handshake has superseded this one — a currency
-        // changed while this was in flight — and its own write has already
-        // expired the session this URL points at.
+        // `!==` can only mean this attempt was abandoned — `prepareCheckout`
+        // refuses to start a second while one is pending, so the only way a
+        // newer one exists is a Subscribe click that could not wait.
         if (this.pendingCheckout === attempt) {
           this.pendingCheckout = null;
           this.rememberReadyCheckout({ uid, priceId, url, readyAt: Date.now() });
+          // The reader may have changed currency while this was running, in
+          // which case `prepareCheckout` turned itself away at the guard above
+          // and nothing else will ask again. One retry, now that the slot is
+          // free; it terminates because the next attempt is for whatever is
+          // selected *then*, and the per-window ration bounds it regardless.
+          if (this.selectedProPrice()?.priceId !== priceId) {
+            void this.prepareCheckout();
+          }
         }
       },
       () => {
@@ -1021,27 +1051,30 @@ export class SubscriptionService {
         }
         // Nothing is cached for a rejection (`CLAUDE.md` §4.4) — the next
         // click starts a fresh handshake rather than replaying this failure.
+        // No retry here either: a failure is not a reason to spend another
+        // session nobody asked for.
       },
     );
 
     return promise;
   }
 
-  /** The waiting session, if it is this account's, this price's, and still usable. */
+  /**
+   * The waiting session, if it is this account's, this price's, and still
+   * usable.
+   *
+   * **Read from storage every time, never from a field.** The entry is
+   * device-wide rather than tab-wide, so another tab can have replaced it (it
+   * pre-created for itself) or cleared it (it started a handshake) since this
+   * tab last looked — and a cached copy of a session that has since been
+   * expired is precisely the thing that sends a reader to Stripe's "this
+   * session has expired" page. A price that does not match means "create a
+   * fresh one", which is correct rather than merely safe: the other tab's
+   * session is in another currency and this reader is not buying that.
+   */
   private readyCheckoutFor(uid: string, priceId: string): ReadyCheckout | null {
-    if (!this.readyCheckoutLoaded) {
-      this.readyCheckoutLoaded = true;
-      this.readyCheckout = this.pricingCache.readReadyCheckout();
-    }
-    const ready = this.readyCheckout;
-    if (!ready) {
-      return null;
-    }
-    if (!isReadyCheckoutFresh(ready)) {
-      this.forgetReadyCheckout();
-      return null;
-    }
-    return ready.uid === uid && ready.priceId === priceId ? ready : null;
+    const ready = this.pricingCache.readReadyCheckout();
+    return ready && ready.uid === uid && ready.priceId === priceId ? ready : null;
   }
 
   private pendingCheckoutFor(uid: string, priceId: string): Promise<string> | null {
@@ -1050,14 +1083,12 @@ export class SubscriptionService {
   }
 
   private rememberReadyCheckout(entry: ReadyCheckout): void {
-    this.readyCheckout = entry;
-    this.readyCheckoutLoaded = true;
-    this.pricingCache.writeReadyCheckout(entry);
+    if (!this.pricingCache.writeReadyCheckout(entry)) {
+      this.readyCheckoutUnstorable = true;
+    }
   }
 
   private forgetReadyCheckout(): void {
-    this.readyCheckout = null;
-    this.readyCheckoutLoaded = true;
     this.pricingCache.clearReadyCheckout();
   }
 

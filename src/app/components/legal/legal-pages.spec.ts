@@ -189,6 +189,29 @@ describe('legal pages', () => {
   });
 
   /**
+   * The pricing page's browser storage, and the one claim in it that is a
+   * *retention* promise rather than a description: the checkout link is kept
+   * for up to 20 hours on this device.
+   *
+   * It is pinned because the sentence tracks an implementation choice that has
+   * already moved once — the entry was per-tab `sessionStorage` until it had
+   * to become device-wide, so that a second tab reuses the live Stripe session
+   * instead of expiring it (`docs/app.md` §1.6). Moving it back, or dropping
+   * the window, falsifies this paragraph silently.
+   */
+  it('discloses what the pricing page keeps on the device, and for how long', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('what Pro costs in each currency');
+    expect(text).toContain('discarded after 24 hours');
+    expect(text).toContain('kept on this device for up to 20 hours');
+    expect(text).toContain('discarded when you use it, when you sign out');
+    // The claim the old per-tab wording made and this one must not: nothing
+    // here promises the link dies with the tab.
+    expect(text).not.toContain('discarded when you close the tab');
+  });
+
+  /**
    * The absolute "no profiling" claim appeared **three** times, and keeping
    * running totals of a player's own games engages every one of them. Two were
    * rewritten when `users/{uid}` shipped; this pins that none has quietly
