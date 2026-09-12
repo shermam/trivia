@@ -61,9 +61,18 @@ function installFakeAudioContext() {
   const tones: RecordedTone[] = [];
   const contexts: FakeContext[] = [];
   let constructorThrows = false;
+  let startsSuspended = false;
+  let resumeRejects = false;
+  let resumeLeavesSuspended = false;
 
   class FakeContext {
-    state: AudioContextState = 'running';
+    /**
+     * Starts `running`, as a real context built after a user activation does.
+     * A test that wants the suspended path sets `startsSuspended` before the
+     * cue that builds it, rather than reaching in afterwards — the whole point
+     * is what happens on the way *in*.
+     */
+    state: AudioContextState = startsSuspended ? 'suspended' : 'running';
     currentTime = 0;
     destination = {} as AudioDestinationNode;
     resumeCalls = 0;
@@ -111,7 +120,12 @@ function installFakeAudioContext() {
 
     resume(): Promise<void> {
       this.resumeCalls += 1;
-      this.state = 'running';
+      if (resumeRejects) {
+        return Promise.reject(new DOMException('not allowed', 'NotAllowedError'));
+      }
+      if (!resumeLeavesSuspended) {
+        this.state = 'running';
+      }
       return Promise.resolve();
     }
 
@@ -143,6 +157,20 @@ function installFakeAudioContext() {
     refuse: () => {
       constructorThrows = true;
     },
+    /** Every context built from here on starts suspended, as one built without activation does. */
+    buildSuspended: () => {
+      startsSuspended = true;
+    },
+    /** `resume()` settles, and the state does not move — a browser still refusing audio. */
+    resumeWithoutRunning: () => {
+      startsSuspended = true;
+      resumeLeavesSuspended = true;
+    },
+    /** `resume()` rejects outright, which it does with no activation behind it. */
+    refuseResume: () => {
+      startsSuspended = true;
+      resumeRejects = true;
+    },
     restore: () => {
       if (original) {
         Object.defineProperty(globalThis, 'AudioContext', original);
@@ -150,6 +178,29 @@ function installFakeAudioContext() {
         Reflect.deleteProperty(globalThis, 'AudioContext');
       }
     },
+  };
+}
+
+/**
+ * Stands in for `navigator.userActivation`, which jsdom does not implement.
+ *
+ * Its absence is why every other test here reaches the scheduling path at all:
+ * the service treats a missing API as "assume activation", so jsdom behaves
+ * like an activated document by default. This is how a test says otherwise —
+ * a freshly reloaded page, which is exactly the case a queued cue comes from.
+ */
+function stubUserActivation(hasBeenActive: boolean): () => void {
+  const original = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+  Object.defineProperty(navigator, 'userActivation', {
+    configurable: true,
+    get: () => ({ hasBeenActive, isActive: hasBeenActive }),
+  });
+  return () => {
+    if (original) {
+      Object.defineProperty(navigator, 'userActivation', original);
+    } else {
+      Reflect.deleteProperty(navigator as unknown as Record<string, unknown>, 'userActivation');
+    }
   };
 }
 
@@ -298,7 +349,7 @@ describe('AudioService — cues with Web Audio', () => {
     expect(audio.contexts).toHaveLength(1);
   });
 
-  it('reuses the one context across cues, and resumes it when it is suspended', () => {
+  it('reuses the one context across cues, and resumes it when it is suspended', async () => {
     const service = setup();
     service.playCorrect();
     service.playIncorrect();
@@ -308,8 +359,112 @@ describe('AudioService — cues with Web Audio', () => {
 
     // What a backgrounded tab, or an incoming call on iOS, leaves behind.
     audio.contexts[0].state = 'suspended';
+    audio.tones.length = 0;
     service.playTimerTick();
     expect(audio.contexts[0].resumeCalls).toBe(1);
+
+    // Scheduled in the continuation, on the clock as it reads once the context
+    // is genuinely running — not before it, which is what queues a cue.
+    await Promise.resolve();
+    expect(audio.tones.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **The bug this guard exists for, and the reason it is not obvious.** A
+   * suspended context does not *refuse* work: its clock is frozen, so a tone
+   * scheduled on it is queued and fires whenever something else resumes it —
+   * over whatever screen the reader is on by then. Nothing about that is
+   * visible at the call site, and it shipped as a real sequence: reload
+   * `/game-over`, hear nothing, start a new game, and the fanfare plays over
+   * the first answer's chime.
+   */
+  it('schedules nothing onto a context that is still suspended', async () => {
+    // `resume()` settles and the state does not move, which is what a browser
+    // that has not decided to allow audio actually does.
+    audio.resumeWithoutRunning();
+    const service = setup();
+
+    service.playGameOver(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(audio.contexts).toHaveLength(1);
+    expect(audio.contexts[0].resumeCalls).toBe(1);
+    expect(audio.tones).toHaveLength(0);
+  });
+
+  it('drops the cue rather than throwing when resuming is refused', async () => {
+    audio.refuseResume();
+    const service = setup();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(() => service.playCorrect()).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(audio.tones).toHaveLength(0);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('schedules nothing onto a closed context', () => {
+    const service = setup();
+    service.playCorrect();
+    audio.tones.length = 0;
+    audio.contexts[0].state = 'closed';
+
+    service.playCorrect();
+
+    expect(audio.contexts[0].resumeCalls).toBe(0);
+    expect(audio.tones).toHaveLength(0);
+  });
+
+  /**
+   * The **first** cue of a session must still be scheduled. A naive
+   * `state !== 'running'` early return eats it, because a context can be built
+   * suspended even with an activation behind it; the resume continuation is
+   * what makes that case work rather than fail silently. `sound-effects.spec.ts`
+   * holds the same claim down in a real browser.
+   */
+  it('still plays the first cue when the new context needs resuming first', async () => {
+    audio.buildSuspended();
+    const service = setup();
+
+    service.playCorrect();
+    expect(audio.tones).toHaveLength(0);
+
+    await Promise.resolve();
+    expect(audio.tones).toHaveLength(2);
+  });
+
+  /**
+   * A reloaded document — the `/game-over` refresh `game-resume.spec.ts`
+   * covers — has had no gesture, so the service asks the browser for nothing
+   * at all. Building a context there is what creates something to queue onto.
+   */
+  it('builds no context at all before the document has been activated', () => {
+    const restore = stubUserActivation(false);
+    try {
+      const service = setup();
+      service.playGameOver(true);
+      service.playCorrect();
+
+      expect(audio.contexts).toHaveLength(0);
+      expect(audio.tones).toHaveLength(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('plays again once the document has been activated', () => {
+    const restore = stubUserActivation(true);
+    try {
+      const service = setup();
+      service.playCorrect();
+
+      expect(audio.tones.length).toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
   });
 
   it('plays a correct answer as a rising pair and a wrong one as a single low tone', () => {

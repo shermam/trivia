@@ -1183,6 +1183,12 @@ describe('QuizLoopComponent — audio cues (FEAT-003)', () => {
    * guard, the mutation this is for, would not fail it. Dispatching invokes the
    * listener the way a stray programmatic click does — the same case
    * `selectAnswer()`'s own re-check calls the belt to its braces.
+   *
+   * Extra Time on an unlimited game is deliberately **not** among them. It is
+   * not rendered at all there, so there is no element to press and no way for a
+   * test to reach `useExtraTime()`'s `isTimed()` guard through the DOM — a case
+   * written that way would press nothing and pass whatever the guard did. That
+   * the button is absent is asserted where it belongs, in the lifelines block.
    */
   function press(button: HTMLElement | null): void {
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1195,13 +1201,6 @@ describe('QuizLoopComponent — audio cues (FEAT-003)', () => {
 
     press(query('[data-cy="lifeline-fiftyFifty"]'));
 
-    expect(audio.playLifeline).not.toHaveBeenCalled();
-  });
-
-  it('stays silent when Extra Time is not rendered on an unlimited game', () => {
-    const { query, audio } = setup({ timeLimit: 'unlimited', question: fourAnswers() });
-
-    expect(query('[data-cy="lifeline-extraTime"]')).toBeNull();
     expect(audio.playLifeline).not.toHaveBeenCalled();
   });
 

@@ -152,6 +152,30 @@
         <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
       </button>
 
+      <!--
+        The mute's twin above `sm`, beside the theme toggle for the same reason
+        it sits beside it in the drawer. The drawer is `sm:hidden`, so without
+        this the only way to silence the game on a desktop was to narrow the
+        window until the hamburger appeared.
+
+        Icon-only, like the theme toggle it pairs with, so the accessible name
+        is an `aria-label` rather than visible text — and the box is a fixed
+        `h-9 w-9` in both states, which is what keeps the bar from reflowing
+        when it is pressed (`CLAUDE.md` §4.4). `aria-pressed` carries the state
+        for the same reason as in the drawer: here it is the *only* channel
+        besides the glyph, since there is no label to read.
+      -->
+      <button
+        type="button"
+        (click)="toggleSound()"
+        data-cy="top-bar-sound-toggle"
+        [attr.aria-pressed]="audioService.isMuted()"
+        [attr.aria-label]="audioService.isMuted() ? 'Unmute sounds' : 'Mute sounds'"
+        class="hidden sm:flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+      >
+        <app-icon [name]="audioService.isMuted() ? 'volume-x' : 'volume-2'" [size]="16" />
+      </button>
+
       <div class="relative">
         <!--
           No `gap-2` on the button, deliberately. The gap belongs to the label,

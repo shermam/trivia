@@ -601,9 +601,15 @@ export class GameOverComponent implements OnInit {
     this.playerName = this.authService.user()?.displayName ?? '';
     void this.loadLeaderboard();
     this.recordGameResult();
-    // Once per arrival at the screen, including a reload of it — the cue
-    // belongs to reading the result rather than to finishing the game, and a
-    // reader who came back deliberately is not startled by hearing it again.
+    // Once per arrival at the screen, a reload included — and the reload is
+    // the case worth knowing about, because the obvious guess about it is
+    // wrong. A reloaded document is not un-activated: measured in Chromium,
+    // `navigator.userActivation.hasBeenActive` still reads `true` after a
+    // reload and a context built there starts `running`, so this genuinely
+    // plays rather than being skipped. What makes that safe is `AudioService`
+    // scheduling only onto a running context: were it suspended, the tones
+    // would be *queued* on a frozen clock and would arrive over the first
+    // answer of the next game rather than being dropped.
     this.audio.playGameOver(this.isPerfectRound());
   }
 

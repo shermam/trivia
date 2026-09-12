@@ -364,6 +364,9 @@ describe('TopBarComponent: the sound toggle in the drawer', () => {
     localStorage.removeItem('trivia_sound_muted');
   });
 
+  const barSoundToggle = (h: ReturnType<typeof setup>) =>
+    h.fixture.nativeElement.querySelector('[data-cy="top-bar-sound-toggle"]') as HTMLButtonElement;
+
   it('sits in the drawer beside the theme toggle, unpressed and offering to mute', () => {
     const h = setup();
     h.open();
@@ -372,6 +375,50 @@ describe('TopBarComponent: the sound toggle in the drawer', () => {
     expect(button).not.toBeNull();
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.textContent?.trim()).toBe('Mute sounds');
+  });
+
+  /**
+   * **Two copies, because neither surface exists at both widths.** The drawer
+   * is `sm:hidden` and the bar's controls are `hidden sm:flex`, so a mute in
+   * only one of them leaves half the viewports unable to silence the game —
+   * which is how this shipped for review. Which one is *visible* at which
+   * width is a Tailwind class and therefore invisible to jsdom; that half is
+   * `sound-effects.spec.ts`'s, at a real viewport. What is checked here is
+   * that the second control exists at all and carries the same contract.
+   */
+  it('renders a twin in the bar itself, for the widths the drawer does not cover', () => {
+    const h = setup();
+
+    const button = barSoundToggle(h);
+    expect(button).not.toBeNull();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    // Icon-only, so the accessible name has to be the label rather than text.
+    expect(button.getAttribute('aria-label')).toBe('Mute sounds');
+    expect(button.textContent?.trim()).toBe('');
+  });
+
+  it('keeps both copies on the same state, since they are one preference', () => {
+    const h = setup();
+
+    barSoundToggle(h).click();
+    h.fixture.detectChanges();
+
+    expect(barSoundToggle(h).getAttribute('aria-pressed')).toBe('true');
+    expect(barSoundToggle(h).getAttribute('aria-label')).toBe('Unmute sounds');
+    h.open();
+    expect(soundToggle(h).getAttribute('aria-pressed')).toBe('true');
+    expect(soundToggle(h).textContent?.trim()).toBe('Unmute sounds');
+  });
+
+  /** Fixed `h-9 w-9` in both states, so pressing it cannot reflow the bar (§4.4). */
+  it('renders the bar copy from the same box in both states', () => {
+    const h = setup();
+    const unmuted = barSoundToggle(h).className;
+
+    barSoundToggle(h).click();
+    h.fixture.detectChanges();
+
+    expect(barSoundToggle(h).className).toBe(unmuted);
   });
 
   it('flips both the state and the label when pressed', () => {

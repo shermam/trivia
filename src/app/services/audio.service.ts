@@ -13,19 +13,35 @@ import { EmbedModeService } from './embed-mode.service';
  * the critical path of the first correct answer. A handful of short tones cost
  * none of that, and they start on the audio clock rather than after a fetch.
  *
- * **The `AudioContext` is created on the first cue, never at bootstrap.** A
- * context constructed before any user gesture starts `suspended` under every
- * browser's autoplay policy and logs a warning saying so; one constructed on
- * the first cue is already past the click that started the game. Where it
- * cannot be had at all — jsdom has no `AudioContext`, a Safari private window
- * may refuse one, a headless runner may have no output device — every method
- * here is a silent no-op. Silent in both senses: no sound and no console
- * error, because a game that logs an exception per answer is worse than a
- * game with no sound.
+ * **Nothing is built, and nothing is scheduled, until the document has had a
+ * user gesture.** Two separate rules, and the second is the one that is easy to
+ * miss. A context constructed before any activation starts `suspended` under
+ * every browser's autoplay policy and logs a warning saying so — that is what
+ * the activation gate below prevents. But a *suspended* context does not
+ * refuse work: its clock is frozen, so tones scheduled at `currentTime + ε`
+ * are **queued**, and they all fire at once the moment something else resumes
+ * it, over whatever screen the reader has reached by then. So a cue is
+ * scheduled only onto a context that is confirmed `running`, and dropped
+ * otherwise — a missed cue costs nothing, a queued one is heard in the wrong
+ * place.
  *
- * **Embed mode plays nothing.** `?embed=1` renders no top bar and therefore no
- * nav drawer, which is where the mute toggle lives — so an embedded game with
- * audio is a game a reader cannot silence (`docs/app.md`).
+ * The two rules cover different cases, and the division is worth knowing
+ * because the obvious guess about it is wrong. **A reload is not the
+ * un-activated case**: measured in Chromium, `navigator.userActivation
+ * .hasBeenActive` still reads `true` after a reload and a context built there
+ * starts `running`, so a reloaded `/game-over` genuinely replays its fanfare.
+ * The activation gate is for a document that has never been touched at all;
+ * the `running` check is what makes every other case safe.
+ *
+ * Where a context cannot be had at all — jsdom has no `AudioContext`, a Safari
+ * private window may refuse one, a headless runner may have no output device —
+ * every method here is a silent no-op. Silent in both senses: no sound and no
+ * console error, because a game that logs an exception per answer is worse
+ * than a game with no sound.
+ *
+ * **Embed mode plays nothing.** `?embed=1` renders no top bar, and the mute
+ * toggle lives in the bar and its drawer — so an embedded game with audio is a
+ * game a reader cannot silence (`docs/app.md`).
  */
 
 /**
@@ -147,6 +163,28 @@ function readStoredMute(): boolean {
   }
 }
 
+/**
+ * Whether this document has ever had a user gesture.
+ *
+ * The gate on building an `AudioContext` at all: one built before any
+ * activation starts `suspended`, logs Chrome's autoplay warning, and — worse
+ * than either — becomes a place to queue tones nobody will hear until later
+ * (see the note at the top of this file).
+ *
+ * `?? true` where the API is missing, which is the right default rather than a
+ * shrug: `navigator.userActivation` is not universal, and treating its absence
+ * as "no activation" would silence the whole feature on those engines. The
+ * autoplay policy is still the backstop there — it simply refuses to start the
+ * context, which is the case the `state` check below already handles.
+ */
+function documentHasBeenActivated(): boolean {
+  try {
+    return navigator.userActivation?.hasBeenActive ?? true;
+  } catch {
+    return true;
+  }
+}
+
 function writeStoredMute(muted: boolean): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, muted ? 'true' : 'false');
@@ -193,6 +231,15 @@ export class AudioService {
     });
   }
 
+  /**
+   * Flips the mute and remembers it.
+   *
+   * It stops the *next* cue, not one already scheduled: a tone handed to the
+   * audio thread plays to its end, so muting during the longest cue here can
+   * still be followed by up to about 0.7s of sound. Cutting it off would mean
+   * holding every live node to disconnect, for a fraction of a second nobody
+   * has complained about — and a hard cut mid-envelope clicks.
+   */
   toggleMute(): void {
     const muted = !this.muted();
     this.muted.set(muted);
@@ -251,14 +298,63 @@ export class AudioService {
     this.play(isPerfectRound ? CUES.gameOverPerfect : CUES.gameOver);
   }
 
+  /**
+   * Plays a cue, or decides not to.
+   *
+   * The order of the guards is the design. Mute and embed mode come first
+   * because they must not so much as build a context. The activation gate is
+   * next, so a screen that renders without a gesture behind it — a reloaded
+   * `/game-over` — asks the browser for nothing. Only then is the context
+   * built, and even then a tone is scheduled **only** onto one confirmed
+   * `running`: a suspended context's clock is frozen, so scheduling on it
+   * queues the cue rather than playing it, and the queue empties over whatever
+   * the reader is looking at when something else resumes it.
+   *
+   * The `running` check does not eat the first cue of a session, which is the
+   * plausible way to get this wrong. A context created after an activation
+   * starts `running`, so the common path schedules straight away; a suspended
+   * one is resumed and scheduled in the continuation, on the clock as it reads
+   * *then*. Pinned in a real browser by `sound-effects.spec.ts`, which counts
+   * `OscillatorNode.start` calls on the first answer of a game.
+   */
   private play(tones: readonly Tone[]): void {
     if (this.muted() || this.embedMode.isEmbedded()) {
+      return;
+    }
+    if (!documentHasBeenActivated()) {
       return;
     }
     const context = this.audioContext();
     if (!context) {
       return;
     }
+    if (context.state === 'running') {
+      this.scheduleAll(context, tones);
+      return;
+    }
+    if (context.state !== 'suspended') {
+      // 'closed', or an engine-specific state such as Safari's 'interrupted'.
+      // Neither is something to schedule onto.
+      return;
+    }
+    try {
+      void context.resume().then(
+        () => {
+          // Re-read rather than assume: `resume()` settling is not a promise
+          // that the state moved, and a context suspended again in the
+          // meantime is one more chance to queue a cue for later.
+          if (context.state === 'running') {
+            this.scheduleAll(context, tones);
+          }
+        },
+        () => undefined,
+      );
+    } catch {
+      // Some engines throw synchronously on a closed context.
+    }
+  }
+
+  private scheduleAll(context: AudioContext, tones: readonly Tone[]): void {
     try {
       const startAt = context.currentTime + SCHEDULE_LEAD_SECONDS;
       for (const tone of tones) {
@@ -271,17 +367,11 @@ export class AudioService {
   }
 
   /**
-   * The context, built on demand.
-   *
-   * `resume()` on every call rather than once at creation: a context is
-   * suspended by the browser whenever the page loses the audio focus — an iOS
-   * call, another tab taking over — and stays suspended until something asks.
-   * It rejects if the page has never had a user gesture, which is why the
-   * rejection is swallowed rather than reported: the cue is simply not heard.
+   * The context, built on demand — and only ever called once the caller has
+   * checked that the document has been activated.
    */
   private audioContext(): AudioContext | null {
     if (this.context) {
-      this.resumeIfSuspended(this.context);
       return this.context;
     }
     if (this.unavailable) {
@@ -293,23 +383,11 @@ export class AudioService {
         return null;
       }
       this.context = new AudioContext();
-      this.resumeIfSuspended(this.context);
       return this.context;
     } catch {
       // No Web Audio, or the engine refused to give us a context. Asked once.
       this.unavailable = true;
       return null;
-    }
-  }
-
-  private resumeIfSuspended(context: AudioContext): void {
-    if (context.state !== 'suspended') {
-      return;
-    }
-    try {
-      void context.resume().catch(() => undefined);
-    } catch {
-      // Some engines throw synchronously on a closed context.
     }
   }
 
