@@ -85,7 +85,7 @@ export class AccountService {
    * behind `getApp()` — and without the `.catch` one failed chunk was replayed
    * for the life of the tab, so a single network blip permanently disabled
    * Export and Delete account. That is the third instance of this exact
-   * pattern in this repo (`SubscriptionService.getProPriceId` has the correct
+   * pattern in this repo (`SubscriptionService.getProPrices` has the correct
    * one; `AuthService.getAuth` was the second), which is why §4.4 names it.
    *
    * Nothing downstream is left stuck by the clear: every caller awaits this

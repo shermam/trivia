@@ -105,6 +105,19 @@ export const createCheckoutSession = onDocumentCreated(
         mode: 'subscription',
         customer: customerId,
         line_items: [{ price, quantity: 1 }],
+        // **Adaptive Pricing is cross-border only, and that is the whole
+        // reason the catalog carries more than one price.** It localises a
+        // price for a buyer in a *different* country from the merchant, and
+        // never for one in the merchant's own — so for this Brazilian Stripe
+        // account it does nothing at all for a Brazilian buyer, whose
+        // Brazilian-issued card can only be charged in BRL and is otherwise
+        // declined with "your card doesn't support this currency". No
+        // parameter changes that; a BRL price on the Pro product does, and is
+        // what `SubscriptionService` offers a BR visitor (`app.md` §1.6).
+        // Stated explicitly rather than left to the Dashboard setting so the
+        // behaviour is readable here and cannot change under the app from a
+        // console toggle nobody in this repo can see.
+        adaptive_pricing: { enabled: true },
         success_url: `${origin}/pricing?checkout=success`,
         cancel_url: `${origin}/pricing?checkout=cancelled`,
         // Carried onto the resulting Subscription object itself (not just

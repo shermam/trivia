@@ -75,7 +75,7 @@ export class TriviaService {
    * permanently degraded session: every later call returns the same rejection,
    * so the category picker stays stuck on "Any Category" until a full page
    * reload, long after the network recovered. Same pattern as
-   * `SubscriptionService.getProPriceId()`.
+   * `SubscriptionService.getProPrices()`.
    *
    * Clearing unconditionally is safe here: the field is only reassigned when
    * it is null, and it is still this promise for as long as this promise is

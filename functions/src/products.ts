@@ -6,8 +6,8 @@ import { deleteIfNotStale, setIfNotStale } from './event-order';
 /**
  * Mirrors the Stripe product/price catalog into the public `products`/
  * `prices` Firestore collections — exactly what
- * `SubscriptionService.getProPriceId()` reads to resolve the current Pro
- * price without ever hardcoding it client-side.
+ * `SubscriptionService.getProPrices()` reads to resolve the current Pro
+ * prices (one per currency) without ever hardcoding one client-side.
  */
 export async function syncProductToFirestore(
   product: Stripe.Product,
@@ -85,7 +85,7 @@ const MAX_PRO_PRODUCTS = 5;
  * a single equality filter served by the automatic single-field index;
  * `active` is checked in `isSellableProPrice` instead. Not needing a composite
  * index for this is worth more than saving one document read.
- * `SubscriptionService.getProPriceId()` filters the same way, for the same
+ * `SubscriptionService.getProPrices()` filters the same way, for the same
  * reason and so the two agree on what a Pro product is.
  */
 export async function isPriceSellableAsPro(priceId: string): Promise<boolean> {

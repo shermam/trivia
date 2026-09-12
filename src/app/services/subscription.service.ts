@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import {
   FirestoreRestClient,
   isFirestorePermissionDenied,
+  type RestDocument,
 } from './firestore-rest/firestore-rest.client';
 
 const CUSTOMERS_COLLECTION = 'customers';
@@ -64,10 +65,37 @@ const ACTIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
  * `firestore.rules` refuses every privileged write from that account. A UI
  * signal that looked only at `status` therefore unlocked a form the server was
  * always going to reject, with no way for the user to tell why. Same
- * correction as `getProPriceId()` below, which already selects by role
+ * correction as `getProPrices()` below, which already selects by role
  * "matching the server" — this half was simply missed.
  */
 const PRO_ROLE = 'pro';
+
+/**
+ * The currency a visitor in this region has to be offered, when the catalog
+ * carries a price in it.
+ *
+ * **Not a preference — a requirement.** This Stripe account is registered in
+ * Brazil, and a Brazilian-issued card can only be charged in BRL; presented a
+ * USD price it is declined with "your card doesn't support this currency".
+ * Stripe's Adaptive Pricing does not rescue that case, because it localises
+ * prices only for buyers **outside** the merchant's own country
+ * (`functions/src/checkout-sessions.ts`). So a Brazilian buyer needs a real
+ * BRL price, and this is what puts them on it by default.
+ *
+ * The region comes from the browser's own language tags, which is a UI signal
+ * and nothing more (`CLAUDE.md` §4.2): it decides which of the catalog's
+ * prices is preselected, and the visitor can switch. What is actually charged
+ * is decided by the price ID the session document carries, which the Cloud
+ * Function validates against the mirrored catalog either way.
+ */
+const REGION_CURRENCIES: Record<string, string> = { BR: 'brl' };
+
+/**
+ * Preferred when the visitor's own region asks for nothing in particular.
+ * The catalog decides what exists; this only decides which of several it opens
+ * on.
+ */
+const FALLBACK_CURRENCY = 'usd';
 
 /**
  * Ceilings on the price lookup, so neither of its queries is unbounded
@@ -95,6 +123,126 @@ const MAX_SUBSCRIPTIONS_PER_CUSTOMER = 20;
 interface SessionOutcome {
   url?: string;
   error?: string;
+}
+
+/**
+ * One currency the Pro tier is on sale in — a single mirrored Stripe Price.
+ *
+ * There is one of these per currency rather than one price with several
+ * currencies on it. Stripe can carry alternative `currency_options` on a
+ * price, but only until that price has been used: once a customer has checked
+ * out against it the price is frozen, and selling in a new currency then means
+ * a new Price object on the same Product. This app therefore models the
+ * catalog the way that constraint forces — the Pro product carries one active
+ * monthly price per currency, each with its own `firebaseRole: pro` metadata
+ * (`docs/data-model.md`), and choosing a currency is choosing which price ID
+ * checkout is started with.
+ */
+export interface ProPriceOption {
+  /** The Stripe Price ID the checkout session document carries. */
+  readonly priceId: string;
+  /** Lowercase ISO 4217, exactly as Stripe stores it (`usd`, `brl`). */
+  readonly currency: string;
+  /** The smallest unit of that currency — 99 for $0.99 — or `null` if unset. */
+  readonly unitAmount: number | null;
+}
+
+/**
+ * Which currency to open on, given what the catalog offers and what the
+ * browser says about where the reader is.
+ *
+ * Pure and exported so the rule is testable without a Firestore fake: the
+ * `pt-BR` case is the entire point of this feature and it must not depend on
+ * the machine running the suite.
+ *
+ * `Intl.Locale` rather than a string match on the tag, because the region is a
+ * subtag and `startsWith('pt')` would be wrong twice — `pt-PT` is not Brazil,
+ * and `pt` alone is (it maximises to `pt-Latn-BR`).
+ *
+ * **Every tag is looked at, not just the first**, because a Brazilian who
+ * prefers English browses with `['en-US', 'pt-BR']` and quoting them USD ends
+ * in a declined card, while quoting BRL to somebody who merely reads
+ * Portuguese is a charge their card can take and one click undoes. The
+ * recoverable mistake is the one to make.
+ */
+export function defaultProCurrency(
+  options: readonly ProPriceOption[],
+  locales: readonly string[],
+): string | null {
+  const offered = new Set(options.map((option) => option.currency));
+  for (const tag of locales) {
+    const required = REGION_CURRENCIES[regionOf(tag) ?? ''];
+    if (required && offered.has(required)) {
+      return required;
+    }
+  }
+  if (offered.has(FALLBACK_CURRENCY)) {
+    return FALLBACK_CURRENCY;
+  }
+  // Catalog order, so which currency wins never depends on network timing.
+  return options[0]?.currency ?? null;
+}
+
+/**
+ * The mirrored price document as a currency the page can quote.
+ *
+ * `currency` is typed as `string` here but arrives from a Firestore document,
+ * so it is checked rather than asserted — a price with no currency is not a
+ * price anything can be quoted in, and `firstPerCurrency` drops it. Same for a
+ * `unit_amount` that is not a number: Stripe leaves it `null` on a price whose
+ * amount is decided at checkout, which this app does not sell, and the page
+ * shows a placeholder rather than inventing a figure.
+ */
+function toProPriceOption(price: RestDocument): ProPriceOption {
+  const currency = price.data['currency'];
+  const unitAmount = price.data['unit_amount'];
+  return {
+    priceId: price.id,
+    currency: typeof currency === 'string' ? currency.toLowerCase() : '',
+    unitAmount: typeof unitAmount === 'number' ? unitAmount : null,
+  };
+}
+
+/** One price per currency, keeping the first in catalog order and dropping the unusable. */
+function firstPerCurrency(options: readonly ProPriceOption[]): ProPriceOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    if (option.currency === '' || seen.has(option.currency)) {
+      return false;
+    }
+    seen.add(option.currency);
+    return true;
+  });
+}
+
+/**
+ * The reader's language tags, in their own preference order.
+ *
+ * `navigator.languages` is the ordered list and `navigator.language` the
+ * single most-preferred one; older or unusual browsers populate only the
+ * second, and a browser that offers neither gets an empty list and the
+ * catalog's own default currency.
+ */
+function browserLocales(): readonly string[] {
+  const languages = navigator.languages ?? [];
+  if (languages.length > 0) {
+    return languages;
+  }
+  return navigator.language ? [navigator.language] : [];
+}
+
+function regionOf(tag: string): string | undefined {
+  try {
+    const locale = new Intl.Locale(tag);
+    // `pt` carries no region of its own; `maximize()` supplies the likeliest
+    // one (`pt` → `pt-Latn-BR`), which is the whole reason a bare language tag
+    // is usable here at all.
+    return locale.region ?? locale.maximize().region;
+  } catch {
+    // A malformed tag throws a RangeError. `navigator.languages` is not ours
+    // to trust any more than any other browser-supplied value.
+    return undefined;
+  }
 }
 
 /**
@@ -179,7 +327,32 @@ export class SubscriptionService {
 
   private readonly hasActiveSubscriptionDocSignal = signal(false);
   private trackedUid: string | null = null;
-  private proPricePromise: Promise<string> | null = null;
+  private proPricesPromise: Promise<readonly ProPriceOption[]> | null = null;
+
+  private readonly proPriceOptionsSignal = signal<readonly ProPriceOption[]>([]);
+  private readonly selectedCurrencySignal = signal<string | null>(null);
+
+  /**
+   * Every currency the Pro tier is on sale in, in catalog order. Empty until
+   * `loadProPrices()` has resolved — and empty is what a page with nothing to
+   * render yet should see, not a guess at a price (`CLAUDE.md` §4.4).
+   */
+  readonly proPriceOptions = this.proPriceOptionsSignal.asReadonly();
+
+  /** The currency the reader is being quoted, or `null` before the catalog lands. */
+  readonly selectedCurrency = this.selectedCurrencySignal.asReadonly();
+
+  /**
+   * The price that will actually be bought: the selected currency's, falling
+   * back to the first the catalog offers so a selection that no longer exists
+   * (a currency withdrawn in the Dashboard between load and click) cannot
+   * leave the button quoting nothing.
+   */
+  readonly selectedProPrice = computed<ProPriceOption | null>(() => {
+    const options = this.proPriceOptionsSignal();
+    const currency = this.selectedCurrencySignal();
+    return options.find((option) => option.currency === currency) ?? options[0] ?? null;
+  });
 
   /**
    * Orders concurrent reads of the same subcollection.
@@ -308,11 +481,58 @@ export class SubscriptionService {
   }
 
   /**
-   * Resolves the Stripe Price ID for the single active monthly "Pro"
-   * product by reading the `products`/`prices` collections the webhook
-   * handler (`functions/src/products.ts`) keeps synced from the Stripe
-   * Dashboard, so the price never has to be hardcoded here — changing the
-   * price in Stripe doesn't require a frontend deploy.
+   * Reads the catalog and publishes what Pro costs, for the page to render.
+   *
+   * **The read moved onto page load, and that is a real cost worth stating.**
+   * It used to happen on the Subscribe click alone, so an anonymous visitor
+   * browsing `/pricing` cost nothing; now every visit to that page spends
+   * roughly two public reads (the products query, plus one prices query per
+   * active Pro product). That is the price of the page showing a real amount
+   * instead of a number written into the template — which it has to, because
+   * the amount now depends on which currency the reader is being quoted, and
+   * a literal would be wrong for half of them. The click still costs nothing
+   * extra: the promise is memoised, so `startProCheckout()` reuses this read.
+   *
+   * **Failures are swallowed**, and the page shows a placeholder rather than a
+   * price. A catalog that cannot be read is not something the reader can act
+   * on at page load, and guessing an amount would be the alarming answer to a
+   * question nobody asked (`CLAUDE.md` §4.4). The cause is still reported the
+   * moment it matters — clicking Subscribe re-runs the same lookup and shows
+   * the `SubscriptionError` it throws.
+   */
+  async loadProPrices(): Promise<void> {
+    let options: readonly ProPriceOption[];
+    try {
+      options = await this.getProPrices();
+    } catch {
+      return;
+    }
+    this.proPriceOptionsSignal.set(options);
+    if (this.selectedCurrencySignal() === null) {
+      this.selectedCurrencySignal.set(defaultProCurrency(options, browserLocales()));
+    }
+  }
+
+  /**
+   * Quotes the reader in another of the currencies the catalog offers.
+   *
+   * A currency the catalog does not carry is ignored rather than stored: the
+   * selection decides which price ID checkout is started with, and a selection
+   * with no price behind it would turn the Subscribe button into a button that
+   * cannot work.
+   */
+  selectCurrency(currency: string): void {
+    if (this.proPriceOptionsSignal().some((option) => option.currency === currency)) {
+      this.selectedCurrencySignal.set(currency);
+    }
+  }
+
+  /**
+   * Resolves every currency the "Pro" tier is on sale in, by reading the
+   * `products`/`prices` collections the webhook handler
+   * (`functions/src/products.ts`) keeps synced from the Stripe Dashboard — so
+   * no price is ever hardcoded here, and adding a currency in Stripe needs no
+   * frontend deploy.
    *
    * **Selects by `role`, matching the server.** `createCheckoutSession` accepts
    * a price only if it belongs to an active product carrying `role: 'pro'`
@@ -326,20 +546,36 @@ export class SubscriptionService {
    * Neither carried a `limit` before, and the price lookups ran one after
    * another (finding C5).
    */
-  private getProPriceId(): Promise<string> {
-    if (!this.proPricePromise) {
-      this.proPricePromise = this.loadProPriceId();
+  /**
+   * The Price ID checkout should use: the currency the reader was quoted.
+   *
+   * Re-resolved from the catalog rather than read off `selectedProPrice`, so a
+   * click that arrives before the page's own load has finished — or after a
+   * failed load — still gets a price rather than a refusal. Which currency it
+   * lands on is then the same rule the page applies: the selection if one was
+   * made and still exists, otherwise the catalog's first.
+   */
+  private async selectedProPriceId(): Promise<string> {
+    const options = await this.getProPrices();
+    const currency = this.selectedCurrencySignal();
+    const chosen = options.find((option) => option.currency === currency) ?? options[0];
+    return chosen.priceId;
+  }
+
+  private getProPrices(): Promise<readonly ProPriceOption[]> {
+    if (!this.proPricesPromise) {
+      this.proPricesPromise = this.loadProPriceOptions();
       // Don't cache a failed lookup: a product fixed in the Dashboard after
       // a failed attempt should be picked up on the very next click, not
       // require a full page reload.
-      this.proPricePromise.catch(() => {
-        this.proPricePromise = null;
+      this.proPricesPromise.catch(() => {
+        this.proPricesPromise = null;
       });
     }
-    return this.proPricePromise;
+    return this.proPricesPromise;
   }
 
-  private async loadProPriceId(): Promise<string> {
+  private async loadProPriceOptions(): Promise<readonly ProPriceOption[]> {
     // Filters on `role` alone, exactly as the server's own catalog check does
     // (`functions/src/products.ts`): one equality filter is served by the
     // automatic single-field index, while `role` + `active` together would
@@ -360,7 +596,7 @@ export class SubscriptionService {
     // `for` loop that awaited each subcollection in turn (finding C5), so the
     // wait was the sum of the round trips rather than the slowest one — and it
     // ran on the click that starts checkout, where the delay is most visible.
-    const monthlyPriceIds = await Promise.all(
+    const monthlyPrices = await Promise.all(
       activeProducts.map(async (product) => {
         const prices = await this.rest.runQuery(
           {
@@ -370,14 +606,16 @@ export class SubscriptionService {
           },
           { timeoutMs: CHECKOUT_TIMEOUT_MS },
         );
-        return prices.find((price) => price.data['interval'] === 'month')?.id ?? null;
+        return prices.filter((price) => price.data['interval'] === 'month').map(toProPriceOption);
       }),
     );
 
-    // First match in catalog order, not first to resolve — parallelism must
-    // not make which price is chosen depend on network timing.
-    const proPriceId = monthlyPriceIds.find((priceId) => priceId !== null);
-    if (!proPriceId) {
+    // Catalog order, not order of arrival — parallelism must not make which
+    // price is chosen depend on network timing. One price per currency: two
+    // monthly BRL prices on the same product is a Dashboard mistake, and
+    // picking the first is both deterministic and the older of the two.
+    const options = firstPerCurrency(monthlyPrices.flat());
+    if (options.length === 0) {
       // Says that Pro is not on sale rather than inviting a retry, because
       // nothing the user does can change the answer: the catalog is written
       // only by `stripeWebhook`, and this is what an environment looks like
@@ -387,7 +625,7 @@ export class SubscriptionService {
         "Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later.",
       );
     }
-    return proPriceId;
+    return options;
   }
 
   /**
@@ -402,15 +640,23 @@ export class SubscriptionService {
    * and the checkout mode used to be sent from here and handed to Stripe
    * verbatim; the function decides both itself now, so there is nothing left
    * on this path for a hand-written document to redirect or re-price.
+   *
+   * **The currency is the price ID and nothing else.** Each currency is its own
+   * Stripe Price on the Pro product, so choosing one is choosing which of them
+   * to check out against — there is no second field to validate, and the
+   * function's existing catalog check (`isPriceSellableAsPro`) covers the
+   * choice exactly as it covers any other price ID a client can send.
    */
   async startProCheckout(): Promise<void> {
     const checkoutUrl = await this.runSessionHandshake({
       collectionName: 'checkout_sessions',
-      // A factory, not a value, so the price lookup only happens once the
-      // caller has been confirmed signed in — an anonymous click should cost
-      // a catalog read no more than it should cost a rejected write.
+      // A factory, not a value, so the catalog is only consulted once the
+      // caller has been confirmed signed in — an anonymous *click* should cost
+      // a read no more than it should cost a rejected write. (Rendering the
+      // page costs one either way now; the lookup is memoised, so this reuses
+      // it rather than repeating it.)
       buildPayload: async () => ({
-        price: await this.getProPriceId(),
+        price: await this.selectedProPriceId(),
         origin: window.location.origin,
       }),
       signedOutMessage: 'Sign in before subscribing.',

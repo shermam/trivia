@@ -159,7 +159,7 @@ describe('AccountService functions bootstrap', () => {
    * just the call that failed.
    *
    * The third instance of this exact pattern in this repo, which is why §4.4
-   * names it. `SubscriptionService.getProPriceId` has the correct one.
+   * names it. `SubscriptionService.getProPrices` has the correct one.
    */
   it('retries the bootstrap after a failure instead of replaying it forever', async () => {
     const { service } = setup();

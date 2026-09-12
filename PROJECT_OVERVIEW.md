@@ -1,6 +1,6 @@
 # Trivia App — Project Overview
 
-A single-page trivia quiz game built with Angular, styled with Tailwind CSS, and backed by Firebase (Firestore for data, Cloud Functions for backend logic, Hosting for deployment). It pulls questions from the public Open Trivia DB API and/or a custom Firestore-backed question bank, runs a timed multiple-choice quiz, and tracks a global high-score leaderboard. A paid **Pro tier** ($0.99/month, via Stripe) unlocks the ability to contribute questions to the shared bank.
+A single-page trivia quiz game built with Angular, styled with Tailwind CSS, and backed by Firebase (Firestore for data, Cloud Functions for backend logic, Hosting for deployment). It pulls questions from the public Open Trivia DB API and/or a custom Firestore-backed question bank, runs a timed multiple-choice quiz, and tracks a global high-score leaderboard. A paid **Pro tier** (a monthly subscription via Stripe, priced from the Stripe catalog in each currency it is sold in) unlocks the ability to contribute questions to the shared bank.
 
 Live project: Firebase project `intellectura-3b26a`, served on the custom domain **trivimind.com** as well as the `.web.app`/`.firebaseapp.com` names Hosting provides · Repo: `shermam/trivia`
 

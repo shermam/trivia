@@ -4,8 +4,10 @@ import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 import { FirestoreRestError } from './firestore-rest/firestore-rest.client';
 import {
+  type ProPriceOption,
   SubscriptionError,
   SubscriptionService,
+  defaultProCurrency,
   subscriptionFailureMessage,
 } from './subscription.service';
 
@@ -43,11 +45,20 @@ interface RecordedQuery {
   limit?: number;
 }
 
+interface PriceSeed {
+  id: string;
+  active: boolean;
+  interval: string;
+  /** Omitted means `usd`; `null` means the document carries no currency at all. */
+  currency?: string | null;
+  unitAmount?: number | null;
+}
+
 interface ProductSeed {
   id: string;
   role: string | null;
   active: boolean;
-  prices: { id: string; active: boolean; interval: string }[];
+  prices: PriceSeed[];
   /** Lets a test make the *first* product the slowest to answer. */
   delayMs?: number;
 }
@@ -243,7 +254,18 @@ function fakeFirestore(options: FakeOptions = {}) {
         return ok(
           docsFor(
             collectionPath,
-            prices.map((p) => ({ id: p.id, data: { interval: p.interval } })),
+            prices.map((p) => ({
+              id: p.id,
+              data: {
+                interval: p.interval,
+                // Defaults, so a seed that does not care about money still
+                // produces the document shape the catalog really holds — the
+                // currency is what the service now groups prices by, and a
+                // fake that left it out would make every price look alike.
+                currency: p.currency === undefined ? 'usd' : p.currency,
+                unit_amount: p.unitAmount === undefined ? 99 : p.unitAmount,
+              },
+            })),
           ),
         );
       }
@@ -606,7 +628,7 @@ describe('SubscriptionService handshake polling', () => {
 });
 
 /**
- * Finding C5. `getProPriceId()` read the product catalog and then awaited each
+ * Finding C5. `getProPrices()` read the product catalog and then awaited each
  * product's `prices` subcollection **one at a time**, so the wait was the sum
  * of the round trips rather than the slowest — on the click that starts
  * checkout, where a delay is most visible. Neither query carried a `limit`
@@ -619,7 +641,17 @@ describe('SubscriptionService handshake polling', () => {
  * price the server is bound to reject, and checkout would simply stop working.
  */
 describe('SubscriptionService Pro price lookup (C5)', () => {
-  const monthly = (id: string) => ({ id, active: true, interval: 'month' });
+  const monthly = (
+    id: string,
+    currency?: string | null,
+    unitAmount?: number | null,
+  ): PriceSeed => ({
+    id,
+    active: true,
+    interval: 'month',
+    currency,
+    unitAmount,
+  });
 
   beforeEach(() => {
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
@@ -745,6 +777,268 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
 
     await expect(pending).rejects.toBeInstanceOf(SubscriptionError);
     await expect(pending).rejects.toThrow(/no active monthly Pro price/i);
+  });
+});
+
+/**
+ * Which currency the reader is quoted, and therefore which Stripe Price ID
+ * checkout is started against.
+ *
+ * This is the whole feature, and the reason it is not cosmetic: a
+ * Brazilian-issued card cannot be charged in USD by a Brazilian Stripe
+ * account, and Adaptive Pricing does not help because it localises only for
+ * buyers *outside* the merchant's country. So a BR visitor landing on the USD
+ * price does not see a slightly odd number — they see a declined card. The
+ * default has to be right before anybody clicks anything.
+ */
+describe('SubscriptionService currency selection', () => {
+  const user = { uid: 'user-1', isAnonymous: false };
+  const monthly = (
+    id: string,
+    currency?: string | null,
+    unitAmount?: number | null,
+  ): PriceSeed => ({
+    id,
+    active: true,
+    interval: 'month',
+    currency,
+    unitAmount,
+  });
+  const bothCurrencies = [
+    {
+      id: 'prod_pro',
+      role: 'pro',
+      active: true,
+      prices: [monthly('price_usd', 'usd', 99), monthly('price_brl', 'brl', 590)],
+    },
+  ];
+
+  /**
+   * Replaces what the browser says its languages are.
+   *
+   * A spy rather than `stubGlobal('navigator', …)`: the rest of jsdom's
+   * navigator is still needed, and replacing the object wholesale is how a
+   * test starts failing for a reason that has nothing to do with it.
+   */
+  function speaking(...languages: string[]) {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(languages);
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('offers one price per currency, in catalog order', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    speaking('en-US');
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.proPriceOptions()).toEqual([
+      { priceId: 'price_usd', currency: 'usd', unitAmount: 99 },
+      { priceId: 'price_brl', currency: 'brl', unitAmount: 590 },
+    ]);
+  });
+
+  // Two monthly prices in the same currency is a Dashboard mistake rather than
+  // a choice, and offering both would put two identical-looking options in
+  // front of the reader.
+  it('keeps only the first price in each currency', async () => {
+    fakeFirestore({
+      products: [
+        {
+          id: 'prod_pro',
+          role: 'pro',
+          active: true,
+          prices: [monthly('price_usd_old', 'usd', 99), monthly('price_usd_new', 'usd', 149)],
+        },
+      ],
+    });
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.proPriceOptions().map((o) => o.priceId)).toEqual(['price_usd_old']);
+  });
+
+  // A price with no currency cannot be quoted in one, and showing it as an
+  // unnamed option would be worse than not showing it.
+  it('drops a price the catalog carries no currency for', async () => {
+    fakeFirestore({
+      products: [
+        {
+          id: 'prod_pro',
+          role: 'pro',
+          active: true,
+          prices: [monthly('price_broken', null), monthly('price_usd', 'usd', 99)],
+        },
+      ],
+    });
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.proPriceOptions().map((o) => o.priceId)).toEqual(['price_usd']);
+  });
+
+  it('opens on BRL for a Brazilian browser when BRL is on sale', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    speaking('pt-BR', 'pt', 'en-US');
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('brl');
+    expect(service.selectedProPrice()).toEqual({
+      priceId: 'price_brl',
+      currency: 'brl',
+      unitAmount: 590,
+    });
+  });
+
+  it('opens on USD for everybody else', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    speaking('en-US', 'en');
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+  });
+
+  // The catalog decides what exists. A Brazilian browser with no BRL price on
+  // sale gets the USD one rather than a currency that isn't there.
+  it('falls back to what is on sale when the reader’s currency is not', async () => {
+    fakeFirestore({
+      products: [{ id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_usd')] }],
+    });
+    speaking('pt-BR');
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+    expect(service.proPriceOptions()).toHaveLength(1);
+  });
+
+  it('checks out against the price of the currency the reader picked', async () => {
+    const fake = fakeFirestore({ products: bothCurrencies });
+    speaking('en-US');
+    const { service } = configure(user);
+    await service.loadProPrices();
+
+    service.selectCurrency('brl');
+    await service.startProCheckout();
+
+    expect(fake.writes.at(-1)!.data['price']).toBe('price_brl');
+  });
+
+  // The selection decides which price ID checkout uses, so a currency with no
+  // price behind it would be a Subscribe button that cannot work.
+  it('ignores a currency the catalog does not offer', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    speaking('en-US');
+    const { service } = configure(user);
+    await service.loadProPrices();
+
+    service.selectCurrency('eur');
+
+    expect(service.selectedCurrency()).toBe('usd');
+  });
+
+  // The page shows a placeholder and the Subscribe click reports the cause;
+  // what must not happen is the load rejecting into nothing and taking the
+  // page's own bootstrap with it.
+  it('leaves the page priceless rather than throwing when the catalog cannot be read', async () => {
+    fakeFirestore({ products: [] });
+    const { service } = configure(user);
+
+    await expect(service.loadProPrices()).resolves.toBeUndefined();
+
+    expect(service.proPriceOptions()).toEqual([]);
+    expect(service.selectedProPrice()).toBeNull();
+  });
+
+  // `CLAUDE.md` §4.4: a memoised promise that is never cleared on rejection
+  // turns one failed read into a permanently priceless page.
+  it('retries a failed catalog read rather than replaying the failure', async () => {
+    const first = fakeFirestore({ products: [] });
+    const { service } = configure(user);
+    await service.loadProPrices();
+    expect(first.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(1);
+
+    vi.unstubAllGlobals();
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+    const second = fakeFirestore({ products: bothCurrencies });
+    await service.loadProPrices();
+
+    expect(second.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(1);
+    expect(service.proPriceOptions()).toHaveLength(2);
+  });
+});
+
+/**
+ * The default-currency rule on its own, away from Firestore.
+ *
+ * Exported and tested directly because the `pt-BR` case is the point of the
+ * feature and must not depend on the locale of the machine running the suite —
+ * which is exactly what a test that only drove the service through jsdom's own
+ * `navigator` would depend on.
+ */
+describe('defaultProCurrency', () => {
+  const option = (currency: string): ProPriceOption => ({
+    priceId: `price_${currency}`,
+    currency,
+    unitAmount: 100,
+  });
+  const both = [option('usd'), option('brl')];
+
+  it('sends a Brazilian browser to the Brazilian price', () => {
+    expect(defaultProCurrency(both, ['pt-BR', 'pt', 'en-US'])).toBe('brl');
+  });
+
+  // `pt` carries no region subtag of its own and maximises to `pt-Latn-BR`,
+  // which is why the region is read through `Intl.Locale` rather than matched
+  // off the front of the tag.
+  it('reads the region from a bare language tag', () => {
+    expect(defaultProCurrency(both, ['pt'])).toBe('brl');
+  });
+
+  // The other half of that: `startsWith('pt')` would have sent Portugal to the
+  // Brazilian price, where a euro card has no reason to be charged in reais.
+  it('does not treat European Portuguese as Brazilian', () => {
+    expect(defaultProCurrency(both, ['pt-PT'])).toBe('usd');
+  });
+
+  /*
+   * The whole list is scanned, not just the first tag, and the asymmetry of
+   * being wrong is why. A Brazilian who prefers English browses with
+   * `['en-US', 'pt-BR']`, and quoting them USD ends in a declined card; a
+   * reader who merely reads Portuguese is quoted BRL, which their card can
+   * take and which one click undoes. The recoverable mistake is the one to
+   * make.
+   */
+  it('finds the reader’s region anywhere in the browser’s list', () => {
+    expect(defaultProCurrency(both, ['en-US', 'en', 'pt-BR'])).toBe('brl');
+  });
+
+  it('ignores a malformed language tag instead of throwing', () => {
+    expect(defaultProCurrency(both, ['not a tag', 'pt-BR'])).toBe('brl');
+  });
+
+  it('falls back to the catalog’s first currency when neither rule matches', () => {
+    expect(defaultProCurrency([option('gbp'), option('eur')], ['en-GB'])).toBe('gbp');
+  });
+
+  it('has nothing to select from an empty catalog', () => {
+    expect(defaultProCurrency([], ['pt-BR'])).toBeNull();
   });
 });
 

@@ -40,6 +40,28 @@ export interface ProSubscriptionSeed {
 }
 
 /**
+ * One monthly Pro price, as `stripeWebhook` would mirror it.
+ *
+ * A currency is a **separate Stripe Price** on the same product rather than a
+ * `currency_options` entry on one — Stripe freezes a price once it has been
+ * used — so seeding a second currency means seeding a second price here too
+ * (`docs/data-model.md`, `products`).
+ */
+export interface ProPriceSeed {
+  id: string;
+  currency: string;
+  /** Smallest unit of that currency: 99 for $0.99, 590 for R$ 5,90. */
+  unitAmount: number;
+}
+
+/** A checkout-session document as the client wrote it, read back for assertions. */
+export interface CheckoutSessionRecord {
+  id: string;
+  price: string;
+  origin: string;
+}
+
+/**
  * A `question_reports` document as read back by `getQuestionReports`, ID
  * included — the ID carries the `{window}-{slot}-{uid}` volume cap, so specs
  * assert on its shape as well as on the payload (finding H4).

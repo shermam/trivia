@@ -137,14 +137,25 @@ introduced by hand, below.
    catalog query filters on, so without it the product is invisible to the
    pricing page; the price's is where the `stripeRole` claim the app gates on
    comes from, so without it an active subscription grants nothing (audit H6).
-   Then set the dev project's secrets:
+
+   **Create one recurring monthly price per currency the app sells in** — a USD
+   one and a BRL one — as separate Prices on that same product, each with its
+   own `firebaseRole: pro`. That is the shape `SubscriptionService` reads
+   (`app.md` §1.6) and the reason dev has to mirror it: with only the USD price
+   in test mode, the currency switch never appears here and the Brazilian path
+   is untestable outside production. Alternative `currency_options` on a single
+   price is deliberately **not** the model — Stripe freezes those once a price
+   has been used (`stack.md` §2.4). Then set the dev project's secrets:
+
    ```bash
    firebase functions:secrets:set STRIPE_SECRET_KEY --project trivimind-dev
    firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project trivimind-dev
    ```
+
    Use the **test-mode** key. The livemode assertion derives which Stripe it is
    talking to from the key itself, not from the project name (audit §4.3), so a
    test key here is not merely safe — it is what makes the check correct.
+
 9. **Point a Stripe test webhook** at the dev project's `stripeWebhook`
    function URL
    (`https://us-central1-trivimind-dev.cloudfunctions.net/stripeWebhook`),

@@ -306,7 +306,7 @@ describe('AuthService: a failed bootstrap must not poison the session', () => {
    * timed out, was reused for the life of the tab. Every later call got the
    * same rejection back.
    *
-   * `FirebaseAppService.getApp()` and `SubscriptionService.getProPriceId()`
+   * `FirebaseAppService.getApp()` and `SubscriptionService.getProPrices()`
    * both already cleared on failure and both cite the rule; this one was
    * simply missed.
    */
