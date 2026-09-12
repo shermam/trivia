@@ -322,6 +322,8 @@
           </p>
           <a
             routerLink="/pricing"
+            (mouseenter)="subscriptionService.primePricing()"
+            (focus)="subscriptionService.primePricing()"
             data-cy="daily-limit-upgrade"
             class="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-2.5 font-bold text-white shadow-cta transition-colors hover:bg-emerald-800"
           >
