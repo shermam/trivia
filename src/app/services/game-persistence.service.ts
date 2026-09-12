@@ -11,6 +11,7 @@ import {
   TriviaQuestion,
   isTimeLimitOption,
 } from '../models/question.model';
+import { displayScore, maxScoreFor } from '../models/scoring';
 import { CURRENT_GAME_KEY, GAME_STATE_STORE, OfflineDbService } from './offline-db.service';
 
 /**
@@ -30,7 +31,52 @@ export interface PersistedGame {
   config: GameConfig;
   questions: TriviaQuestion[];
   currentIndex: number;
+  /**
+   * The rounded point total — what the player sees and what would be saved to
+   * a leaderboard.
+   *
+   * **Redundant with `points` below, and written anyway.** It is the one field
+   * in this record that a build predating `FEAT-004` requires: that build reads
+   * `score` and validates it, so dropping it in favour of `points` alone would
+   * make every new save unreadable to a browser still running a cached bundle,
+   * losing the game rather than the streak. Nothing reads it back here — the
+   * total is recomputed from `points` — so the two cannot drift into
+   * disagreeing about anything the app acts on.
+   */
   score: number;
+  /**
+   * The exact point total, halves and all (`FEAT-004`). Restored in preference
+   * to `score`, because rounding on the way in and again on the way out would
+   * hand a reloading player a free half point on every 1.5× answer.
+   *
+   * Additive, and no `SCHEMA_VERSION` bump — the same call as every field
+   * before it, for the same reason: a mismatch discards the game rather than
+   * migrating it, so bumping would throw away every game in flight at deploy
+   * time. A save written before this existed had no multiplier, so its `score`
+   * *is* its exact total.
+   */
+  points: number;
+  /**
+   * How many questions were answered correctly — no longer the same thing as
+   * the score, and the number accuracy is computed from.
+   *
+   * Additive on the same terms. For a save written before the multiplier
+   * existed, the score was the correct-answer count, which is what the parser
+   * falls back to.
+   */
+  correctAnswers: number;
+  /**
+   * The run in progress and the longest one so far (`FEAT-004`). A streak is
+   * part of the game a player would be annoyed to lose (`CLAUDE.md` §4.4) —
+   * eight correct in a row is most of the value of the round — and the current
+   * run cannot be recovered from the answer history, because a skip leaves it
+   * untouched while the history records one.
+   *
+   * Additive on the same terms; absent means zero, which is what a game played
+   * before the feature had.
+   */
+  currentStreak: number;
+  maxStreak: number;
   /** True once the last question was answered — the player is on `/game-over`, not mid-game. */
   isComplete: boolean;
   /**
@@ -99,6 +145,11 @@ const SOURCES: readonly QuestionSource[] = ['open_trivia', 'custom', 'mixed'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+/** A whole number of questions/answers, from none to all of them. */
+function isCountWithin(value: unknown, max: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
 }
 
 function isAnswer(value: unknown): boolean {
@@ -178,6 +229,10 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     questions,
     currentIndex,
     score,
+    points,
+    correctAnswers,
+    currentStreak,
+    maxStreak,
     isComplete,
     flaggedQuestionIds,
     answerHistory,
@@ -209,14 +264,42 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
   ) {
     return null;
   }
+  // Bounded by what a multiplied run can reach, which is also exactly what
+  // `firestore.rules` will accept — so a restored game can never put the client
+  // on the wrong side of the rule it is meant to satisfy. This is a robustness
+  // boundary, not a security one (see the doc comment): the bound that matters
+  // is the one in the rules.
   if (
     typeof score !== 'number' ||
     !Number.isInteger(score) ||
     score < 0 ||
-    score > questions.length
+    score > maxScoreFor(questions.length)
   ) {
     return null;
   }
+
+  // The exact total, or — for a save written before multipliers existed — the
+  // integer score, which was the exact total back when every answer was worth
+  // one point. Anything out of range falls back the same way rather than
+  // rejecting the game: a total is worth less than the round it belongs to.
+  const restoredPoints =
+    typeof points === 'number' &&
+    Number.isFinite(points) &&
+    points >= 0 &&
+    points <= maxScoreFor(questions.length)
+      ? points
+      : score;
+
+  // Clamped to the question count, which the score no longer is. A save
+  // written before the split has neither field and its score *was* the count,
+  // so `score` is the honest fallback — but a new save with a multiplied score
+  // and a corrupt count must not inherit a "correct answers" above the number
+  // of questions, which is the one value `recordGameResult` refuses outright.
+  const restoredCorrect = isCountWithin(correctAnswers, questions.length)
+    ? correctAnswers
+    : Math.min(score, questions.length);
+
+  const restoredStreak = isCountWithin(currentStreak, questions.length) ? currentStreak : 0;
 
   return {
     version: SCHEMA_VERSION,
@@ -224,7 +307,14 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     config: withTimeLimit(config),
     questions,
     currentIndex,
-    score,
+    score: displayScore(restoredPoints),
+    points: restoredPoints,
+    correctAnswers: restoredCorrect,
+    currentStreak: restoredStreak,
+    // Never below the run still in progress: a record claiming a best of 0
+    // while three correct answers are on the board would under-report the
+    // game's streak into the player's lifetime totals.
+    maxStreak: Math.max(restoredStreak, isCountWithin(maxStreak, questions.length) ? maxStreak : 0),
     isComplete: isComplete === true,
     // Anything unrecognised is dropped rather than rejecting the whole save:
     // a flag is a hint about a question, and losing one is not worth losing

@@ -1,11 +1,45 @@
-import { Locator } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { signInFromGameOver } from '../../support/auth';
 import { answerQuestion, startGame, startNewGame } from '../../support/game';
 import { CORRECT_ANSWERS, questionsFixture } from '../../support/open-trivia';
 
+/**
+ * **Every game in this file is played to a score no multiplier touches**, and
+ * that is a property of where the file runs rather than of what it tests.
+ *
+ * It is one of two `authenticated/` specs in the preview slice
+ * (`playwright.preview.config.ts`), so it writes real leaderboard entries into
+ * the real `trivimind-dev` project — where `firestore.rules` is whatever `main`
+ * last deployed, because rules are per project and a preview channel is
+ * Hosting only (`docs/ci-cd.md` §4.2a). A spec that ran here therefore has to
+ * write documents the rules on `main` accept as well as the ones in the branch
+ * under test. A streak of three or more earns a multiplier (`FEAT-004`), which
+ * carries the score past the question count and takes `percentage` off the
+ * score it used to be derived from — so a perfect five-question round is
+ * exactly the kind of entry that is legitimate on one side of a rules change
+ * and refused on the other. Missing a question keeps the streak under the first
+ * bonus tier and the entry acceptable to both.
+ *
+ * The multiplied entry has a spec of its own, `streak-leaderboard.spec.ts`,
+ * which is emulator-only for that reason.
+ */
 test.describe('verified user saves a score to the leaderboard', () => {
   const password = 'correct horse battery staple';
+
+  /**
+   * Answers all five fixture questions, missing the ones named by index, so the
+   * run never reaches a third consecutive correct answer.
+   */
+  async function playMissing(page: Page, missing: readonly number[]): Promise<void> {
+    for (const [index, correct] of CORRECT_ANSWERS.entries()) {
+      await answerQuestion(
+        page,
+        missing.includes(index) ? questionsFixture.results[index].incorrect_answers[0] : correct,
+      );
+    }
+    await expect(page).toHaveURL(/\/game-over$/);
+  }
 
   /**
    * Unique per test, not per file: workers share one emulator and there is no
@@ -50,10 +84,7 @@ test.describe('verified user saves a score to the leaderboard', () => {
     });
 
     await startGame(page, 5);
-    for (const answer of CORRECT_ANSWERS) {
-      await answerQuestion(page, answer);
-    }
-    await expect(page).toHaveURL(/\/game-over$/);
+    await playMissing(page, [2]);
 
     // Anonymous at game-over: prompted to sign in instead of the save form.
     // Visible, because every face of the card is always in the DOM — see the
@@ -106,10 +137,7 @@ test.describe('verified user saves a score to the leaderboard', () => {
     await firebase.createVerifiedUser({ email, password });
 
     await startGame(page, 5);
-    for (const answer of CORRECT_ANSWERS) {
-      await answerQuestion(page, answer);
-    }
-    await expect(page).toHaveURL(/\/game-over$/);
+    await playMissing(page, [2]);
 
     await signInFromGameOver(page, email, password);
     await page.locator('input[name=playerName]').fill('Repeat Player');
@@ -123,14 +151,9 @@ test.describe('verified user saves a score to the leaderboard', () => {
     // dropdown rendered open for no in-app reason).
     await startNewGame(page, 5);
 
-    // Miss the first question this time so the new attempt can't beat the
-    // perfect score already on file for this uid.
-    const wrongAnswer = questionsFixture.results[0].incorrect_answers[0];
-    await answerQuestion(page, wrongAnswer);
-    for (const answer of CORRECT_ANSWERS.slice(1)) {
-      await answerQuestion(page, answer);
-    }
-    await expect(page).toHaveURL(/\/game-over$/);
+    // Miss one more question this time, so the new attempt scores below the
+    // four already on file for this uid.
+    await playMissing(page, [0, 3]);
 
     await page.locator('input[name=playerName]').fill('Repeat Player');
     await page.getByRole('button', { name: 'Save Score', exact: true }).click();

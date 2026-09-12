@@ -89,7 +89,7 @@
       }
 
       <div class="p-6">
-        <div class="flex flex-wrap items-center gap-2 mb-5">
+        <div class="flex flex-wrap items-center gap-2 mb-5" data-cy="question-badges">
           <span
             class="text-[11px] font-bold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-full px-2.5 py-1"
           >
@@ -100,7 +100,47 @@
           >
             {{ question.difficulty }}
           </span>
+
+          <!--
+            The streak badge (`FEAT-004`). Beside the other two pills rather
+            than in the header: at 320px the header's three items already fill
+            it, and a fourth would wrap the "Question N / M" label onto a second
+            line the moment a streak started.
+
+            **Always rendered, only `invisible`** — this row wraps, so a pill
+            that came and went would re-wrap it and move the question text under
+            the reader mid-round (§4.4). Its contents are a constant width by
+            construction, not by a reserved minimum: a two-character
+            `tabular-nums` slot for the streak (25 is the longest game the setup
+            screen offers) and a multiplier always written to one decimal, so
+            `×1.0` and `×1.5` measure the same.
+
+            `aria-hidden`, because the `role="status"` region below is the
+            accessible channel for this and says it in words.
+          -->
+          <span
+            data-cy="streak-indicator"
+            [ngClass]="streakClass()"
+            [class.invisible]="!showsStreak()"
+            aria-hidden="true"
+          >
+            <app-icon name="flame" [size]="13" />
+            <span data-cy="streak-count" class="min-w-[2ch] text-right tabular-nums">{{
+              gameController.currentStreak()
+            }}</span>
+            <span data-cy="streak-multiplier" class="tabular-nums"
+              >&times;{{ multiplierLabel(gameController.scoreMultiplier()) }}</span
+            >
+          </span>
         </div>
+
+        <!-- Announced only when the multiplier tier moves — the result region
+             below already says "Correct." on every right answer, and repeating
+             the running count on top of it would bury the part that matters
+             (G3, `CLAUDE.md` §4.5). -->
+        <p role="status" aria-live="polite" data-cy="streak-status" class="sr-only">
+          {{ streakAnnouncement() }}
+        </p>
 
         <div class="flex items-start justify-between gap-3 mb-6">
           <h2

@@ -257,25 +257,28 @@ Every document `stripeWebhook` mirrors carries `eventCreated` — the `created` 
 ```
 uid: string            (doc ID; must equal request.auth.uid)
 name: string          (1–30 chars)
-score: int             (0 .. totalQuestions)
+score: int             (0 .. totalQuestions — every entry here predates multipliers)
 totalQuestions: int    (1–25; the longest game the app offers)
-percentage: int        (must equal round(score * 100 / totalQuestions))
-createdAt: int         (epoch ms, must be near server time)
+percentage: int        (round(score * 100 / totalQuestions))
+createdAt: int         (epoch ms, near server time)
 ```
 
 - **Read**: public.
 - **Create / Update**: requires a non-anonymous, (if password-based) email-verified caller writing to their own uid's doc — schema is strictly validated in `firestore.rules` (exact key set, types, bounds) and an update is only accepted if `score` improves on the existing value.
 - **Delete**: disallowed.
 - **Retired** (finding G7). Its contents were migrated into `leaderboards/15/entries`, the client no longer reads or writes it, and `firestore.rules` now allows **read only**. Writes are refused rather than ignored: a client cached from before the switch would otherwise keep writing scores into a collection nothing reads, which looks like success and loses them silently. Reads stay open so the documents remain inspectable — nothing was deleted.
-- One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes. **A rejection is not self-explanatory**, though: since the bounds above were added, the rules also refuse a clock outside the accepted window, a name over 30 characters, a score inconsistent with the question count, and an unverified account. `GameOverComponent` therefore reads the caller's own entry before claiming "your best score is already higher", and only suppresses retry when that reading confirms it — everything else, including a lookup that itself fails, gets a generic message and keeps the form open. Reporting one cause for every rejection told most of those users something false and left them no way to try again.
+- One document per user (doc ID == uid) — the client `setDoc`s unconditionally and lets the rules reject non-improving writes. **A rejection is not self-explanatory**, though: since the bounds above were added, the rules also refuse a clock outside the accepted window, a name over 30 characters, a score above the multiplier ceiling, an accuracy above what the score allows, and an unverified account. `GameOverComponent` therefore reads the caller's own entry before claiming "your best score is already higher", and only suppresses retry when that reading confirms it — everything else, including a lookup that itself fails, gets a generic message and keeps the form open. Reporting one cause for every rejection told most of those users something false and left them no way to try again.
 
-**The numeric bounds are anti-cheat, not just shape validation.** Previously the rules checked only that `score >= 0` and `totalQuestions >= score`, which accepted a hand-written `999999` and made rank #1 permanently unassailable (an update requires beating the existing score). Three constraints now tie an entry to something a real game could have produced:
+**The numeric bounds are anti-cheat, not just shape validation.** The rules once checked only that `score >= 0` and `totalQuestions >= score`, which accepted a hand-written `999999` and made rank #1 permanently unassailable (an update requires beating the existing score). Four constraints tie an entry to something a real game could have produced:
 
 - **`totalQuestions` is capped at 25**, the longest game `GameSetupComponent` offers. Deliberately a _range_ (1–25) rather than the exact option set: a `custom` or `mixed` game legitimately returns fewer questions than requested when the bank is short, so asking for 25 when 7 exist produces a genuine 7-question game. **Raising the option list above 25 requires raising this cap too** — the rules tests fail loudly if the two disagree, and `GameSetupComponent`'s own `Validators.max` was tightened from 50 to 25 to match, since 50 was never reachable through the UI.
-- **`percentage` must equal `round(score * 100 / totalQuestions)`** rather than being a free 0–100 field, so 1 correct out of 10 can no longer be published as 100%. Firestore's `math.round()` was verified empirically against JavaScript's `Math.round()` across `.5` boundaries before relying on exact equality — they agree, so no tolerance is needed.
+- **`score` is capped at `totalQuestions * maxScoreMultiplier()`**, which is 3 (`FEAT-004`). A streak multiplier is the reason a score may exceed the question count at all, and the cap is what keeps "may exceed" from meaning "is unbounded": a perfect 25-question run tops out at 75, and so does a forged one. The number is duplicated as `MAX_SCORE_MULTIPLIER` in `src/app/models/scoring.ts` so the client can refuse to submit a score the rules would reject — a refusal arrives as a bare `permission-denied` that `/game-over` cannot honestly narrate — and a test in `firestore-tests/leaderboards.rules.spec.ts` reads the number out of `firestore.rules` and pins the two equal. **The rules copy is the authority**; a client is the attacker's own machine.
+- **`percentage` is raw accuracy, bounded in three ways rather than derived**: an integer, `0..100`, and no greater than `round(score * 100 / totalQuestions)`. It used to be exactly that expression, which stopped being true the moment the score carried a multiplier and the accuracy did not. The inequality is the same check relaxed along the one axis the multiplier moves: every correct answer is worth at least a point, so the correct-answer count can never exceed the score, and `math.round()` is monotonic — an unmultiplied run still satisfies it with equality, while 1 correct out of 10 still cannot be published as 100%. The `<= 100` half is what stops a multiplied score licensing a 340% entry. Firestore's `math.round()` was verified empirically against JavaScript's `Math.round()` across `.5` boundaries before any of this relied on it — they agree, so no tolerance is needed.
 - **`createdAt` must sit near server time** (`isNearRequestTime()`, shared with `custom_questions`), so an entry can't be backdated.
 
-**This is mitigation, not closure.** Nothing here proves a game was actually played — a determined attacker can still write a plausible 25/25. What it removes is the cheap, unbounded version: the ceiling for a forged entry is now the same as the ceiling for an honest one. Closing it properly needs a server-attested game token, which was considered and deliberately deferred — see `AUDIT_REMEDIATION.md` §4.
+**The rules deliberately do not re-simulate the game.** The bound is a ceiling, not a reproduction of the tier table: a rule that reproduced it would have to change in lockstep with every balance tweak and would reject honest scores the day it fell behind. The tiers are the client's business; what the server owes is a number no run can exceed.
+
+**This is mitigation, not closure.** Nothing here proves a game was actually played — a determined attacker can still write a plausible 75/25. What it removes is the cheap, unbounded version: the ceiling for a forged entry is now the same as the ceiling for an honest one. Closing it properly needs a server-attested game token, which was considered and deliberately deferred — see `AUDIT_REMEDIATION.md` §4.
 
 **One composite index is defined** (`firestore.indexes.json`): `custom_questions` on `(category ASC, difficulty ASC)`, for the bounded question query described below. The index Firestore actually builds ends with `__name__`, but that **must not be written in the file** — declaring it breaks every deploy after the first (`INFRASTRUCTURE.md` §6.3), and `firestore-tests/indexes.spec.ts` fails if it reappears. The leaderboard's `orderBy('score', 'desc').limit(10)` needs only the automatic single-field index, and so does a question query filtering on category **or** difficulty alone — Firestore's automatic single-field indexes are already `(field, __name__)`, so they serve one equality filter ordered by document ID. Only the two-filter case needs a composite.
 
@@ -288,9 +291,9 @@ leaderboards/{limit}/entries/{uid}
 
 uid: string            (doc ID; must equal request.auth.uid)
 name: string           (1–30 chars)
-score: int             (0 .. totalQuestions)
+score: int             (points; 0 .. totalQuestions * 3 — streak multipliers, FEAT-004)
 totalQuestions: int    (1–25)
-percentage: int        (must equal round(score * 100 / totalQuestions))
+percentage: int        (accuracy; 0..100, and <= round(score * 100 / totalQuestions))
 createdAt: int         (epoch ms, must be near server time)
 timeLimit: string      (must equal the {limit} path segment)
 ```
@@ -298,7 +301,7 @@ timeLimit: string      (must equal the {limit} path segment)
 `{limit}` is one of **`15`**, **`30`** or **`unlimited`** — the three timing constraints a game can be played under (finding G7). A score won with no time limit is not comparable to one won in 15 seconds, so each constraint gets its own board rather than one board recording the conditions and ranking across them.
 
 - **Read**: public, but only for a declared board. The board name is a path segment the caller chooses, so an unchecked read rule would serve `leaderboards/anything/entries` — a public collection named by whoever asks.
-- **Create / Update**: identical contract to the collection above — a non-anonymous, (if password-based) email-verified caller writing to their own uid, exact-key schema validation, and an update only if `score` improves. The improving-score check reads `resource.data` **at that path**, so it is naturally scoped per board: a player's 15-second best cannot block their first unlimited entry, which is the whole point of separating them.
+- **Create / Update**: identical contract to the collection above — a non-anonymous, (if password-based) email-verified caller writing to their own uid, exact-key schema validation, and an update only if `score` improves. A multiplied score improves on an unmultiplied one exactly as any higher score does; nothing about the ranking changed, only the range a score may occupy. The improving-score check reads `resource.data` **at that path**, so it is naturally scoped per board: a player's 15-second best cannot block their first unlimited entry, which is the whole point of separating them.
 - **Delete**: disallowed.
 
 **A subcollection rather than a `timeLimit` field on one flat collection.** The flat version needs `where('timeLimit','==',x).orderBy('score','desc')`, which requires a **composite index** — and index configuration is the one thing the emulator cannot verify, the same gap that took the deploy pipeline down for four consecutive merges (D3, above). Per-board `orderBy('score','desc').limit(10)` needs only the automatic single-field index, so that class of risk does not arise at all. `firestore.indexes.json` is untouched by this feature.
@@ -306,6 +309,8 @@ timeLimit: string      (must equal the {limit} path segment)
 **`timeLimit` is redundant with the path and is stored anyway.** An exact-key `hasOnly()` allowlist cannot be widened later without rejecting every existing document — the A10 wall — so a field that might be wanted has to be in the schema from the start, and an admin export across boards should not have to parse document paths to know what it is looking at. The rules require it to equal the path segment, which is what keeps the redundancy from drifting into a second, disagreeing source of truth.
 
 **The board list is schema, not configuration.** Adding an option to the setup screen without adding it to `isValidBoard` produces a game whose score can never be saved. `firestore-tests/leaderboards.rules.spec.ts` enumerates the same three values, and its accept cases fail if the rules list shrinks — verified by mutation, since a suite of nothing but rejections passes against a rule that denies everything.
+
+**Old and new entries share a board indefinitely**, and both have to read correctly on it. An entry saved before `FEAT-004` has `score == correctAnswers` and nothing distinguishes it from a multiplied one; the row renders `N pts · P%` either way, which is true of both, where the old `score / totalQuestions` form would have been a lie about the newer ones (`app.md` §1.1).
 
 #### Migrating off the flat `leaderboard` collection
 

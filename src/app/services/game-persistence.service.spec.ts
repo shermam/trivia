@@ -77,6 +77,10 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     questions: [makeQuestion('q0'), makeQuestion('q1')],
     currentIndex: 1,
     score: 1,
+    points: 1,
+    correctAnswers: 1,
+    currentStreak: 1,
+    maxStreak: 1,
     isComplete: false,
     flaggedQuestionIds: [],
     answerHistory: [],
@@ -456,6 +460,96 @@ describe('GamePersistenceService (B8)', () => {
 
     vi.spyOn(Date, 'now').mockReturnValue(now - 60 * 60 * 1000);
     expect(await service.load()).not.toBeNull();
+  });
+
+  /*
+   * `FEAT-004`. Four fields were added to this record without bumping
+   * `SCHEMA_VERSION`, on the same grounds as every addition before them — a
+   * mismatch discards the game rather than migrating it, so a bump would throw
+   * away every round in flight at deploy time. That reasoning is only sound if
+   * a record written by the previous build still restores, which is what these
+   * pin.
+   */
+  describe('streaks and multipliers', () => {
+    it('round-trips the exact total, the correct count and the run', async () => {
+      await service.save(
+        makeGame({
+          // Five questions, because the counts below are bounded by the length
+          // of the game they belong to — a three-answer run cannot be restored
+          // into a two-question record, and would silently clamp.
+          questions: Array.from({ length: 5 }, (_, i) => makeQuestion(`q${i}`)),
+          score: 4,
+          points: 3.5,
+          correctAnswers: 3,
+          currentStreak: 3,
+          maxStreak: 3,
+        }),
+      );
+
+      const loaded = await service.load();
+      expect(loaded?.points).toBe(3.5);
+      expect(loaded?.score).toBe(4);
+      expect(loaded?.correctAnswers).toBe(3);
+      expect(loaded?.currentStreak).toBe(3);
+      expect(loaded?.maxStreak).toBe(3);
+    });
+
+    /*
+     * A save written before multipliers existed has a `score` that *was* the
+     * exact total and *was* the correct-answer count, because every answer was
+     * worth one point. Falling back to it is what keeps such a game playable
+     * rather than discarded.
+     */
+    it('restores a record written before the fields existed', async () => {
+      await putRaw(validRecord({ score: 1 }));
+
+      const loaded = await service.load();
+      expect(loaded?.points).toBe(1);
+      expect(loaded?.score).toBe(1);
+      expect(loaded?.correctAnswers).toBe(1);
+      expect(loaded?.currentStreak).toBe(0);
+      expect(loaded?.maxStreak).toBe(0);
+    });
+
+    /*
+     * The score a multiplier can reach is above the question count and below
+     * the rules ceiling, and both halves matter: refusing the first would
+     * discard a legitimate game on reload, and accepting above the second
+     * would hand the client a score `firestore.rules` is bound to refuse.
+     */
+    it('accepts a multiplied score up to the rules ceiling', async () => {
+      await putRaw(validRecord({ score: 3, points: 3 }));
+
+      expect((await service.load())?.score).toBe(3);
+    });
+
+    it('refuses a score above the rules ceiling', async () => {
+      await putRaw(validRecord({ score: 4, points: 4 }));
+
+      expect(await service.load()).toBeNull();
+    });
+
+    // Out-of-range or hand-edited values fall back rather than discarding the
+    // round: a total is worth less than the game it belongs to.
+    it('falls back to the stored score when the exact total is unusable', async () => {
+      await putRaw(validRecord({ score: 1, points: 'lots' }));
+
+      expect((await service.load())?.points).toBe(1);
+    });
+
+    it('never restores more correct answers than there were questions', async () => {
+      await putRaw(validRecord({ score: 3, points: 3, correctAnswers: 99 }));
+
+      expect((await service.load())?.correctAnswers).toBe(1);
+    });
+
+    // A record claiming no best while a run is in progress would under-report
+    // the game's streak into the player's lifetime totals.
+    it('never restores a best streak below the run in progress', async () => {
+      await putRaw(validRecord({ score: 1, points: 1, currentStreak: 1, maxStreak: 0 }));
+
+      expect((await service.load())?.maxStreak).toBe(1);
+    });
   });
 
   it.each([
