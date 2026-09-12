@@ -2,7 +2,7 @@ import { ConsoleMessage, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { answerQuestion, startGame } from '../../support/game';
 import { expectSameHeight, settledHeight } from '../../support/layout';
-import { CORRECT_ANSWERS, questionsFixture } from '../../support/open-trivia';
+import { CORRECT_ANSWERS, questionsFixture, stubOpenTrivia } from '../../support/open-trivia';
 
 /**
  * Sound effects and the mute that turns them off (`FEAT-003`).
@@ -43,6 +43,12 @@ test.describe('the mute toggle in the nav drawer', () => {
   test.use({ viewport: MOBILE });
 
   test.beforeEach(async ({ page }) => {
+    // No game is started in this block; the stub is only so that four tests
+    // about a button in the top bar never depend on a third-party service
+    // being up — the setup screen fetches its category list on load. Same
+    // reasoning as `embed-mode.spec.ts`, and it matters more here, because
+    // these run against a real deployed channel in the preview slice too.
+    await stubOpenTrivia(page);
     await page.goto('/');
   });
 
