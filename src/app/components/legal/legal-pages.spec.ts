@@ -39,6 +39,9 @@ async function render(component: typeof PrivacyPolicyComponent | typeof TermsOfS
   return fixture.nativeElement as HTMLElement;
 }
 
+/** Text as a reader hears it: one space between words, whatever the source did. */
+const collapse = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ');
+
 const PAGES = [
   { name: 'Privacy Policy', component: PrivacyPolicyComponent },
   { name: 'Terms of Service', component: TermsOfServiceComponent },
@@ -245,6 +248,44 @@ describe('legal pages', () => {
 
     expect(text).not.toContain('no profile of you is built');
     expect(text).not.toContain('there is no advertising, profiling or tracking here');
+  });
+
+  /**
+   * The donation disclosures, and specifically the two halves that are easiest
+   * to falsify without touching a sentence: what a signed-in donation stores,
+   * and that a signed-out one stores nothing at all.
+   *
+   * The second is not a courtesy — it is what makes the dialog's own notice
+   * true, and it holds because `createDonationSession` attaches a
+   * `firebaseUID` only for a real account and `donationRecordFrom` writes
+   * nothing without one. Attach that metadata to a guest session and this
+   * paragraph becomes a misstatement about payment data with nothing going
+   * red.
+   */
+  it('discloses what a donation stores, and that a guest donation stores nothing', async () => {
+    // Whitespace-collapsed before matching, because these claims are long
+    // enough to be reflowed across lines by the formatter — and a pin that
+    // breaks when Prettier rewraps a paragraph is a pin nobody keeps.
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+
+    expect(text).toContain('the amount, the currency, the time, and the identifier Stripe gives');
+    expect(text).toContain('A donation made while signed out stores nothing here at all');
+    expect(text).toContain('Take a one-off donation and record it against your account');
+  });
+
+  /**
+   * The Terms' side of the same feature. "Buys nothing" is the claim that has
+   * to keep pace with the product: the day a donation unlocks anything at all,
+   * this sentence is false and the refund paragraph below it reads differently
+   * too.
+   */
+  it('states that a donation is voluntary, buys nothing, and can be refunded on request', async () => {
+    const text = collapse((await render(TermsOfServiceComponent)).textContent);
+
+    expect(text).toContain('entirely voluntary and buys nothing');
+    expect(text).toContain('unlocks no feature, grants no rank or badge');
+    expect(text).toContain('A donation is a gift rather than a purchase');
+    expect(text).toContain('We would rather return the money than keep a payment');
   });
 
   it('states the minimum age on both pages consistently', async () => {

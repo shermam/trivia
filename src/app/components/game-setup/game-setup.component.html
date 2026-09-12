@@ -22,6 +22,52 @@
       <p class="text-slate-500 dark:text-slate-400">Configure your quiz and test your knowledge</p>
     </div>
 
+    <!--
+      Where a donation comes back to. Part of the first frame rather than
+      something that arrives late: the query parameter is read from the route
+      snapshot at construction, so the card is laid out with the banner in it
+      and nothing below it moves (§4.4). `/pricing`'s `?checkout=` banners work
+      the same way and read the same.
+    -->
+    @if (donationStatus() === 'success') {
+      <div
+        data-cy="donation-success"
+        class="mb-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 dark:border-emerald-500/25 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-800 dark:text-emerald-300"
+      >
+        <span class="flex items-start gap-2">
+          <app-icon name="circle-check-big" [size]="16" class="shrink-0 mt-0.5" />
+          Thank you — your coffee is very much appreciated.
+        </span>
+        <button
+          type="button"
+          data-cy="dismiss-donation-status"
+          (click)="dismissDonationStatus()"
+          class="shrink-0 font-semibold hover:underline"
+        >
+          Dismiss
+        </button>
+      </div>
+    }
+    @if (donationStatus() === 'cancelled') {
+      <div
+        data-cy="donation-cancelled"
+        class="mb-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800 px-3 py-2.5 text-sm text-slate-600 dark:text-slate-300"
+      >
+        <span class="flex items-start gap-2">
+          <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+          Donation cancelled — nothing was charged.
+        </span>
+        <button
+          type="button"
+          data-cy="dismiss-donation-status"
+          (click)="dismissDonationStatus()"
+          class="shrink-0 font-semibold hover:underline"
+        >
+          Dismiss
+        </button>
+      </div>
+    }
+
     @if (gameController.hasResumableGame()) {
       <div
         data-cy="resume-banner"

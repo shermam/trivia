@@ -63,6 +63,30 @@ export interface ProPriceSeed {
   unitAmount: number;
 }
 
+/**
+ * One donation preset to seed — a single one-time Stripe Price on the donation
+ * product.
+ *
+ * `kind: 'donation'` is the marker the mirror copies from Stripe metadata onto
+ * both the product and the price, and it is what keeps the Pro catalog and the
+ * tip jar from matching each other's prices (`functions/src/checkout-request.ts`).
+ * Seeded here rather than assumed, because `stripeWebhook` never fires against
+ * the emulator.
+ */
+export interface DonationPriceSeed {
+  id: string;
+  currency: string;
+  /** Smallest unit of that currency: 500 for $5.00, 2500 for R$ 25,00. */
+  unitAmount: number;
+}
+
+/** A donation-session document as the client wrote it, read back for assertions. */
+export interface DonationSessionRecord {
+  id: string;
+  price: string;
+  origin: string;
+}
+
 /** A checkout-session document as the client wrote it, read back for assertions. */
 export interface CheckoutSessionRecord {
   id: string;

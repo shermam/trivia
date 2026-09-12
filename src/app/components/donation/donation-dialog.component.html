@@ -1,0 +1,207 @@
+@if (isOpen()) {
+  <!-- `aria-hidden` marks the backdrop as decoration — it is a tint with a
+       click handler, and announcing it would be noise. It is deliberately not
+       a claim about the page behind, which stays in the accessibility tree:
+       `aria-modal="true"` on the dialog is what asks assistive tech to ignore
+       that, and the Tab trap is what enforces the same for everyone else. -->
+  <div class="fixed inset-0 z-40 bg-slate-900/50" aria-hidden="true" (click)="close()"></div>
+
+  <!-- Anchored to the top of the viewport rather than centred, the same way
+       game-over's report dialog is. It is what keeps a late error message from
+       moving the controls above it (§4.4): everything the reader is looking at
+       when they click Donate stays where it was, and the message appears
+       underneath. -->
+  <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+    <div
+      #donationDialog
+      id="donation-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="donation-dialog-title"
+      tabindex="-1"
+      data-cy="donation-dialog"
+      (keydown.escape)="close()"
+      (keydown)="keepFocusInDialog($event)"
+      class="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 shadow-card-lg focus:outline-none"
+    >
+      <div
+        class="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
+      >
+        <h2
+          id="donation-dialog-title"
+          class="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-slate-50"
+        >
+          <app-icon name="coffee" [size]="18" class="text-amber-700 dark:text-amber-400" />
+          Buy me a coffee
+        </h2>
+        <button
+          type="button"
+          data-cy="close-donation-dialog"
+          aria-label="Close"
+          (click)="close()"
+          class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
+        >
+          <app-icon name="x" [size]="18" />
+        </button>
+      </div>
+
+      <div class="px-6 py-5">
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
+          Trivimind is free to play and always will be. A one-off tip helps pay for the servers.
+        </p>
+
+        @if (isUnavailable()) {
+          <p
+            data-cy="donation-unavailable"
+            class="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-500/25 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+          >
+            <app-icon name="triangle-alert" [size]="16" class="shrink-0 mt-0.5" />
+            Donations aren't available right now — no donation amounts are set up. Please try again
+            later.
+          </p>
+        } @else {
+          <!-- Currency row, same shape as the Pro card's: the label on the
+               left, and on the right either the shared switch or a plain pill
+               naming the one currency there is. Both are the same box, so a
+               second currency fills a control that is already on the page
+               rather than creating one (§4.4). -->
+          <div class="flex items-center justify-between gap-3 mb-4">
+            <span
+              id="donation-currency-label"
+              class="text-sm font-semibold text-slate-500 dark:text-slate-400"
+              >Currency</span
+            >
+            @if (hasCurrencyChoice()) {
+              <app-currency-switch
+                [currencies]="currencies()"
+                [selected]="selectedCurrency()"
+                name="donation-currency"
+                labelledBy="donation-currency-label"
+                testIdPrefix="donation-currency"
+                (currencySelected)="selectCurrency($event)"
+              />
+            } @else {
+              <div class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+                <span
+                  data-cy="donation-currency"
+                  class="flex items-center justify-center rounded-lg px-3 py-1 text-sm font-semibold text-slate-600 dark:text-slate-400"
+                  >{{ selectedCurrency()?.toUpperCase() ?? ' ' }}</span
+                >
+              </div>
+            }
+          </div>
+
+          <p
+            id="donation-amount-label"
+            class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2"
+          >
+            Amount
+          </p>
+
+          <!-- Three cells whatever the state, so the row that holds the
+               amounts is the same height while the catalog is still loading as
+               it is afterwards, and the button below it never moves (§4.4).
+               The amounts themselves come from the mirrored Stripe catalog —
+               never from this template, which would be wrong for whoever is
+               not being charged in that currency. -->
+          @if (catalogResolved()) {
+            <div
+              role="radiogroup"
+              aria-labelledby="donation-amount-label"
+              data-cy="donation-amounts"
+              class="grid grid-cols-3 gap-2"
+            >
+              @for (preset of presets(); track preset.priceId) {
+                <label
+                  class="flex items-center justify-center rounded-xl border-[1.5px] px-2 py-3 text-base font-bold cursor-pointer transition-colors"
+                  [class.border-emerald-600]="selectedPriceId() === preset.priceId"
+                  [class.bg-emerald-50]="selectedPriceId() === preset.priceId"
+                  [class.dark:bg-emerald-500/10]="selectedPriceId() === preset.priceId"
+                  [class.text-emerald-700]="selectedPriceId() === preset.priceId"
+                  [class.dark:text-emerald-400]="selectedPriceId() === preset.priceId"
+                  [class.border-slate-900/15]="selectedPriceId() !== preset.priceId"
+                  [class.dark:border-white/15]="selectedPriceId() !== preset.priceId"
+                  [class.text-slate-700]="selectedPriceId() !== preset.priceId"
+                  [class.dark:text-slate-300]="selectedPriceId() !== preset.priceId"
+                >
+                  <input
+                    type="radio"
+                    name="donation-amount"
+                    class="sr-only"
+                    [attr.data-cy]="'donation-amount-' + preset.priceId"
+                    [attr.value]="preset.priceId"
+                    [checked]="selectedPriceId() === preset.priceId"
+                    (change)="selectPreset(preset.priceId)"
+                  />
+                  {{ amountLabel(preset.unitAmount, preset.currency) }}
+                </label>
+              }
+            </div>
+          } @else {
+            <div class="grid grid-cols-3 gap-2" aria-hidden="true">
+              @for (placeholder of [0, 1, 2]; track placeholder) {
+                <span
+                  class="flex items-center justify-center rounded-xl border-[1.5px] border-slate-900/10 dark:border-white/10 px-2 py-3 text-base font-bold text-slate-300 dark:text-slate-600"
+                  >—</span
+                >
+              }
+            </div>
+          }
+
+          @if (isGuest()) {
+            <!-- Said before anybody pays, and said accurately: there is no
+                 supporter badge yet, so this promises none. What is true today
+                 is that a donation from a signed-out visitor cannot be
+                 attributed to an account, and nothing about it is stored. -->
+            <p
+              data-cy="donation-guest-notice"
+              class="flex items-start gap-2 mt-4 text-sm text-slate-500 dark:text-slate-400"
+            >
+              <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+              You're not signed in, so this donation won't be recorded against an account. Sign in
+              first if you'd like it linked to yours.
+            </p>
+          }
+
+          <button
+            type="button"
+            data-cy="donate"
+            (click)="donate()"
+            [disabled]="isDonating() || !selectedPriceId()"
+            class="mt-5 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
+          >
+            @if (isDonating()) {
+              Redirecting&hellip;
+            } @else {
+              <app-icon name="coffee" [size]="16" />
+              {{ donateLabel() }}
+            }
+          </button>
+
+          <p class="mt-3 text-center text-xs text-slate-400 dark:text-slate-500">
+            A one-off payment through Stripe. It buys nothing and is not refundable by default — see
+            the Terms.
+          </p>
+        }
+
+        <!-- Permanently present and empty until there is something to say,
+             the same pattern game-over's report status uses: a live region
+             inserted into the DOM already carrying its message is routinely
+             missed by screen readers (§4.5). The visible box below is the
+             sighted half of the same message and is deliberately not a second
+             live region, which would announce it twice. -->
+        <p role="status" aria-live="polite" class="sr-only">{{ errorMessage() }}</p>
+
+        @if (errorMessage()) {
+          <p
+            data-cy="donation-error"
+            class="flex items-start gap-2 mt-3 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
+          >
+            <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+            {{ errorMessage() }}
+          </p>
+        }
+      </div>
+    </div>
+  </div>
+}

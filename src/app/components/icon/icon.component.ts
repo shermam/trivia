@@ -27,6 +27,7 @@ export type IconName =
   | 'flag'
   | 'flag-filled'
   | 'flame'
+  | 'coffee'
   | 'menu'
   | 'external-link';
 
@@ -97,6 +98,14 @@ export type IconName =
         @case ('x') {
           <path d="M18 6 6 18" />
           <path d="m6 6 12 12" />
+        }
+        @case ('coffee') {
+          <path d="M10 2v2" />
+          <path d="M14 2v2" />
+          <path
+            d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"
+          />
+          <path d="M6 2v2" />
         }
         @case ('menu') {
           <path d="M4 6h16" />

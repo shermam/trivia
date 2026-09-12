@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildAccountExport } from './account-export';
+import { buildAccountExport, timestampToIso } from './account-export';
 
 const user = {
   uid: 'user-1',
@@ -120,4 +120,45 @@ test('reports an explicit null, not an absent key, when no game has been finishe
 
   assert.equal(result.gameplayStats, null);
   assert.ok('gameplayStats' in result, 'the key must be present so its emptiness is stated');
+});
+
+/**
+ * Donations are billing records, and the Privacy Policy promises the export
+ * returns those. An export that quietly omitted them would be the same kind of
+ * misstatement `notHeldHere` exists to prevent — worse, because the money is
+ * the part a reader is most likely to be checking on.
+ */
+test('includes one-time donations and the date the account first gave', () => {
+  const result = buildAccountExport({
+    ...base,
+    supporterSince: '2026-09-01T10:00:00.000Z',
+    donations: [{ id: 'cs_1', amount: 500, currency: 'brl' }],
+  });
+
+  assert.equal(result.billing.supporterSince, '2026-09-01T10:00:00.000Z');
+  assert.deepEqual(result.billing.donations, [{ id: 'cs_1', amount: 500, currency: 'brl' }]);
+});
+
+test('states an account that has never donated as empty rather than omitting it', () => {
+  const result = buildAccountExport(base);
+
+  assert.equal(result.billing.supporterSince, null);
+  assert.deepEqual(result.billing.donations, []);
+  assert.ok('donations' in result.billing);
+});
+
+/**
+ * A Firestore `Timestamp` serialises to `{"_seconds":…,"_nanoseconds":…}`,
+ * which answers nothing a person asked for. This is the one field on the
+ * customer document that is one.
+ */
+test('renders a Firestore timestamp as ISO 8601, and anything else as null', () => {
+  assert.equal(
+    timestampToIso({ toDate: () => new Date('2026-09-01T10:00:00.000Z') }),
+    '2026-09-01T10:00:00.000Z',
+  );
+  assert.equal(timestampToIso(undefined), null);
+  assert.equal(timestampToIso(null), null);
+  assert.equal(timestampToIso('2026-09-01'), null);
+  assert.equal(timestampToIso({ toDate: () => new Date(Number.NaN) }), null);
 });

@@ -156,6 +156,18 @@ export function validCheckoutSession(overrides: Record<string, unknown> = {}) {
   return { price: 'price_test_pro', origin: 'https://example.web.app', ...overrides };
 }
 
+/**
+ * A schema-valid `donation_sessions` document; spread over it for invalid
+ * variants.
+ *
+ * The same two fields a checkout session carries, and a separate factory all
+ * the same — the two rules are separate functions precisely so they can
+ * diverge, and a shared factory would hide the day one of them does.
+ */
+export function validDonationSession(overrides: Record<string, unknown> = {}) {
+  return { price: 'price_test_coffee', origin: 'https://example.web.app', ...overrides };
+}
+
 /** A schema-valid `portal_sessions` document; spread over it for invalid variants. */
 export function validPortalSession(overrides: Record<string, unknown> = {}) {
   return { origin: 'https://example.web.app', ...overrides };

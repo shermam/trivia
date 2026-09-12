@@ -145,7 +145,17 @@ introduced by hand, below.
    in test mode, the currency switch never appears here and the Brazilian path
    is untestable outside production. Alternative `currency_options` on a single
    price is deliberately **not** the model — Stripe freezes those once a price
-   has been used (`stack.md` §2.4). Then set the dev project's secrets:
+   has been used (`stack.md` §2.4).
+
+   **The donation catalog is a second product, and it is optional here.**
+   Without it the tip jar reports that donations are not available, which is a
+   state worth seeing at least once; with it, the dialog and its currency
+   switch are testable on dev. The Dashboard steps are in `stack.md` §2.4, and
+   the endpoint below needs `checkout.session.completed` and
+   `checkout.session.async_payment_succeeded` among its events for a donation
+   to be recorded at all.
+
+   Then set the dev project's secrets:
 
    ```bash
    firebase functions:secrets:set STRIPE_SECRET_KEY --project trivimind-dev
