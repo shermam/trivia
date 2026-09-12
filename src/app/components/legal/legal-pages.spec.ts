@@ -257,6 +257,24 @@ describe('legal pages', () => {
   });
 
   /**
+   * `FEAT-003` added a browser-storage key, and this list is exhaustive by
+   * construction: it opens by saying the app sets no cookies and uses the
+   * browser's own storage "instead", so a key missing from it is the page
+   * describing storage the app does not have and omitting storage it does.
+   *
+   * Pinned on the two claims that make the entry true rather than on the
+   * sentence: that it never leaves the device, and that it is only ever a
+   * yes-or-no. Moving the preference to an account, or growing it into a
+   * volume setting that gets synced, falsifies one of those silently.
+   */
+  it('discloses the sound-effects mute among what is kept on the device', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain("whether you have muted the game's sound effects");
+    expect(text).toContain('stays on this device and is sent nowhere');
+  });
+
+  /**
    * The absolute "no profiling" claim appeared **three** times, and keeping
    * running totals of a player's own games engages every one of them. Two were
    * rewritten when `users/{uid}` shipped; this pins that none has quietly

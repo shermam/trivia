@@ -23,6 +23,7 @@ import {
   TriviaQuestion,
   boardKey,
 } from '../../models/question.model';
+import { AudioService } from '../../services/audio.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
@@ -95,6 +96,7 @@ export class GameOverComponent implements OnInit {
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly embedMode = inject(EmbedModeService);
   private readonly firebaseService = inject(FirebaseService);
+  private readonly audio = inject(AudioService);
 
   protected readonly initialsFor = initialsFor;
 
@@ -572,12 +574,43 @@ export class GameOverComponent implements OnInit {
     });
   }
 
+  /**
+   * Whether every question of the round was answered correctly, which is the
+   * celebration this screen is able to make honestly (`FEAT-003`).
+   *
+   * **Not "was this a personal best".** `FEAT-003` asks for a cue chosen by the
+   * final score, and the obvious reading of that is a high-score fanfare — but
+   * nothing in this app knows whether a player has ever done better. The
+   * leaderboard keeps one best entry per account and enforces it inside
+   * `firestore.rules`, so the only signal a client gets is a bare
+   * `permission-denied` that could equally be a dozen other things
+   * (`CLAUDE.md` §4.4). A fanfare fed by a guess is a claim the app cannot
+   * check, so the split is made on the one thing the round itself settles.
+   *
+   * Accuracy, not points: a multiplied score is not a fraction of the question
+   * count, and `correctAnswers` is the counter that can equal it (§1.1).
+   */
+  private readonly isPerfectRound = computed(() => {
+    const total = this.gameController.totalQuestions();
+    return total > 0 && this.gameController.correctAnswers() === total;
+  });
+
   ngOnInit(): void {
     // Reaching here means hasCompletedGameGuard passed — a finished game is in
     // memory (finding F4; the completeness check lives on the route, not here).
     this.playerName = this.authService.user()?.displayName ?? '';
     void this.loadLeaderboard();
     this.recordGameResult();
+    // Once per arrival at the screen, a reload included — and the reload is
+    // the case worth knowing about, because the obvious guess about it is
+    // wrong. A reloaded document is not un-activated: measured in Chromium,
+    // `navigator.userActivation.hasBeenActive` still reads `true` after a
+    // reload and a context built there starts `running`, so this genuinely
+    // plays rather than being skipped. What makes that safe is `AudioService`
+    // scheduling only onto a running context: were it suspended, the tones
+    // would be *queued* on a frozen clock and would arrive over the first
+    // answer of the next game rather than being dropped.
+    this.audio.playGameOver(this.isPerfectRound());
   }
 
   protected openSignIn(): void {
