@@ -19,6 +19,8 @@ export type IconName =
   | 'triangle-alert'
   | 'sun'
   | 'moon'
+  | 'volume-2'
+  | 'volume-x'
   | 'wifi-off'
   | 'clock'
   | 'clock-plus'
@@ -208,6 +210,20 @@ export type IconName =
         }
         @case ('moon') {
           <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+        }
+        <!-- The speaker body is shared by both volume marks, so the two states
+             differ only in what sits to its right — the arcs or the cross. A
+             mark that changed shape entirely would read as a different control
+             rather than the same one in another state. -->
+        @case ('volume-2') {
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        }
+        @case ('volume-x') {
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+          <line x1="22" x2="16" y1="9" y2="15" />
+          <line x1="16" x2="22" y1="9" y2="15" />
         }
         @case ('wifi-off') {
           <path d="M12 20h.01" />

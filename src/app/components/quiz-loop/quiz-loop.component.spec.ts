@@ -11,6 +11,7 @@ import {
   TriviaQuestion,
 } from '../../models/question.model';
 import { multiplierForStreak } from '../../models/scoring';
+import { AudioService } from '../../services/audio.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { QuizLoopComponent } from './quiz-loop.component';
@@ -107,6 +108,20 @@ function setup(
     useFiftyFifty,
   };
 
+  // Stubbed rather than real, because the assertion is *which cue fired on
+  // which event* — the real service is a no-op in jsdom (no `AudioContext`),
+  // so a spy on it would record nothing either way. `audio.service.spec.ts`
+  // covers the service itself.
+  const audio = {
+    isMuted: signal(false),
+    toggleMute: vi.fn(),
+    playCorrect: vi.fn(),
+    playIncorrect: vi.fn(),
+    playTimerTick: vi.fn(),
+    playLifeline: vi.fn(),
+    playGameOver: vi.fn(),
+  };
+
   TestBed.configureTestingModule({
     providers: [
       {
@@ -117,6 +132,7 @@ function setup(
         provide: TriviaService,
         useValue: { playingOffline: signal(options.playingOffline ?? false) },
       },
+      { provide: AudioService, useValue: audio },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
     ],
   });
@@ -130,6 +146,7 @@ function setup(
     gameController,
     registerSkippedQuestion,
     consumeLifeline,
+    audio,
     host: fixture.nativeElement as HTMLElement,
     query: (selector: string) =>
       (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(selector),
@@ -1059,5 +1076,264 @@ describe('QuizLoopComponent — lifelines (FEAT-002)', () => {
     query('[data-cy="lifeline-skip"]')?.click();
 
     expect(history).toEqual([SKIPPED]);
+  });
+});
+
+/**
+ * The audio cues (`FEAT-003`).
+ *
+ * All of this is inaudible to every other layer of the suite: Playwright runs a
+ * muted browser, Lighthouse never leaves `/`, and a cue fired on the wrong
+ * event looks identical in a diff to one fired on the right event. So what is
+ * pinned here is the *mapping* — which event plays what, and, at least as
+ * importantly, which events play nothing.
+ */
+describe('QuizLoopComponent — audio cues (FEAT-003)', () => {
+  const START = 1_000_000_000;
+
+  /** 50/50 and Skip both need a question with more than one wrong option. */
+  function fourAnswers(): TriviaQuestion {
+    return makeQuestion({
+      all_answers: [
+        { id: 'q1:correct', text: 'Paris', isCorrect: true },
+        { id: 'q1:incorrect-0', text: 'London', isCorrect: false },
+        { id: 'q1:incorrect-1', text: 'Berlin', isCorrect: false },
+        { id: 'q1:incorrect-2', text: 'Madrid', isCorrect: false },
+      ],
+    });
+  }
+
+  it('plays the success cue on a correct answer, and only that one', () => {
+    const { query, audio } = setup();
+
+    query('[data-cy="answer-option"]')?.click();
+
+    expect(audio.playCorrect).toHaveBeenCalledOnce();
+    expect(audio.playIncorrect).not.toHaveBeenCalled();
+  });
+
+  it('plays the failure cue on a wrong answer', () => {
+    const { queryAll, audio } = setup();
+
+    // The second option is the wrong one on the default fixture question.
+    queryAll('[data-cy="answer-option"]')[1]?.click();
+
+    expect(audio.playIncorrect).toHaveBeenCalledOnce();
+    expect(audio.playCorrect).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A timeout and a wrong answer are the same event to a player — the question
+   * is over and it scored nothing — so they share a cue. The recap is where the
+   * two are told apart, which is the screen with no clock on it.
+   */
+  it('plays the failure cue when the clock runs out with nothing chosen', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { audio, registerAnswer } = setup();
+
+    now = START + 16_000;
+    vi.advanceTimersByTime(250);
+
+    expect(registerAnswer).toHaveBeenCalledExactlyOnceWith(null);
+    expect(audio.playIncorrect).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * **A skip gets the lifeline cue and neither answer cue**, which is the
+   * distinction worth pinning: the question ends without producing an outcome
+   * to react to, so "that worked" is the whole of what there is to report.
+   */
+  it('plays the lifeline cue on a skip, and neither answer cue', () => {
+    const { query, audio } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-skip"]')?.click();
+
+    expect(audio.playLifeline).toHaveBeenCalledOnce();
+    expect(audio.playCorrect).not.toHaveBeenCalled();
+    expect(audio.playIncorrect).not.toHaveBeenCalled();
+  });
+
+  it('plays the lifeline cue when 50/50 is spent', () => {
+    const { query, audio } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+
+    expect(audio.playLifeline).toHaveBeenCalledOnce();
+  });
+
+  it('plays the lifeline cue when Extra Time is spent', () => {
+    const { query, audio } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-extraTime"]')?.click();
+
+    expect(audio.playLifeline).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * **Silence is the other half of the contract.** The cue reports that a
+   * lifeline was spent, so a press that spends nothing must make no sound —
+   * otherwise it tells the player something happened when nothing did.
+   *
+   * Every case below is unreachable by pointer, because the button carries
+   * `disabled` — which is exactly why the click is **dispatched** rather than
+   * `click()`ed. `HTMLElement.click()` on a disabled control runs no activation
+   * behaviour, so the handler is never entered and the test would be asserting
+   * about the attribute rather than about the guard; hoisting the cue above the
+   * guard, the mutation this is for, would not fail it. Dispatching invokes the
+   * listener the way a stray programmatic click does — the same case
+   * `selectAnswer()`'s own re-check calls the belt to its braces.
+   *
+   * Extra Time on an unlimited game is deliberately **not** among them. It is
+   * not rendered at all there, so there is no element to press and no way for a
+   * test to reach `useExtraTime()`'s `isTimed()` guard through the DOM — a case
+   * written that way would press nothing and pass whatever the guard did. That
+   * the button is absent is asserted where it belongs, in the lifelines block.
+   */
+  function press(button: HTMLElement | null): void {
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }
+
+  it('stays silent when 50/50 cannot be spent on a two-option question', () => {
+    // The default fixture question is true/false-shaped: one wrong answer, so
+    // removing it would hand over the correct one.
+    const { query, audio } = setup();
+
+    press(query('[data-cy="lifeline-fiftyFifty"]'));
+
+    expect(audio.playLifeline).not.toHaveBeenCalled();
+  });
+
+  it('stays silent on a second press of a lifeline already spent', () => {
+    const { query, fixture, audio } = setup({ question: fourAnswers() });
+
+    query('[data-cy="lifeline-skip"]')?.click();
+    fixture.detectChanges();
+    audio.playLifeline.mockClear();
+
+    press(query('[data-cy="lifeline-skip"]'));
+
+    expect(audio.playLifeline).not.toHaveBeenCalled();
+  });
+
+  it('stays silent once the question has been answered', () => {
+    const { query, fixture, audio } = setup({ question: fourAnswers() });
+
+    query('[data-cy="answer-option"]')?.click();
+    fixture.detectChanges();
+
+    press(query('[data-cy="lifeline-fiftyFifty"]'));
+    press(query('[data-cy="lifeline-skip"]'));
+
+    expect(audio.playLifeline).not.toHaveBeenCalled();
+  });
+
+  /**
+   * One tick per remaining second inside the window the ring already turns red
+   * for — not one per interval fire, which would be four — and none before it.
+   */
+  it('ticks once a second through the last five, and not before them', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { audio } = setup(); // 15s
+
+    // Nine seconds gone: six left, which is outside the window.
+    now = START + 9_000;
+    vi.advanceTimersByTime(250);
+    expect(audio.playTimerTick).not.toHaveBeenCalled();
+
+    // Into the window, one whole second at a time, with the interval firing
+    // four times for each of them.
+    for (const elapsed of [10_000, 11_000, 12_000, 13_000, 14_000]) {
+      now = START + elapsed;
+      vi.advanceTimersByTime(1_000);
+    }
+
+    expect(audio.playTimerTick).toHaveBeenCalledTimes(5);
+  });
+
+  /**
+   * A backgrounded tab throttles the interval to as little as one fire a
+   * minute, so several seconds of the window can pass between two readings of
+   * the clock. That is one tick, not one per second skipped — the cue is driven
+   * by the second the clock reads, never by how often the timer fired.
+   */
+  it('ticks once for a whole window crossed in a single late reading', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { audio } = setup();
+
+    now = START + 13_500; // 2s left, reached in one jump from 15
+    vi.advanceTimersByTime(250);
+
+    expect(audio.playTimerTick).toHaveBeenCalledOnce();
+  });
+
+  it('never ticks on an unlimited game, which has no deadline to warn about', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { audio } = setup({ timeLimit: 'unlimited' });
+
+    now = START + 600_000;
+    vi.advanceTimersByTime(600_000);
+
+    expect(audio.playTimerTick).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The tick's teardown is the countdown's own (`CLAUDE.md` §4.4): answering
+   * stops the interval, so there is nothing left to fire. Asserted rather than
+   * assumed, because a cue that outlived its question would be audible on the
+   * *next* one and attributed to it.
+   */
+  it('stops ticking the moment the question resolves', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { query, audio } = setup();
+
+    now = START + 11_000; // 4s left — one tick
+    vi.advanceTimersByTime(250);
+    expect(audio.playTimerTick).toHaveBeenCalledOnce();
+
+    query('[data-cy="answer-option"]')?.click();
+    now = START + 14_000;
+    vi.advanceTimersByTime(3_000);
+
+    expect(audio.playTimerTick).toHaveBeenCalledOnce();
+  });
+
+  it('plays nothing once the component is destroyed', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { fixture, audio } = setup();
+
+    fixture.destroy();
+    now = START + 16_000;
+    vi.advanceTimersByTime(5_000);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(audio.playTimerTick).not.toHaveBeenCalled();
+    expect(audio.playIncorrect).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Extra Time pushes the deadline back out of the warning window, so the
+   * ticking stops — the cue follows the question's own deadline rather than the
+   * game's limit, exactly as the ring does.
+   */
+  it('stops ticking when Extra Time moves the deadline out of the window', () => {
+    let now = START;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { query, audio } = setup({ question: fourAnswers() });
+
+    now = START + 11_000; // 4s left
+    vi.advanceTimersByTime(250);
+    expect(audio.playTimerTick).toHaveBeenCalledOnce();
+
+    query('[data-cy="lifeline-extraTime"]')?.click();
+    now = START + 12_000; // 18s left after the extension
+    vi.advanceTimersByTime(1_000);
+
+    expect(audio.playTimerTick).toHaveBeenCalledOnce();
   });
 });

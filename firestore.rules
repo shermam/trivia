@@ -630,22 +630,36 @@ service cloud.firestore {
     // Reports are deliberately open to ANY signed-in caller, anonymous
     // included: most players never sign in, and an abuse channel most of the
     // audience can't use is half a channel. What makes that safe is that a
-    // report is inert — nothing reads it but the owner in the console, and
-    // nothing triggers on it — and the document ID carries the same
-    // {window}-{slot} volume cap as the session documents (A3), suffixed
-    // with the caller's own uid so one user's slots can't occupy another's
-    // in this shared top-level collection. The uid lands in the regex as a
-    // literal: Firebase-minted uids are alphanumeric, and this app never
-    // uses custom tokens, so there are no regex metacharacters to worry
-    // about — and ownership doesn't ride on the ID anyway, `reportedBy` is
-    // bound to the caller separately above.
+    // report does nothing on arrival — nothing triggers on it, and the only
+    // clients that may read it are the reviewers appointed in `user_roles` —
+    // and that the document ID carries the same {window}-{slot} volume cap as
+    // the session documents (A3), suffixed with the caller's own uid so one
+    // user's slots can't occupy another's in this shared top-level
+    // collection. The uid lands in the regex as a literal: Firebase-minted
+    // uids are alphanumeric, and this app never uses custom tokens, so there
+    // are no regex metacharacters to worry about — and ownership doesn't ride
+    // on the ID anyway, `reportedBy` is bound to the caller separately above.
     //
-    // Review is console-only (the Admin SDK bypasses these rules), so every
-    // client verb except create is denied — including read: a report may
-    // quote another user's content and name its author, and no client has
-    // any business enumerating those.
+    // **Reviewers read, nobody else does — not even the reporter.** A report
+    // is filed so that somebody acts on it, and `/review` is where that
+    // happens: a collection no client may read leaves every complaint where
+    // only the Firebase console can see it, which is a reporting channel that
+    // ends nowhere. `isReviewer()` is the whole condition rather than the
+    // right operand of a `||`, because there is no public branch here to
+    // short-circuit past: every read of this collection is a reviewer's, and
+    // every one of them pays the one `user_roles` lookup. Note what the grant
+    // includes — a reviewer's token reads the whole document, `reportedBy` and
+    // all. Rules cannot return a subset, so dropping the uid before it reaches
+    // the queue is `ReviewerService`'s job (and `/privacy` says a reviewer can
+    // read the record either way). That is one more reason the role is granted
+    // by hand, out of band.
+    //
+    // Update and delete stay closed to every client, reviewers included: a
+    // report is the record that somebody complained, not a task to tick off.
+    // A reviewer acts on the *question*, through `custom_questions`' own
+    // moderation rule.
     match /question_reports/{reportId} {
-      allow read: if false;
+      allow read: if isReviewer();
       allow create: if request.auth != null
                     && isValidQuestionReport()
                     && reportId.matches(

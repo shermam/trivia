@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { GameConfig, TriviaQuestion } from '../models/question.model';
+import { Difficulty, GameConfig, TriviaQuestion } from '../models/question.model';
 import { shuffleArray } from '../utils/shuffle.util';
 import { OfflineDbService, QUESTIONS_STORE as STORE_NAME } from './offline-db.service';
 
@@ -121,6 +121,42 @@ export class OfflineQuestionsService {
     const pool = filtered.length >= Math.min(amount, sourceScoped.length) ? filtered : sourceScoped;
 
     return shuffleArray(pool).slice(0, amount);
+  }
+
+  /**
+   * Cached questions that genuinely match a draw's filters — the reservoir the
+   * deduplicating draw substitutes from (`FEAT-034`, `TriviaService`).
+   *
+   * **Two things separate this from `getOfflineQuestions()` above, and both
+   * follow from it being used while the network is working.** It applies
+   * category and difficulty as a *filter* rather than a preference, because
+   * substituting an off-topic question into a game the player filtered would
+   * be a worse outcome than serving a repeat — the preference fallback there
+   * is justified by "a mismatched-topic offline game beats no offline game at
+   * all", and there is no such trade here. And it returns everything that
+   * matches rather than `amount` of them, because the caller is choosing
+   * between candidates rather than being handed a game.
+   *
+   * Never throws. A pool that cannot be read costs deduplication; it must not
+   * cost a draw that has already succeeded.
+   */
+  async getMatchingQuestions(
+    source: TriviaQuestion['source'],
+    category: string,
+    difficulty: Difficulty | '',
+  ): Promise<TriviaQuestion[]> {
+    let all: TriviaQuestion[];
+    try {
+      all = await this.getAllQuestions();
+    } catch {
+      return [];
+    }
+    return all.filter(
+      (question) =>
+        question.source === source &&
+        (!category || question.category === category) &&
+        (!difficulty || question.difficulty === difficulty),
+    );
   }
 
   private async getAllQuestions(): Promise<TriviaQuestion[]> {

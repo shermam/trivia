@@ -109,6 +109,41 @@ export interface QuestionReportRecord {
 }
 
 /**
+ * A report written straight into the collection, for a spec that needs more of
+ * them than filing them through the UI could reasonably produce — paging.
+ *
+ * Identical to what is read back, and the **ID is the caller's** rather than
+ * generated, because the queue orders by document ID: a spec that wants to know
+ * which of its reports land on which page has to choose where they sort.
+ */
+export type QuestionReportSeed = QuestionReportRecord;
+
+/**
+ * A board entry as Firestore holds it, read back for assertions.
+ *
+ * The whole document rather than "does a row exist", because the thing worth
+ * checking about a save is the numbers it wrote: a score, its denominator and
+ * the accuracy derived from neither. `timeLimit` is included because the entry
+ * carries the board it belongs to as a field as well as in its path
+ * (`docs/data-model.md`), and the two disagreeing is a real failure mode.
+ */
+export interface LeaderboardEntryRecord {
+  name: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  createdAt: number;
+  timeLimit: string;
+}
+
+/** Which entry to read back. One document per account per board. */
+export interface LeaderboardEntryQuery {
+  uid: string;
+  /** Which board to read. Defaults to the 15-second board. */
+  timeLimit?: string;
+}
+
+/**
  * The boards, one per timing constraint (finding G7). Must match `isValidBoard`
  * in `firestore.rules`. Seeding and cleanup both have to visit every one of
  * them, so the list lives here rather than at each call site.

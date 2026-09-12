@@ -23,9 +23,29 @@ import { CORRECT_ANSWERS, questionsFixture } from '../../support/open-trivia';
  *
  * The multiplied entry has a spec of its own, `streak-leaderboard.spec.ts`,
  * which is emulator-only for that reason.
+ *
+ * **What was saved is asserted through the Admin SDK, never off the board**,
+ * and that is the second thing this file's location decides. The board renders
+ * the top ten by score, and `trivimind-dev`'s is a shared, permanent ranking
+ * that every PR adds to and nothing prunes — so "my row is on screen" is a
+ * claim about everybody else's scores as much as about the save under test. It
+ * held until it didn't: with ten entries above four points on the 15-second
+ * board, a four-point save writes correctly, renders nothing, and fails a test
+ * whose subject is the write. Re-running cannot clear that and neither can any
+ * amount of unique naming, because the row is genuinely not in the top ten.
+ * `firebase.getLeaderboardEntry` reads the document this test's own account
+ * wrote, which is the thing the test is actually about; the board is asserted
+ * only for what this test controls — that the section renders and finishes
+ * loading.
  */
 test.describe('verified user saves a score to the leaderboard', () => {
   const password = 'correct horse battery staple';
+
+  /**
+   * What `playMissing(page, [2])` is worth: four of five right, no streak past
+   * the first bonus tier, so the score is the plain correct-answer count.
+   */
+  const oneMissedScore = { score: 4, totalQuestions: 5, percentage: 80 } as const;
 
   /**
    * Answers all five fixture questions, missing the ones named by index, so the
@@ -55,28 +75,24 @@ test.describe('verified user saves a score to the leaderboard', () => {
     firebase,
   }) => {
     /**
-     * The **displayed names** are unique per run, not only the uids behind
-     * them, and that is the half that was missing. A unique uid stops two runs
-     * writing the same document; it does nothing for an assertion that
-     * addresses a row by the text it shows. Both preview suites seed a rival
-     * and save a score on every PR, so a fixed "Reigning Champ" put two
-     * identical rows on one board — which Playwright reports as a strict-mode
-     * violation rather than quietly matching the first, which would have passed
-     * against another run's row while proving nothing about its own.
-     *
-     * A **short** tag rather than `unique()`: `firestore.rules` caps a
-     * leaderboard name at 30 characters and the input carries `maxlength="30"`,
-     * so a long suffix is truncated by the browser before it is ever written
-     * and the assertion then looks for a string nothing shows.
+     * The displayed names stay unique per run even though nothing addresses a
+     * row by its text any more: the name is what gets written and read back,
+     * and two concurrent runs sharing "Test Player" would let this assertion
+     * pass against the wrong save. A **short** tag rather than `unique()`,
+     * because `firestore.rules` caps a leaderboard name at 30 characters and
+     * the input carries `maxlength="30"` — a long suffix is truncated by the
+     * browser before it is written, and the assertion then compares against a
+     * string nothing stored.
      */
     const tag = Math.random().toString(36).slice(2, 8);
     const rival = `Reigning Champ ${tag}`;
     const player = `Test Player ${tag}`;
 
     const email = `player-${unique()}@example.com`;
-    await firebase.createVerifiedUser({ email, password });
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    const rivalUid = `existing-leader-${unique()}`;
     await firebase.seedLeaderboardEntry({
-      uid: `existing-leader-${unique()}`,
+      uid: rivalUid,
       name: rival,
       score: 5,
       totalQuestions: 5,
@@ -125,8 +141,31 @@ test.describe('verified user saves a score to the leaderboard', () => {
 
     await expect(page.getByTestId('score-saved')).toBeVisible();
     await expectCardHeightUnmoved(card, signedOutHeight, 'card height moved when the score saved');
-    await expect(page.getByText(rival)).toBeVisible();
-    await expect(page.getByText(player)).toBeVisible();
+
+    // The board is asserted for what this test controls: that the section is
+    // there and has stopped loading. Which rows it ends up showing is a
+    // property of every other score in the project.
+    await expect(page.getByTestId('leaderboard-body')).toBeVisible();
+    await expect(page.getByTestId('leaderboard-skeleton')).toHaveCount(0);
+
+    // What the save actually wrote, for this test's own account. Polled
+    // because the confirmation above is rendered from the client's own view of
+    // the write and a read-back can still be a beat behind it — and a single
+    // read would be a race dressed as an assertion (`CLAUDE.md` §4.6).
+    await expect
+      .poll(() => firebase.getLeaderboardEntry({ uid }), {
+        message: 'the score was never written to the 15-second board',
+      })
+      .toMatchObject({ name: player, ...oneMissedScore, timeLimit: '15' });
+
+    // And that saving one account's score left another account's row alone.
+    // The screen could never distinguish that from "it happens to be in the
+    // top ten", which is what this assertion used to be doing.
+    await expect
+      .poll(() => firebase.getLeaderboardEntry({ uid: rivalUid }), {
+        message: "the rival's entry did not survive the save",
+      })
+      .toMatchObject({ name: rival, score: 5 });
   });
 
   test('surfaces a friendly message when the new score does not beat the existing best', async ({
@@ -134,7 +173,7 @@ test.describe('verified user saves a score to the leaderboard', () => {
     firebase,
   }) => {
     const email = `player-${unique()}@example.com`;
-    await firebase.createVerifiedUser({ email, password });
+    const { uid } = await firebase.createVerifiedUser({ email, password });
 
     await startGame(page, 5);
     await playMissing(page, [2]);
@@ -164,6 +203,16 @@ test.describe('verified user saves a score to the leaderboard', () => {
     // against whichever happens to be there (`CLAUDE.md` §4.6).
     await expect(page.getByTestId('score-save-failed')).toBeVisible();
     await expect(page.getByTestId('score-save-failed')).toContainText('already higher');
+
+    // The message is what the player is told; this is what the rules did. A
+    // refusal that the app narrated correctly while the lower score overwrote
+    // the higher one would satisfy every assertion above and lose the entry
+    // the test is named for.
+    await expect
+      .poll(() => firebase.getLeaderboardEntry({ uid }), {
+        message: 'the refused save overwrote the better score',
+      })
+      .toMatchObject(oneMissedScore);
   });
 });
 

@@ -89,8 +89,11 @@
   <p>
     Any signed-in player can flag a question and file a report. The report stores the question's
     identifier, the reason you chose, anything you typed in the optional detail box, and your
-    account identifier. Reports are readable only by us — never by other players, and not through
-    the app at all.
+    account identifier. Reports are readable by us and by the small number of players we have
+    appointed as reviewers, who read them in the app in order to act on what they say — that is how
+    a report reaches somebody who can do something about the question. No other player can read
+    them. The review screen does not show who filed a report, though your account identifier stays
+    part of the record a reviewer's access reaches.
   </p>
 
   <h2>Information created by using the app</h2>
@@ -289,11 +292,13 @@
   <p><strong>Trivimind sets no cookies.</strong> It uses your browser's own storage instead:</p>
   <ul>
     <li>
-      <strong>Local storage</strong> — your light/dark theme preference; your sign-in session
-      (managed by Firebase Authentication); and, once you have opened the pricing page, what Pro
-      costs in each currency it is sold in, together with the two-letter country code described
-      above. Those last two are kept so the page can show you a price straight away on your next
-      visit instead of asking again, and both are discarded after 24 hours.
+      <strong>Local storage</strong> — your light/dark theme preference; whether you have muted the
+      game's sound effects, which is a single yes-or-no that stays on this device and is sent
+      nowhere; your sign-in session (managed by Firebase Authentication); and, once you have opened
+      the pricing page, what Pro costs in each currency it is sold in, together with the two-letter
+      country code described above. Those last two are kept so the page can show you a price
+      straight away on your next visit instead of asking again, and both are discarded after 24
+      hours.
     </li>
     <li>
       <strong
@@ -311,6 +316,15 @@
       game can start with no network connection; and a snapshot of a game in progress, so a reload
       or a crash doesn't lose it. The saved game is discarded after six hours. Neither contains
       personal information beyond the game itself.
+    </li>
+    <li>
+      <strong>IndexedDB, once you have answered a question</strong> — a list of the questions you
+      have already answered, so that a later game can ask you something else. Each entry is an
+      identifier and the moment you answered: for a question from the community bank the identifier
+      is that question's own reference, and for one from Open Trivia DB it is a short fingerprint of
+      its wording. Nothing records which answer you gave or whether you were right. It holds at most
+      2,000 entries and the oldest go first. It stays on this device: it is never sent anywhere, it
+      is not tied to your account, and playing on another device starts again.
     </li>
     <li>
       <strong>Service worker cache</strong> — the app's own files (scripts, styles, icons), so it
@@ -497,11 +511,11 @@
     Rather than describe this in adjectives, here is what is actually in place. Everything is served
     over HTTPS only. Access to every record in the database is enforced by server-side rules, not by
     the app's interface, so a request that bypasses the app entirely is refused the same way — your
-    billing records, for instance, are readable only by you, and reports are readable by nobody
-    through the app. Passwords are handled by Firebase Authentication and never reach our own code.
-    Payment card details never reach us at all. The app sends a strict Content Security Policy that
-    names every host the browser is allowed to contact and forbids being embedded in a frame by
-    anyone.
+    billing records, for instance, are readable only by you, and a report about a question is
+    readable only by us and by the reviewers appointed to act on it. Passwords are handled by
+    Firebase Authentication and never reach our own code. Payment card details never reach us at
+    all. The app sends a strict Content Security Policy that names every host the browser is allowed
+    to contact and forbids being embedded in a frame by anyone.
   </p>
   <p>
     No system is perfectly secure, and we don't claim otherwise. If you find a security problem,

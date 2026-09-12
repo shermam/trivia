@@ -210,6 +210,29 @@ describe('legal pages', () => {
   });
 
   /**
+   * Who can read a filed report (`FEAT-026`). The policy said twice, in two
+   * different sections, that reports were readable by nobody through the app —
+   * two sentences that a one-line change to `firestore.rules` can falsify
+   * without going anywhere near them, which is the whole of `CLAUDE.md` §4.0.
+   *
+   * Pinned in **both** places, and in the negative as well as the positive: the
+   * easy half-finished edit is to fix the paragraph a reader would notice and
+   * leave the security section still promising the opposite.
+   */
+  it('says who can read a report, in both sections that describe it', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    // The reporting section.
+    expect(text).toContain('appointed as reviewers, who read them in the app');
+    expect(text).toContain('The review screen does not show who filed a report');
+    // The security section, which makes the same claim from the other end.
+    expect(text).toContain('readable only by us and by the reviewers appointed to act on it');
+    // The claim that is no longer true, in either of the forms it took.
+    expect(text).not.toContain('not through the app at all');
+    expect(text).not.toContain('reports are readable by nobody');
+  });
+
+  /**
    * The pricing page's browser storage, and the one claim in it that is a
    * *retention* promise rather than a description: the checkout link is kept
    * for up to 20 hours on this device.
@@ -234,6 +257,41 @@ describe('legal pages', () => {
     // reader backs out of Stripe and the next click should reuse it.
     expect(text).not.toContain('discarded when you close the tab');
     expect(text).not.toContain('discarded when you use it');
+  });
+
+  /**
+   * The browser-storage list is exhaustive by construction — it is the answer
+   * to "what does this app keep on my device", and a reader has no other way
+   * to check it. `FEAT-034` added a store and three claims that are promises
+   * rather than descriptions: the cap, that the answer itself is not recorded,
+   * and that nothing leaves the device. Each of them is one refactor away from
+   * being false, and none of them would fail anything else.
+   */
+  it('discloses the seen-question store, its bound, and what it does not record', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('a list of the questions you have already answered');
+    expect(text).toContain('at most 2,000 entries and the oldest go first');
+    expect(text).toContain('Nothing records which answer you gave or whether you were right');
+    expect(text).toContain('playing on another device starts again');
+  });
+
+  /**
+   * `FEAT-003` added a browser-storage key, and this list is exhaustive by
+   * construction: it opens by saying the app sets no cookies and uses the
+   * browser's own storage "instead", so a key missing from it is the page
+   * describing storage the app does not have and omitting storage it does.
+   *
+   * Pinned on the two claims that make the entry true rather than on the
+   * sentence: that it never leaves the device, and that it is only ever a
+   * yes-or-no. Moving the preference to an account, or growing it into a
+   * volume setting that gets synced, falsifies one of those silently.
+   */
+  it('discloses the sound-effects mute among what is kept on the device', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain("whether you have muted the game's sound effects");
+    expect(text).toContain('stays on this device and is sent nowhere');
   });
 
   /**

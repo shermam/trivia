@@ -13,6 +13,7 @@ import {
   answeredWith,
 } from '../../models/question.model';
 import { AccountService } from '../../services/account.service';
+import { AudioService } from '../../services/audio.service';
 import { AuthService } from '../../services/auth.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
@@ -1865,5 +1866,120 @@ describe('GameOverComponent lifetime stats recording', () => {
     });
 
     expect(recordGameResult).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The end-of-round cue (`FEAT-003`).
+ *
+ * The variant is chosen from **accuracy**, not from the point total and not
+ * from anything about previous games: this screen does not know whether the
+ * player has ever done better, and inventing a personal-best signal to feed a
+ * fanfare would be a claim the app cannot check (`CLAUDE.md` §4.4). So the only
+ * thing asserted is that the perfect round and the ordinary one are told apart,
+ * and that a multiplied score — which can exceed the question count — is not
+ * what does the telling.
+ */
+describe('GameOverComponent — the end-of-round cue (FEAT-003)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  function render(options: { correctAnswers: number; totalQuestions: number; score?: number }) {
+    const playGameOver = vi.fn();
+
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(options.score ?? options.correctAnswers),
+            correctAnswers: signal(options.correctAnswers),
+            maxStreak: signal(options.correctAnswers),
+            totalQuestions: signal(options.totalQuestions),
+            percentage: signal(
+              options.totalQuestions === 0
+                ? 0
+                : Math.round((options.correctAnswers / options.totalQuestions) * 100),
+            ),
+            questions: signal([]),
+            config: signal(makeConfig()),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
+            gameId: signal<string | null>('game-fixture'),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isAnonymous: signal(false),
+            isFullyAuthenticated: signal(true),
+            resendVerificationEmail: () => Promise.resolve(),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
+        { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore: vi.fn(),
+            getLeaderboardEntry: () => Promise.resolve(null),
+            getTopScores: () => of([]),
+          },
+        },
+        {
+          provide: AudioService,
+          useValue: {
+            isMuted: signal(false),
+            toggleMute: vi.fn(),
+            playCorrect: vi.fn(),
+            playIncorrect: vi.fn(),
+            playTimerTick: vi.fn(),
+            playLifeline: vi.fn(),
+            playGameOver,
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    return { fixture, playGameOver };
+  }
+
+  it('celebrates a round with every question right', () => {
+    const { playGameOver } = render({ correctAnswers: 5, totalQuestions: 5 });
+
+    expect(playGameOver).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it('plays the ordinary cue when one answer was missed', () => {
+    const { playGameOver } = render({ correctAnswers: 4, totalQuestions: 5 });
+
+    expect(playGameOver).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  /**
+   * The trap a score-based test would fall into. Streak multipliers make a
+   * perfect five-question round worth seven points, so "score equals question
+   * count" is false for exactly the round that should be celebrated — and
+   * "score is at least the question count" is true for rounds that should not
+   * be. Accuracy is the only number that survives multipliers (§1.1).
+   */
+  it('reads accuracy, not the multiplied point total', () => {
+    const { playGameOver } = render({ correctAnswers: 5, totalQuestions: 5, score: 7 });
+
+    expect(playGameOver).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it('treats a round with nothing right as an ordinary one', () => {
+    const { playGameOver } = render({ correctAnswers: 0, totalQuestions: 5, score: 0 });
+
+    expect(playGameOver).toHaveBeenCalledExactlyOnceWith(false);
   });
 });

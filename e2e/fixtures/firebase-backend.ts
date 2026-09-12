@@ -11,10 +11,13 @@ import {
   DonationSessionRecord,
   GameplayStatsSeed,
   LEADERBOARD_BOARDS,
+  LeaderboardEntryQuery,
+  LeaderboardEntryRecord,
   LeaderboardSeed,
   ProPriceSeed,
   ProSubscriptionSeed,
   QuestionReportRecord,
+  QuestionReportSeed,
   ReviewerSeed,
   VerifiedUserSeed,
 } from './types';
@@ -91,9 +94,10 @@ export class FirebaseBackend {
 
   /**
    * The reports filed against these questions, read through the Admin SDK
-   * because `firestore.rules` forbids **every** client read of
-   * `question_reports` — so the UI saying "Reported" proves nothing about the
-   * write on its own (finding H4).
+   * because the only clients `firestore.rules` lets read `question_reports` are
+   * the appointed reviewers (`FEAT-026`) — never the player who filed one, so
+   * the UI saying "Reported" proves nothing about the write on its own
+   * (finding H4).
    *
    * **Takes the ids rather than reading the collection.** The emulator is
    * shared by every worker in the run, so an unscoped read would return another
@@ -110,6 +114,27 @@ export class FirebaseBackend {
       .where('questionId', 'in', questionIds)
       .get();
     return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as QuestionReportRecord);
+  }
+
+  /**
+   * Writes reports straight into `question_reports`, bypassing Firestore rules.
+   *
+   * For the one thing filing them through the UI cannot reach: a page boundary.
+   * The reporting form writes one report per five-minute slot per uid, so
+   * twenty-six of them would need twenty-six browser sessions; the reviewer's
+   * queue pages at twenty-five.
+   *
+   * **Emulator-only, like every other report in this suite.** `question_reports`
+   * is keyed by nothing the preview sweep tracks, which is why
+   * `playwright.preview.config.ts` keeps the specs that write them off the real
+   * project rather than trying to clean up after them.
+   */
+  async seedQuestionReports(reports: QuestionReportSeed[]): Promise<void> {
+    const batch = this.firestore.batch();
+    for (const { id, ...report } of reports) {
+      batch.set(this.firestore.collection('question_reports').doc(id), report);
+    }
+    await batch.commit();
   }
 
   /**
@@ -346,6 +371,26 @@ export class FirebaseBackend {
     await this.firestore
       .doc(`leaderboards/${board}/entries/${entry.uid}`)
       .set({ createdAt: Date.now(), ...entry, timeLimit: board });
+  }
+
+  /**
+   * One account's entry on one board, or `null` when it has none.
+   *
+   * **A spec asserting that a score was saved has to read it here rather than
+   * off the screen.** The board renders the top ten by score, and against the
+   * real `trivimind-dev` project that is a shared, permanent ranking that only
+   * ever grows — so "my row is visible" is a claim about everybody else's
+   * scores as much as about the save under test, and it stops being true the
+   * moment ten better entries exist. Reading the document says exactly what
+   * the app wrote, for exactly the account the test created, whatever else is
+   * on the board.
+   */
+  async getLeaderboardEntry({
+    uid,
+    timeLimit = '15',
+  }: LeaderboardEntryQuery): Promise<LeaderboardEntryRecord | null> {
+    const snapshot = await this.firestore.doc(`leaderboards/${timeLimit}/entries/${uid}`).get();
+    return snapshot.exists ? (snapshot.data() as LeaderboardEntryRecord) : null;
   }
 
   /**
