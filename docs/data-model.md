@@ -17,7 +17,7 @@ user_roles/{uid}
   reviewer: boolean
 ```
 
-One document per account, named by uid, holding role flags. **Empty today** — nothing reads it yet. It ships ahead of the rules that will consult it (`BACKLOG.md` item 4) so that the register, its lockdown and its tests are deployed and provable before any privilege depends on them, and so roles can be granted before there is anything to grant them for.
+One document per account, named by uid, holding role flags. **`isReviewer()` in `firestore.rules` reads it** — it is what gates the `/review` queue, the reviewer's `status` write on `custom_questions`, and the read of a question that is not yet approved. It shipped one release ahead of those rules on purpose, so the register, its lockdown and its tests were deployed and provable before any privilege depended on them, and so a reviewer could be appointed before there was anything to appoint them for.
 
 - **Read**: `get` on your own document only (`request.auth != null && request.auth.uid == uid`). Any uid, anonymous included — see below.
 - **List**: never, by anyone.
@@ -52,7 +52,7 @@ The second is the one that would matter even if the console could: **a claim rev
 
 ### `users` — lifetime gameplay totals, one document per player
 
-`users/{uid}` holds a player's running totals: `gamesPlayed`, `questionsAnswered`, `correctAnswers`, `bestStreak` (the longest run of consecutive correct answers **within one game**), plus `lastGameId`, `statsSince`, `updatedAt` and a `rateWindowStart`/`gamesInWindow` pair. Created lazily by the `recordGameResult` callable the first time a signed-in account finishes a game, and deleted by `deleteAccount`.
+`users/{uid}` holds a player's running totals: `gamesPlayed`, `questionsAnswered`, `correctAnswers`, `bestStreak` (the longest run of consecutive correct answers **within one game**), plus `lastGameId`, `statsSince`, `updatedAt` and a `rateWindowStart`/`gamesInWindow` pair. Created lazily by the `recordGameResult` callable the first time a signed-in account finishes a game, and deleted by `deleteAccount`. The app reads it in exactly one place — `/profile` (`app.md` §1.10), one `get` per visit at the owner's own path, which is the only shape the rule below permits.
 
 **Nothing here is client-writable, and that is the design rather than an omission.** `CLAUDE.md` §4.1 requires every client-writable collection to carry an exact-key `hasOnly()` allowlist; §4.2 records the corollary, that a document has no allowlist to widen later _only while it stays free of any client write path_. Five roadmap specs name this document (`FEAT-005`, `-014`, `-028`, `-038`, `-041`) and their proposed field sets are neither settled nor consistent with each other, so freezing a key set now would put the A10 one-way door on the collection least able to afford it. Keeping every write on the Admin SDK costs one callable invocation per completed game and buys a schema that can grow — the exact inverse of `custom_questions`, and the same bargain `user_roles` above already makes.
 
