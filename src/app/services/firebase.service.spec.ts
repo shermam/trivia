@@ -69,6 +69,13 @@ function toWireFields(data: Record<string, unknown>): Record<string, unknown> {
 interface RecordedQuery {
   collectionPath: string;
   wheres: { field: string; value: unknown }[];
+  /**
+   * The bare document IDs a `__name__` filter named, recorded apart from
+   * `wheres` because they are not a field comparison: Firestore matches them
+   * against a **reference**, so they arrive as resource paths and are checked
+   * against a document's ID rather than against anything in its data.
+   */
+  documentIds?: string[];
   orderBy: { field: string; direction: string }[];
   startAt?: string;
   endBefore?: string;
@@ -99,7 +106,12 @@ function pathFromUrl(url: string): string {
 }
 
 function cursorId(cursor: { values?: { referenceValue?: string }[] } | undefined) {
-  const reference = cursor?.values?.[0]?.referenceValue;
+  return referenceId(cursor?.values?.[0]);
+}
+
+/** The document ID at the end of a `referenceValue`'s full resource path. */
+function referenceId(value: { referenceValue?: string } | undefined) {
+  const reference = value?.referenceValue;
   return reference ? reference.slice(reference.lastIndexOf('/') + 1) : undefined;
 }
 
@@ -136,17 +148,28 @@ function fakeServer(
               >[])
             : [where]
           : [];
-        const wheres = rawFilters.map((filter) => {
-          const fieldFilter = filter['fieldFilter'] as {
-            field: { fieldPath: string };
-            value: { stringValue?: string };
-          };
-          return { field: fieldFilter.field.fieldPath, value: fieldFilter.value.stringValue };
-        });
+        const fieldFilters = rawFilters.map(
+          (filter) =>
+            filter['fieldFilter'] as {
+              field: { fieldPath: string };
+              value: {
+                stringValue?: string;
+                arrayValue?: { values?: { referenceValue?: string }[] };
+              };
+            },
+        );
+        const wheres = fieldFilters
+          .filter((filter) => filter.field.fieldPath !== '__name__')
+          .map((filter) => ({ field: filter.field.fieldPath, value: filter.value.stringValue }));
+        const documentIds = fieldFilters
+          .filter((filter) => filter.field.fieldPath === '__name__')
+          .flatMap((filter) => (filter.value.arrayValue?.values ?? []).map(referenceId))
+          .filter((id): id is string => id !== undefined);
 
         const recorded: RecordedQuery = {
           collectionPath,
           wheres,
+          ...(documentIds.length ? { documentIds } : {}),
           orderBy: (query['orderBy'] ?? []) as { field: string; direction: string }[],
           startAt: cursorId(query['startAt']),
           endBefore: cursorId(query['endAt']),
@@ -168,6 +191,9 @@ function fakeServer(
         }
         for (const filter of recorded.wheres) {
           rows = rows.filter((row) => row.data[filter.field] === filter.value);
+        }
+        if (recorded.documentIds) {
+          rows = rows.filter((row) => recorded.documentIds!.includes(row.id));
         }
         if (recorded.startAt !== undefined) {
           rows = rows.filter((row) => row.id >= recorded.startAt!);
@@ -843,6 +869,94 @@ describe('FirebaseService: the review queue (item 4b-ii)', () => {
     const { service } = setup(seed, () => 'permission-denied');
 
     await expect(service.setQuestionStatus('p1', 'approved')).rejects.toThrow();
+  });
+});
+
+/**
+ * The questions a page of reports names (`FEAT-026`).
+ *
+ * The interesting property is the read count. A report carries a `questionId`
+ * and nothing else about the question, so the obvious implementation is one
+ * `getDocument` per row — twenty-five round trips for a page of twenty-five.
+ * These rows pin the batched shape instead, including the two edges that make
+ * it correct: Firestore's thirty-value ceiling on an `IN`, and a report whose
+ * question has since been deleted.
+ */
+describe('FirebaseService.getQuestionsByIds (FEAT-026)', () => {
+  const seed: SeedDoc[] = [
+    { id: 'q1', data: makeQuestion({ status: 'approved', question: 'First?' }) as never },
+    { id: 'q2', data: makeQuestion({ status: 'pending', question: 'Second?' }) as never },
+    { id: 'q3', data: makeQuestion({ status: 'rejected', question: 'Third?' }) as never },
+  ];
+
+  it('reads the named questions in one bounded query', async () => {
+    const { service, queries } = setup(seed);
+
+    const result = await firstValueFrom(service.getQuestionsByIds(['q1', 'q3']));
+
+    expect(result.map((q) => q.id).sort()).toEqual(['q1', 'q3']);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].collectionPath).toBe('custom_questions');
+    expect(queries[0].documentIds).toEqual(['q1', 'q3']);
+    // `CLAUDE.md` §4.1 — the filter is the bound, and the limit says so again.
+    expect(queries[0].limit).toBe(2);
+  });
+
+  // A queue whose whole job is reports about *questionable* questions must be
+  // able to show one in any status; the rules allow a reviewer exactly that.
+  it('returns questions whatever their moderation status', async () => {
+    const { service } = setup(seed);
+
+    const result = await firstValueFrom(service.getQuestionsByIds(['q1', 'q2', 'q3']));
+
+    expect(result.map((q) => q.status).sort()).toEqual(['approved', 'pending', 'rejected']);
+  });
+
+  it('asks once for a question several reports name', async () => {
+    const { service, queries } = setup(seed);
+
+    const result = await firstValueFrom(service.getQuestionsByIds(['q1', 'q1', 'q1']));
+
+    expect(queries[0].documentIds).toEqual(['q1']);
+    expect(result).toHaveLength(1);
+  });
+
+  // Firestore rejects an `IN` carrying more than thirty comparison values, so
+  // a page larger than that has to arrive as more than one query. Nothing in
+  // the emulator or the types says so — it is a server-side limit that surfaces
+  // as a failed read.
+  it('splits a page wider than the IN limit into batches of thirty', async () => {
+    const many: SeedDoc[] = Array.from({ length: 35 }, (_, i) => ({
+      id: `b${String(i).padStart(2, '0')}`,
+      data: makeQuestion({ status: 'pending' }) as never,
+    }));
+    const { service, queries } = setup(many);
+
+    const result = await firstValueFrom(service.getQuestionsByIds(many.map((doc) => doc.id)));
+
+    expect(queries).toHaveLength(2);
+    expect(queries[0].documentIds).toHaveLength(30);
+    expect(queries[1].documentIds).toHaveLength(5);
+    expect(result).toHaveLength(35);
+  });
+
+  // A report outlives the question it names: `custom_questions` is deletable
+  // from the console and nothing cascades. The absence has to come back as an
+  // absence, so the row can say the question is gone rather than the whole
+  // page failing.
+  it('leaves out an id the bank no longer holds, rather than failing', async () => {
+    const { service } = setup(seed);
+
+    const result = await firstValueFrom(service.getQuestionsByIds(['q1', 'deleted-question']));
+
+    expect(result.map((q) => q.id)).toEqual(['q1']);
+  });
+
+  it('reads nothing at all for an empty list of ids', async () => {
+    const { service, queries } = setup(seed);
+
+    expect(await firstValueFrom(service.getQuestionsByIds([]))).toEqual([]);
+    expect(queries).toHaveLength(0);
   });
 });
 

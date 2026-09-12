@@ -2,7 +2,13 @@ import { Injectable, inject } from '@angular/core';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../auth.service';
 import { FirebaseAppService } from '../firebase-app.service';
-import { FirestoreFields, decodeFields, encodeFields, encodeValue } from './firestore-value';
+import {
+  FirestoreFields,
+  FirestoreValue,
+  decodeFields,
+  encodeFields,
+  encodeValue,
+} from './firestore-value';
 
 /**
  * Firestore over its REST API, with `fetch`.
@@ -61,6 +67,13 @@ export type RestFilterOp = 'EQUAL' | 'IN';
 export interface RestFieldFilter {
   field: string;
   op: RestFilterOp;
+  /**
+   * The value to compare against — a bare document **ID**, or an array of
+   * them, when `field` is {@link DOCUMENT_ID_FIELD}. Same reasoning as the
+   * cursors below: `__name__` compares against a `referenceValue` holding the
+   * full resource path, which only this client knows how to build, so the call
+   * site passes the ID and cannot get the path wrong.
+   */
   value: unknown;
 }
 
@@ -480,7 +493,10 @@ function buildStructuredQuery(
     fieldFilter: {
       field: { fieldPath: filter.field },
       op: filter.op,
-      value: encodeValue(filter.value),
+      value:
+        filter.field === DOCUMENT_ID_FIELD
+          ? documentIdFilterValue(resourceName, query.collectionPath, filter.value)
+          : encodeValue(filter.value),
     },
   }));
   if (filters.length === 1) {
@@ -525,6 +541,41 @@ function documentIdCursor(resourceName: string, collectionPath: string, document
   // The reference is the *resource name*, starting at `projects/…` — not the
   // https URL the requests go to.
   return { referenceValue: `${resourceName}/${collectionPath}/${documentId}` };
+}
+
+/**
+ * A `__name__` comparison value: one reference for `EQUAL`, an array of them
+ * for `IN`.
+ *
+ * Firestore compares `__name__` against a **reference**, never a string, and a
+ * string there is not an error — the filter simply matches nothing, so the
+ * query comes back empty and looks like a collection that holds no such
+ * document. That silence is why this is a branch in the builder rather than a
+ * note at the call site.
+ */
+function documentIdFilterValue(
+  resourceName: string,
+  collectionPath: string,
+  value: unknown,
+): FirestoreValue {
+  if (Array.isArray(value)) {
+    return {
+      arrayValue: {
+        values: value.map((id) => documentIdCursor(resourceName, collectionPath, asDocumentId(id))),
+      },
+    };
+  }
+  return documentIdCursor(resourceName, collectionPath, asDocumentId(value));
+}
+
+function asDocumentId(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('/')) {
+    throw new TypeError(
+      `Cannot filter on ${DOCUMENT_ID_FIELD} with ${JSON.stringify(value)}: it takes a bare ` +
+        'document ID, which this client expands into the full resource path.',
+    );
+  }
+  return value;
 }
 
 function assertPlainFieldName(name: string): string {

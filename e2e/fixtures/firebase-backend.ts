@@ -89,9 +89,10 @@ export class FirebaseBackend {
 
   /**
    * The reports filed against these questions, read through the Admin SDK
-   * because `firestore.rules` forbids **every** client read of
-   * `question_reports` — so the UI saying "Reported" proves nothing about the
-   * write on its own (finding H4).
+   * because the only clients `firestore.rules` lets read `question_reports` are
+   * the appointed reviewers (`FEAT-026`) — never the player who filed one, so
+   * the UI saying "Reported" proves nothing about the write on its own
+   * (finding H4).
    *
    * **Takes the ids rather than reading the collection.** The emulator is
    * shared by every worker in the run, so an unscoped read would return another

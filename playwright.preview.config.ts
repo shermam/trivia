@@ -97,12 +97,12 @@ export default defineConfig<object, E2EWorkerOptions>({
   testIgnore: [
     /*
      * Emulator-only for two reasons. It asserts the written report through an
-     * Admin-SDK read of `question_reports`, a collection no client may read by
-     * rule — handing the preview suite console-level read access to real
-     * users' reports is a bigger grant than a spec the emulator already covers
-     * is worth. And its writes would outlive the run: a report is keyed by
-     * nothing the sweep tracks, so every preview would leave real rows in the
-     * owner's review queue.
+     * Admin-SDK read of `question_reports`, a collection only the appointed
+     * reviewers may read — handing the preview suite console-level read access
+     * to real users' reports is a bigger grant than a spec the emulator already
+     * covers is worth. And its writes would outlive the run: a report is keyed
+     * by nothing the sweep tracks, so every preview would leave real rows in
+     * the owner's review queue.
      */
     '**/unauthenticated/question-reporting.spec.ts',
     /*

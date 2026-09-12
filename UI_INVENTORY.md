@@ -315,22 +315,28 @@ Full-screen centered card. **No route guard** — access is decided in-page from
 
 - **Back link**: "← Back to game" → `/`
 - **Title**: "Review Queue"
-- **Status filter**: a labelled tab group (`sr-only` heading "Filter by status") with **Pending / Approved / Rejected**; the active tab is filled, the others outlined
-- **Question list**: one card per question in the active status — question text, its answers with the correct one marked, then `Category:` / `Difficulty:` / `Submitted:` / `Author:` metadata, and below that the contributor's optional **source** (an external-link glyph and a link opening in a new tab, labelled with the source name, followed in muted grey by the URL's hostname — the reviewer is shown where the link goes, not only what the contributor called it; the hostname alone is the label when no source name was given) and **Justification** (a tinted block headed "Justification" holding the contributor's prose). Neither renders when the question carries none, which is the usual case
-- **Action buttons** per card: **Approve** (hidden on the Approved tab) and **Reject** (hidden on the Rejected tab), so the button that would be a no-op is never offered
+- **View picker**: a labelled tab group (`sr-only` heading "Choose what to review") with **Pending / Approved / Rejected / Reports**; the active tab is filled, the others outlined
+- **Question list** (the three status tabs): one card per question in the active status — question text, its answers with the correct one marked, then `Category:` / `Difficulty:` / `Submitted:` / `Status:` / `Author:` metadata, and below that the contributor's optional **source** (an external-link glyph and a link opening in a new tab, labelled with the source name, followed in muted grey by the URL's hostname — the reviewer is shown where the link goes, not only what the contributor called it; the hostname alone is the label when no source name was given) and **Justification** (a tinted block headed "Justification" holding the contributor's prose). Neither renders when the question carries none, which is the usual case
+- **Action buttons** per card: **Approve** (hidden when the question is already approved) and **Reject** (hidden when it is already rejected), so the button that would be a no-op is never offered
 - **Truncation note** when the queue is full — the query is capped, and the list says so rather than implying it is the whole queue
+- **Reports list** (the Reports tab): a one-line status block above the list, then one card per filed report — the reason in words ("The answer is wrong", "Inappropriate or offensive", "Spam or nonsense", "Something else") with "Reported {date}" opposite it, the reporter's optional detail in their own words below, and under a divider the **whole question card** described above, action buttons included. **Nothing identifies who filed the report.** A report whose question has since been deleted shows its question id and "…is no longer in the bank, so there is nothing left to act on" in place of the card
+- **"Show more reports"** below the list, only once a page has come back full
 
 ### States
 
-| State                           | Content                                                                                                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Access still resolving**      | "Checking your access…" — the neutral state, shown before the role is known rather than guessing either way |
-| **Not a reviewer**              | An explanation that the queue is for reviewers, with a way back to the game                                 |
-| **Loading the queue**           | "Loading…"                                                                                                  |
-| **Load failed**                 | An inline error with a retry affordance                                                                     |
-| **Empty for the active status** | An empty-state message for that tab                                                                         |
-| **Loaded**                      | The question list                                                                                           |
-| **Action failed**               | An inline error above the list; the card stays put so the action can be retried                             |
+| State                           | Content                                                                                                                                                                                            |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Access still resolving**      | "Checking your access…" — the neutral state, shown before the role is known rather than guessing either way                                                                                        |
+| **Not a reviewer**              | An explanation that the queue is for reviewers, with a way back to the game. No tabs, no lists                                                                                                     |
+| **Loading the queue**           | "Loading…"                                                                                                                                                                                         |
+| **Load failed**                 | An inline error with a retry affordance                                                                                                                                                            |
+| **Empty for the active status** | An empty-state message for that tab                                                                                                                                                                |
+| **Loaded**                      | The question list                                                                                                                                                                                  |
+| **Action failed**               | An inline error above the list; the card stays put so the action can be retried                                                                                                                    |
+| **Reports: loading**            | "Loading reports…"                                                                                                                                                                                 |
+| **Reports: none filed**         | "No reports have been filed." — in the same box the loading message occupied, so the tab does not resize when the read lands                                                                       |
+| **Reports: loaded**             | "Newest first. Nothing is marked handled — a report stays as the record that somebody complained.", above the list                                                                                 |
+| **Reports: load failed**        | "Could not load the reports. Please try again." and a **Try again** button, in that same box — never the empty state, because a read that failed says nothing about whether anybody has complained |
 
 ---
 
@@ -497,18 +503,18 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 ## 10. Full route table
 
-| Path            | Component                 | Guard                                             | Purpose                                         |
-| --------------- | ------------------------- | ------------------------------------------------- | ----------------------------------------------- |
-| `/`             | `GameSetupComponent`      | none                                              | Configure & start a game                        |
-| `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory  | Answer questions against a timer                |
-| `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory   | Final score, save to leaderboard, view top 10   |
-| `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)   | Submit a question to the custom bank (Pro only) |
-| `/profile`      | `ProfileStatsComponent`   | none (in-page gating on a signed-in real account) | A player's own lifetime gameplay totals         |
-| `/pricing`      | `PricingComponent`        | none                                              | Compare Starter vs. Pro, subscribe via Stripe   |
-| `/review`       | `ReviewQueueComponent`    | none (in-page gating on the reviewer role)        | Approve or reject submitted questions           |
-| `/privacy`      | `PrivacyPolicyComponent`  | none                                              | Published Privacy Policy                        |
-| `/terms`        | `TermsOfServiceComponent` | none                                              | Published Terms of Service                      |
-| `*` (unmatched) | —                         | redirects to `/`                                  | —                                               |
+| Path            | Component                 | Guard                                             | Purpose                                                   |
+| --------------- | ------------------------- | ------------------------------------------------- | --------------------------------------------------------- |
+| `/`             | `GameSetupComponent`      | none                                              | Configure & start a game                                  |
+| `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory  | Answer questions against a timer                          |
+| `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory   | Final score, save to leaderboard, view top 10             |
+| `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)   | Submit a question to the custom bank (Pro only)           |
+| `/profile`      | `ProfileStatsComponent`   | none (in-page gating on a signed-in real account) | A player's own lifetime gameplay totals                   |
+| `/pricing`      | `PricingComponent`        | none                                              | Compare Starter vs. Pro, subscribe via Stripe             |
+| `/review`       | `ReviewQueueComponent`    | none (in-page gating on the reviewer role)        | Approve or reject submitted questions; read filed reports |
+| `/privacy`      | `PrivacyPolicyComponent`  | none                                              | Published Privacy Policy                                  |
+| `/terms`        | `TermsOfServiceComponent` | none                                              | Published Terms of Service                                |
+| `*` (unmatched) | —                         | redirects to `/`                                  | —                                                         |
 
 ---
 
@@ -528,7 +534,7 @@ Grouped by screen, for quick reference when building Figma text styles / content
 
 **Pricing**: Back to game · Pricing · Play free forever, or go Pro to contribute your own questions. · Subscription started! It may take a few seconds to finish activating. · Start playing · Dismiss · Checkout was cancelled — no charge was made. · Starter · Everything you need to play and compete. · Free ($0/month) · Play unlimited games · Submit scores to the global leaderboard · Your current plan · Pro · Contribute questions and shape the game. · {amount}/month · Currency · USD · BRL · Everything in Starter · Create and add custom questions to the global question bank · More features coming soon · You're subscribed · Loading… · Sign in to subscribe · Redirecting… · Subscribe · Subscribe — {amount}/mo · Verify your email first, then come back to subscribe. · Could not start checkout. Please try again. · Sign in before subscribing. · Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later. · Timed out waiting for Stripe checkout to start. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not start checkout. Please reload the page and try again. · Your account is already set up to pay in {currency}, so Pro can only be bought in {currency} from this account. · Cancel anytime. No hidden fees.
 
-**Review Queue**: Review Queue · Back to game · Filter by status · Pending · Approved · Rejected · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Author: · Approve · Reject
+**Review Queue**: Review Queue · Back to game · Choose what to review · Pending · Approved · Rejected · Reports · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Status: · Author: · Approve · Reject · This page is for question reviewers. If you think you should have access, ask the site owner. · Questions players have contributed to the shared bank, and the reports players have filed about them. Rejecting a question stops it being served in games; it is not deleted. · Nothing {{status}} right now. · Could not load the queue. Please try again. · Try again · Question marked {{status}}. · Could not save that decision. Please try again. · Showing the first {{n}}. Review these and reload for more. · Loading reports… · No reports have been filed. · Newest first. Nothing is marked handled — a report stays as the record that somebody complained. · Could not load the reports. Please try again. · The answer is wrong · Inappropriate or offensive · Spam or nonsense · Something else · Reported {{date}} · Question {{id}} is no longer in the bank, so there is nothing left to act on. · Show more reports
 
 **Your stats**: Back to game · Your stats · Your lifetime totals across every game you have finished while signed in. Only you can see them. · Loading your lifetime totals… · Sign in and your totals start counting from the next game you finish. · Nothing banked yet — finish a game and your totals will show up here. · Could not load your stats just now. · Tracking since {{date}}. · Tracking your lifetime totals. · Games played · Questions answered · Correct answers · Accuracy · Best streak · Start a game · Sign in · Try again · Your stats are ready. · No finished games yet. · Signed out. Stats are only kept for a signed-in account. · Could not load your stats.
 

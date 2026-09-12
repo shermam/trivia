@@ -2,7 +2,7 @@ import { Locator, Page } from '@playwright/test';
 import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
-import { optionLabel, waitForPlayRoute } from '../../support/game';
+import { answerQuestion, optionLabel, waitForPlayRoute } from '../../support/game';
 import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
 
 /**
@@ -144,6 +144,78 @@ test.describe('the review queue', () => {
 
     await expect(page.getByText('This page is for question reviewers')).toBeVisible();
     await expect(page.getByText(pendingText)).toHaveCount(0);
+    // Not a tab in sight, the reports one included — so there is no control
+    // offering a read `firestore.rules` would refuse anyway (`FEAT-026`).
+    await expect(page.getByTestId('review-tab')).toHaveCount(0);
+  });
+
+  /**
+   * `FEAT-026`, end to end: a player files a report and a reviewer acts on it.
+   *
+   * The whole point of the feature is the seam between those two people, and
+   * this is the only test that crosses it. The rules suite proves the read is
+   * refused for everyone but a reviewer; the unit specs prove the service drops
+   * `reportedBy` and the component pairs each report with its question. None of
+   * them can show that a report written by one session through the reporting
+   * form is the one a *different* account reads back through the real rules.
+   *
+   * The reporter is the anonymous session every page load mints, because that
+   * is who reports in practice (finding H4) — and it is also the strongest
+   * version of the test, since an anonymous uid cannot be a reviewer and the
+   * report is therefore unreadable by the account that filed it.
+   */
+  test('shows a filed report to a reviewer, who rejects the question from it', async ({
+    page,
+    firebase,
+  }) => {
+    // Exactly one question in this category is approved, so the game is
+    // deterministic and the report is about a question this test owns.
+    await startCustomGame(page, category);
+    await answerQuestion(page, 'Yes');
+    await expect(page).toHaveURL(/\/game-over$/);
+    await expect(page.getByText('Game Over!').first()).toBeVisible();
+
+    const questionId = `approved-${tag}`;
+    const detail = `The answer is not Yes (${tag}).`;
+    await page.getByTestId('open-report-dialog').click();
+    await page.getByTestId(`report-question-${questionId}`).click();
+    await page.getByRole('radio', { name: 'The answer is wrong', exact: true }).check();
+    await page.locator('textarea[name="report-detail"]').fill(detail);
+    await page.getByTestId(`send-report-${questionId}`).click();
+    await expect(page.getByTestId(`reported-badge-${questionId}`)).toHaveText('Reported');
+
+    // Whose report it is, read through the Admin SDK: the uid belongs to the
+    // anonymous session and is not knowable from the browser afterwards, and
+    // the reviewer's screen must not show it.
+    const [filed] = await firebase.getQuestionReports([questionId]);
+    expect(filed.reportedBy).toBeTruthy();
+
+    await signInAsReviewer(page, firebase);
+    await page.goto('/review');
+    await reviewTab(page, 'reports').click();
+
+    // Scoped to this test's own report. The emulator is shared, so the tab
+    // lists every worker's complaints and a count of rows would be about all of
+    // them.
+    const row = page.getByTestId('review-report').filter({ hasText: tag });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('The answer is wrong');
+    await expect(row).toContainText(detail);
+    await expect(row).toContainText(approvedText);
+    // The complaint, not the complainant.
+    await expect(row).not.toContainText(filed.reportedBy);
+
+    // The decision the report exists to prompt, made from the report itself.
+    await row.getByTestId('reject-question').click();
+    await expect(row.getByTestId('question-status')).toHaveText('rejected');
+    // The report stays — it is the record that somebody complained, not a task
+    // that has been ticked off.
+    await expect(row).toHaveCount(1);
+
+    // ...and the write landed under the real rules, rather than only the row
+    // repainting from memory.
+    await reviewTab(page, 'rejected').click();
+    await expect(page.getByText(approvedText)).toBeVisible();
   });
 
   /**
@@ -270,9 +342,9 @@ async function startCustomGame(page: Page, category: string): Promise<void> {
   await waitForPlayRoute(page);
 }
 
-/** The Pending / Approved / Rejected filter, by its status rather than its label. */
-function reviewTab(page: Page, status: 'pending' | 'approved' | 'rejected'): Locator {
-  return page.locator(`[data-cy="review-tab"][data-status="${status}"]`);
+/** The Pending / Approved / Rejected / Reports picker, by view rather than by label. */
+function reviewTab(page: Page, view: 'pending' | 'approved' | 'rejected' | 'reports'): Locator {
+  return page.locator(`[data-cy="review-tab"][data-status="${view}"]`);
 }
 
 /**

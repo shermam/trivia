@@ -1,48 +1,80 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   OnInit,
   computed,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { CustomQuestionDoc, QuestionStatus } from '../../models/question.model';
+import {
+  CustomQuestionDoc,
+  QuestionReport,
+  QuestionReportReason,
+  QuestionStatus,
+} from '../../models/question.model';
 import { FirebaseService, REVIEW_PAGE_SIZE } from '../../services/firebase.service';
-import { ReviewerService } from '../../services/reviewer.service';
+import { REPORTS_PAGE_SIZE, ReviewerService } from '../../services/reviewer.service';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
 
 type ReviewQuestion = CustomQuestionDoc & { id: string };
 
-/** The three statuses, in the order the picker offers them. */
-export const REVIEW_TABS: readonly { status: QuestionStatus; label: string }[] = [
-  { status: 'pending', label: 'Pending' },
-  { status: 'approved', label: 'Approved' },
-  { status: 'rejected', label: 'Rejected' },
+/** What the queue shows: one of the three moderation statuses, or the reports. */
+export type ReviewView = QuestionStatus | 'reports';
+
+/** One filed report, with the question it is about — or `null` if it is gone. */
+export interface ReportRow {
+  report: QuestionReport;
+  question: ReviewQuestion | null;
+}
+
+/** The views, in the order the picker offers them. */
+export const REVIEW_TABS: readonly { view: ReviewView; label: string }[] = [
+  { view: 'pending', label: 'Pending' },
+  { view: 'approved', label: 'Approved' },
+  { view: 'rejected', label: 'Rejected' },
+  { view: 'reports', label: 'Reports' },
 ];
 
+/** What a reader chose, in words a reviewer reads rather than a stored enum. */
+const REASON_LABELS: Record<QuestionReportReason, string> = {
+  incorrect: 'The answer is wrong',
+  inappropriate: 'Inappropriate or offensive',
+  spam: 'Spam or nonsense',
+  other: 'Something else',
+};
+
 /**
- * The moderation queue (`BACKLOG.md` item 4b-ii).
+ * The moderation queue (`BACKLOG.md` item 4b-ii), and the reports players file
+ * against community questions (`FEAT-026`).
  *
- * **The Pending tab is empty until item 4c**, which is when submissions start
- * arriving there instead of going straight into the bank. That does not make
- * this page inert in the meantime, and the reason is worth stating: rejecting
- * an *approved* question takes it out of what players are served, so this is
- * the first in-app way to act on an abuse report at all. Until now the only
- * route was a manual console deletion.
+ * **The two halves are one screen on purpose.** A report is only worth reading
+ * next to the question it is about, and acting on one is the ordinary `status`
+ * write the other three tabs already make — so a reporter's complaint and the
+ * decision it asks for are one click apart rather than a console away.
  *
  * Reviewer-gated in the UI only. `ReviewerService` decides whether to render
- * the page; `firestore.rules` decides whether any of its buttons do anything.
- * A non-reviewer who navigates here directly gets the "not a reviewer" state,
- * and would be refused by the server even if they did not.
+ * the page; `firestore.rules` decides whether any of its buttons do anything,
+ * and whether the reports read returns anything at all. A non-reviewer who
+ * navigates here directly gets the "not a reviewer" state, and would be refused
+ * by the server even if they did not.
  */
 @Component({
   selector: 'app-review-queue',
   standalone: true,
-  imports: [RouterLink, IconComponent, SourceLinkComponent, QuestionJustificationComponent],
+  imports: [
+    NgTemplateOutlet,
+    RouterLink,
+    IconComponent,
+    SourceLinkComponent,
+    QuestionJustificationComponent,
+  ],
   templateUrl: './review-queue.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -53,15 +85,49 @@ export class ReviewQueueComponent implements OnInit {
   protected readonly tabs = REVIEW_TABS;
   protected readonly pageSize = REVIEW_PAGE_SIZE;
 
-  protected readonly activeStatus = signal<QuestionStatus>('pending');
+  protected readonly activeView = signal<ReviewView>('pending');
   protected readonly questions = signal<ReviewQuestion[]>([]);
   protected readonly isLoading = signal(false);
   protected readonly loadError = signal<string | null>(null);
 
   /**
+   * The reports page, and how much of it has been asked for. The limit grows
+   * rather than paging on a cursor: reports are never resolved, so "reload for
+   * more" — which is what the question tabs offer, because reviewing a question
+   * removes it — would hand back the same newest page forever.
+   */
+  protected readonly reports = signal<ReportRow[]>([]);
+  protected readonly reportsLimit = signal(REPORTS_PAGE_SIZE);
+  protected readonly isReportsFull = computed(() => this.reports().length >= this.reportsLimit());
+
+  /**
+   * Which of the reports tab's four messages is showing.
+   *
+   * **A failed read outranks an empty one.** "No reports have been filed" is a
+   * claim about the collection, and a read that was refused or timed out is not
+   * evidence for it — telling a reviewer their queue is clear when it is merely
+   * unreadable is the false narration `CLAUDE.md` §4.4 forbids, and the one
+   * this screen could most easily produce.
+   */
+  protected readonly reportsView = computed<'loading' | 'failed' | 'empty' | 'loaded'>(() => {
+    if (this.isLoading()) {
+      return 'loading';
+    }
+    if (this.loadError()) {
+      return 'failed';
+    }
+    return this.reports().length === 0 ? 'empty' : 'loaded';
+  });
+
+  /** The block of stacked messages, focused when a retry starts — see `retryReports()`. */
+  private readonly reportsStatus = viewChild<ElementRef<HTMLElement>>('reportsStatus');
+
+  /**
    * The question currently being acted on, so its two buttons can disable
    * without freezing the whole list. Holding the id rather than a boolean is
-   * what makes that per-row instead of per-page.
+   * what makes that per-row instead of per-page — and on the reports tab it
+   * also covers the case the question tabs cannot produce: several reports
+   * about one question, whose buttons are all the same write.
    */
   protected readonly pendingActionId = signal<string | null>(null);
   protected readonly actionError = signal<string | null>(null);
@@ -79,49 +145,122 @@ export class ReviewQueueComponent implements OnInit {
     void this.load();
   }
 
-  protected async select(status: QuestionStatus): Promise<void> {
-    if (status === this.activeStatus()) {
+  protected async select(view: ReviewView): Promise<void> {
+    if (view === this.activeView()) {
       return;
     }
-    this.activeStatus.set(status);
+    this.activeView.set(view);
     this.actionResult.set(null);
     this.actionError.set(null);
     await this.load();
   }
 
   protected async load(): Promise<void> {
-    const status = this.activeStatus();
+    const view = this.activeView();
     this.isLoading.set(true);
     this.loadError.set(null);
     try {
-      const questions = await firstValueFrom(this.firebaseService.getQuestionsByStatus(status));
-      // The tab may have changed while this was in flight; the late answer for
-      // the previous tab must not overwrite the current one.
-      if (this.activeStatus() === status) {
-        this.questions.set(questions);
+      if (view === 'reports') {
+        const rows = await this.loadReports();
+        // The tab may have changed while this was in flight; the late answer
+        // for the previous tab must not overwrite the current one.
+        if (this.activeView() === view) {
+          this.reports.set(rows);
+        }
+      } else {
+        const questions = await firstValueFrom(this.firebaseService.getQuestionsByStatus(view));
+        if (this.activeView() === view) {
+          this.questions.set(questions);
+        }
       }
     } catch {
       // Deliberately generic. A failure here is a refused read, a timeout or a
       // network fault and the client cannot tell which — narrating a cause it
-      // did not verify is exactly what `CLAUDE.md` §4.4 forbids.
-      this.loadError.set('Could not load the queue. Please try again.');
+      // did not verify is exactly what `CLAUDE.md` §4.4 forbids. What it must
+      // never do is fall through to the empty state: "no reports have been
+      // filed" is a claim, and a read that failed is not evidence for it.
+      this.loadError.set(
+        view === 'reports'
+          ? 'Could not load the reports. Please try again.'
+          : 'Could not load the queue. Please try again.',
+      );
     } finally {
-      if (this.activeStatus() === status) {
+      if (this.activeView() === view) {
         this.isLoading.set(false);
       }
     }
   }
 
+  /** Asks for another page of reports, keeping the ones already on screen. */
+  protected async showMoreReports(): Promise<void> {
+    this.reportsLimit.update((limit) => limit + REPORTS_PAGE_SIZE);
+    await this.load();
+  }
+
+  /**
+   * Re-runs a reports read that failed.
+   *
+   * **It moves focus before starting the read**, because starting the read is
+   * what takes the focused element away: the block goes back to its loading
+   * face, "Try again" turns `visibility: hidden`, and focus on a hidden element
+   * silently drops to `<body>` (`CLAUDE.md` §4.4), sending a keyboard user back
+   * to the top of the page to reach a second "Try again". The block itself is
+   * the target: it is present in every state and carries the sentence that
+   * answers the retry.
+   */
+  protected retryReports(): void {
+    this.reportsStatus()?.nativeElement.focus();
+    void this.load();
+  }
+
+  /**
+   * The reports, each paired with the question it names.
+   *
+   * Two bounded reads, not one per report: the page of reports, then one
+   * batched lookup of the distinct questions it mentions
+   * (`FirebaseService.getQuestionsByIds`). A question the lookup does not
+   * return is one that has been deleted from the bank since the report was
+   * filed, and the row says so rather than disappearing.
+   */
+  private async loadReports(): Promise<ReportRow[]> {
+    const reports = await this.reviewerService.getQuestionReports(this.reportsLimit());
+    const questions = await firstValueFrom(
+      this.firebaseService.getQuestionsByIds(reports.map((report) => report.questionId)),
+    );
+    const byId = new Map(questions.map((question) => [question.id, question]));
+
+    return reports.map((report) => ({ report, question: byId.get(report.questionId) ?? null }));
+  }
+
   protected async decide(question: ReviewQuestion, status: QuestionStatus): Promise<void> {
+    // Captured before the round trip: the reviewer may switch tabs while the
+    // write is in flight, and where the decided row lives is a property of
+    // where it was made, not of where they are when it lands.
+    const view = this.activeView();
     this.pendingActionId.set(question.id);
     this.actionError.set(null);
     this.actionResult.set(null);
     try {
       await this.firebaseService.setQuestionStatus(question.id, status);
-      // Drop the row locally rather than refetching: the reviewer's next
-      // decision should not wait on a round trip, and the row no longer
-      // belongs in the tab they are looking at.
-      this.questions.update((all) => all.filter((q) => q.id !== question.id));
+      if (view === 'reports') {
+        // The report stays — it is the record that somebody complained, not a
+        // task to tick off — so the row's copy of the question is updated in
+        // place instead. Every row naming the same question is updated, because
+        // several reports about one question is the normal case and one write
+        // settles all of them.
+        this.reports.update((rows) =>
+          rows.map((row) =>
+            row.question?.id === question.id
+              ? { ...row, question: { ...row.question, status } }
+              : row,
+          ),
+        );
+      } else {
+        // Drop the row locally rather than refetching: the reviewer's next
+        // decision should not wait on a round trip, and the row no longer
+        // belongs in the tab they are looking at.
+        this.questions.update((all) => all.filter((q) => q.id !== question.id));
+      }
       this.actionResult.set(`Question marked ${status}.`);
     } catch {
       this.actionError.set('Could not save that decision. Please try again.');
@@ -136,5 +275,13 @@ export class ReviewQueueComponent implements OnInit {
 
   protected submittedAt(question: ReviewQuestion): string {
     return question.createdAt ? new Date(question.createdAt).toLocaleString() : 'Unknown';
+  }
+
+  protected reportedAt(report: QuestionReport): string {
+    return report.createdAt ? new Date(report.createdAt).toLocaleString() : 'Unknown';
+  }
+
+  protected reasonLabel(report: QuestionReport): string {
+    return REASON_LABELS[report.reason];
   }
 }

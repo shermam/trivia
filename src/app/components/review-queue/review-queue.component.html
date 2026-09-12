@@ -23,31 +23,31 @@
       </p>
     } @else {
       <p class="text-slate-500 dark:text-slate-400 mb-8">
-        Questions players have contributed to the shared bank. Rejecting one stops it being served
-        in games; it is not deleted.
+        Questions players have contributed to the shared bank, and the reports players have filed
+        about them. Rejecting a question stops it being served in games; it is not deleted.
       </p>
 
       <!-- Grouped controls need the role and the label, or the group's purpose
            is never conveyed (CLAUDE.md §4.5). Nothing audits a missing one. -->
-      <h2 id="review-filter-label" class="sr-only">Filter by status</h2>
+      <h2 id="review-view-label" class="sr-only">Choose what to review</h2>
       <div
         role="radiogroup"
-        aria-labelledby="review-filter-label"
+        aria-labelledby="review-view-label"
         class="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1 mb-6"
       >
-        @for (tab of tabs; track tab.status) {
+        @for (tab of tabs; track tab.view) {
           <button
             type="button"
             role="radio"
             data-cy="review-tab"
-            [attr.data-status]="tab.status"
-            [attr.aria-checked]="activeStatus() === tab.status"
-            (click)="select(tab.status)"
+            [attr.data-status]="tab.view"
+            [attr.aria-checked]="activeView() === tab.view"
+            (click)="select(tab.view)"
             class="px-4 py-1.5 text-sm font-semibold rounded-lg transition-colors"
-            [class.bg-emerald-600]="activeStatus() === tab.status"
-            [class.text-white]="activeStatus() === tab.status"
-            [class.text-slate-600]="activeStatus() !== tab.status"
-            [class.dark:text-slate-300]="activeStatus() !== tab.status"
+            [class.bg-emerald-600]="activeView() === tab.view"
+            [class.text-white]="activeView() === tab.view"
+            [class.text-slate-600]="activeView() !== tab.view"
+            [class.dark:text-slate-300]="activeView() !== tab.view"
           >
             {{ tab.label }}
           </button>
@@ -67,141 +67,297 @@
         </p>
       }
 
-      @if (isLoading()) {
-        <p class="text-slate-500 dark:text-slate-400" role="status">Loading…</p>
-      } @else if (loadError()) {
+      @if (activeView() === 'reports') {
+        <!--
+          One grid cell holding every message this tab can show, rendered from
+          first paint and switched with `invisible` (`visibility: hidden`)
+          rather than `@if`, so the empty state occupies the space the loading
+          state already had and the tab does not resize when the read lands
+          (`CLAUDE.md` §4.4). A hard-coded `min-h` would be a number to
+          re-measure every time one of these sentences changed.
+
+          `role="status"` on the container rather than on each face: a hidden
+          face is out of the accessibility tree, so the region's text is
+          whichever message is showing, and the change from one to the next is
+          what gets announced.
+
+          `tabindex="-1"` is not decoration — `retryReports()` hands focus here
+          because the button it is called from is about to be hidden.
+        -->
         <div
-          class="rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+          #reportsStatus
+          role="status"
+          tabindex="-1"
+          data-cy="reports-status"
+          class="grid mb-4 focus:outline-none"
         >
-          <p role="alert" class="mb-2">{{ loadError() }}</p>
-          <button type="button" (click)="load()" class="font-semibold hover:underline">
-            Try again
-          </button>
-        </div>
-      } @else if (questions().length === 0) {
-        <p class="text-slate-500 dark:text-slate-400" role="status">
-          Nothing {{ activeStatus() }} right now.
-        </p>
-      } @else {
-        <ul class="space-y-4">
-          <!-- Tracked by id, never by question text: two questions with the
-               same wording are still two questions (CLAUDE.md §4.4). -->
-          @for (question of questions(); track question.id) {
-            <li
-              data-cy="review-question"
-              class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
-            >
-              <p class="font-semibold text-slate-900 dark:text-slate-50 mb-3">
-                {{ question.question }}
-              </p>
-
-              <ul class="space-y-1 mb-4 text-sm">
-                @for (answer of answersFor(question); track $index) {
-                  <li
-                    class="flex items-center gap-2"
-                    [class.text-emerald-700]="answer === question.correct_answer"
-                    [class.dark:text-emerald-400]="answer === question.correct_answer"
-                    [class.text-slate-600]="answer !== question.correct_answer"
-                    [class.dark:text-slate-400]="answer !== question.correct_answer"
-                  >
-                    @if (answer === question.correct_answer) {
-                      <app-icon name="circle-check-big" [size]="14" class="shrink-0" />
-                      <span class="sr-only">Correct answer:</span>
-                    } @else {
-                      <span aria-hidden="true" class="w-3.5 shrink-0"></span>
-                    }
-                    {{ answer }}
-                  </li>
-                }
-              </ul>
-
-              <dl class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                <div class="flex gap-1">
-                  <dt>Category:</dt>
-                  <dd>{{ question.category }}</dd>
-                </div>
-                <div class="flex gap-1">
-                  <dt>Difficulty:</dt>
-                  <dd>{{ question.difficulty }}</dd>
-                </div>
-                <div class="flex gap-1">
-                  <dt>Submitted:</dt>
-                  <dd>{{ submittedAt(question) }}</dd>
-                </div>
-                <div class="flex gap-1">
-                  <dt>Author:</dt>
-                  <dd>{{ question.createdBy ?? 'Unattributed (predates attribution)' }}</dd>
-                </div>
-              </dl>
-
-              <!--
-                The source, when the contributor gave one (FEAT-022). Styled
-                to match the metadata list above it because that is what it is
-                — but kept outside the `<dl>` deliberately: a term/definition
-                pair whose definition is a link into a new tab is awkward to
-                announce, and the shared component owns the new-tab and
-                https-only handling that this card would otherwise have to
-                repeat. Renders nothing when there is no source, which is the
-                common case.
-
-                `showHost` is on **here and nowhere else**. The label is the
-                contributor's own `sourceTitle`, so a title of "Wikipedia" over
-                a link to anywhere at all reads as Wikipedia — on the one
-                screen whose job is approving on evidence, and where every
-                other contributor-written value is shown raw. The reviewer sees
-                the destination; the player, who meets the link only after a
-                reviewer has vouched for the question, does not need it.
-              -->
-              <app-source-link
-                [url]="question.sourceUrl"
-                [title]="question.sourceTitle"
-                [showHost]="true"
-              />
-
-              <!--
-                The contributor's justification, when they gave one. This is
-                the card's reason to exist for a tricky question: the source
-                says where to check, the justification says what the
-                contributor believes the source shows — and a reviewer who has
-                both can approve on evidence rather than on plausibility.
-                Renders nothing when there is none, which is the common case.
-              -->
-              <app-question-justification [text]="question.explanation" />
-
-              <div class="flex gap-2 mt-4">
-                @if (activeStatus() !== 'approved') {
-                  <button
-                    type="button"
-                    data-cy="approve-question"
-                    [disabled]="pendingActionId() === question.id"
-                    (click)="decide(question, 'approved')"
-                    class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                  >
-                    Approve
-                  </button>
-                }
-                @if (activeStatus() !== 'rejected') {
-                  <button
-                    type="button"
-                    data-cy="reject-question"
-                    [disabled]="pendingActionId() === question.id"
-                    (click)="decide(question, 'rejected')"
-                    class="px-3 py-1.5 text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
-                  >
-                    Reject
-                  </button>
-                }
-              </div>
-            </li>
-          }
-        </ul>
-
-        @if (isFull()) {
-          <p class="mt-6 text-xs text-slate-500 dark:text-slate-400">
-            Showing the first {{ pageSize }}. Review these and reload for more.
+          <p
+            class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+            [class.invisible]="reportsView() !== 'loading'"
+            data-cy="reports-loading"
+          >
+            Loading reports…
           </p>
+          <p
+            class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+            [class.invisible]="reportsView() !== 'empty'"
+            data-cy="reports-empty"
+          >
+            No reports have been filed.
+          </p>
+          <p
+            class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+            [class.invisible]="reportsView() !== 'loaded'"
+            data-cy="reports-summary"
+          >
+            Newest first. Nothing is marked handled — a report stays as the record that somebody
+            complained.
+          </p>
+          <div
+            class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
+            [class.invisible]="reportsView() !== 'failed'"
+            data-cy="reports-failed"
+          >
+            <p class="text-sm text-red-700 dark:text-red-300">{{ loadError() }}</p>
+            <button
+              type="button"
+              data-cy="reports-retry"
+              (click)="retryReports()"
+              class="text-sm font-semibold text-red-700 dark:text-red-300 hover:underline"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+
+        @if (reports().length > 0) {
+          <ul class="space-y-4">
+            <!-- Tracked by the report's document id: two players can file the
+                 same complaint about the same question, and those are two
+                 reports (CLAUDE.md §4.4). The id is a key and never rendered —
+                 it ends in the reporter's uid. -->
+            @for (row of reports(); track row.report.id) {
+              <li
+                data-cy="review-report"
+                class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+              >
+                <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <p
+                    data-cy="report-reason"
+                    class="font-semibold text-slate-900 dark:text-slate-50"
+                  >
+                    {{ reasonLabel(row.report) }}
+                  </p>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">
+                    Reported {{ reportedAt(row.report) }}
+                  </p>
+                </div>
+
+                @if (row.report.detail) {
+                  <!-- The reporter's own words, kept as they typed them:
+                       interpolation escapes the text, and `pre-line` keeps
+                       their line breaks without an [innerHTML] that would
+                       parse it. -->
+                  <p
+                    data-cy="report-detail"
+                    class="mt-2 text-sm text-slate-600 dark:text-slate-300 whitespace-pre-line"
+                  >
+                    {{ row.report.detail }}
+                  </p>
+                }
+
+                <!--
+                  The question the complaint is about, read in the same batch as
+                  the page of reports. Nothing about the reporter is shown here
+                  or anywhere else on this screen: a reviewer needs the
+                  complaint, not the complainant (`FEAT-026`).
+                -->
+                @if (row.question; as reported) {
+                  <div
+                    data-cy="reported-question"
+                    class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800"
+                  >
+                    <ng-container
+                      [ngTemplateOutlet]="questionCard"
+                      [ngTemplateOutletContext]="{ $implicit: reported, status: reported.status }"
+                    />
+                  </div>
+                } @else {
+                  <p
+                    data-cy="reported-question-missing"
+                    class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 text-sm text-slate-500 dark:text-slate-400"
+                  >
+                    Question <code class="font-mono">{{ row.report.questionId }}</code> is no longer
+                    in the bank, so there is nothing left to act on.
+                  </p>
+                }
+              </li>
+            }
+          </ul>
+
+          @if (isReportsFull()) {
+            <button
+              type="button"
+              data-cy="show-more-reports"
+              (click)="showMoreReports()"
+              [disabled]="isLoading()"
+              class="mt-6 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+            >
+              Show more reports
+            </button>
+          }
+        }
+      } @else {
+        @if (isLoading()) {
+          <p class="text-slate-500 dark:text-slate-400" role="status">Loading…</p>
+        } @else if (loadError()) {
+          <div
+            class="rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+          >
+            <p role="alert" class="mb-2">{{ loadError() }}</p>
+            <button type="button" (click)="load()" class="font-semibold hover:underline">
+              Try again
+            </button>
+          </div>
+        } @else if (questions().length === 0) {
+          <p class="text-slate-500 dark:text-slate-400" role="status">
+            Nothing {{ activeView() }} right now.
+          </p>
+        } @else {
+          <ul class="space-y-4">
+            <!-- Tracked by id, never by question text: two questions with the
+                 same wording are still two questions (CLAUDE.md §4.4). -->
+            @for (question of questions(); track question.id) {
+              <li
+                data-cy="review-question"
+                class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+              >
+                <ng-container
+                  [ngTemplateOutlet]="questionCard"
+                  [ngTemplateOutletContext]="{ $implicit: question, status: activeView() }"
+                />
+              </li>
+            }
+          </ul>
+
+          @if (isFull()) {
+            <p class="mt-6 text-xs text-slate-500 dark:text-slate-400">
+              Showing the first {{ pageSize }}. Review these and reload for more.
+            </p>
+          }
         }
       }
     }
   </div>
 </div>
+
+<!--
+  One question as a reviewer reads it, rendered in the status tabs and inside a
+  report alike. A second copy would be how the two grew different affordances —
+  the same argument as game-over's report row, and the reason the reports tab
+  can offer a decision at all without repeating this markup.
+
+  `status` is the value a decision is compared against to hide the button that
+  would be a no-op: the active tab in the lists (where the query guarantees they
+  agree), and the question's own stored status inside a report (where nothing
+  else could know it).
+-->
+<ng-template #questionCard let-question let-status="status">
+  <p class="font-semibold text-slate-900 dark:text-slate-50 mb-3">
+    {{ question.question }}
+  </p>
+
+  <ul class="space-y-1 mb-4 text-sm">
+    @for (answer of answersFor(question); track $index) {
+      <li
+        class="flex items-center gap-2"
+        [class.text-emerald-700]="answer === question.correct_answer"
+        [class.dark:text-emerald-400]="answer === question.correct_answer"
+        [class.text-slate-600]="answer !== question.correct_answer"
+        [class.dark:text-slate-400]="answer !== question.correct_answer"
+      >
+        @if (answer === question.correct_answer) {
+          <app-icon name="circle-check-big" [size]="14" class="shrink-0" />
+          <span class="sr-only">Correct answer:</span>
+        } @else {
+          <span aria-hidden="true" class="w-3.5 shrink-0"></span>
+        }
+        {{ answer }}
+      </li>
+    }
+  </ul>
+
+  <dl class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+    <div class="flex gap-1">
+      <dt>Category:</dt>
+      <dd>{{ question.category }}</dd>
+    </div>
+    <div class="flex gap-1">
+      <dt>Difficulty:</dt>
+      <dd>{{ question.difficulty }}</dd>
+    </div>
+    <div class="flex gap-1">
+      <dt>Submitted:</dt>
+      <dd>{{ submittedAt(question) }}</dd>
+    </div>
+    <div class="flex gap-1">
+      <dt>Status:</dt>
+      <dd data-cy="question-status">{{ question.status ?? 'unknown' }}</dd>
+    </div>
+    <div class="flex gap-1">
+      <dt>Author:</dt>
+      <dd>{{ question.createdBy ?? 'Unattributed (predates attribution)' }}</dd>
+    </div>
+  </dl>
+
+  <!--
+    The source, when the contributor gave one (FEAT-022). Styled to match the
+    metadata list above it because that is what it is — but kept outside the
+    `<dl>` deliberately: a term/definition pair whose definition is a link into
+    a new tab is awkward to announce, and the shared component owns the new-tab
+    and https-only handling that this card would otherwise have to repeat.
+    Renders nothing when there is no source, which is the common case.
+
+    `showHost` is on **here and nowhere else**. The label is the contributor's
+    own `sourceTitle`, so a title of "Wikipedia" over a link to anywhere at all
+    reads as Wikipedia — on the one screen whose job is approving on evidence,
+    and where every other contributor-written value is shown raw. The reviewer
+    sees the destination; the player, who meets the link only after a reviewer
+    has vouched for the question, does not need it.
+  -->
+  <app-source-link [url]="question.sourceUrl" [title]="question.sourceTitle" [showHost]="true" />
+
+  <!--
+    The contributor's justification, when they gave one. This is the card's
+    reason to exist for a tricky question: the source says where to check, the
+    justification says what the contributor believes the source shows — and a
+    reviewer who has both can approve on evidence rather than on plausibility.
+    Renders nothing when there is none, which is the common case.
+  -->
+  <app-question-justification [text]="question.explanation" />
+
+  <div class="flex gap-2 mt-4">
+    @if (status !== 'approved') {
+      <button
+        type="button"
+        data-cy="approve-question"
+        [disabled]="pendingActionId() === question.id"
+        (click)="decide(question, 'approved')"
+        class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+      >
+        Approve
+      </button>
+    }
+    @if (status !== 'rejected') {
+      <button
+        type="button"
+        data-cy="reject-question"
+        [disabled]="pendingActionId() === question.id"
+        (click)="decide(question, 'rejected')"
+        class="px-3 py-1.5 text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+      >
+        Reject
+      </button>
+    }
+  </div>
+</ng-template>
