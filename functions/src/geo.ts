@@ -43,17 +43,29 @@ import { countryFromHeaders } from './geo-country';
  * authorisation to give up here — the endpoint reads one header off the
  * caller's own request and tells them what it said.
  */
-export const geo = onRequest({ invoker: 'public' }, (req, res) => {
-  // A shared cache holding one visitor's country and serving it to the next is
-  // the one way this endpoint could be actively wrong, so it is refused before
-  // anything else — including on the 405 path, which is still a response an
-  // intermediary could store.
-  res.set('Cache-Control', 'private, no-store');
+export const geo = onRequest(
+  {
+    invoker: 'public',
+    // Unauthenticated by necessity, so anyone can call it in a loop. The gen-2
+    // default is 100 instances at 80 concurrent requests each; five still
+    // serves ~400 at once, far past anything this app sees, and a caller who
+    // exceeds it waits — which the client already treats as "country unknown"
+    // after two seconds. That turns a bill someone else can run up into a
+    // pre-selected radio button not moving.
+    maxInstances: 5,
+  },
+  (req, res) => {
+    // A shared cache holding one visitor's country and serving it to the next
+    // is the one way this endpoint could be actively wrong, so it is refused
+    // before anything else — including on the 405 path, which is still a
+    // response an intermediary could store.
+    res.set('Cache-Control', 'private, no-store');
 
-  if (req.method !== 'GET') {
-    res.status(405).set('Allow', 'GET').json({ error: 'Method not allowed.' });
-    return;
-  }
+    if (req.method !== 'GET') {
+      res.status(405).set('Allow', 'GET').json({ error: 'Method not allowed.' });
+      return;
+    }
 
-  res.status(200).json({ country: countryFromHeaders(req.headers) });
-});
+    res.status(200).json({ country: countryFromHeaders(req.headers) });
+  },
+);

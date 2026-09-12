@@ -472,26 +472,59 @@ test.describe('pricing / choosing a currency', () => {
    */
   test.describe('when the answer arrives after the page has rendered', () => {
     /**
-     * Nothing is measured in here, deliberately. The card's height across a
-     * change of currency is already pinned by the test above, which drives the
-     * same state change through the control; adding a measurement to this one
-     * would only widen the window the held request has to survive, and that
-     * window is bounded by the client's own two-second deadline.
+     * **Two visits rather than one held response, and the client's own
+     * deadline is why.** The obvious way to write this is to hold the answer
+     * open, assert the dollar price, release, and assert the change — but the
+     * client arms a two-second `AbortSignal.timeout` on that request the
+     * moment the page starts loading, so everything before the release has to
+     * fit inside a budget the test has no control over. On a loaded runner it
+     * would not, the request would be abandoned, and the test would fail for a
+     * reason that has nothing to do with what it is checking.
+     *
+     * So the answer is never held. It is answered immediately both times and
+     * *changed* in between, which reproduces the same thing the reader
+     * experiences — a control already on screen and checked, and then the
+     * server's answer moving it — with no deadline in the loop at all.
+     *
+     * Leaving and coming back re-runs the lookup **inside the same document**,
+     * which is what makes the second visit a continuation rather than a fresh
+     * start: `SubscriptionService` has the catalog memoised so nothing is
+     * re-read, and `GeoService` asks the server again because its first answer
+     * was `null` and a failure is deliberately not cached (`CLAUDE.md` §4.4).
+     * The request count is asserted for that reason — if the memo ever started
+     * caching a `null`, this would fail on the count rather than mysteriously
+     * on the currency.
+     *
+     * Nothing is measured here. The card's height across a change of currency
+     * is already pinned by the test above, which drives the same state change
+     * through the control.
      */
     test('moves the checked radio', async ({ page }) => {
-      const geo = await holdGeoRead(page, 'BR');
+      let country: string | null = null;
+      const geo = { requests: 0 };
+      await page.route('**/api/geo', async (route) => {
+        geo.requests += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ country }),
+        });
+      });
 
+      // The server cannot say yet, so the page settles on the dollar price —
+      // the state a reader is in for as long as the answer is outstanding.
       await page.goto('/pricing');
-
-      // The control is on screen and quoting dollars while the server is still
-      // being waited on — the state a real reader sees for those two seconds.
       await expect(page.getByTestId('currency-usd')).toBeChecked();
+      await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
 
-      geo.release();
+      country = 'BR';
+      await page.getByRole('link', { name: 'Back to game', exact: true }).click();
+      await expect(page).toHaveURL(/\/$/);
+      await page.goBack();
 
       await expect(page.getByTestId('currency-brl')).toBeChecked();
       await expect(page.getByTestId('pro-price')).toHaveText(/^R\$\s5,90$/);
-      expect(geo.held.requests, 'geo requests held open by the intercept').toBeGreaterThan(0);
+      expect(geo.requests, 'geo requests the page made').toBeGreaterThan(1);
     });
 
     /**
