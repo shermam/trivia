@@ -294,6 +294,36 @@ export interface NewQuestionReportDoc {
   createdAt: number;
 }
 
+/**
+ * A filed report as the review queue reads it back (`FEAT-026`).
+ *
+ * **`reportedBy` is absent on purpose, and its absence is the feature.** A
+ * reviewer needs the complaint, not the complainant, and the uid is the one
+ * field in the document that identifies a person. `firestore.rules` cannot
+ * return a subset of a document, so the narrowing happens in
+ * `ReviewerService.getQuestionReports` — and leaving the field off this type is
+ * what stops a template ever being written that renders it.
+ */
+export interface QuestionReport {
+  /**
+   * The `{window}-{slot}-{uid}` document ID: the stable key a `@for` tracks by
+   * (`CLAUDE.md` §4.4). It **ends in the reporter's uid**, so it is a key and
+   * never something to render — the same uid the field above deliberately
+   * leaves out.
+   */
+  id: string;
+  questionId: string;
+  reason: QuestionReportReason;
+  detail?: string;
+  /**
+   * Epoch ms, or `null` for a value that is not a number — which the rules make
+   * unreachable through the app and a console-written document does not. The
+   * queue says "Unknown" rather than rendering a date it does not have, the
+   * same way an unattributed question does.
+   */
+  createdAt: number | null;
+}
+
 /** Raw shape of a question as returned by the Open Trivia DB API. */
 export interface OpenTriviaApiQuestion {
   category: string;

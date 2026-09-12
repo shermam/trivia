@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { AudioService } from '../../services/audio.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { ReviewerService } from '../../services/reviewer.service';
@@ -63,6 +64,12 @@ export class TopBarComponent {
   protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly themeService = inject(ThemeService);
+  /**
+   * Read for `isMuted` alone — the drawer is where the mute lives because it
+   * is the one surface reachable on a phone mid-question (`FEAT-003`), and the
+   * top bar's own controls are `hidden sm:flex`. Nothing here plays a cue.
+   */
+  protected readonly audioService = inject(AudioService);
   /**
    * Decides whether to show the review link, and nothing else. Rendering it
    * is a convenience; `firestore.rules` is what makes the page's buttons
@@ -355,6 +362,10 @@ export class TopBarComponent {
 
   protected toggleTheme(): void {
     this.themeService.toggle();
+  }
+
+  protected toggleSound(): void {
+    this.audioService.toggleMute();
   }
 
   protected closeMenu(): void {

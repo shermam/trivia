@@ -10,9 +10,12 @@ import { questionsFixture, stubExtraCategory, stubOpenTrivia } from '../../suppo
  * Finding H4 — the reporting path for community questions, driven as an
  * anonymous player on purpose: most players never sign in, and the whole
  * design decision was that reporting works for them. The written document is
- * asserted through the Admin SDK (`firebase.getQuestionReports`), because
- * clients are forbidden from reading `question_reports` back — the UI saying
- * "Reported" proves nothing about the write on its own.
+ * asserted through the Admin SDK (`firebase.getQuestionReports`), because the
+ * player who files a report cannot read it back: `firestore.rules` admits only
+ * the appointed reviewers, and an anonymous session is never one of them
+ * (`FEAT-026`). The UI saying "Reported" proves nothing about the write on its
+ * own. The reviewer's side of that seam — the report reaching the queue and
+ * being acted on — is `authenticated/review-queue.spec.ts`.
  *
  * Reporting starts *during* the game: a flag on the question the player is
  * looking at, and game-over then leads with what they flagged. The dialog is
