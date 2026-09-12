@@ -17,6 +17,7 @@ import { giveUpAfter } from '../utils/give-up-after.util';
 import { shuffleArray } from '../utils/shuffle.util';
 import { DailyGameLimitService } from './daily-game-limit.service';
 import { GamePersistenceService } from './game-persistence.service';
+import { SeenQuestionsService } from './seen-questions.service';
 import { TriviaService } from './trivia.service';
 
 /**
@@ -54,6 +55,7 @@ export class GameControllerService {
   private readonly triviaService = inject(TriviaService);
   private readonly dailyLimit = inject(DailyGameLimitService);
   private readonly persistence = inject(GamePersistenceService);
+  private readonly seenQuestions = inject(SeenQuestionsService);
   private readonly router = inject(Router);
 
   readonly config = signal<GameConfig | null>(null);
@@ -521,7 +523,26 @@ export class GameControllerService {
     this.record(SKIPPED);
   }
 
+  /**
+   * The one place a question's outcome is written down — and therefore the one
+   * place it is marked as seen (`FEAT-034`).
+   *
+   * All four outcomes come through here: a correct answer, a wrong one, a
+   * timeout and a skip. That is exactly the set the seen-set wants, because
+   * all four mean the player read the question — and it is why the mark lives
+   * at this funnel rather than at the two public methods above, which would be
+   * two call sites to keep in step and a third to forget when a fifth outcome
+   * arrives. Drawing a question and abandoning the game reaches nothing here,
+   * so a closed tab never burns questions the player was never shown.
+   *
+   * Fire-and-forget, and `markSeen` never rejects: a storage failure costs
+   * deduplication, never the answer being recorded.
+   */
   private record(outcome: PickedAnswer): void {
+    const question = this.currentQuestion();
+    if (question) {
+      void this.seenQuestions.markSeen(question);
+    }
     this.answerHistory.update((history) => [...history, outcome]);
   }
 

@@ -4,9 +4,32 @@ import { provideHttpClient } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 import { TriviaQuestion } from '../models/question.model';
+import { seenKeyFor } from '../utils/seen-key.util';
 import { FirebaseService } from './firebase.service';
 import { OfflineQuestionsService } from './offline-questions.service';
+import { SeenQuestionsService } from './seen-questions.service';
 import { TriviaService } from './trivia.service';
+
+/**
+ * A device that has answered nothing, so every draw takes the plain path
+ * (`FEAT-034`).
+ *
+ * Stubbed rather than left to the real service for the reason
+ * `game-controller.service.spec.ts` stubs the daily allowance: `ng test` runs
+ * with `--isolate` false, so spec files share one `fake-indexeddb`, and the
+ * seen-set is written by another file in this run. A real read here would make
+ * the question counts these tests assert depend on whether
+ * `game-controller.service.spec.ts` happened to go first.
+ *
+ * It is also just correct on its own terms — nothing in these describes is
+ * about deduplication. The ones that are provide their own set below.
+ */
+function nothingSeenYet() {
+  return {
+    provide: SeenQuestionsService,
+    useValue: { readSeenSet: () => Promise.resolve(null), markSeen: () => Promise.resolve() },
+  };
+}
 
 /** Opens its own short-lived connection so it can `close()` afterward instead of leaving one dangling. */
 function clearOfflineDb(): Promise<void> {
@@ -65,6 +88,7 @@ describe('TriviaService offline fallback', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: FirebaseService, useValue: { getCustomQuestions: () => of([]) } },
+        nothingSeenYet(),
       ],
     });
     httpMock = TestBed.inject(HttpTestingController);
@@ -267,6 +291,7 @@ describe('TriviaService answer identity', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: FirebaseService, useValue: { getCustomQuestions: () => of([]) } },
+        nothingSeenYet(),
       ],
     });
   });
@@ -356,6 +381,7 @@ describe('TriviaService category caching', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: FirebaseService, useValue: { getCustomQuestions: () => of([]) } },
+        nothingSeenYet(),
       ],
     });
     httpMock = TestBed.inject(HttpTestingController);
@@ -423,6 +449,7 @@ describe('TriviaService entity decoding is per source', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: FirebaseService, useValue: { getCustomQuestions: () => of(customQuestions) } },
+        nothingSeenYet(),
       ],
     });
     httpMock = TestBed.inject(HttpTestingController);
@@ -494,6 +521,7 @@ describe('TriviaService contributor attribution passes through the mapper', () =
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: FirebaseService, useValue: { getCustomQuestions: () => of(customQuestions) } },
+        nothingSeenYet(),
       ],
     });
   }
@@ -572,6 +600,7 @@ describe('TriviaService custom-question queries (C1)', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: FirebaseService, useValue: { getCustomQuestions } },
+        nothingSeenYet(),
       ],
     });
     return { service: TestBed.inject(TriviaService), getCustomQuestions };
@@ -618,5 +647,378 @@ describe('TriviaService custom-question queries (C1)', () => {
       difficulty: '',
       limit: 5,
     });
+  });
+});
+
+/**
+ * `FEAT-034` — the draw stops serving questions this device has already
+ * answered, and the two halves that make that possible.
+ *
+ * Everything the draw reads is stubbed here: the seen-set, the shared bank and
+ * the offline pool. That is deliberate — this is about the *selection*, and
+ * the storage each of those three sits on has its own spec. The wiring that
+ * fills the seen-set lives in `game-controller.service.spec.ts`.
+ */
+describe('TriviaService deduplication (FEAT-034)', () => {
+  interface DrawStubs {
+    seen: Record<string, number> | null;
+    bank?: unknown[];
+    pool?: TriviaQuestion[];
+  }
+
+  function customDoc(id: string) {
+    return {
+      id,
+      category: 'Science',
+      type: 'multiple',
+      difficulty: 'easy',
+      question: `Question ${id}?`,
+      correct_answer: 'A',
+      incorrect_answers: ['B', 'C', 'D'],
+    };
+  }
+
+  function poolQuestion(id: string, question: string): TriviaQuestion {
+    return { ...makeOfflineQuestion(question), id };
+  }
+
+  function configure({ seen, bank = [], pool = [] }: DrawStubs) {
+    const getCustomQuestions = vi.fn(() => of(bank));
+    const getMatchingQuestions = vi.fn(() => Promise.resolve(pool));
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions } },
+        {
+          provide: OfflineQuestionsService,
+          useValue: { getMatchingQuestions, getOfflineQuestions: () => Promise.resolve([]) },
+        },
+        {
+          provide: SeenQuestionsService,
+          useValue: {
+            readSeenSet: () =>
+              Promise.resolve(seen === null ? null : new Map(Object.entries(seen))),
+            markSeen: () => Promise.resolve(),
+          },
+        },
+      ],
+    });
+    return {
+      service: TestBed.inject(TriviaService),
+      httpMock: TestBed.inject(HttpTestingController),
+      getCustomQuestions,
+      getMatchingQuestions,
+    };
+  }
+
+  function customGame(amount: number) {
+    return { amount, category: '', difficulty: '', source: 'custom', timeLimit: 15 } as const;
+  }
+
+  function openTriviaGame(amount: number) {
+    return { amount, category: '', difficulty: '', source: 'open_trivia', timeLimit: 15 } as const;
+  }
+
+  /** One Open Trivia DB result, as the API shapes it. */
+  function openTriviaResult(question: string) {
+    return {
+      category: 'Science',
+      type: 'multiple',
+      difficulty: 'easy',
+      question,
+      correct_answer: 'A',
+      incorrect_answers: ['B', 'C', 'D'],
+    };
+  }
+
+  /** Ids, sorted — `preferUnseen` shuffles, so the order is not something to assert on. */
+  function ids(questions: TriviaQuestion[]): string[] {
+    return questions.map((question) => question.id).sort();
+  }
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('serves the questions this device has not answered', async () => {
+    const { service } = configure({
+      seen: { 'custom:c1': 100, 'custom:c2': 200 },
+      bank: ['c1', 'c2', 'c3', 'c4'].map(customDoc),
+    });
+
+    expect(ids(await service.getQuestions(customGame(2)))).toEqual(['c3', 'c4']);
+  });
+
+  /**
+   * With a small bank everything is eventually seen, and the draw has to keep
+   * working. Failing, or quietly serving a four-question game, would make the
+   * feature worse than not having it — so the remainder comes from the ones
+   * the player is least likely to remember.
+   */
+  it('tops up with the least-recently-seen rather than shortening the game', async () => {
+    const { service } = configure({
+      seen: { 'custom:c1': 300, 'custom:c2': 100, 'custom:c3': 200 },
+      bank: ['c1', 'c2', 'c3'].map(customDoc),
+    });
+
+    expect(ids(await service.getQuestions(customGame(2)))).toEqual(['c2', 'c3']);
+  });
+
+  /**
+   * The order is load-bearing rather than incidental, in two directions. New
+   * material first is the right way round for a player who abandons a round
+   * halfway; and the top-up arriving in a *stable* least-recently-seen order
+   * is what keeps a second game reproducible — `sign-in-save-score.spec.ts`
+   * plays two rounds in one browser and answers by position, and a draw that
+   * reshuffled the second one would break it for a reason that has nothing to
+   * do with what it is testing.
+   */
+  it('serves the unseen first and appends the top-up oldest-first', async () => {
+    const { service } = configure({
+      seen: { 'custom:c1': 300, 'custom:c2': 100, 'custom:c3': 200 },
+      bank: ['c1', 'c2', 'c3', 'c4'].map(customDoc),
+    });
+
+    const drawn = await service.getQuestions(customGame(3));
+
+    expect(drawn.map((question) => question.id)).toEqual(['c4', 'c2', 'c3']);
+  });
+
+  it('still fills the game when every question in the bank has been answered', async () => {
+    const bankIds = ['c1', 'c2', 'c3', 'c4', 'c5'];
+    const { service } = configure({
+      seen: Object.fromEntries(bankIds.map((id, index) => [`custom:${id}`, index + 1])),
+      bank: bankIds.map(customDoc),
+    });
+
+    expect(ids(await service.getQuestions(customGame(5)))).toEqual(bankIds);
+  });
+
+  it('never serves the same question twice in one round, whichever side it came from', async () => {
+    const { service, httpMock } = configure({
+      seen: { 'otdb:whatever': 100 },
+      // The pool holds the same question the API just returned. One candidate,
+      // not two — otherwise the reserve could put a copy of the fetched
+      // question back into the round it was already in.
+      pool: [poolQuestion('cached', 'Who wrote Hamlet?')],
+    });
+
+    const promise = service.getQuestions(openTriviaGame(2));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        results: [openTriviaResult('Who wrote Hamlet?'), openTriviaResult('Who wrote Macbeth?')],
+      });
+
+    // Sorted: both are unseen, and the unseen are shuffled among themselves.
+    const drawn = await promise;
+    expect(drawn.map((question) => question.question).sort()).toEqual([
+      'Who wrote Hamlet?',
+      'Who wrote Macbeth?',
+    ]);
+    httpMock.verify();
+  });
+
+  /**
+   * The one path in the draw that can hand back a shorter game than the bank
+   * could have filled, and it is the right trade rather than an oversight.
+   * Two questions in one Open Trivia DB page whose wording normalises alike
+   * are one candidate — collapsing them is the whole point of a content hash —
+   * and inside a page of exactly `amount` there is nothing behind them to
+   * promote. A repeat inside a single round is more noticeable than a
+   * four-question five.
+   */
+  it('collapses two identically-worded questions in one page, one question short', async () => {
+    const { service, httpMock } = configure({ seen: { 'otdb:whatever': 100 } });
+
+    const promise = service.getQuestions(openTriviaGame(2));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        // Same question, different spacing and case — which is exactly what
+        // `normaliseQuestionText` exists to see through.
+        results: [openTriviaResult('Who wrote Hamlet?'), openTriviaResult('who  wrote hamlet? ')],
+      });
+
+    expect(await promise).toHaveLength(1);
+    httpMock.verify();
+  });
+
+  /**
+   * The read-width rule. A page of exactly the game's question count has
+   * nothing to substitute *with*, so the deduplicating draw reads a bounded
+   * multiple — and a device that has answered nothing reads exactly what it
+   * always did, which is what keeps finding C1's bound where it was for
+   * everyone who cannot benefit from widening it.
+   */
+  it('reads twice the game from the bank when there is a seen-set to filter against', async () => {
+    const { service, getCustomQuestions } = configure({ seen: { 'custom:c1': 1 } });
+
+    await service.getQuestions(customGame(5));
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({ category: '', difficulty: '', limit: 10 });
+  });
+
+  it('reads exactly the game when the device has answered nothing', async () => {
+    const { service, getCustomQuestions } = configure({ seen: null });
+
+    await service.getQuestions(customGame(5));
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({ category: '', difficulty: '', limit: 5 });
+  });
+
+  it('caps the widened read, so the longest game does not read fifty documents twice', async () => {
+    const { service, getCustomQuestions } = configure({ seen: { 'custom:c1': 1 } });
+
+    await service.getQuestions(customGame(25));
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({ category: '', difficulty: '', limit: 50 });
+  });
+
+  it('does not consult the offline pool at all on a plain draw', async () => {
+    const { service, getMatchingQuestions } = configure({ seen: null });
+
+    await service.getQuestions(customGame(5));
+
+    expect(getMatchingQuestions).not.toHaveBeenCalled();
+  });
+
+  /**
+   * **A community question is never substituted from the pool, and this is a
+   * moderation rule rather than a cost one.** A pooled question was approved
+   * when it was fetched and may have been rejected since; the pool stores no
+   * `status` and no client may re-check one, so a draw that reached for it
+   * would put a withdrawn question back into an online game — the outcome
+   * review-before-publish exists to prevent. The widened bank read is this
+   * source's substitute supply, and every candidate it yields came from a
+   * query filtered on `status == 'approved'` moments earlier.
+   *
+   * Asserted as "the pool is not even read", not as "the result happens to
+   * hold no pooled question": the second passes whenever the pool is empty,
+   * which is most of the time.
+   */
+  it('never draws on the offline pool for a community question, seen-set or not', async () => {
+    const { service, getMatchingQuestions } = configure({
+      seen: { 'custom:c1': 100, 'custom:c2': 200 },
+      bank: ['c1', 'c2'].map(customDoc),
+      pool: [{ ...poolQuestion('cached-1', 'Cached one?'), source: 'custom' as const }],
+    });
+
+    const drawn = await service.getQuestions(customGame(5));
+
+    expect(getMatchingQuestions).not.toHaveBeenCalled();
+    // Both were answered and there is nothing else approved to swap in, so the
+    // round repeats them — which is the honest outcome when the bank is
+    // exhausted, and better than serving something nobody has vouched for.
+    expect(ids(drawn)).toEqual(['c1', 'c2']);
+  });
+
+  /**
+   * **The pool substitutes; it never supplies** — live for Open Trivia DB,
+   * which is the one source that has a reserve. Letting it lengthen a draw
+   * would turn "no questions match this filter", a real result `getQuestions`
+   * deliberately leaves alone, into a game served silently from cache with no
+   * offline banner to say so; the fallback is for a *failed* fetch.
+   */
+  it('an empty Open Trivia response stays empty, whatever the pool holds', async () => {
+    const { service, httpMock } = configure({
+      seen: { 'otdb:whatever': 100 },
+      pool: [poolQuestion('cached', 'Cached question?')],
+    });
+
+    const promise = service.getQuestions(openTriviaGame(5));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({ response_code: 1, results: [] });
+
+    expect(await promise).toEqual([]);
+    httpMock.verify();
+  });
+
+  it('a short Open Trivia page stays short', async () => {
+    const seenText = 'Served before?';
+    const { service, httpMock } = configure({
+      seen: { [seenKeyFor(makeOfflineQuestion(seenText))]: 100 },
+      pool: [poolQuestion('cached-1', 'Cached one?'), poolQuestion('cached-2', 'Cached two?')],
+    });
+
+    const promise = service.getQuestions(openTriviaGame(5));
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({ response_code: 0, results: [openTriviaResult(seenText)] });
+
+    // The one question the API returned has been answered and the pool holds
+    // two that have not, so its slot is substituted — but there is still only
+    // one slot, because one is what the network supplied. *Which* of the two
+    // unseen fills it is a shuffle, so the assertion is that the repeat did
+    // not survive rather than which replacement won.
+    const drawn = await promise;
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].id.startsWith('cached-')).toBe(true);
+    httpMock.verify();
+  });
+
+  /**
+   * Open Trivia DB gets no widened request — its `amount` is a requirement
+   * rather than a ceiling, so asking for more than a narrow category holds
+   * returns `response_code: 1` and no questions at all, and its rate limit
+   * refuses a second call in the same draw. Its substitutions come from the
+   * offline pool instead.
+   */
+  it('asks Open Trivia DB for exactly the game, seen-set or not', async () => {
+    const { service, httpMock } = configure({ seen: { 'otdb:whatever': 1 } });
+
+    const promise = service.getQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'open_trivia',
+      timeLimit: 15,
+    });
+    const request = httpMock.expectOne((r) => r.url === 'https://opentdb.com/api.php');
+    expect(request.request.params.get('amount')).toBe('5');
+    request.flush({ response_code: 0, results: [] });
+    await promise;
+    httpMock.verify();
+  });
+
+  it('substitutes an Open Trivia repeat with an unseen question from the offline pool', async () => {
+    const cached = poolQuestion('cached-1', 'A question from the pool?');
+    const { service, httpMock, getMatchingQuestions } = configure({
+      seen: { [seenKeyFor(makeOfflineQuestion('Served before?'))]: 100 },
+      pool: [cached],
+    });
+
+    const promise = service.getQuestions({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'open_trivia',
+      timeLimit: 15,
+    });
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        results: [
+          {
+            category: 'Science',
+            type: 'multiple',
+            difficulty: 'easy',
+            question: 'Served before?',
+            correct_answer: 'A',
+            incorrect_answers: ['B', 'C', 'D'],
+          },
+        ],
+      });
+
+    const drawn = await promise;
+    expect(drawn.map((question) => question.question)).toEqual(['A question from the pool?']);
+    // Source-scoped, and filtered by the game's own category/difficulty — a
+    // substitution that ignored either would drop an off-topic question into a
+    // game the player filtered.
+    expect(getMatchingQuestions).toHaveBeenCalledWith('open_trivia', '', '');
+    httpMock.verify();
   });
 });

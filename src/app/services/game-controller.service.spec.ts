@@ -11,10 +11,12 @@ import {
   answeredWith,
 } from '../models/question.model';
 import { maxScoreFor } from '../models/scoring';
+import { seenKeyFor } from '../utils/seen-key.util';
 import { DailyGameLimitService } from './daily-game-limit.service';
 import { GameControllerService } from './game-controller.service';
 import { GamePersistenceService } from './game-persistence.service';
-import { OfflineDbService } from './offline-db.service';
+import { OfflineDbService, SEEN_QUESTIONS_STORE } from './offline-db.service';
+import { SeenQuestionsService } from './seen-questions.service';
 import { TriviaService } from './trivia.service';
 
 /**
@@ -52,14 +54,61 @@ function noDailyLimit() {
   };
 }
 
-/** Wipes the persisted game between tests, via the service that owns the format. */
+/**
+ * Wipes the persisted game between tests, via the service that owns the format
+ * — and the seen-set with it, which is not hygiene but isolation.
+ *
+ * Answering a question marks it seen (`FEAT-034`), and `ng test` runs with
+ * `--isolate` false, so these writes land in the same `fake-indexeddb`
+ * `trivia.service.spec.ts` draws against. Leaving them behind would make that
+ * file's question counts depend on which spec ran first, which is the class of
+ * cross-file flake the daily-allowance stub above exists to prevent.
+ */
 async function clearSavedGame(): Promise<void> {
   TestBed.configureTestingModule({});
   await TestBed.inject(GamePersistenceService).clear();
+  await clearSeenQuestions();
   // Hygiene, not load-bearing: the schema spec uses its own databases. Closing
   // just keeps this file from leaking a connection per test.
   await TestBed.inject(OfflineDbService).close();
   TestBed.resetTestingModule();
+}
+
+async function clearSeenQuestions(): Promise<void> {
+  const db = await TestBed.inject(OfflineDbService).open();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(SEEN_QUESTIONS_STORE, 'readwrite');
+    tx.objectStore(SEEN_QUESTIONS_STORE).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error as Error);
+  });
+}
+
+/**
+ * Every key the seen-set holds right now, sorted so an assertion is about the
+ * set rather than about `getAll()`'s ordering — several marks inside one
+ * millisecond carry the same `seenAt`, and the order they come back in is not
+ * something this feature promises.
+ */
+async function readSeenKeys(): Promise<string[]> {
+  const seen = await TestBed.inject(SeenQuestionsService).readSeenSet();
+  return [...(seen ?? new Map<string, number>()).keys()].sort();
+}
+
+/**
+ * The seen-set as it settles.
+ *
+ * `record()` marks fire-and-forget — a quiz must not wait on IndexedDB to
+ * register an answer — so a single read taken straight after answering is a
+ * race, not an assertion (`CLAUDE.md` §4.6). Retried through `vi.waitFor`,
+ * which is the retrying form, and which also fails on the *unexpected extra*
+ * mark rather than only on the missing one.
+ */
+function expectSeenKeys(expected: string[]): Promise<void> {
+  return vi.waitFor(async () => expect(await readSeenKeys()).toEqual([...expected].sort()), {
+    timeout: 5_000,
+    interval: 10,
+  });
 }
 
 /**
@@ -1072,5 +1121,99 @@ describe('GameControllerService lifelines (FEAT-002)', () => {
     service.resetGame();
 
     expect(service.lifelines()).toEqual(ALL_LIFELINES_AVAILABLE);
+  });
+});
+
+/**
+ * `FEAT-034`. A question counts as *seen* the moment it resolves — and only
+ * then.
+ *
+ * The four outcomes are the whole contract: a correct answer, a wrong one, a
+ * timeout and a skip all mean the player read the question, so all four mark
+ * it. Drawing a question and never reaching it does not, which is what keeps a
+ * closed tab from silently burning questions nobody was shown.
+ *
+ * Driven through the controller rather than through `SeenQuestionsService`
+ * directly, because the thing that can regress is the wiring: the mark lives
+ * at `record()`, the one funnel all four outcomes pass through, and a fifth
+ * outcome added past it would be silently unmarked.
+ */
+describe('GameControllerService seen-set (FEAT-034)', () => {
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(async () => {
+    // Reset first: `clearSavedGame` configures a module of its own, which the
+    // TestBed refuses while this test's is still instantiated.
+    TestBed.resetTestingModule();
+    await clearSavedGame();
+  });
+
+  it('marks a question answered correctly', async () => {
+    const service = setup(2);
+    const question = service.questions()[0];
+
+    service.registerAnswer(question.all_answers[0]);
+
+    await expectSeenKeys([seenKeyFor(question)]);
+  });
+
+  it('marks a question answered wrongly', async () => {
+    const service = setup(2);
+    const question = service.questions()[0];
+
+    service.registerAnswer(question.all_answers[1]);
+
+    await expectSeenKeys([seenKeyFor(question)]);
+  });
+
+  it('marks a question the clock ran out on', async () => {
+    const service = setup(2);
+    const question = service.questions()[0];
+
+    service.registerAnswer(null);
+
+    await expectSeenKeys([seenKeyFor(question)]);
+  });
+
+  it('marks a question the player skipped', async () => {
+    const service = setup(2);
+    const question = service.questions()[0];
+
+    service.registerSkippedQuestion();
+
+    await expectSeenKeys([seenKeyFor(question)]);
+  });
+
+  it('marks each question of a round exactly once, as it resolves', async () => {
+    const service = setup(3);
+    const [first, second, third] = service.questions();
+
+    service.registerAnswer(first.all_answers[0]);
+    service.advanceQuestion();
+    service.registerSkippedQuestion();
+    service.advanceQuestion();
+    service.registerAnswer(null);
+
+    await expectSeenKeys([seenKeyFor(first), seenKeyFor(second), seenKeyFor(third)]);
+  });
+
+  /**
+   * The case the "mark at answer" decision exists for: a player who opens a
+   * game and walks away has not been shown anything, and a seen-set that
+   * counted the draw would spend the bank on questions nobody read.
+   */
+  it('marks nothing when a game is drawn and abandoned unanswered', async () => {
+    const service = setup(3);
+
+    service.advanceQuestion();
+    service.advanceQuestion();
+    service.resetGame();
+
+    // Given a moment to be wrong in: the mark is fire-and-forget, so asserting
+    // an absence immediately would pass against a mark that simply had not
+    // landed yet.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await readSeenKeys()).toEqual([]);
   });
 });

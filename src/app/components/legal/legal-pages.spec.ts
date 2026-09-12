@@ -257,6 +257,23 @@ describe('legal pages', () => {
   });
 
   /**
+   * The browser-storage list is exhaustive by construction — it is the answer
+   * to "what does this app keep on my device", and a reader has no other way
+   * to check it. `FEAT-034` added a store and three claims that are promises
+   * rather than descriptions: the cap, that the answer itself is not recorded,
+   * and that nothing leaves the device. Each of them is one refactor away from
+   * being false, and none of them would fail anything else.
+   */
+  it('discloses the seen-question store, its bound, and what it does not record', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('a list of the questions you have already answered');
+    expect(text).toContain('at most 2,000 entries and the oldest go first');
+    expect(text).toContain('Nothing records which answer you gave or whether you were right');
+    expect(text).toContain('playing on another device starts again');
+  });
+
+  /**
    * `FEAT-003` added a browser-storage key, and this list is exhaustive by
    * construction: it opens by saying the app sets no cookies and uses the
    * browser's own storage "instead", so a key missing from it is the page
