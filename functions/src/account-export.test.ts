@@ -94,6 +94,32 @@ test('keeps each leaderboard entry labelled with the board it came from', () => 
 });
 
 /**
+ * `FEAT-028` added a board per country under each timing constraint, and an
+ * export that returned only the global rows would answer a data-access request
+ * with less than the app publishes — the regional entry carries the player's
+ * name, score *and* the country they declared.
+ *
+ * Two rows on the same board is the shape worth pinning: `board` alone no
+ * longer identifies an entry, so it is the document's own `region` field that
+ * tells the global row from the Brazilian one, and it has to survive the
+ * spread.
+ */
+test('carries a regional entry alongside the global one on the same board', () => {
+  const result = buildAccountExport({
+    ...base,
+    leaderboardEntries: [
+      { board: '15', score: 8, totalQuestions: 10 },
+      { board: '15', region: 'BR', score: 8, totalQuestions: 10 },
+    ],
+  });
+
+  assert.deepEqual(
+    result.leaderboardEntries.map((entry) => entry['region']),
+    [undefined, 'BR'],
+  );
+});
+
+/**
  * The lifetime totals from `users/{uid}`. Two rows, because the absent case is
  * the one that matters: the document is created lazily on the first completed
  * game, so an account that has never finished one legitimately has nothing —

@@ -7,6 +7,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { REGION_CODES } from '../src/app/models/regions';
 import { MAX_SCORE_MULTIPLIER } from '../src/app/models/scoring';
 import {
   asAnonymous,
@@ -54,6 +55,26 @@ async function seedExisting(limit: string, uid: string, score: number) {
     await setDoc(
       doc(ctx.firestore(), 'leaderboards', limit, 'entries', uid),
       boardEntry(uid, limit, { score }),
+    );
+  });
+}
+
+/** A schema-valid regional entry: the board document plus the country it is published under. */
+const regionalEntry = (
+  uid: string,
+  limit: string,
+  region: string,
+  overrides: Record<string, unknown> = {},
+) => validEntry(uid, { timeLimit: limit, region, ...overrides });
+
+const regionalRef = (ctx: RulesTestContext, limit: string, region: string, uid: string) =>
+  doc(ctx.firestore(), 'leaderboards', limit, 'regions', region, 'entries', uid);
+
+async function seedExistingRegional(limit: string, region: string, uid: string, score: number) {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(
+      doc(ctx.firestore(), 'leaderboards', limit, 'regions', region, 'entries', uid),
+      regionalEntry(uid, limit, region, { score }),
     );
   });
 }
@@ -480,6 +501,338 @@ describe('leaderboard (pre-G7): retired, read-only', () => {
       setDoc(
         doc(asVerifiedPassword(env, 'u').firestore(), 'leaderboard', 'u'),
         validEntry('u', { score: 9 }),
+      ),
+    );
+  });
+});
+
+/**
+ * `FEAT-028`. A board per country per timing constraint, one path segment
+ * below the boards above, so a player who will never crack the global top ten
+ * has one they can actually compete on.
+ *
+ * **Two things are new here and everything else is inherited.** The new half
+ * is the `region` dimension — which regions exist, that the path and the field
+ * must agree, and that the improving-score rule is scoped per country as well
+ * as per board. The inherited half is every bound `hasValidScoreFields()` puts
+ * on a global entry, which has to hold here too or the forgery the `score`
+ * ceiling exists to refuse simply moves one path segment sideways; the cases
+ * below re-prove the ones a regional path could plausibly have been wired
+ * around rather than re-proving all of them.
+ */
+describe('regional leaderboards: which regions exist (FEAT-028)', () => {
+  /*
+   * **The list is duplicated, so it is pinned** — the same arrangement as
+   * `maxScoreMultiplier()` above and for the same reason: the rules copy is
+   * the authority, the client copy exists so the picker cannot offer a country
+   * the rules will refuse, and two lists that can drift are a save that fails
+   * with a bare `permission-denied` for whoever lives in the country that
+   * drifted. Read out of the rules text rather than restated here, so this
+   * cannot agree with a list the emulator never loaded.
+   */
+  it('agrees with the client about which countries exist', () => {
+    const rules = readFileSync('firestore.rules', 'utf8');
+    const declared = /function isValidRegion\(region\)\s*\{\s*return region in \[([^\]]*)\]/.exec(
+      rules,
+    );
+
+    expect(declared, 'isValidRegion() not found in firestore.rules').not.toBeNull();
+    const codes = [...(declared?.[1] ?? '').matchAll(/'([A-Z]{2})'/g)].map((match) => match[1]);
+
+    expect(codes.length, 'the rules list is not empty').toBeGreaterThan(200);
+    expect(codes).toEqual([...REGION_CODES]);
+  });
+
+  /*
+   * The accept half, and it carries most of the weight: `region in [...]` over
+   * 249 entries is exactly the kind of rules expression that can fail 100%
+   * closed — past an evaluation budget, or written inside-out — and look
+   * perfectly correct doing so (`CLAUDE.md` §4.6). One code from each end of
+   * the list and one from the middle, because a limit that bit would bite the
+   * last entry first.
+   */
+  for (const region of ['AD', 'BR', 'ZW']) {
+    it(`accepts a write to the "${region}" board`, async () => {
+      await assertSucceeds(
+        setDoc(
+          regionalRef(asVerifiedPassword(env, 'u'), '15', region, 'u'),
+          regionalEntry('u', '15', region),
+        ),
+      );
+    });
+
+    it(`serves a public read of the "${region}" board`, async () => {
+      await assertSucceeds(
+        getDocs(
+          collection(
+            asSignedOut(env).firestore(),
+            'leaderboards',
+            '15',
+            'regions',
+            region,
+            'entries',
+          ),
+        ),
+      );
+    });
+  }
+
+  for (const limit of BOARDS) {
+    it(`accepts a Brazilian entry on the "${limit}" board`, async () => {
+      await assertSucceeds(
+        setDoc(
+          regionalRef(asVerifiedPassword(env, 'u'), limit, 'BR', 'u'),
+          regionalEntry('u', limit, 'BR'),
+        ),
+      );
+    });
+  }
+
+  /*
+   * The region is a path segment the caller names, so an unchecked one is a
+   * public collection whose name an attacker chooses. `XK` and `UK` are the
+   * interesting rejections rather than the obvious ones: both are real
+   * two-letter codes in daily use and neither is officially assigned, so a
+   * rule written as a shape check — or a list generated from an ICU table
+   * without filtering it — would accept them.
+   */
+  for (const bogus of ['ZZ', 'XK', 'UK', 'EU', 'br', 'B', 'BRA', 'Brazil', '15']) {
+    it(`rejects a write to an undeclared region (${JSON.stringify(bogus)})`, async () => {
+      await assertFails(
+        setDoc(
+          regionalRef(asVerifiedPassword(env, 'u'), '15', bogus, 'u'),
+          regionalEntry('u', '15', bogus),
+        ),
+      );
+    });
+  }
+
+  it('rejects a read of an undeclared region', async () => {
+    await assertFails(
+      getDocs(
+        collection(asSignedOut(env).firestore(), 'leaderboards', '15', 'regions', 'ZZ', 'entries'),
+      ),
+    );
+  });
+
+  it('rejects a regional write to an undeclared board', async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '60', 'BR', 'u'),
+        regionalEntry('u', '60', 'BR'),
+      ),
+    );
+  });
+});
+
+describe('regional leaderboards: the path and the fields must agree', () => {
+  it('rejects an entry whose region names a different board', async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'PT'),
+      ),
+    );
+  });
+
+  /*
+   * `hasOnly()` accepts a subset, so nothing in the allowlist makes `region`
+   * mandatory — `data.region == region` is what does, and this is the case
+   * that fails if that clause is ever softened into a presence check.
+   */
+  it('rejects an entry with no region at all', async () => {
+    await assertFails(
+      setDoc(regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'), boardEntry('u', '15')),
+    );
+  });
+
+  it('rejects a non-string region', async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR', { region: 55 }),
+      ),
+    );
+  });
+
+  it('rejects a timeLimit naming a different board', async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR', { timeLimit: 'unlimited' }),
+      ),
+    );
+  });
+
+  /*
+   * The global board's allowlist has no `region` key and must not grow one by
+   * accident: a document carrying both would be the same entry filed under two
+   * schemas, and the global board is where every pre-`FEAT-028` row lives.
+   */
+  it('rejects a region field on the global board', async () => {
+    await assertFails(
+      setDoc(
+        entryRef(asVerifiedPassword(env, 'u'), '15', 'u'),
+        boardEntry('u', '15', { region: 'BR' }),
+      ),
+    );
+  });
+});
+
+describe('regional leaderboards: the anti-flood gate and the bounds carry over', () => {
+  const write = (overrides: Record<string, unknown>) =>
+    setDoc(
+      regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+      regionalEntry('u', '15', 'BR', overrides),
+    );
+
+  it('rejects a signed-out caller', async () => {
+    await assertFails(
+      setDoc(regionalRef(asSignedOut(env), '15', 'BR', 'u'), regionalEntry('u', '15', 'BR')),
+    );
+  });
+
+  it('rejects an anonymous player', async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asAnonymous(env, 'anon'), '15', 'BR', 'anon'),
+        regionalEntry('anon', '15', 'BR'),
+      ),
+    );
+  });
+
+  it('rejects an unverified password account', async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asUnverifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR'),
+      ),
+    );
+  });
+
+  it('allows an OAuth account without email_verified', async () => {
+    await assertSucceeds(
+      setDoc(regionalRef(asOAuth(env, 'u'), '15', 'BR', 'u'), regionalEntry('u', '15', 'BR')),
+    );
+  });
+
+  it("rejects writing to someone else's document id", async () => {
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'attacker'), '15', 'BR', 'victim'),
+        regionalEntry('victim', '15', 'BR'),
+      ),
+    );
+  });
+
+  it('rejects a uid field that disagrees with the document id', async () => {
+    await assertFails(write({ uid: 'someone-else' }));
+  });
+
+  it('rejects an unknown extra key', async () => {
+    await assertFails(write({ cheated: true }));
+  });
+
+  it('rejects an implausible score', async () => {
+    await assertFails(write({ score: 999999, totalQuestions: 999999, percentage: 100 }));
+  });
+
+  it('rejects a score one over the multiplier ceiling', async () => {
+    await assertFails(write({ score: 10 * MAX_SCORE_MULTIPLIER + 1, totalQuestions: 10 }));
+  });
+
+  it('accepts a score exactly on the multiplier ceiling', async () => {
+    await assertSucceeds(write({ score: 10 * MAX_SCORE_MULTIPLIER, totalQuestions: 10 }));
+  });
+
+  it('accepts a perfect five-question run', async () => {
+    await assertSucceeds(write({ score: 7, totalQuestions: 5, percentage: 100 }));
+  });
+
+  it('rejects an accuracy above what the score implies', async () => {
+    await assertFails(write({ score: 1, totalQuestions: 10, percentage: 100 }));
+  });
+
+  it('rejects a backdated createdAt', async () => {
+    await assertFails(write({ createdAt: Date.now() - 60 * 60 * 1000 }));
+  });
+
+  it('rejects a name over 30 chars', async () => {
+    await assertFails(write({ name: 'x'.repeat(31) }));
+  });
+
+  it('refuses a delete by the owner', async () => {
+    await seedExistingRegional('15', 'BR', 'u', 5);
+    const { deleteDoc } = await import('firebase/firestore');
+    await assertFails(deleteDoc(regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u')));
+  });
+});
+
+describe('regional leaderboards: improving-score is scoped per country', () => {
+  it('accepts a better score on the same regional board', async () => {
+    await seedExistingRegional('15', 'BR', 'u', 5);
+    await assertSucceeds(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR', { score: 6 }),
+      ),
+    );
+  });
+
+  it('rejects an equal score on the same regional board', async () => {
+    await seedExistingRegional('15', 'BR', 'u', 5);
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR', { score: 5 }),
+      ),
+    );
+  });
+
+  /*
+   * The behaviour the picker's copy promises: changing country affects future
+   * saves only, and a player's Brazilian best must not gatekeep their first
+   * Portuguese entry. If the improving-score check reached across countries,
+   * moving would silently cost the mover their new board.
+   */
+  it('accepts a lower first score in a different country', async () => {
+    await seedExistingRegional('15', 'BR', 'u', 20);
+    await assertSucceeds(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'PT', 'u'),
+        regionalEntry('u', '15', 'PT', { score: 1 }),
+      ),
+    );
+  });
+
+  it('accepts a lower first score on a different board in the same country', async () => {
+    await seedExistingRegional('15', 'BR', 'u', 20);
+    await assertSucceeds(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), 'unlimited', 'BR', 'u'),
+        regionalEntry('u', 'unlimited', 'BR', { score: 1 }),
+      ),
+    );
+  });
+
+  /*
+   * The two documents one save writes are independent, so neither
+   * improving-score floor may be read off the other: a player whose global
+   * best already stands can still be first in their own country, and the
+   * client attempts both writes for exactly this reason.
+   */
+  it('accepts a regional entry the global board would refuse', async () => {
+    await seedExisting('15', 'u', 20);
+    await assertSucceeds(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR', { score: 1 }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        entryRef(asVerifiedPassword(env, 'u'), '15', 'u'),
+        boardEntry('u', '15', { score: 1 }),
       ),
     );
   });

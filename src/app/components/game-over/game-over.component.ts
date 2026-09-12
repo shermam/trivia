@@ -20,9 +20,11 @@ import {
   LeaderboardEntry,
   NewQuestionReportDoc,
   QuestionReportReason,
+  RegionalLeaderboardEntry,
   TriviaQuestion,
   boardKey,
 } from '../../models/question.model';
+import { regionName, regionOptions } from '../../models/regions';
 import { AudioService } from '../../services/audio.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AccountService } from '../../services/account.service';
@@ -31,6 +33,7 @@ import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
+import { RegionService } from '../../services/region.service';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
@@ -74,6 +77,9 @@ interface RecapRow {
  */
 type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save';
 
+/** Which of the two boards the reader is looking at (`FEAT-028`). */
+type BoardScope = 'global' | 'regional';
+
 @Component({
   selector: 'app-game-over',
   standalone: true,
@@ -97,6 +103,7 @@ export class GameOverComponent implements OnInit {
   protected readonly embedMode = inject(EmbedModeService);
   private readonly firebaseService = inject(FirebaseService);
   private readonly audio = inject(AudioService);
+  private readonly regionService = inject(RegionService);
 
   protected readonly initialsFor = initialsFor;
 
@@ -124,6 +131,72 @@ export class GameOverComponent implements OnInit {
   protected readonly leaderboard = signal<LeaderboardEntry[]>([]);
   protected readonly isLoadingLeaderboard = signal(true);
   protected readonly leaderboardError = signal<string | null>(null);
+
+  /** Every country the picker offers, named in the reader's own language. */
+  protected readonly regionOptions = regionOptions();
+
+  /**
+   * The country the save form is currently set to publish under, or `''` for
+   * "prefer not to say" (`FEAT-028`).
+   *
+   * Seeded from the player's stored declaration and, when there is none,
+   * preselected from `RegionService.inferredRegion()` once that resolves.
+   * **The two are not the same thing**, which is why the inference lands here
+   * and never in storage: a preselection the reader can change before pressing
+   * Save is a suggestion, and a preselection written to their device is a
+   * record of where the app thinks they are.
+   *
+   * A late arrival only moves a radio and a `<select>`'s selected option —
+   * neither resizes anything — and it is suppressed once the reader has
+   * touched the control, so an answer that arrives two seconds in can never
+   * overwrite a choice already made.
+   */
+  protected readonly selectedRegion = signal<string>(this.regionService.declaredRegion() ?? '');
+
+  /** Whether the reader has used the picker this visit, which the inference must not override. */
+  private regionChosenByReader = false;
+
+  /** The country's own name, for a board heading and the toggle's label. */
+  protected readonly selectedRegionName = computed(() => {
+    const region = this.selectedRegion();
+    return region ? regionName(region) : null;
+  });
+
+  /**
+   * Which board the reader is looking at. Global by default, always.
+   *
+   * The regional option stays selectable with no country set — it explains how
+   * to get one instead of ranking anybody — because a control that disables
+   * itself is a control that has told the reader nothing about why.
+   */
+  protected readonly boardScope = signal<BoardScope>('global');
+
+  /**
+   * The toggle's two options, as data.
+   *
+   * Enumerated rather than written out twice in the template, so the two
+   * labels cannot drift into different markup — the property that keeps the
+   * pair the same size in both states is that they are one box repeated.
+   */
+  protected readonly BOARD_SCOPES: readonly { scope: BoardScope; label: string }[] = [
+    { scope: 'global', label: 'Global' },
+    { scope: 'regional', label: 'Regional' },
+  ];
+
+  /**
+   * Which population the board is ranking, in words (`FEAT-028`).
+   *
+   * Its own line under the heading rather than folded into it, so the header
+   * keeps one height across the toggle: the combined string is long enough to
+   * wrap at 390px and short enough not to at 1024px, which is exactly the
+   * viewport-dependent shift `CLAUDE.md` §4.4 describes.
+   */
+  protected readonly boardScopeLabel = computed(() => {
+    if (this.boardScope() === 'global') {
+      return 'Worldwide';
+    }
+    return this.selectedRegionName() ? `In ${this.selectedRegionName()}` : 'Your country';
+  });
 
   /**
    * How many rows the board is, in every state.
@@ -166,13 +239,29 @@ export class GameOverComponent implements OnInit {
    * empty board and a full one are the same height.
    */
   protected readonly leaderboardMessage = computed(() => {
+    // The regional tab with no country set. Not an error and not an empty
+    // board — there is no board to be empty — so it says how to get one
+    // instead of ranking nobody, and never asks for a location (`FEAT-028`).
+    if (this.boardScope() === 'regional' && !this.selectedRegion()) {
+      return this.showsRealAccount()
+        ? 'Choose your country in the save form above to see how you rank there.'
+        : 'Sign in and choose your country to see how you rank there.';
+    }
     if (this.isLoadingLeaderboard()) {
       return null;
     }
     if (this.leaderboardError()) {
       return this.leaderboardError();
     }
-    return this.leaderboard().length === 0 ? 'No scores yet. Be the first!' : null;
+    if (this.leaderboard().length === 0) {
+      // A board of one is the normal state of a country nobody has played in
+      // yet, and there is deliberately no minimum participant count — an empty
+      // national board is an invitation, not a defect.
+      return this.boardScope() === 'regional'
+        ? `No scores in ${this.selectedRegionName()} yet. Be the first!`
+        : 'No scores yet. Be the first!';
+    }
+    return null;
   });
 
   /**
@@ -431,6 +520,19 @@ export class GameOverComponent implements OnInit {
   });
 
   /**
+   * Which ranking the rank claim is about — the world, or one country.
+   *
+   * `playerRank` is read off whichever board is on screen, so the sentence has
+   * to name it: "#3 on the 15-second leaderboard" would be a false claim about
+   * the world for a player sitting third in Portugal.
+   */
+  protected readonly rankBoardLabel = computed(() =>
+    this.boardScope() === 'regional' && this.selectedRegionName()
+      ? `${this.boardLabel()} leaderboard in ${this.selectedRegionName()}`
+      : `${this.boardLabel()} leaderboard`,
+  );
+
+  /**
    * Whether there is a real, settled account behind this game — as opposed to
    * an anonymous session, or auth that has not answered yet.
    *
@@ -600,6 +702,7 @@ export class GameOverComponent implements OnInit {
     // memory (finding F4; the completeness check lives on the route, not here).
     this.playerName = this.authService.user()?.displayName ?? '';
     void this.loadLeaderboard();
+    void this.preselectRegion();
     this.recordGameResult();
     // Once per arrival at the screen, a reload included — and the reload is
     // the case worth knowing about, because the obvious guess about it is
@@ -611,6 +714,57 @@ export class GameOverComponent implements OnInit {
     // would be *queued* on a frozen clock and would arrive over the first
     // answer of the next game rather than being dropped.
     this.audio.playGameOver(this.isPerfectRound());
+  }
+
+  /**
+   * Opens the picker on the app's best guess, when the player has not already
+   * told it (`FEAT-028`).
+   *
+   * Three properties are load-bearing and each is one line. It **never
+   * overrides a declaration** — a stored country, or one the reader has
+   * touched the control for this visit — so an answer that arrives two seconds
+   * into the page cannot undo a choice made in the first two. It **stores
+   * nothing**: the guess lives in component state until the reader either
+   * changes it or saves a score under it. And it **cannot fail loudly**:
+   * `inferredRegion()` resolves to `null` for every failure there is, which is
+   * also what it resolves to locally and on a preview channel, where
+   * `/api/geo` does not exist at all.
+   */
+  private async preselectRegion(): Promise<void> {
+    if (this.regionService.declaredRegion()) {
+      return;
+    }
+    const inferred = await this.regionService.inferredRegion();
+    if (inferred && !this.regionChosenByReader && !this.regionService.declaredRegion()) {
+      this.selectedRegion.set(inferred);
+    }
+  }
+
+  /**
+   * The picker changed, which is the only event that turns a guess into a
+   * declaration.
+   *
+   * `''` is "prefer not to say" and clears the stored value rather than
+   * writing an empty one, so a reader who opts out is in the same state as one
+   * who has never chosen — no regional entry is written, and nothing about
+   * them is kept.
+   */
+  protected onRegionChange(region: string): void {
+    this.regionChosenByReader = true;
+    this.selectedRegion.set(region);
+    this.regionService.declareRegion(region || null);
+    if (this.boardScope() === 'regional') {
+      void this.loadLeaderboard();
+    }
+  }
+
+  /** The Global/Regional toggle. Re-reads the board, because it is a different collection. */
+  protected onBoardScopeChange(scope: BoardScope): void {
+    if (this.boardScope() === scope) {
+      return;
+    }
+    this.boardScope.set(scope);
+    void this.loadLeaderboard();
   }
 
   protected openSignIn(): void {
@@ -626,6 +780,24 @@ export class GameOverComponent implements OnInit {
     }
   }
 
+  /**
+   * Publishes the score — to the global board, and to the player's own
+   * country board when they have named one (`FEAT-028`).
+   *
+   * **Two independent writes, attempted together rather than in sequence.**
+   * They are separate documents under separate improving-score floors, so
+   * either can be refused while the other succeeds, and the interesting case
+   * is the common one: a player whose global best already stands can still be
+   * first in a country they have only just declared. Gating the regional write
+   * on the global one succeeding would silently deny them that, and gating it
+   * the other way round would deny the reverse.
+   *
+   * So the save has succeeded if *either* document was written, and only a
+   * round where both were refused reaches `reportSaveFailure`. That keeps the
+   * one narrated failure — "your best score is already higher" — pinned to the
+   * case it can actually verify, rather than being claimed for a round that
+   * did publish something (`CLAUDE.md` §4.4).
+   */
   async saveScore(): Promise<void> {
     const user = this.authService.user();
     const name = this.playerName.trim();
@@ -636,20 +808,34 @@ export class GameOverComponent implements OnInit {
     this.isSaving.set(true);
     this.saveError.set(null);
 
+    const entry = {
+      uid: user.uid,
+      name,
+      score: this.gameController.score(),
+      totalQuestions: this.gameController.totalQuestions(),
+      percentage: this.gameController.percentage(),
+      createdAt: Date.now(),
+      timeLimit: this.board(),
+    };
+    const region = this.selectedRegion();
+    const regionalEntry: RegionalLeaderboardEntry | null = region ? { ...entry, region } : null;
+
     try {
-      await this.firebaseService.saveHighScore({
-        uid: user.uid,
-        name,
-        score: this.gameController.score(),
-        totalQuestions: this.gameController.totalQuestions(),
-        percentage: this.gameController.percentage(),
-        createdAt: Date.now(),
-        timeLimit: this.board(),
-      });
+      const writes = [
+        this.firebaseService.saveHighScore(entry),
+        ...(regionalEntry ? [this.firebaseService.saveRegionalHighScore(regionalEntry)] : []),
+      ];
+      const outcomes = await Promise.allSettled(writes);
+
+      const rejected = outcomes.filter(
+        (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+      );
+      if (rejected.length === outcomes.length) {
+        await this.reportSaveFailure(rejected[0].reason, entry.score);
+        return;
+      }
       this.hasSaved.set(true);
       await this.loadLeaderboard();
-    } catch (error) {
-      await this.reportSaveFailure(error, this.gameController.score());
     } finally {
       this.isSaving.set(false);
     }
@@ -775,11 +961,33 @@ export class GameOverComponent implements OnInit {
     this.gameController.resetGame();
   }
 
+  /**
+   * Fetches whichever board is showing.
+   *
+   * The regional tab with no country set reads nothing at all rather than
+   * reading an empty one: there is no path to query, and a skeleton that
+   * resolves to "no scores yet" would be narrating an outcome no request
+   * produced (`CLAUDE.md` §4.4). `leaderboardMessage` says how to get a board
+   * instead.
+   */
   private async loadLeaderboard(): Promise<void> {
+    const region = this.selectedRegion();
+    const regional = this.boardScope() === 'regional';
+    if (regional && !region) {
+      this.leaderboard.set([]);
+      this.leaderboardError.set(null);
+      this.isLoadingLeaderboard.set(false);
+      return;
+    }
+
     this.isLoadingLeaderboard.set(true);
     this.leaderboardError.set(null);
     try {
-      const topScores = await firstValueFrom(this.firebaseService.getTopScores(this.board(), 10));
+      const topScores = await firstValueFrom(
+        regional
+          ? this.firebaseService.getRegionalTopScores(this.board(), region, 10)
+          : this.firebaseService.getTopScores(this.board(), 10),
+      );
       this.leaderboard.set(topScores);
     } catch {
       this.leaderboard.set([]);

@@ -79,6 +79,53 @@ service cloud.firestore {
       return limit in ['15', '30', 'unlimited'];
     }
 
+    // The countries a regional board may exist for: the officially assigned
+    // ISO 3166-1 alpha-2 codes, and nothing else (`FEAT-028`).
+    //
+    // An explicit list rather than a two-letter shape check, for the reason
+    // `isValidBoard()` is a list: the region is a path segment the caller
+    // chooses, so a shape check alone hands anyone a public collection named
+    // `ZZ` — free storage under a board no screen will ever show, and a read
+    // rule that serves it. Two letters is a shape; a country is a fact.
+    //
+    // **This list is the schema, and the client holds a copy of it**
+    // (`src/app/models/regions.ts`), because a picker offering a country the
+    // rules refuse produces a save that fails with a bare `permission-denied`
+    // on the one screen that cannot honestly explain one. A test in
+    // `firestore-tests/leaderboards.rules.spec.ts` reads the codes out of this
+    // file and pins the two lists equal, the same way `maxScoreMultiplier()`
+    // is pinned — the rules copy is the authority.
+    //
+    // Deliberately **only** the officially assigned codes. The exceptionally
+    // reserved ones (`UK`, `EU`, `XK`, `CQ`, …) and the user-assigned range
+    // are not countries anyone can be in, and admitting them would put boards
+    // in the collection that no dropdown can reach.
+    function isValidRegion(region) {
+      return region in [
+        'AD', 'AE', 'AF', 'AG', 'AI', 'AL', 'AM', 'AO', 'AQ', 'AR', 'AS', 'AT',
+        'AU', 'AW', 'AX', 'AZ', 'BA', 'BB', 'BD', 'BE', 'BF', 'BG', 'BH', 'BI',
+        'BJ', 'BL', 'BM', 'BN', 'BO', 'BQ', 'BR', 'BS', 'BT', 'BV', 'BW', 'BY',
+        'BZ', 'CA', 'CC', 'CD', 'CF', 'CG', 'CH', 'CI', 'CK', 'CL', 'CM', 'CN',
+        'CO', 'CR', 'CU', 'CV', 'CW', 'CX', 'CY', 'CZ', 'DE', 'DJ', 'DK', 'DM',
+        'DO', 'DZ', 'EC', 'EE', 'EG', 'EH', 'ER', 'ES', 'ET', 'FI', 'FJ', 'FK',
+        'FM', 'FO', 'FR', 'GA', 'GB', 'GD', 'GE', 'GF', 'GG', 'GH', 'GI', 'GL',
+        'GM', 'GN', 'GP', 'GQ', 'GR', 'GS', 'GT', 'GU', 'GW', 'GY', 'HK', 'HM',
+        'HN', 'HR', 'HT', 'HU', 'ID', 'IE', 'IL', 'IM', 'IN', 'IO', 'IQ', 'IR',
+        'IS', 'IT', 'JE', 'JM', 'JO', 'JP', 'KE', 'KG', 'KH', 'KI', 'KM', 'KN',
+        'KP', 'KR', 'KW', 'KY', 'KZ', 'LA', 'LB', 'LC', 'LI', 'LK', 'LR', 'LS',
+        'LT', 'LU', 'LV', 'LY', 'MA', 'MC', 'MD', 'ME', 'MF', 'MG', 'MH', 'MK',
+        'ML', 'MM', 'MN', 'MO', 'MP', 'MQ', 'MR', 'MS', 'MT', 'MU', 'MV', 'MW',
+        'MX', 'MY', 'MZ', 'NA', 'NC', 'NE', 'NF', 'NG', 'NI', 'NL', 'NO', 'NP',
+        'NR', 'NU', 'NZ', 'OM', 'PA', 'PE', 'PF', 'PG', 'PH', 'PK', 'PL', 'PM',
+        'PN', 'PR', 'PS', 'PT', 'PW', 'PY', 'QA', 'RE', 'RO', 'RS', 'RU', 'RW',
+        'SA', 'SB', 'SC', 'SD', 'SE', 'SG', 'SH', 'SI', 'SJ', 'SK', 'SL', 'SM',
+        'SN', 'SO', 'SR', 'SS', 'ST', 'SV', 'SX', 'SY', 'SZ', 'TC', 'TD', 'TF',
+        'TG', 'TH', 'TJ', 'TK', 'TL', 'TM', 'TN', 'TO', 'TR', 'TT', 'TV', 'TW',
+        'TZ', 'UA', 'UG', 'UM', 'US', 'UY', 'UZ', 'VA', 'VC', 'VE', 'VG', 'VI',
+        'VN', 'VU', 'WF', 'WS', 'YE', 'YT', 'ZA', 'ZM', 'ZW'
+      ];
+    }
+
     // The most a streak multiplier may be worth (`FEAT-004`), and therefore the
     // factor by which a run may out-score its own question count.
     //
@@ -125,12 +172,15 @@ service cloud.firestore {
     // old equality relaxed along the one axis the multiplier moves: an
     // unmultiplied run still satisfies it with equality, while 1 correct out of
     // 10 still cannot be published as 100%.
-    function isValidBoardEntry(uid, limit) {
+    //
+    // Every clause `hasValidScoreFields()` applies holds on a regional board
+    // as well, which is why the two allowlists share it rather than restating
+    // it: a country's board is still a public ranking a player writes about
+    // themselves (`CLAUDE.md` §4.1), and a bound enforced on one board and not
+    // the other would only move a forged entry one path segment sideways.
+    function hasValidScoreFields(uid, limit) {
       let data = request.resource.data;
-      return data.keys().hasOnly(
-                ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt', 'timeLimit']
-              )
-            && data.timeLimit == limit
+      return data.timeLimit == limit
             && data.uid == uid
             && data.name is string
             && data.name.size() > 0
@@ -146,6 +196,33 @@ service cloud.firestore {
             && data.percentage <= 100
             && data.percentage <= math.round(data.score * 100.0 / data.totalQuestions)
             && isNearRequestTime(data.createdAt);
+    }
+
+    function isValidBoardEntry(uid, limit) {
+      return request.resource.data.keys().hasOnly(
+               ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt', 'timeLimit']
+             )
+            && hasValidScoreFields(uid, limit);
+    }
+
+    // The regional entry: the same document plus the country it was published
+    // under (`FEAT-028`).
+    //
+    // `region` is required rather than merely permitted, and it is
+    // `data.region == region` that makes it so — `hasOnly()` accepts a subset,
+    // so an allowlist alone would let the key be omitted, exactly as
+    // `data.timeLimit == limit` is what requires `timeLimit`. Storing it at
+    // all is the same trade `timeLimit` makes: redundant with the path,
+    // unwidenable later against existing documents (the A10 wall), and the
+    // reason an export does not have to parse a document path to say which
+    // country an entry was published under.
+    function isValidRegionalBoardEntry(uid, limit, region) {
+      return request.resource.data.keys().hasOnly(
+               ['uid', 'name', 'score', 'totalQuestions', 'percentage', 'createdAt', 'timeLimit',
+                'region']
+             )
+            && request.resource.data.region == region
+            && hasValidScoreFields(uid, limit);
     }
 
     // A bare `scheme://host[:port]` — no path, no query, no fragment, so
@@ -756,6 +833,42 @@ service cloud.firestore {
                     && request.auth.uid == uid
                     && isValidBoard(limit)
                     && isValidBoardEntry(uid, limit)
+                    && request.resource.data.score > resource.data.score;
+      allow delete: if false;
+    }
+
+    // One board per country per timing constraint (`FEAT-028`): the same
+    // contract again, one path segment deeper, so a player can be ranked
+    // against the people near them rather than against the whole world.
+    //
+    // **A second path segment rather than a `region` field on the board
+    // above**, for the reason the board above is a subcollection rather than a
+    // `timeLimit` field: filtering a flat collection would need
+    // `where('region','==',x).orderBy('score','desc')` and therefore a
+    // composite index, and index configuration is the one thing the emulator
+    // cannot verify (D3, `data-model.md` §3). `firestore.indexes.json` is
+    // untouched by this feature.
+    //
+    // Both path segments are checked, and for the same reason: they are named
+    // by the caller. Without `isValidRegion()` the collection accepts a board
+    // called `ZZ`, publicly readable, that no screen shows and nothing sweeps.
+    //
+    // The improving-score check reads `resource.data` at *this* path, so it is
+    // scoped per country as well as per board — a player who moves country
+    // starts at nothing on the new board and keeps their entry on the old one,
+    // which is the behaviour the picker's copy promises.
+    match /leaderboards/{limit}/regions/{region}/entries/{uid} {
+      allow read: if isValidBoard(limit) && isValidRegion(region);
+      allow create: if isRealAuthedUser()
+                    && request.auth.uid == uid
+                    && isValidBoard(limit)
+                    && isValidRegion(region)
+                    && isValidRegionalBoardEntry(uid, limit, region);
+      allow update: if isRealAuthedUser()
+                    && request.auth.uid == uid
+                    && isValidBoard(limit)
+                    && isValidRegion(region)
+                    && isValidRegionalBoardEntry(uid, limit, region)
                     && request.resource.data.score > resource.data.score;
       allow delete: if false;
     }

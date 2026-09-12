@@ -284,6 +284,46 @@ describe('legal pages', () => {
    * yes-or-no. Moving the preference to an account, or growing it into a
    * volume setting that gets synced, falsifies one of those silently.
    */
+  /**
+   * `FEAT-028` publishes a country beside a player's name and score, and asks
+   * the app's own server which country they are in on a second screen. Both
+   * falsified a sentence that was true when it was written: the heading scoped
+   * the lookup to the pricing page "and nowhere else", and the leaderboard
+   * section listed what an entry holds without a country in it.
+   *
+   * Pinned on the distinction the whole design rests on rather than on the
+   * prose — that what is published is the reader's choice and never the
+   * inference — because that is the claim a refactor could quietly falsify,
+   * and the one that would matter if it did.
+   */
+  it('scopes the country lookup to the screens that make it, and to a pre-selection', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).not.toContain('on the pricing page, and nowhere else');
+    expect(text).toContain('On two screens the app asks');
+    expect(text).toContain(
+      'a country we worked out is never published on a leaderboard and never written to your account',
+    );
+  });
+
+  it('discloses that a leaderboard entry can publish a country you chose', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain(
+      'the country you chose is stored on that entry and shown beside your name and score',
+    );
+    // Deletion sweeps the country boards too, which is a promise the sweep in
+    // `functions/src/leaderboards.ts` has to keep and nothing else pins.
+    expect(text).toContain('country boards included');
+  });
+
+  it('discloses the remembered country among what is kept on the device', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('Local storage, once you have chosen a country to rank in');
+    expect(text).toContain('Only a country you chose yourself is stored here');
+  });
+
   it('discloses the sound-effects mute among what is kept on the device', async () => {
     const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
 

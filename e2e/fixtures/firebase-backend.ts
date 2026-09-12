@@ -12,6 +12,7 @@ import {
   LeaderboardEntryQuery,
   LeaderboardEntryRecord,
   LeaderboardSeed,
+  RegionalLeaderboardEntryQuery,
   ProPriceSeed,
   ProSubscriptionSeed,
   QuestionReportRecord,
@@ -289,6 +290,26 @@ export class FirebaseBackend {
     timeLimit = '15',
   }: LeaderboardEntryQuery): Promise<LeaderboardEntryRecord | null> {
     const snapshot = await this.firestore.doc(`leaderboards/${timeLimit}/entries/${uid}`).get();
+    return snapshot.exists ? (snapshot.data() as LeaderboardEntryRecord) : null;
+  }
+
+  /**
+   * One account's entry on one *country* board (`FEAT-028`), or `null`.
+   *
+   * Read back rather than looked for on screen for the reason above, and one
+   * more that only applies here: a spec proving a score reached Brazil's board
+   * and not Portugal's is asserting about two collections, and the second half
+   * — "it is *not* there" — cannot be shown by a screen that is only ever
+   * displaying one of them.
+   */
+  async getRegionalLeaderboardEntry({
+    uid,
+    region,
+    timeLimit = '15',
+  }: RegionalLeaderboardEntryQuery): Promise<LeaderboardEntryRecord | null> {
+    const snapshot = await this.firestore
+      .doc(`leaderboards/${timeLimit}/regions/${region}/entries/${uid}`)
+      .get();
     return snapshot.exists ? (snapshot.data() as LeaderboardEntryRecord) : null;
   }
 
