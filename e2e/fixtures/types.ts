@@ -102,6 +102,26 @@ export interface LeaderboardSeed {
   timeLimit?: string;
 }
 
+/**
+ * Lifetime totals as the `recordGameResult` callable would have banked them.
+ *
+ * Writing `users/{uid}` directly is the Admin SDK's privilege — the collection
+ * has no client write path at all (`docs/data-model.md`) — and it exists so a
+ * spec whose subject is the *profile screen* can put a known set of numbers on
+ * it in one round trip instead of playing the games that would produce them.
+ * A spec whose subject is the callable plays the game: see
+ * `lifetime-stats.spec.ts`.
+ */
+export interface GameplayStatsSeed {
+  uid: string;
+  gamesPlayed: number;
+  questionsAnswered: number;
+  correctAnswers: number;
+  bestStreak: number;
+  /** Epoch ms. Omitted to stand in for a document written before the field existed. */
+  statsSince?: number;
+}
+
 /** Grants (or explicitly withholds) the moderation role for one account. */
 export interface ReviewerSeed {
   uid: string;

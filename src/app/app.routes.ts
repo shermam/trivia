@@ -46,6 +46,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'profile',
+    title: 'Your stats',
+    loadComponent: () =>
+      import('./components/profile-stats/profile-stats.component').then(
+        (m) => m.ProfileStatsComponent,
+      ),
+  },
+  {
     path: 'pricing',
     title: 'Pricing',
     loadComponent: () =>
