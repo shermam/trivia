@@ -178,7 +178,7 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 
 Score only increases on a correct answer, by one base point **times the active streak multiplier**: 1–2 in a row score ×1.0, 3–4 score ×1.5, 5–7 score ×2.0, 8 or more score ×3.0. A wrong answer or a timeout resets the run; a skip neither breaks nor extends it. A timeout and a skip both score zero and both still count toward the total.
 
-**Audio cues** (unless muted from the nav drawer, or in embed mode, where nothing plays): a rising two-note chime on a correct answer, a short low buzz on a wrong one **or** a timeout, a soft tick on each of the last five seconds of a timed question — none on the "No limit" setting, which has no countdown — and a short upward sweep whenever a lifeline is spent, Skip included, which gets that cue and no answer cue. A press on a lifeline that is unavailable or already spent makes no sound. All synthesised in the browser; there is no volume control, only the mute.
+**Audio cues** (unless muted (from the top bar above `sm`, from the nav drawer below it), or in embed mode, where nothing plays): a rising two-note chime on a correct answer, a short low buzz on a wrong one **or** a timeout, a soft tick on each of the last five seconds of a timed question — none on the "No limit" setting, which has no countdown — and a short upward sweep whenever a lifeline is spent, Skip included, which gets that cue and no answer cue. A press on a lifeline that is unavailable or already spent makes no sound. All synthesised in the browser; there is no volume control, only the mute.
 
 ### Lifelines toolbar
 

@@ -437,9 +437,14 @@ describe('AudioService — cues with Web Audio', () => {
   });
 
   /**
-   * A reloaded document — the `/game-over` refresh `game-resume.spec.ts`
-   * covers — has had no gesture, so the service asks the browser for nothing
-   * at all. Building a context there is what creates something to queue onto.
+   * A document nobody has touched at all — opened from a bookmark and left
+   * alone, or a page reached only by script — has had no user activation, so
+   * the service asks the browser for nothing: building a context there is what
+   * creates something to queue onto. This is not the reload case: measured in
+   * Chromium, `navigator.userActivation.hasBeenActive` survives a reload and a
+   * fresh context starts `running`, so a reloaded `/game-over` plays its cue.
+   * What covers *every* path is the `running` check before scheduling, pinned
+   * by the cases above; this gate only spares the browser a pointless context.
    */
   it('builds no context at all before the document has been activated', () => {
     const restore = stubUserActivation(false);
