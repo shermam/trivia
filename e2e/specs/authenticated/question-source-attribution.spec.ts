@@ -108,6 +108,9 @@ test.describe('question source attribution', () => {
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     await expect(link).toContainText('Example Journal');
+    // The reviewer is shown where the link goes, not only what the contributor
+    // called it — `showHost`, which is on for this card and nowhere else.
+    await expect(link).toContainText('example.org');
 
     await expect(card.getByTestId('question-justification')).toContainText(justification);
   });

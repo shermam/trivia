@@ -18,20 +18,14 @@ import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 
 /**
- * `Validators.required` accepts `"   "`, and `firestore.rules` does not: it
- * checks `size() > 0` on the *trimmed* value this component sends. Without a
- * trim-aware check the form would happily submit whitespace and the write
- * would come back as a bare `permission-denied` — a rejection the user cannot
- * act on, for a rule the client already knows about.
- */
-/**
  * Optional, but `https://` when present — the same rule `firestore.rules`
  * enforces, checked here so the contributor gets a field error instead of a
  * `permission-denied` they cannot act on.
  *
  * Deliberately not a full URL regex. The rule this mirrors is a prefix check,
  * and a client validator stricter than the server's would refuse writes the
- * backend would have accepted.
+ * backend would have accepted. An empty or whitespace-only value passes: the
+ * field is optional, and the submit drops it rather than writing one.
  */
 function httpsUrl(control: AbstractControl): ValidationErrors | null {
   const value = typeof control.value === 'string' ? control.value.trim() : '';
@@ -43,6 +37,13 @@ function httpsUrl(control: AbstractControl): ValidationErrors | null {
     : { httpsUrl: true };
 }
 
+/**
+ * `Validators.required` accepts `"   "`, and `firestore.rules` does not: it
+ * checks `size() > 0` on the *trimmed* value this component sends. Without a
+ * trim-aware check the form would happily submit whitespace and the write
+ * would come back as a bare `permission-denied` — a rejection the user cannot
+ * act on, for a rule the client already knows about.
+ */
 function nonBlank(control: AbstractControl): ValidationErrors | null {
   return typeof control.value === 'string' && control.value.trim().length === 0
     ? { required: true }

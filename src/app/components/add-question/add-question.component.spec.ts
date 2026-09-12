@@ -250,6 +250,25 @@ describe('AddQuestionComponent source attribution', () => {
     expect('sourceTitle' in written).toBe(false);
   });
 
+  /**
+   * The mirror of the `sourceTitle` case below, and not a duplicate of it:
+   * `sourceUrl` carries a *validator* as well, so whitespace here has two
+   * ways to go wrong — a blocked submit if `httpsUrl` treated `"  "` as a
+   * malformed address, or an empty string written for a rule that refuses
+   * one. Neither happens; the key is simply absent.
+   */
+  it('drops a whitespace-only link without blocking the submit', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.sourceUrl.setValue('   ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).toHaveBeenCalledTimes(1);
+    expect('sourceUrl' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+    expect(component.validationSummary()).toBeNull();
+  });
+
   it('drops a whitespace-only title rather than writing one the rules refuse', async () => {
     const { component, addCustomQuestion, fillValidForm } = setup();
     fillValidForm();
@@ -458,6 +477,29 @@ describe('AddQuestionComponent rendered feedback', () => {
    * nothing — the same "Save does nothing" experience the whole error-handling
    * path in this component exists to prevent.
    */
+  /**
+   * WCAG 1.3.5's neighbour: guidance that only sits next to a control is
+   * guidance a screen-reader user never hears, because the control announces
+   * its label and its *description*. Both hinted fields carry their hint id
+   * from first paint, not only once something is wrong.
+   */
+  it('describes the hinted controls by their help text before anything is wrong', () => {
+    const { fixture } = setup();
+    fixture.detectChanges();
+
+    const url: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl');
+    expect(url?.getAttribute('aria-describedby')).toBe('sourceUrl-hint');
+    expect(fixture.nativeElement.querySelector('#sourceUrl-hint')?.textContent).toMatch(
+      /where the answer comes from/i,
+    );
+
+    const justification: HTMLElement | null = fixture.nativeElement.querySelector('#explanation');
+    expect(justification?.getAttribute('aria-describedby')).toBe('explanation-hint');
+    expect(fixture.nativeElement.querySelector('#explanation-hint')?.textContent).toMatch(
+      /tricky question/i,
+    );
+  });
+
   it('names and focuses a malformed source link, rather than failing silently', async () => {
     const { fixture, component, fillValidForm } = setup();
     fixture.detectChanges();
@@ -474,7 +516,10 @@ describe('AddQuestionComponent rendered feedback', () => {
     expect(error?.textContent).toMatch(/https:\/\//);
     const input: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl');
     expect(input?.getAttribute('aria-invalid')).toBe('true');
-    expect(input?.getAttribute('aria-describedby')).toBe('sourceUrl-error');
+    // The error **and** the standing hint, error first: the description a
+    // screen reader reads out is the whole list, and the hint has to stay in
+    // it or the guidance disappears at the moment it is most needed.
+    expect(input?.getAttribute('aria-describedby')).toBe('sourceUrl-error sourceUrl-hint');
   });
 
   /**
@@ -501,7 +546,7 @@ describe('AddQuestionComponent rendered feedback', () => {
     const box: HTMLElement | null = fixture.nativeElement.querySelector('#explanation');
     expect(box?.tagName).toBe('TEXTAREA');
     expect(box?.getAttribute('aria-invalid')).toBe('true');
-    expect(box?.getAttribute('aria-describedby')).toBe('explanation-error');
+    expect(box?.getAttribute('aria-describedby')).toBe('explanation-error explanation-hint');
   });
 
   it('moves focus to the first invalid field so the problem is unmissable', async () => {

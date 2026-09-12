@@ -143,8 +143,20 @@
                 https-only handling that this card would otherwise have to
                 repeat. Renders nothing when there is no source, which is the
                 common case.
+
+                `showHost` is on **here and nowhere else**. The label is the
+                contributor's own `sourceTitle`, so a title of "Wikipedia" over
+                a link to anywhere at all reads as Wikipedia — on the one
+                screen whose job is approving on evidence, and where every
+                other contributor-written value is shown raw. The reviewer sees
+                the destination; the player, who meets the link only after a
+                reviewer has vouched for the question, does not need it.
               -->
-              <app-source-link [url]="question.sourceUrl" [title]="question.sourceTitle" />
+              <app-source-link
+                [url]="question.sourceUrl"
+                [title]="question.sourceTitle"
+                [showHost]="true"
+              />
 
               <!--
                 The contributor's justification, when they gave one. This is

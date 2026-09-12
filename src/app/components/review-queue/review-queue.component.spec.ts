@@ -259,6 +259,26 @@ describe('ReviewQueueComponent source attribution', () => {
     expect(link?.textContent).toContain('Example Journal');
   });
 
+  /**
+   * The wiring half of `SourceLinkComponent`'s `showHost` (its own spec owns
+   * the rendering). A card that stops passing the flag looks identical to one
+   * that never had it, and the failure is silent in the worst place: a title
+   * the contributor typed, standing in for a destination nobody is shown, on
+   * the screen where a question is approved on evidence.
+   */
+  it('discloses where a mismatched title actually points', async () => {
+    const cards = await render([
+      question('p1', {
+        sourceUrl: 'https://not-wikipedia.example/page',
+        sourceTitle: 'Wikipedia',
+      }),
+    ]);
+
+    const link = cards[0].querySelector<HTMLAnchorElement>('[data-cy="question-source-link"]');
+    expect(link?.textContent).toContain('Wikipedia');
+    expect(link?.textContent).toContain('not-wikipedia.example');
+  });
+
   it('renders no source furniture on a card that carries none', async () => {
     const cards = await render([question('p1')]);
 
