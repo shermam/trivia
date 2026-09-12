@@ -2,7 +2,7 @@ import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { expectRadiosAreGrouped } from '../../support/a11y';
 import { signInFromGameOver } from '../../support/auth';
-import { answerQuestion, startGame } from '../../support/game';
+import { answerQuestion, optionLabel, startGame } from '../../support/game';
 import { settledHeight } from '../../support/layout';
 import { CORRECT_ANSWERS, questionsFixture } from '../../support/open-trivia';
 
@@ -153,9 +153,7 @@ test.describe('a score reaches the country board its player named', () => {
     await expect(page.getByTestId('board-scope-global')).toBeChecked();
     await expect(page.getByTestId('leaderboard-scope')).toHaveText('Worldwide');
 
-    // The radios are `sr-only`, so the visible target is the label around
-    // them — clicking the input itself is how a real reader never does it.
-    await page.getByRole('radio', { name: 'Regional', exact: true }).check();
+    await selectBoard(page, 'regional');
 
     await expect(page.getByTestId('board-scope-regional')).toBeChecked();
     await expect(page.getByTestId('leaderboard-scope')).toHaveText('In Brazil');
@@ -198,7 +196,7 @@ test.describe('a score reaches the country board its player named', () => {
       const before = await settledHeight(body, 'the leaderboard body');
       const headerBefore = await settledHeight(header, 'the leaderboard heading');
 
-      await page.getByRole('radio', { name: 'Regional', exact: true }).check();
+      await selectBoard(page, 'regional');
       await expect(page.getByTestId('leaderboard-scope')).toHaveText('In Brazil');
 
       await expect.poll(async () => (await body.boundingBox())?.height).toBe(before);
@@ -248,9 +246,24 @@ test.describe('a score reaches the country board its player named', () => {
         await expect(page.getByTestId('save-score-region')).toHaveValue('');
         // And the Regional tab offers a way in rather than a dead end or a
         // location prompt.
-        await page.getByRole('radio', { name: 'Regional', exact: true }).check();
+        await selectBoard(page, 'regional');
         await expect(page.getByTestId('leaderboard-message')).toContainText('Choose your country');
       });
     });
   });
 });
+
+/**
+ * Switches the board, by clicking what a reader clicks.
+ *
+ * The radios are `sr-only` — a 1×1 clipped box — so `check()` on the input
+ * itself is refused: the pointer lands on the `<label>` that owns it, and
+ * Playwright reports the label as intercepting its own radio. `optionLabel`
+ * is the house helper for exactly that shape, shared with the setup screen's
+ * pickers and the pricing page's currency switch. Clicking the label needs no
+ * `force`, which matters because `force` skips the check that would notice a
+ * control becoming genuinely unclickable.
+ */
+async function selectBoard(page: Page, scope: 'global' | 'regional'): Promise<void> {
+  await optionLabel(page, page.getByTestId(`board-scope-${scope}`)).click();
+}
