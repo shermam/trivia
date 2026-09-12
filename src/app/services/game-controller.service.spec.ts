@@ -10,6 +10,7 @@ import {
   TriviaQuestion,
   answeredWith,
 } from '../models/question.model';
+import { maxScoreFor } from '../models/scoring';
 import { DailyGameLimitService } from './daily-game-limit.service';
 import { GameControllerService } from './game-controller.service';
 import { GamePersistenceService } from './game-persistence.service';
@@ -162,7 +163,7 @@ describe('GameControllerService progress', () => {
   it('tracks position, not score', () => {
     const service = setup(10);
     service.currentIndex.set(4);
-    service.score.set(1);
+    service.correctAnswers.set(1);
 
     expect(service.progressPercentage()).toBe(50);
     expect(service.percentage()).toBe(10);
@@ -200,7 +201,8 @@ describe('GameControllerService persistence (B8)', () => {
       timeLimit: 15,
     });
     service.currentIndex.set(index);
-    service.score.set(score);
+    service.points.set(score);
+    service.correctAnswers.set(score);
     TestBed.tick(); // effects are flushed by change detection, not synchronously
     await service.flushPendingWrites();
     return service;
@@ -248,6 +250,67 @@ describe('GameControllerService persistence (B8)', () => {
     expect(reloaded.totalQuestions()).toBe(5);
     expect(reloaded.isComplete()).toBe(true);
     expect(reloaded.hasResumableGame()).toBe(false);
+  });
+
+  /*
+   * `FEAT-004`. A streak is part of the game a player would be annoyed to lose
+   * (`CLAUDE.md` §4.4): eight correct in a row is most of the value of the
+   * round, and a reload that reset it to zero would take the multiplier with
+   * it. The half point is the part a naive round-trip gets wrong — restoring a
+   * rounded 4 as the exact total hands back half a point on every reload — so
+   * the game here is played to one on purpose.
+   */
+  it('carries the streak, the exact total and the correct count through a reload', async () => {
+    const service = setup(5);
+    service.config.set({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+    for (let index = 0; index < 3; index++) {
+      service.registerAnswer(service.questions()[index].all_answers[0]);
+    }
+    service.currentIndex.set(3);
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    expect(service.points()).toBe(3.5);
+
+    const reloaded = await reload();
+
+    expect(reloaded.points()).toBe(3.5);
+    expect(reloaded.score()).toBe(4);
+    expect(reloaded.correctAnswers()).toBe(3);
+    expect(reloaded.currentStreak()).toBe(3);
+    expect(reloaded.maxStreak()).toBe(3);
+    expect(reloaded.scoreMultiplier()).toBe(1.5);
+  });
+
+  // The run continues across the reload rather than restarting: the next
+  // correct answer is the fourth in a row and still earns 1.5x.
+  it('goes on scoring the restored run at the tier it was on', async () => {
+    const service = setup(5);
+    service.config.set({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+    for (let index = 0; index < 3; index++) {
+      service.registerAnswer(service.questions()[index].all_answers[0]);
+    }
+    service.currentIndex.set(3);
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    const reloaded = await reload();
+    reloaded.registerAnswer(reloaded.questions()[3].all_answers[0]);
+
+    expect(reloaded.currentStreak()).toBe(4);
+    expect(reloaded.points()).toBe(5);
   });
 
   // Flags ride the same record as the score (H4 follow-up). The controller
@@ -605,6 +668,211 @@ describe('GameControllerService answer history (FEAT-001)', () => {
 });
 
 /**
+ * `FEAT-004`. The streak and the multiplier live here rather than in the quiz
+ * component for the same reason the answer history does — they have to survive
+ * a reload — and the arithmetic lives in `models/scoring.ts`, which is tested
+ * on its own. What is worth pinning *here* is the bookkeeping: which outcomes
+ * move the run, which reset it, and the fact that `score`, `correctAnswers` and
+ * `percentage` are now three different answers to three different questions.
+ */
+describe('GameControllerService streaks and multipliers (FEAT-004)', () => {
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  /** Answers question `index` right or wrong, as the quiz component would. */
+  function answer(service: GameControllerService, index: number, correct: boolean): void {
+    const question = service.questions()[index];
+    service.registerAnswer(question.all_answers[correct ? 0 : 1]);
+  }
+
+  it('starts at no streak and no multiplier bonus', () => {
+    const service = setup(5);
+
+    expect(service.currentStreak()).toBe(0);
+    expect(service.maxStreak()).toBe(0);
+    expect(service.scoreMultiplier()).toBe(1);
+  });
+
+  it('extends the run on each correct answer', () => {
+    const service = setup(5);
+
+    answer(service, 0, true);
+    answer(service, 1, true);
+
+    expect(service.currentStreak()).toBe(2);
+    expect(service.maxStreak()).toBe(2);
+  });
+
+  it('resets the run on a wrong answer, keeping the best', () => {
+    const service = setup(5);
+
+    answer(service, 0, true);
+    answer(service, 1, true);
+    answer(service, 2, false);
+
+    expect(service.currentStreak()).toBe(0);
+    expect(service.maxStreak()).toBe(2);
+  });
+
+  // A timeout is a different outcome for the recap and the same one for the
+  // streak — `registerAnswer(null)` is how the quiz reports the clock running
+  // out, and it must not be mistaken for "no answer, no harm done".
+  it('resets the run on a timeout too', () => {
+    const service = setup(5);
+
+    answer(service, 0, true);
+    service.registerAnswer(null);
+
+    expect(service.currentStreak()).toBe(0);
+    expect(service.maxStreak()).toBe(1);
+  });
+
+  /*
+   * **A skip neither breaks nor extends the run**, which is the one rule here
+   * that cannot be recovered from the answer history afterwards: a skip shows
+   * up there as a question nobody got right. Pinned in both directions — the
+   * run survives it, and the skip does not itself count towards it.
+   */
+  it('leaves the run untouched when a question is skipped', () => {
+    const service = setup(5);
+
+    answer(service, 0, true);
+    answer(service, 1, true);
+    service.registerSkippedQuestion();
+    answer(service, 3, true);
+
+    expect(service.currentStreak()).toBe(3);
+    expect(service.maxStreak()).toBe(3);
+    expect(service.correctAnswers()).toBe(3);
+  });
+
+  it('scores a plain run at one point per answer', () => {
+    const service = setup(5);
+
+    answer(service, 0, true);
+    answer(service, 1, true);
+
+    expect(service.points()).toBe(2);
+    expect(service.score()).toBe(2);
+  });
+
+  /*
+   * The third consecutive correct answer is the first to earn 1.5×, and the
+   * half point it produces is exactly why `points` is kept apart from `score`.
+   * Both are asserted: the exact total, and the integer the board would get.
+   */
+  it('applies the 1.5x tier from the third answer in a row', () => {
+    const service = setup(5);
+
+    answer(service, 0, true);
+    answer(service, 1, true);
+    answer(service, 2, true);
+
+    expect(service.scoreMultiplier()).toBe(1.5);
+    expect(service.points()).toBe(3.5);
+    expect(service.score()).toBe(4);
+  });
+
+  it('scores a perfect five-question run above its question count', () => {
+    const service = setup(5);
+
+    for (let index = 0; index < 5; index++) {
+      answer(service, index, true);
+    }
+
+    // 1 + 1 + 1.5 + 1.5 + 2
+    expect(service.points()).toBe(7);
+    expect(service.score()).toBe(7);
+    expect(service.correctAnswers()).toBe(5);
+  });
+
+  /*
+   * **Accuracy is never multiplied.** This is the assertion that stops a
+   * leaderboard entry claiming 140%: `percentage` is built from the correct
+   * answers, and the rules refuse anything above 100 regardless.
+   */
+  it('reports accuracy from the correct answers, not from the score', () => {
+    const service = setup(5);
+
+    for (let index = 0; index < 5; index++) {
+      answer(service, index, true);
+    }
+
+    expect(service.score()).toBe(7);
+    expect(service.percentage()).toBe(100);
+  });
+
+  it('reports partial accuracy from the correct answers alone', () => {
+    const service = setup(10);
+
+    answer(service, 0, true);
+    answer(service, 1, true);
+    answer(service, 2, true);
+    answer(service, 3, true);
+
+    expect(service.correctAnswers()).toBe(4);
+    expect(service.percentage()).toBe(40);
+    expect(service.score()).toBeGreaterThan(4);
+  });
+
+  /*
+   * **The two-ends rule** (`CLAUDE.md` §4.1, and `FEAT-004` §0). The client
+   * must never produce a score `firestore.rules` will refuse, because the
+   * refusal arrives as a bare `permission-denied` that nothing can honestly
+   * explain to the player. Walked over every game length the setup screen
+   * offers, playing the best round each one allows.
+   */
+  it('cannot produce a score above the ceiling the rules enforce', () => {
+    for (const questions of [5, 10, 15, 20, 25]) {
+      const service = setup(questions);
+      for (let index = 0; index < questions; index++) {
+        answer(service, index, true);
+      }
+
+      expect(service.score()).toBeLessThanOrEqual(maxScoreFor(questions));
+      expect(service.percentage()).toBeLessThanOrEqual(100);
+      TestBed.resetTestingModule();
+    }
+  });
+
+  // Starting a fresh game must not inherit the previous one's run — a player
+  // who abandoned a game eight correct answers in would otherwise open the
+  // next one already at 3x.
+  it('starts a new game with no streak carried over', async () => {
+    const service = setupWithQuestionSource(3);
+    service.questions.set([makeQuestion('old')]);
+    service.registerAnswer(service.questions()[0].all_answers[0]);
+
+    await service.startGame({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'open_trivia',
+      timeLimit: 15,
+    });
+
+    expect(service.currentStreak()).toBe(0);
+    expect(service.maxStreak()).toBe(0);
+    expect(service.points()).toBe(0);
+    expect(service.correctAnswers()).toBe(0);
+  });
+
+  it('clears the streak when a saved game is discarded', () => {
+    const service = setup(5);
+    answer(service, 0, true);
+
+    service.discardSavedGame();
+
+    expect(service.currentStreak()).toBe(0);
+    expect(service.maxStreak()).toBe(0);
+    expect(service.points()).toBe(0);
+    expect(service.correctAnswers()).toBe(0);
+  });
+});
+
+/**
  * `FEAT-002`. The service owns *availability* — which lifelines are left, and
  * which options 50/50 removed — because both have to survive a reload. The
  * timer itself stays in `QuizLoopComponent`, so Extra Time is only a
@@ -720,10 +988,10 @@ describe('GameControllerService lifelines (FEAT-002)', () => {
 
   /*
    * The security-relevant one, decided explicitly with the owner on 28 August
-   * 2026. `firestore.rules` validates only
-   * `percentage == math.round(score * 100.0 / totalQuestions)` and
-   * `totalQuestions >= score` — so if a skip shrank the denominator, skipping
-   * nine of ten and answering one would post a well-formed 100%.
+   * 2026. Every bound `firestore.rules` puts on an entry scales with
+   * `totalQuestions` — the score ceiling and the accuracy it will accept alike
+   * — so if a skip shrank the denominator, skipping nine of ten and answering
+   * one would post a well-formed 100%.
    */
   it('counts a skipped question toward the total, so skipping cannot inflate accuracy', () => {
     const service = setup(10);

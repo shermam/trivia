@@ -13,6 +13,19 @@
       </h1>
       <p class="text-slate-500 dark:text-slate-400 mb-6">Here's how you did</p>
 
+      <!--
+        Four tiles rather than two, because the multiplier (`FEAT-004`) split
+        one number into two. `score` used to *be* the correct-answer count, so
+        "7 / 10, correct answers" said everything; it is now a point total that
+        streak bonuses can push past the question count, and rendering it over a
+        denominator it no longer divides would read as a lie in the one place a
+        player checks their result.
+
+        So each number answers its own question: points earned, accuracy,
+        answers right, and the longest run. The grid is fixed at two columns and
+        every tile is rendered in every state, so the card is the same size
+        whatever the game did.
+      -->
       <div class="grid grid-cols-2 gap-4">
         <div
           class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
@@ -22,13 +35,13 @@
           >
             Score
           </p>
-          <p class="text-4xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight">
+          <p
+            data-cy="final-score"
+            class="text-4xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight"
+          >
             {{ gameController.score() }}
-            <span class="text-xl font-medium text-slate-400 dark:text-slate-500"
-              >/ {{ gameController.totalQuestions() }}</span
-            >
           </p>
-          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">correct answers</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">points</p>
         </div>
         <div
           class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
@@ -44,6 +57,42 @@
           <p class="text-xs font-semibold mt-1" [ngClass]="performanceColorClass()">
             {{ performanceLabel() }}
           </p>
+        </div>
+        <div
+          class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
+        >
+          <p
+            class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2"
+          >
+            Correct
+          </p>
+          <p
+            data-cy="correct-answers"
+            class="text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight"
+          >
+            {{ gameController.correctAnswers() }}
+            <span class="text-xl font-medium text-slate-400 dark:text-slate-500"
+              >/ {{ gameController.totalQuestions() }}</span
+            >
+          </p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">correct answers</p>
+        </div>
+        <div
+          class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
+        >
+          <p
+            class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2"
+          >
+            Best streak
+          </p>
+          <p
+            data-cy="max-streak"
+            class="flex items-center gap-1.5 text-4xl font-extrabold text-amber-600 dark:text-amber-400 tracking-tight"
+          >
+            <app-icon name="flame" [size]="26" class="shrink-0" />
+            {{ gameController.maxStreak() }}
+          </p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">in a row</p>
         </div>
       </div>
     </div>
@@ -319,12 +368,22 @@
                   }
                 </span>
 
+                <!--
+                  Points and accuracy, not `score / totalQuestions`: a streak
+                  multiplier can carry a score past the number of questions
+                  (`FEAT-004`), and a row reading "7 / 5" invites the reader to
+                  divide two numbers that no longer divide. The question count
+                  is still stored on the entry and still shown in an export — it
+                  is dropped from the row alone, because the row has one line at
+                  320px and the name is the thing that must not be squeezed out
+                  of it.
+                -->
                 <span
-                  class="text-sm font-bold text-slate-900 dark:text-slate-50"
+                  class="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-slate-50"
                   [class.text-emerald-600]="entry.uid === authService.user()?.uid"
                   [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
                 >
-                  {{ entry.score }} / {{ entry.totalQuestions }} ({{ entry.percentage }}%)
+                  {{ entry.score }} pts &middot; {{ entry.percentage }}%
                 </span>
               </li>
             }

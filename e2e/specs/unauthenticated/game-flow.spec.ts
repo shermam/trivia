@@ -25,15 +25,20 @@ test.describe('anonymous game flow (open_trivia source)', () => {
 
     await expect(page).toHaveURL(/\/game-over$/);
     await expect(page.getByRole('heading', { name: 'Game Over!', exact: true })).toBeVisible();
-    // **Exact, because the leaderboard on this same screen renders scores in the
-    // same words.** A row reads `5 / 5 (100%)`, so the substring form of either
-    // of these resolves to the score summary *plus* every entry that happens to
-    // have played a perfect round — a strict-mode failure that says nothing
-    // about the app. It is latent rather than theoretical: it depends entirely
-    // on what else is on the board, which is another spec's business against a
-    // shared emulator and the owner's real data against the preview project.
-    // Exact matching addresses the summary and nothing else, because a row's
-    // text carries its percentage in brackets and the summary's does not.
+    // **Exact, because this screen carries four numbers and a board of ten
+    // more.** The summary's tiles are points, accuracy, correct answers and the
+    // best run, and a substring match for any of them resolves to whichever
+    // others happen to contain the same digits — a strict-mode failure that
+    // says nothing about the app, and on the runner that is *not* strict, a
+    // click on the wrong thing entirely (`CLAUDE.md` §4.6). It is latent rather
+    // than theoretical: what else is on the board is another spec's business
+    // against a shared emulator and the owner's real data against the preview
+    // project.
+    //
+    // The points tile is asserted too, because it is no longer the same number
+    // as the correct-answer count: a perfect five-question round earns seven
+    // points through the streak multipliers (`FEAT-004`).
+    await expect(page.getByTestId('final-score')).toHaveText('7');
     await expect(
       page.getByText(`${CORRECT_ANSWERS.length} / ${CORRECT_ANSWERS.length}`, { exact: true }),
     ).toBeVisible();
@@ -273,8 +278,8 @@ test.describe('anonymous game flow (open_trivia source)', () => {
     }
 
     await expect(page).toHaveURL(/\/game-over$/);
-    // Exact for the reason given on the same assertion in the first test: a
-    // leaderboard row reading `4 / 5 (80%)` matches the substring form too.
+    // The correct-answer tile, exact for the reason given on the same
+    // assertion in the first test.
     await expect(
       page.getByText(`${restCorrect.length} / ${CORRECT_ANSWERS.length}`, { exact: true }),
     ).toBeVisible();
@@ -468,8 +473,8 @@ test.describe('anonymous game flow (open_trivia source)', () => {
     }
 
     await expect(page).toHaveURL(/\/game-over$/);
-    // Four right out of five, not four out of four. Exact, so that neither of
-    // these can be satisfied by a leaderboard row reading `4 / 5 (80%)`.
+    // Four right out of five, not four out of four. Exact, so neither can be
+    // satisfied by another of the summary's four numbers.
     await expect(page.getByText('4 / 5', { exact: true })).toBeVisible();
     await expect(page.getByText('80%', { exact: true })).toBeVisible();
   });
