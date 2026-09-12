@@ -27,7 +27,8 @@ export type IconName =
   | 'flag'
   | 'flag-filled'
   | 'flame'
-  | 'menu';
+  | 'menu'
+  | 'external-link';
 
 /**
  * Inline brand/UI icon set, sourced from lucide-static (ISC license) — kept
@@ -101,6 +102,11 @@ export type IconName =
           <path d="M4 6h16" />
           <path d="M4 12h16" />
           <path d="M4 18h16" />
+        }
+        @case ('external-link') {
+          <path d="M15 3h6v6" />
+          <path d="M10 14 21 3" />
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6" />
         }
         @case ('trophy') {
           <path d="M10 14.66V17a1 1 0 0 1-1 1 2 2 0 0 0-2 2v2" />
