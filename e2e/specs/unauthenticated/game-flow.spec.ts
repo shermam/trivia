@@ -404,9 +404,16 @@ test.describe('anonymous game flow (open_trivia source)', () => {
   /**
    * `FEAT-002`. The lifelines are three interactions the unit layer can only
    * check in pieces — jsdom has no real click-to-disable, and the ids recorded
-   * during play are only proved to match the recap by a real round.
+   * during play are only proved to match the recap by a real round. It is also
+   * the only layer that can see where the row actually sits and whether the
+   * answers hold still around it (`FEAT-048`): jsdom has no layout at all, so
+   * the unit spec can pin the DOM order and nothing more.
    */
   test('spends each lifeline once, and a skip reads as skipped at game over', async ({ page }) => {
+    // Tall enough for the card to be genuinely centred: `min-h-screen flex
+    // items-center` pins it to the top as soon as it overflows, and a box that
+    // cannot move proves nothing by not moving (`CLAUDE.md` §4.4).
+    await page.setViewportSize({ width: 1024, height: 1000 });
     await startGame(page, 5);
 
     // All three offered on a timed game, none spent.
@@ -415,14 +422,67 @@ test.describe('anonymous game flow (open_trivia source)', () => {
     await expect(page.getByTestId('lifeline-extraTime')).toBeEnabled();
     await expect(page.getByTestId('lifeline-skip')).toBeEnabled();
 
+    // `FEAT-048`: the row is below the answers on screen *and* after them in
+    // the DOM — it was moved in the template rather than repositioned with CSS,
+    // so the Tab order and a screen reader's reading order are the order the
+    // eye sees. Both halves are read inside one `expect.poll`: a lone
+    // `evaluate()` or `boundingBox()` resolves once against whatever the DOM
+    // happened to be at that instant (`CLAUDE.md` §4.6).
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const options = Array.from(
+              document.querySelectorAll<HTMLElement>('[data-cy="answer-option"]'),
+            );
+            const row = document.querySelector<HTMLElement>('[data-cy="lifelines"]');
+            const last = options.at(-1);
+            if (!row || !last) {
+              return { inDom: 'missing', onScreen: 'missing' };
+            }
+            const follows =
+              (last.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+            const below = row.getBoundingClientRect().top >= last.getBoundingClientRect().bottom;
+            return {
+              inDom: follows ? 'after the answers' : 'before the answers',
+              onScreen: below ? 'below the answers' : 'not below the answers',
+            };
+          }),
+        { message: 'the lifeline row must follow the answers in the DOM and sit below them' },
+      )
+      .toEqual({ inDom: 'after the answers', onScreen: 'below the answers' });
+
     // 50/50 removes two of the four options and cannot be used twice.
     await expect(page.getByTestId('answer-option')).toHaveCount(4);
+
+    // Read from a state the assertions above have already settled, then polled
+    // after the click, so a late layout frame cannot fail the comparison while
+    // a jump a player would see still does.
+    const firstOption = page.getByTestId('answer-option').first();
+    const beforeSpending = await firstOption.boundingBox();
+    expect(beforeSpending, 'the answers are on screen before a lifeline is spent').not.toBeNull();
+
     await page.getByTestId('lifeline-fiftyFifty').click();
     await expect(page.locator('[data-cy="answer-option"][data-eliminated]')).toHaveCount(2);
     // The options stay in the DOM — the grid must not collapse under the
     // player's cursor (`CLAUDE.md` §4.4).
     await expect(page.getByTestId('answer-option')).toHaveCount(4);
     await expect(page.getByTestId('lifeline-fiftyFifty')).toBeDisabled();
+
+    // ...and with the row below them, spending a lifeline cannot move the
+    // answers either, which is what `FEAT-048` bought.
+    await expect
+      .poll(
+        async () => {
+          const box = (await firstOption.boundingBox())!;
+          return {
+            top: drift(box.y, beforeSpending!.y),
+            height: drift(box.height, beforeSpending!.height),
+          };
+        },
+        { message: 'spending a lifeline must not move or resize the answers' },
+      )
+      .toEqual({ top: 0, height: 0 });
 
     // Answer the first question with a surviving option.
     await page.locator('[data-cy="answer-option"]:not([data-eliminated])').first().click();
