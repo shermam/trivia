@@ -1,7 +1,61 @@
+import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { expectRadiosAreGrouped } from '../../support/a11y';
 import { authMenu, signInViaUi } from '../../support/auth';
 import { optionLabel } from '../../support/game';
+import { expectSameHeight, settledHeight } from '../../support/layout';
+
+/**
+ * Both halves of the catalog read: the `products` query, which runs against
+ * the documents root, and the `prices` query under whichever product it found.
+ *
+ * Not anchored at the end, because the client appends its API key as a query
+ * parameter.
+ */
+const CATALOG_QUERY = /\/documents(\/products\/[^/:]+)?:runQuery/;
+
+/**
+ * The viewport these measurements are taken at, and the width is the part that
+ * matters. Above `sm` the two plans share a grid row with `items-stretch`, so
+ * the shorter card is stretched to the taller one's height and a change inside
+ * it moves nothing — a guard written there could pass while the card grew.
+ * Below `sm` each card is its own row and its box is its own content, which is
+ * the only place this can be measured honestly. The height is generous for the
+ * reason `CLAUDE.md` §4.4 gives: a cramped viewport pins a layout and hides
+ * the very shift the test is looking for.
+ */
+const MEASURING_VIEWPORT = { width: 390, height: 1000 };
+
+/**
+ * Holds the catalog read open, so the page's loading state can be measured
+ * rather than raced.
+ *
+ * The response is fetched immediately and only its *delivery* is held, so the
+ * released page is one round trip from rendering a price rather than starting
+ * one. The count is returned because the intercept is load-bearing: an
+ * intercept that silently stopped matching would leave the test measuring the
+ * loaded state twice and passing by luck (`CLAUDE.md` §4.6).
+ */
+async function holdCatalogRead(page: Page) {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const held = { queries: 0 };
+
+  await page.route(CATALOG_QUERY, async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.fallback();
+      return;
+    }
+    const response = await route.fetch();
+    held.queries += 1;
+    await released;
+    await route.fulfill({ response });
+  });
+
+  return { release: () => release(), held };
+}
 
 /**
  * **Serial, and the `products` catalog is why.** Workers share one emulator
@@ -44,6 +98,39 @@ test.describe('pricing / Stripe checkout', () => {
     await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
     await expect(page.getByTestId('pro-currency')).toHaveText('USD');
     await expect(page.getByTestId('currency-choice')).toHaveCount(0);
+  });
+
+  /**
+   * The Pro card is exactly as tall before the catalog answers as after
+   * (`CLAUDE.md` §4.4).
+   *
+   * Two rows on this card are filled by a network read: the amount, and the
+   * currency cell beside it. Both are rendered from first paint — a dash and a
+   * non-breaking space — so that what arrives fills a box rather than creating
+   * one. The failure this stops is the Subscribe button sliding down under a
+   * reader who is already reaching for it, at the one moment they are looking
+   * at the price rather than at the button.
+   *
+   * Nothing automated sees this without a real layout: jsdom has no boxes, and
+   * Lighthouse only ever loads `/`.
+   */
+  test('does not resize the Pro card when the catalog lands', async ({ page }) => {
+    await page.setViewportSize(MEASURING_VIEWPORT);
+    const catalog = await holdCatalogRead(page);
+
+    await page.goto('/pricing');
+
+    // Measured in the loading state, which lasts exactly as long as this test
+    // needs it to.
+    const card = page.getByTestId('pro-card');
+    await expect(page.getByTestId('pro-price')).toHaveText('—');
+    const whileLoading = await settledHeight(card, 'the Pro card while the catalog loads');
+
+    catalog.release();
+    await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+
+    expect(catalog.held.queries, 'catalog queries held open by the intercept').toBeGreaterThan(0);
+    await expectSameHeight(card, whileLoading, 'the Pro card when the price arrives');
   });
 
   test('creates a real checkout session via the emulated Cloud Function and redirects to Stripe', async ({
@@ -176,6 +263,49 @@ test.describe('pricing / choosing a currency', () => {
         message: 'the price ID the checkout session carries',
       })
       .toEqual([BRL_PRICE_ID]);
+  });
+
+  /**
+   * The same height guarantee as the single-currency card, across the two
+   * state changes only a second currency can produce (`CLAUDE.md` §4.4).
+   *
+   * The currency cell is the interesting one: while the catalog is loading it
+   * is a plain pill, and a second currency turns it into a two-option
+   * radiogroup. Those are different elements, so their heights agree only
+   * because they are built from the same box with the same padding around the
+   * same fixed-size cells — a property that holds by construction today and is
+   * one class edit away from not holding at all.
+   *
+   * Switching currency is measured too, because the amounts are not the same
+   * width and `R$ 5,90` is a longer string than `$0.99`: the row must absorb
+   * that without wrapping, and a wrap here is a line the whole card grows by.
+   */
+  test('keeps the Pro card the same height as the currency control arrives and changes', async ({
+    page,
+  }) => {
+    await page.setViewportSize(MEASURING_VIEWPORT);
+    const catalog = await holdCatalogRead(page);
+
+    await page.goto('/pricing');
+
+    const card = page.getByTestId('pro-card');
+    await expect(page.getByTestId('pro-price')).toHaveText('—');
+    const whileLoading = await settledHeight(card, 'the Pro card while the catalog loads');
+
+    catalog.release();
+    await expect(page.getByTestId('currency-choice')).toBeVisible();
+    await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+
+    expect(catalog.held.queries, 'catalog queries held open by the intercept').toBeGreaterThan(0);
+    await expectSameHeight(card, whileLoading, 'the Pro card when the currency control arrives');
+
+    await optionLabel(page, page.getByTestId('currency-brl')).click();
+    await expect(page.getByTestId('pro-price')).toHaveText(/^R\$\s5,90$/);
+    await expectSameHeight(card, whileLoading, 'the Pro card quoted in BRL');
+
+    await optionLabel(page, page.getByTestId('currency-usd')).click();
+    await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+    await expectSameHeight(card, whileLoading, 'the Pro card quoted back in USD');
   });
 
   /**

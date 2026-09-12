@@ -111,6 +111,22 @@ const MAX_PRO_PRODUCTS = 5;
 const MAX_PRICES_PER_PRODUCT = 20;
 
 /**
+ * What a reader is told when the catalog carries no Pro price at all.
+ *
+ * Says that Pro is not on sale rather than inviting a retry, because nothing
+ * the user does can change the answer: the catalog is written only by
+ * `stripeWebhook`, and this is what an environment looks like before its
+ * Stripe webhook has delivered a single `product.*`/`price.*` event
+ * (`dev-environment.md` §3.1 steps 8–9).
+ *
+ * One constant because two call sites need it — the lookup that finds nothing
+ * to sell, and the checkout that finds nothing to buy — and the second must
+ * not be phrased as "please try again" for a cause that will not change.
+ */
+const NO_PRO_PRICE_MESSAGE =
+  "Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later.";
+
+/**
  * A ceiling the `onSnapshot` version never had. The query was filtered by
  * status but not bounded, which §4.1 asks for on every read — a listener on an
  * unbounded query re-reads the whole result set on every reconnect. One
@@ -485,13 +501,16 @@ export class SubscriptionService {
    *
    * **The read moved onto page load, and that is a real cost worth stating.**
    * It used to happen on the Subscribe click alone, so an anonymous visitor
-   * browsing `/pricing` cost nothing; now every visit to that page spends
-   * roughly two public reads (the products query, plus one prices query per
-   * active Pro product). That is the price of the page showing a real amount
-   * instead of a number written into the template — which it has to, because
-   * the amount now depends on which currency the reader is being quoted, and
-   * a literal would be wrong for half of them. The click still costs nothing
-   * extra: the promise is memoised, so `startProCheckout()` reuses this read.
+   * browsing `/pricing` cost nothing; now a page load that reaches `/pricing`
+   * spends roughly two public reads (the products query, plus one prices query
+   * per active Pro product). That is the price of the page showing a real
+   * amount instead of a number written into the template — which it has to,
+   * because the amount now depends on which currency the reader is being
+   * quoted, and a literal would be wrong for half of them. Everything after
+   * the first read is free: the promise is memoised for the service's
+   * lifetime, so `startProCheckout()` reuses it and so does a second visit to
+   * `/pricing` in the same page load, which re-runs this method and re-reads
+   * nothing.
    *
    * **Failures are swallowed**, and the page shows a placeholder rather than a
    * price. A catalog that cannot be read is not something the reader can act
@@ -508,7 +527,15 @@ export class SubscriptionService {
       return;
     }
     this.proPriceOptionsSignal.set(options);
-    if (this.selectedCurrencySignal() === null) {
+    // The postcondition is that the selection is a currency the catalog
+    // offers — not merely that a selection exists. Keeping a currency the
+    // catalog has stopped carrying would leave the radiogroup with nothing
+    // checked (each radio asks whether it *is* the selection) while
+    // `selectedProPrice` quietly fell back to the first price, so the page
+    // would quote an amount no radio claimed. Re-defaulting puts the two back
+    // in step, and costs nothing while the catalog keeps its answer.
+    const selected = this.selectedCurrencySignal();
+    if (!options.some((option) => option.currency === selected)) {
       this.selectedCurrencySignal.set(defaultProCurrency(options, browserLocales()));
     }
   }
@@ -558,7 +585,17 @@ export class SubscriptionService {
   private async selectedProPriceId(): Promise<string> {
     const options = await this.getProPrices();
     const currency = this.selectedCurrencySignal();
-    const chosen = options.find((option) => option.currency === currency) ?? options[0];
+    // `at(0)` rather than `[0]`, because the index signature lies: it types an
+    // empty list's first element as a `ProPriceOption` and the guard below as
+    // dead code. Nothing can reach it while `loadProPriceOptions()` refuses to
+    // return an empty list — which is the reason to write it out rather than
+    // rely on it. A refusal held at a distance, in another method, fails here
+    // as a `TypeError` on `undefined`, and the reader is shown "Cannot read
+    // properties of undefined" in place of the sentence that explains it.
+    const chosen = options.find((option) => option.currency === currency) ?? options.at(0);
+    if (!chosen) {
+      throw new SubscriptionError(NO_PRO_PRICE_MESSAGE);
+    }
     return chosen.priceId;
   }
 
@@ -616,14 +653,7 @@ export class SubscriptionService {
     // picking the first is both deterministic and the older of the two.
     const options = firstPerCurrency(monthlyPrices.flat());
     if (options.length === 0) {
-      // Says that Pro is not on sale rather than inviting a retry, because
-      // nothing the user does can change the answer: the catalog is written
-      // only by `stripeWebhook`, and this is what an environment looks like
-      // before its Stripe webhook has delivered a single `product.*`/`price.*`
-      // event (`dev-environment.md` §3.1 steps 8–9).
-      throw new SubscriptionError(
-        "Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later.",
-      );
+      throw new SubscriptionError(NO_PRO_PRICE_MESSAGE);
     }
     return options;
   }
