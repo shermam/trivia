@@ -119,6 +119,9 @@ interface InternalReviewQueue {
   actionError(): string | null;
   actionResult(): string | null;
   isFull(): boolean;
+  reasonFor(question: Q): string;
+  setReason(questionId: string, value: string): void;
+  isReasonTooLong(question: Q): boolean;
 }
 
 function report(id: string, overrides: Partial<QuestionReport> = {}): QuestionReport {
@@ -176,7 +179,7 @@ describe('ReviewQueueComponent', () => {
 
     await component.decide(question('p1'), 'approved');
 
-    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'approved');
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'approved', '');
     expect(component.questions().map((q) => q.id)).toEqual(['p2']);
     expect(getQuestionsByStatus).toHaveBeenCalledTimes(1);
   });
@@ -469,7 +472,7 @@ describe('ReviewQueueComponent reports tab', () => {
 
     await component.decide(question('p1', { status: 'approved' }), 'rejected');
 
-    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected');
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
     expect(component.reports()).toHaveLength(1);
     expect(component.reports()[0].question?.status).toBe('rejected');
     expect(component.actionResult()).toMatch(/rejected/);
@@ -694,5 +697,114 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
     expect(host.querySelector<HTMLElement>('[data-cy="reports-failed"]')!.className).toContain(
       'invisible',
     );
+  });
+});
+
+/**
+ * The reviewer's rejection note (`FEAT-007`).
+ *
+ * The interesting half is not that the string reaches the write — it is the
+ * three ways it must *not*. A reason typed about one question must not travel
+ * with another one's decision (one `ng-template` renders every row, so a single
+ * value would); approving must send no reason at all, because
+ * `firestore.rules` refuses one on anything but a rejected question and the
+ * write would be refused outright; and a note longer than the rules accept has
+ * to be named here rather than arriving as a bare `permission-denied`.
+ */
+describe('ReviewQueueComponent rejection reasons', () => {
+  it('sends the reason typed for that row when rejecting', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1')] },
+    });
+    await component.load();
+
+    component.setReason('p1', '  The date is wrong.  ');
+    await component.decide(question('p1'), 'rejected');
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', 'The date is wrong.');
+  });
+
+  // The trap the keyed drafts exist for: the card is one template rendered per
+  // row, so a single shared value would put question one's words on question
+  // two's rejection.
+  it('keeps each draft with the row it was typed on', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1'), question('p2')] },
+    });
+    await component.load();
+
+    component.setReason('p1', 'About the first one.');
+    await component.decide(question('p2'), 'rejected');
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p2', 'rejected', '');
+  });
+
+  // `firestore.rules` refuses a reason on a question that is not rejected, so
+  // an approval carrying one is refused outright rather than merely untidy.
+  it('sends no reason when approving, even with words in the box', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1')] },
+    });
+    await component.load();
+
+    component.setReason('p1', 'Typed and then thought better of.');
+    await component.decide(question('p1'), 'approved');
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'approved', '');
+  });
+
+  it('refuses a reason longer than the rules accept, and says so', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1')] },
+    });
+    await component.load();
+
+    component.setReason('p1', 'x'.repeat(501));
+    expect(component.isReasonTooLong(question('p1'))).toBe(true);
+
+    await component.decide(question('p1'), 'rejected');
+
+    expect(setQuestionStatus).not.toHaveBeenCalled();
+    expect(component.actionError()).toMatch(/500 characters or fewer/);
+  });
+
+  // Rejecting an already-rejected question — to fix a typo in the note, say —
+  // must not wipe what the author has already been shown just because the box
+  // was never touched.
+  it('starts the box from the reason already stored', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: {
+        rejected: [question('p1', { status: 'rejected', rejectionReason: 'Too vague.' })],
+      },
+    });
+    await component.select('rejected');
+
+    expect(component.reasonFor(question('p1', { rejectionReason: 'Too vague.' }))).toBe(
+      'Too vague.',
+    );
+
+    await component.decide(
+      question('p1', { status: 'rejected', rejectionReason: 'Too vague.' }),
+      'rejected',
+    );
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', 'Too vague.');
+  });
+
+  it('lets a reviewer clear a stored reason deliberately', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: {
+        rejected: [question('p1', { status: 'rejected', rejectionReason: 'Too vague.' })],
+      },
+    });
+    await component.select('rejected');
+
+    component.setReason('p1', '');
+    await component.decide(
+      question('p1', { status: 'rejected', rejectionReason: 'Too vague.' }),
+      'rejected',
+    );
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
   });
 });

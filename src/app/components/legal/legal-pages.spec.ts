@@ -207,6 +207,54 @@ describe('legal pages', () => {
   });
 
   /**
+   * `FEAT-007` changed two things both documents asserted the *opposite* of,
+   * and the sentences it falsified were the kind nobody re-reads: "there is
+   * currently no way to edit or withdraw a question from within the app",
+   * written once in each page.
+   *
+   * Pinned in the negative as well as the positive, because the half-finished
+   * edit here is to fix the page a reader would notice and leave the other one
+   * still promising that no such thing exists — the same shape as `FEAT-026`'s
+   * two report sentences.
+   */
+  it('says an author can edit and remove a contribution, in both documents', async () => {
+    const privacy = (await render(PrivacyPolicyComponent)).textContent ?? '';
+    const terms = (await render(TermsOfServiceComponent)).textContent ?? '';
+
+    for (const text of [privacy, terms]) {
+      expect(text).toContain('Your questions');
+      expect(text).not.toContain('no way to edit or withdraw a question');
+    }
+
+    // What removal does, and — the part a reader would otherwise assume — the
+    // three things it does not do. The irrevocable licence is what makes the
+    // distinction load-bearing rather than pedantic.
+    expect(terms).toContain('Remove it from the app');
+    expect(terms).toContain('does not revoke the licence');
+    expect(terms).toContain('cannot reach copies already served');
+    expect(privacy).toContain('does not revoke the licence you granted');
+
+    // ...and that the two sections about the same licence still agree: an
+    // account that has been deleted can no longer withdraw anything.
+    expect(terms).toContain('can no longer be edited or withdrawn by anyone');
+  });
+
+  /**
+   * The reviewer's rejection note (`FEAT-007`) — reviewer-authored text stored
+   * on somebody else's contribution and shown back to them. A new field holding
+   * text about a person is exactly what §4.0's second bullet is about.
+   */
+  it('discloses the reviewer rejection note and who can read it', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('a short note saying why');
+    expect(text).toContain('only to you and our reviewers');
+    // It rides along in the export, because `exportAccountData` returns each
+    // contributed question whole.
+    expect(text).toContain("a reviewer's rejection note comes with it");
+  });
+
+  /**
    * Who can read a filed report (`FEAT-026`). The policy said twice, in two
    * different sections, that reports were readable by nobody through the app —
    * two sentences that a one-line change to `firestore.rules` can falsify

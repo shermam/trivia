@@ -30,6 +30,7 @@ import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
+import { keepTabInside } from '../../utils/focus-trap.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
@@ -357,44 +358,11 @@ export class GameOverComponent implements OnInit {
    * control.
    */
   protected keepFocusInDialog(event: KeyboardEvent): void {
-    if (event.key !== 'Tab') {
-      return;
-    }
-    const dialog = this.reportDialog()?.nativeElement;
-    if (!dialog) {
-      return;
-    }
-
-    // No visibility filter on top of the selector. The obvious one —
-    // `offsetParent !== null` — is wrong twice over: it reports null for any
-    // `position: fixed` element (which this dialog is), and jsdom does not
-    // implement it at all, so it silently empties the list and the trap
-    // degrades to "always bounce back to the dialog". Nothing here needs it
-    // anyway: the template removes controls with `@if` rather than hiding
-    // them, and `:not([disabled])` covers the rest.
-    const focusable = Array.from(
-      dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ),
-    );
-
-    if (focusable.length === 0) {
-      event.preventDefault();
-      dialog.focus();
-      return;
-    }
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-
-    if (event.shiftKey && (active === first || active === dialog)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && active === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    // The trap itself lives in `utils/focus-trap.util.ts`, shared with
+    // `/my-questions`' two dialogs: the three ways of getting it wrong are
+    // subtle enough that a second hand-written copy is a second chance to
+    // reintroduce one.
+    keepTabInside(event, this.reportDialog()?.nativeElement);
   }
 
   protected readonly performanceLabel = computed(() => {

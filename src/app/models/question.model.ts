@@ -249,6 +249,21 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
    * guess — which is why it is a migration and not a permanent asymmetry.
    */
   status?: QuestionStatus;
+  /**
+   * Why a reviewer rejected the question, in their own words (`FEAT-007`).
+   *
+   * **Reviewer-authored and shown to the author**, on `/my-questions`. Optional
+   * in every direction: a reviewer may reject without giving one, every
+   * question rejected before this field existed has none, and
+   * `firestore.rules` refuses it on any document that is not `rejected` — so
+   * "no reason given" is an absent key rather than a blank string, and it is
+   * the normal case rather than an error.
+   *
+   * Not writable by the author at either end: the create rule refuses it and
+   * the owner's own edit clears it, because an edit replaces the text the note
+   * was about.
+   */
+  rejectionReason?: string;
 }
 
 /**

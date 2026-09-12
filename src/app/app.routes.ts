@@ -38,6 +38,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'my-questions',
+    title: 'Your questions',
+    loadComponent: () =>
+      import('./components/my-questions/my-questions.component').then(
+        (m) => m.MyQuestionsComponent,
+      ),
+  },
+  {
     path: 'review',
     title: 'Review queue',
     loadComponent: () =>

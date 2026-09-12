@@ -1,0 +1,396 @@
+<div class="min-h-screen bg-slate-50 dark:bg-slate-950 px-4 sm:px-6 py-10 sm:py-14">
+  <div class="max-w-3xl mx-auto">
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
+    >
+      <app-icon name="arrow-left" [size]="15" />
+      Back to game
+    </a>
+
+    <h1
+      class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-2"
+    >
+      Your questions
+    </h1>
+    <p class="text-slate-500 dark:text-slate-400 mb-8">
+      Everything you have contributed to the shared bank, and what became of it. Editing a question
+      sends it back for review; removing one takes it out of play.
+    </p>
+
+    <!--
+      One grid cell holding every message this screen can show, rendered from
+      first paint and switched with `invisible` (`visibility: hidden`) rather
+      than `@if`, so the empty state occupies the space the loading state
+      already had and nothing below it moves when the read lands
+      (`CLAUDE.md` §4.4). A hard-coded `min-h` would be a number to re-measure
+      every time one of these sentences changed.
+
+      `role="status"` on the container rather than on each face: a hidden face
+      is out of the accessibility tree, so the region's text is whichever
+      message is showing, and the change from one to the next is what gets
+      announced.
+
+      `tabindex="-1"` is not decoration — `retry()` hands focus here because the
+      button it is called from is about to be hidden.
+    -->
+    <div
+      #statusBlock
+      role="status"
+      tabindex="-1"
+      data-cy="my-questions-status"
+      class="grid mb-6 focus:outline-none"
+    >
+      <p
+        class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+        [class.invisible]="view() !== 'loading'"
+        data-cy="my-questions-loading"
+      >
+        Loading your questions…
+      </p>
+      <div
+        class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
+        [class.invisible]="view() !== 'signedOut'"
+        data-cy="my-questions-signed-out"
+      >
+        <p class="text-sm text-slate-500 dark:text-slate-400">
+          Sign in to see the questions you have contributed. Guest sessions cannot add questions, so
+          there is nothing here for one.
+        </p>
+        @if (!embedMode.isEmbedded()) {
+          <button
+            type="button"
+            data-cy="my-questions-sign-in"
+            (click)="openSignIn()"
+            class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+          >
+            Sign in
+          </button>
+        }
+      </div>
+      <div
+        class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
+        [class.invisible]="view() !== 'empty'"
+        data-cy="my-questions-empty"
+      >
+        <p class="text-sm text-slate-500 dark:text-slate-400">
+          You have not contributed a question yet.
+        </p>
+        <a
+          routerLink="/add-question"
+          data-cy="my-questions-add-link"
+          class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+        >
+          Add a question
+        </a>
+      </div>
+      <div
+        class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
+        [class.invisible]="view() !== 'failed'"
+        data-cy="my-questions-failed"
+      >
+        <p class="text-sm text-red-700 dark:text-red-300">{{ loadError() }}</p>
+        <button
+          type="button"
+          data-cy="my-questions-retry"
+          (click)="retry()"
+          class="text-sm font-semibold text-red-700 dark:text-red-300 hover:underline"
+        >
+          Try again
+        </button>
+      </div>
+      <p
+        class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+        [class.invisible]="view() !== 'loaded'"
+        data-cy="my-questions-summary"
+      >
+        Newest first.
+      </p>
+    </div>
+
+    <!-- Every async outcome is announced: an edit and a removal both change the
+         list under the reader, which is silent to assistive tech otherwise. -->
+    <p role="status" class="sr-only">{{ actionResult() }}</p>
+
+    @if (actionError()) {
+      <p
+        role="alert"
+        class="mb-4 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+      >
+        {{ actionError() }}
+      </p>
+    }
+
+    @if (questions().length > 0) {
+      <ul class="space-y-4">
+        <!-- Tracked by the document id, never by the question text: two
+             questions with the same wording are still two questions
+             (CLAUDE.md §4.4). -->
+        @for (question of questions(); track question.id) {
+          <li
+            data-cy="my-question"
+            class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+              <p class="font-semibold text-slate-900 dark:text-slate-50">{{ question.question }}</p>
+              <span
+                data-cy="my-question-status"
+                class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold tracking-wide"
+                [class.bg-amber-100]="question.status === 'pending'"
+                [class.text-amber-800]="question.status === 'pending'"
+                [class.dark:bg-amber-500/15]="question.status === 'pending'"
+                [class.dark:text-amber-300]="question.status === 'pending'"
+                [class.bg-emerald-100]="question.status === 'approved'"
+                [class.text-emerald-800]="question.status === 'approved'"
+                [class.dark:bg-emerald-500/15]="question.status === 'approved'"
+                [class.dark:text-emerald-300]="question.status === 'approved'"
+                [class.bg-red-100]="question.status === 'rejected'"
+                [class.text-red-800]="question.status === 'rejected'"
+                [class.dark:bg-red-500/15]="question.status === 'rejected'"
+                [class.dark:text-red-300]="question.status === 'rejected'"
+                [class.bg-slate-100]="!question.status"
+                [class.text-slate-700]="!question.status"
+                [class.dark:bg-slate-800]="!question.status"
+                [class.dark:text-slate-300]="!question.status"
+              >
+                {{ statusLabel(question) }}
+              </span>
+            </div>
+
+            <dl
+              class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400"
+            >
+              <div class="flex gap-1">
+                <dt>Category:</dt>
+                <dd>{{ question.category }}</dd>
+              </div>
+              <div class="flex gap-1">
+                <dt>Difficulty:</dt>
+                <dd>{{ question.difficulty }}</dd>
+              </div>
+              <div class="flex gap-1">
+                <dt>Submitted:</dt>
+                <dd>{{ submittedAt(question) }}</dd>
+              </div>
+            </dl>
+
+            <!--
+              The reviewer's note, on a rejected question only. Absent is the
+              *normal* case rather than an error: a reviewer may reject without
+              writing one, and every question rejected before this field existed
+              has none — so it reads "No reason was given" rather than as
+              something having gone wrong (`FEAT-007`).
+
+              The reviewer's own words, escaped by interpolation and kept on
+              their own lines with `pre-line`, the same as a report's detail.
+            -->
+            @if (question.status === 'rejected') {
+              <div
+                data-cy="my-question-rejection"
+                class="mt-4 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
+              >
+                <p class="text-xs font-bold uppercase tracking-wide text-red-800 dark:text-red-300">
+                  Why it was rejected
+                </p>
+                @if (question.rejectionReason) {
+                  <p class="mt-1 text-sm text-red-700 dark:text-red-300 whitespace-pre-line">
+                    {{ question.rejectionReason }}
+                  </p>
+                } @else {
+                  <p class="mt-1 text-sm text-red-700/80 dark:text-red-300/80">
+                    No reason was given.
+                  </p>
+                }
+              </div>
+            }
+
+            <div class="flex gap-2 mt-4">
+              <button
+                type="button"
+                data-cy="edit-question"
+                (click)="openEdit(question, $event)"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <app-icon name="pencil" [size]="14" />
+                Edit
+              </button>
+              <button
+                type="button"
+                data-cy="remove-question"
+                (click)="openRemove(question, $event)"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border border-red-200 dark:border-red-500/25 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
+              >
+                <app-icon name="trash" [size]="14" />
+                Remove
+              </button>
+            </div>
+          </li>
+        }
+      </ul>
+
+      @if (hasMore()) {
+        <button
+          type="button"
+          data-cy="show-more-questions"
+          (click)="showMore()"
+          [disabled]="isLoading()"
+          class="mt-6 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+        >
+          Show more
+        </button>
+      }
+    }
+  </div>
+</div>
+
+<!--
+  The two dialogs. Both follow the auth menu's contract (`CLAUDE.md` §4.5):
+  `role="dialog"` + `aria-modal` + `aria-labelledby`, Escape closes, focus moves
+  to the dialog on open and back to the button that opened it on close, and Tab
+  is trapped in both directions by a plain `(keydown)` — Angular's `keydown.tab`
+  does not fire while Shift is held, which is the direction that escapes.
+-->
+@if (dialog(); as open) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div
+      data-cy="dialog-backdrop"
+      class="absolute inset-0 bg-slate-900/50"
+      (click)="closeDialog()"
+      aria-hidden="true"
+    ></div>
+    <div
+      #dialogElement
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-labelledby]="open.kind === 'edit' ? 'edit-dialog-title' : 'remove-dialog-title'"
+      tabindex="-1"
+      [attr.data-cy]="open.kind === 'edit' ? 'edit-question-dialog' : 'remove-question-dialog'"
+      (keydown)="keepFocusInDialog($event)"
+      (keydown.escape)="closeDialog()"
+      class="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white dark:bg-slate-900 shadow-card-lg p-6 focus:outline-none"
+    >
+      @if (open.kind === 'edit') {
+        <h2
+          id="edit-dialog-title"
+          class="text-xl font-bold text-slate-900 dark:text-slate-50 mb-1 pr-8"
+        >
+          Edit your question
+        </h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
+          Saving sends it back for review, so it will not be served until a reviewer approves it
+          again.
+        </p>
+
+        <!--
+          `[formGroup]` belongs on the `<form>` as well as on the fields
+          component's own wrapper, and not for the controls: it is what puts
+          Angular's `FormGroupDirective` on this element, and `(ngSubmit)` is
+          that directive's output. Without it the binding listens for a DOM
+          event nobody raises, the submit button falls through to a **native**
+          form submission, and the browser navigates away from the page — which
+          looks exactly like a save that closed the dialog and did nothing.
+        -->
+        <form [formGroup]="form" (ngSubmit)="saveEdit()">
+          <app-question-fields
+            [form]="form"
+            idPrefix="edit-"
+            [categories]="categories()"
+            [validationSummary]="validationSummary()"
+          />
+
+          @if (dialogError()) {
+            <p
+              data-cy="edit-question-error"
+              class="mt-4 flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
+            >
+              <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+              {{ dialogError() }}
+            </p>
+          }
+
+          <div class="flex gap-3 mt-5">
+            <button
+              type="button"
+              data-cy="cancel-edit"
+              (click)="closeDialog()"
+              [disabled]="isSaving()"
+              class="rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold px-5 py-3 disabled:opacity-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              data-cy="save-question"
+              [disabled]="isSaving()"
+              class="flex-1 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
+            >
+              @if (isSaving()) {
+                Saving&hellip;
+              } @else {
+                Save and resubmit
+              }
+            </button>
+          </div>
+        </form>
+      } @else {
+        <h2
+          id="remove-dialog-title"
+          class="text-xl font-bold text-slate-900 dark:text-slate-50 mb-3 pr-8"
+        >
+          Remove this question from the app?
+        </h2>
+        <p data-cy="remove-question-text" class="text-sm text-slate-700 dark:text-slate-300 mb-3">
+          {{ open.question.question }}
+        </p>
+        <!--
+          "Remove from the app", never "delete permanently" (`FEAT-007` §0). The
+          licence the Terms grant is irrevocable, and this reaches neither copies
+          already served nor a player's offline pool — so promising erasure would
+          be promising something the app cannot do.
+        -->
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
+          It stops being served in games straight away. It does not withdraw the licence you granted
+          when you contributed it, and it cannot reach copies already played or saved offline. See
+          <a routerLink="/terms" class="text-emerald-700 dark:text-emerald-400 hover:underline"
+            >the Terms</a
+          >.
+        </p>
+
+        @if (dialogError()) {
+          <p
+            data-cy="remove-question-error"
+            class="mb-4 flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
+          >
+            <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+            {{ dialogError() }}
+          </p>
+        }
+
+        <div class="flex gap-3">
+          <button
+            type="button"
+            data-cy="cancel-remove"
+            (click)="closeDialog()"
+            [disabled]="isSaving()"
+            class="rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold px-5 py-3 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            data-cy="confirm-remove"
+            (click)="confirmRemove()"
+            [disabled]="isSaving()"
+            class="flex-1 rounded-xl bg-red-700 hover:bg-red-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 transition-all"
+          >
+            @if (isSaving()) {
+              Removing&hellip;
+            } @else {
+              Remove from the app
+            }
+          </button>
+        </div>
+      }
+    </div>
+  </div>
+}

@@ -336,6 +336,52 @@
   -->
   <app-question-justification [text]="question.explanation" />
 
+  <!--
+    Why the question is being rejected, in the reviewer's own words
+    (`FEAT-007`). Optional: a reviewer may reject without one, and every
+    question rejected before this box existed has none, so the author's screen
+    treats an absent reason as normal rather than as an error.
+
+    Rendered on every card rather than revealed by clicking Reject, so it does
+    not resize the row at the moment the reviewer is reaching for the button
+    (`CLAUDE.md` §4.4) — and so the reason is typed *before* the decision, which
+    is the order a reviewer actually works in.
+
+    The label carries the question's id because this template renders once per
+    row: a fixed `for` would point every box at the first one.
+  -->
+  <div class="mt-4">
+    <label
+      [attr.for]="'rejection-reason-' + question.id"
+      class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1"
+    >
+      Reason for rejecting
+      <span class="font-normal">(optional, shown to the author)</span>
+    </label>
+    <textarea
+      [id]="'rejection-reason-' + question.id"
+      data-cy="rejection-reason"
+      rows="2"
+      [value]="reasonFor(question)"
+      (input)="setReason(question.id, $any($event.target).value)"
+      [attr.aria-invalid]="isReasonTooLong(question)"
+      [attr.aria-describedby]="
+        isReasonTooLong(question) ? 'rejection-reason-error-' + question.id : null
+      "
+      placeholder="What would have to change for this to be approved?"
+      class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+    ></textarea>
+    @if (isReasonTooLong(question)) {
+      <p
+        [id]="'rejection-reason-error-' + question.id"
+        data-cy="rejection-reason-error"
+        class="mt-1.5 text-sm text-red-700 dark:text-red-300"
+      >
+        A reason must be {{ maxReasonLength }} characters or fewer.
+      </p>
+    }
+  </div>
+
   <div class="flex gap-2 mt-4">
     @if (status !== 'approved') {
       <button

@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, defer, map } from 'rxjs';
 import {
+  CustomQuestionContent,
   CustomQuestionDoc,
   Difficulty,
   LeaderboardEntry,
@@ -47,6 +48,14 @@ const FIRESTORE_TIMEOUT_MS = 10_000;
 const QUESTION_QUOTA_COLLECTION = 'custom_question_quota';
 const QUESTION_QUOTA_WINDOW_MS = 3_600_000;
 export const MAX_QUESTIONS_PER_HOUR = 20;
+
+/**
+ * The longest a reviewer's rejection note may be (`FEAT-007`). Must agree with
+ * `maxRejectionReasonLength()` in `firestore.rules`; if they drift, the review
+ * queue offers a box whose contents the write is refused for, with nothing on
+ * screen naming the field.
+ */
+export const MAX_REJECTION_REASON_LENGTH = 500;
 
 /**
  * The only status a player is served. `getCustomQuestions` filters on it, and
@@ -98,6 +107,37 @@ const QUOTA_WRITE_ATTEMPTS = 3;
  * whole class of deploy risk — for that is the right way round.
  */
 export const REVIEW_PAGE_SIZE = 50;
+
+/**
+ * How many of an author's own questions one page of `/my-questions` holds
+ * (`FEAT-007`).
+ *
+ * Unlike the review queue above this query **is** ordered, newest first, and so
+ * it pages on a cursor rather than telling the reader to reload: a screen
+ * showing somebody their own contributions has to be able to reach all of them,
+ * and an author who has been contributing for a year has more than fit here.
+ * The order is what makes the bound mean something — an unordered page of
+ * twenty-five is twenty-five arbitrary questions (`CLAUDE.md` §4.1).
+ */
+export const MY_QUESTIONS_PAGE_SIZE = 25;
+
+/**
+ * Where the next page of an author's questions starts: the last row's
+ * `createdAt` and its document ID, in the order the query sorts by.
+ *
+ * The document ID is in there for the same reason `ReportCursor` carries one —
+ * two questions submitted in the same millisecond put one of them at a page
+ * boundary and its twin immediately after the cursor value, where an exclusive
+ * `startAfter` on `createdAt` alone steps straight over it. A contributor
+ * submitting a batch is exactly the case that produces the tie.
+ */
+export type UserQuestionCursor = readonly [createdAt: unknown, id: string];
+
+/** One page of an author's own questions, and where the next one begins. */
+export interface UserQuestionsPage {
+  questions: (CustomQuestionDoc & { id: string })[];
+  next: UserQuestionCursor | null;
+}
 
 /**
  * How many document IDs one `IN` filter may carry. Firestore's own limit is 30
@@ -411,22 +451,143 @@ export class FirebaseService {
   }
 
   /**
-   * Moves a question between moderation statuses.
+   * The caller's own contributions, newest first, starting after `after`
+   * (`FEAT-007`).
+   *
+   * **The `where` is not optional and neither is the `limit`.** Rules are not
+   * filters, so the `createdBy` clause is what lets Firestore *prove* the
+   * ownership branch of the read rule for every document the query could
+   * return — without it the query is refused outright rather than narrowed
+   * (`docs/data-model.md` §3) — and the limit is `CLAUDE.md` §4.1.
+   *
+   * Ordered `createdAt` descending with the document ID as a tiebreaker, which
+   * needs the `(createdBy ASC, createdAt DESC)` composite index declared in
+   * `firestore.indexes.json`. The emulator answers this query whether or not
+   * that index exists, so it is declared rather than discovered (D3).
+   *
+   * Questions predating attribution are absent by construction: they carry no
+   * `createdBy` to match, and nobody can claim them.
+   */
+  async getUserQuestions(uid: string, after?: UserQuestionCursor): Promise<UserQuestionsPage> {
+    const documents = await this.rest.runQuery(
+      {
+        collectionPath: CUSTOM_QUESTIONS_COLLECTION,
+        where: [{ field: 'createdBy', op: 'EQUAL', value: uid }],
+        orderBy: [
+          { field: 'createdAt', direction: 'DESCENDING' },
+          { field: DOCUMENT_ID_FIELD, direction: 'DESCENDING' },
+        ],
+        limit: MY_QUESTIONS_PAGE_SIZE,
+        ...(after === undefined ? {} : { startAfterValues: after }),
+      },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
+    );
+
+    const last = documents[documents.length - 1];
+    return {
+      questions: documents.map((doc) => ({
+        id: doc.id,
+        ...asDocumentData<CustomQuestionDoc>(doc.data),
+      })),
+      // A short page is the end. A full one might also be, which costs one
+      // empty read to find out — the trade every cursor-paged list makes.
+      next:
+        last === undefined || documents.length < MY_QUESTIONS_PAGE_SIZE
+          ? null
+          : [last.data['createdAt'], last.id],
+    };
+  }
+
+  /**
+   * Rewrites the author's own question and sends it back for review
+   * (`FEAT-007`).
+   *
+   * **The status is set here rather than taken from the caller**, exactly as it
+   * is on submission: an author has no more say in whether their edit is
+   * approved than in whether their submission was. `firestore.rules` requires
+   * `'pending'` on an owner update, so a caller offering anything else would be
+   * offering a decision the rules exist to refuse.
+   *
+   * **`createdBy` and `createdAt` are deliberately absent from the mask.** They
+   * are the document's history rather than its content, and leaving them out of
+   * the write is what makes "unchanged" true by construction rather than by the
+   * client remembering to resend the same values — which the rules then check
+   * anyway.
+   *
+   * **Every optional field is in the mask whether or not it has a value**, so
+   * clearing a source link removes the key rather than leaving the old one in
+   * place. `rejectionReason` is in the delete list unconditionally: the note was
+   * about text that no longer exists, and the rules refuse an owner update that
+   * leaves it standing.
+   */
+  async updateUserQuestion(questionId: string, content: CustomQuestionContent): Promise<void> {
+    const optional = ['sourceUrl', 'sourceTitle', 'explanation'] as const;
+    const present = Object.fromEntries(
+      optional.filter((key) => content[key]).map((key) => [key, content[key]]),
+    );
+    const cleared = optional.filter((key) => !content[key]);
+
+    await this.rest.setDocument(
+      `${CUSTOM_QUESTIONS_COLLECTION}/${questionId}`,
+      {
+        category: content.category,
+        type: content.type,
+        difficulty: content.difficulty,
+        question: content.question,
+        correct_answer: content.correct_answer,
+        incorrect_answers: content.incorrect_answers,
+        status: STATUS_ON_SUBMISSION,
+        ...present,
+      },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS, deleteFields: [...cleared, 'rejectionReason'] },
+    );
+  }
+
+  /**
+   * Withdraws the author's own question from the app (`FEAT-007`).
+   *
+   * "From the app" is the honest verb and the UI says so too: the licence the
+   * Terms grant is irrevocable, and this reaches neither copies already served
+   * nor a player's offline pool. What it does do is stop the question being
+   * drawn again.
+   */
+  async deleteUserQuestion(questionId: string): Promise<void> {
+    await this.rest.deleteDocument(`${CUSTOM_QUESTIONS_COLLECTION}/${questionId}`, {
+      timeoutMs: FIRESTORE_TIMEOUT_MS,
+    });
+  }
+
+  /**
+   * Moves a question between moderation statuses, and records why when the
+   * decision is a rejection.
    *
    * **This is the app's first genuinely partial write**, and the note on
    * `FirestoreRestClient.setDocument` said the day one arrived it would have to
-   * decide on purpose. It has: the `updateMask` covers `status` alone, so this
-   * is a patch and every other field is left exactly as the author wrote it.
-   * A full-document replace would be wrong twice over — it would drop whatever
-   * the reviewer's client did not happen to know about, and `firestore.rules`
-   * refuses it anyway, because the moderation rule allows a write that affects
-   * no key but `status`.
+   * decide on purpose. It has: the `updateMask` covers the two keys the
+   * moderation rule permits and nothing else, so every field the author wrote
+   * is left exactly as they wrote it. A full-document replace would be wrong
+   * twice over — it would drop whatever the reviewer's client did not happen to
+   * know about, and `firestore.rules` refuses it anyway.
+   *
+   * **The reason is cleared on any decision that is not a rejection**, and that
+   * is not tidiness: the rules refuse a `rejectionReason` on a question that is
+   * not `rejected`, so approving one that carries a stale note would be refused
+   * outright. Clearing it is also the honest write — a rejection note on an
+   * approved question is a false statement shown to its author.
    */
-  async setQuestionStatus(questionId: string, status: QuestionStatus): Promise<void> {
+  async setQuestionStatus(
+    questionId: string,
+    status: QuestionStatus,
+    rejectionReason?: string,
+  ): Promise<void> {
+    const reason = status === 'rejected' ? (rejectionReason ?? '').trim() : '';
     await this.rest.setDocument(
       `${CUSTOM_QUESTIONS_COLLECTION}/${questionId}`,
-      { status },
-      { timeoutMs: FIRESTORE_TIMEOUT_MS },
+      { status, ...(reason ? { rejectionReason: reason } : {}) },
+      {
+        timeoutMs: FIRESTORE_TIMEOUT_MS,
+        ...(reason ? {} : { deleteFields: ['rejectionReason'] }),
+      },
     );
   }
 

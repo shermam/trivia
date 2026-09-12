@@ -17,7 +17,11 @@ import {
   QuestionReportReason,
   QuestionStatus,
 } from '../../models/question.model';
-import { FirebaseService, REVIEW_PAGE_SIZE } from '../../services/firebase.service';
+import {
+  FirebaseService,
+  MAX_REJECTION_REASON_LENGTH,
+  REVIEW_PAGE_SIZE,
+} from '../../services/firebase.service';
 import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
@@ -144,6 +148,46 @@ export class ReviewQueueComponent implements OnInit {
   protected readonly actionResult = signal<string | null>(null);
 
   protected readonly isFull = computed(() => this.questions().length >= this.pageSize);
+
+  /**
+   * What the reviewer has typed into each row's reason box, keyed by question
+   * id (`FEAT-007`).
+   *
+   * Keyed rather than a single value because the card is rendered once per row
+   * from one `ng-template`, and a reviewer who starts typing about one question
+   * and then decides on another must not send the first one's words with the
+   * second one's rejection. Cleared for a question once its decision lands, so
+   * reopening the tab does not restore words already sent.
+   */
+  private readonly reasonDrafts = signal<Readonly<Record<string, string>>>({});
+
+  /**
+   * The box starts as whatever reason the question already carries, so
+   * rejecting a second time — to correct a status, say — does not silently wipe
+   * a note the author has already been shown. Once the reviewer types, the
+   * draft exists even when it is empty, which is what lets them clear it
+   * deliberately.
+   */
+  protected reasonFor(question: ReviewQuestion): string {
+    return this.reasonDrafts()[question.id] ?? question.rejectionReason ?? '';
+  }
+
+  protected setReason(questionId: string, value: string): void {
+    this.reasonDrafts.update((drafts) => ({ ...drafts, [questionId]: value }));
+  }
+
+  /**
+   * Whether the reason typed for a question is longer than `firestore.rules`
+   * accepts. Checked here so an over-long note is a named error rather than a
+   * bare `permission-denied` on the Reject click — the same reasoning as the
+   * contribution form's bounds, and the number has to agree with
+   * `maxRejectionReasonLength()` in the rules.
+   */
+  protected readonly maxReasonLength = MAX_REJECTION_REASON_LENGTH;
+
+  protected isReasonTooLong(question: ReviewQuestion): boolean {
+    return this.reasonFor(question).trim().length > MAX_REJECTION_REASON_LENGTH;
+  }
 
   ngOnInit(): void {
     void this.load();
@@ -281,15 +325,32 @@ export class ReviewQueueComponent implements OnInit {
   }
 
   protected async decide(question: ReviewQuestion, status: QuestionStatus): Promise<void> {
+    // Refused before the round trip so the reviewer gets a named error rather
+    // than the bare `permission-denied` the rules would answer with.
+    if (status === 'rejected' && this.isReasonTooLong(question)) {
+      this.actionError.set(
+        `A rejection reason has to be ${MAX_REJECTION_REASON_LENGTH} characters or fewer.`,
+      );
+      return;
+    }
+
     // Captured before the round trip: the reviewer may switch tabs while the
     // write is in flight, and where the decided row lives is a property of
     // where it was made, not of where they are when it lands.
     const view = this.activeView();
+    const reason = status === 'rejected' ? this.reasonFor(question).trim() : '';
     this.pendingActionId.set(question.id);
     this.actionError.set(null);
     this.actionResult.set(null);
     try {
-      await this.firebaseService.setQuestionStatus(question.id, status);
+      await this.firebaseService.setQuestionStatus(question.id, status, reason);
+      // The words have been sent; keeping them would put them back in the box
+      // if the reviewer reopens the tab, next to a question already decided.
+      this.reasonDrafts.update((drafts) => {
+        const remaining = { ...drafts };
+        delete remaining[question.id];
+        return remaining;
+      });
       if (view === 'reports') {
         // The report stays — it is the record that somebody complained, not a
         // task to tick off — so the row's copy of the question is updated in
@@ -299,7 +360,17 @@ export class ReviewQueueComponent implements OnInit {
         this.reports.update((rows) =>
           rows.map((row) =>
             row.question?.id === question.id
-              ? { ...row, question: { ...row.question, status } }
+              ? {
+                  ...row,
+                  question: {
+                    ...row.question,
+                    status,
+                    // Mirrors what the write did: the rules refuse a reason on
+                    // anything but a rejected question, so the service clears
+                    // it and so must the row.
+                    ...(reason ? { rejectionReason: reason } : { rejectionReason: undefined }),
+                  },
+                }
               : row,
           ),
         );

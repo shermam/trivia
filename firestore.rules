@@ -277,12 +277,40 @@ service cloud.firestore {
       return 'pending';
     }
 
-    function isValidCustomQuestion() {
-      let data = request.resource.data;
+    // The longest a reviewer's note about a rejected question may be
+    // (`FEAT-007`). Half the justification's 1000: it explains one decision to
+    // one author, where the justification has to explain a question, its answer
+    // and its distractors to every reader.
+    function maxRejectionReasonLength() {
+      return 500;
+    }
+
+    // Everything a `custom_questions` document must *be*, independent of who is
+    // writing it and when. Shared by `create` and by the author's own `update`
+    // (`FEAT-007`), which is the entire reason it is factored out: an
+    // ownership-only update rule would let an author rewrite their document
+    // into any shape at all — new keys outside this allowlist, a 4 MB question
+    // string, a `createdBy` pointing at somebody else — because the validator
+    // used to guard creates and nothing else.
+    //
+    // Attribution, freshness and the submission status are *not* here. They are
+    // conditions on the act of creating, not on the document, and the owner's
+    // update has its own versions of them: `createdBy`/`createdAt` must be
+    // unchanged rather than fresh.
+    // `rejectionReason` is in the key list because a document may legitimately
+    // *hold* one — a reviewer writes it — and this list is a description of the
+    // document's shape. It carries no bound here on purpose: the only writer
+    // who may put a value there is the reviewer, so the bound lives on the
+    // reviewer's own rule below, where it is reachable and where the rules
+    // tests can see it. Both callers of this function refuse the key outright
+    // in a clause of their own, so a bound here would be unreachable — and an
+    // unreachable clause is one a mutation run cannot tell from a deleted one
+    // (`CLAUDE.md` §4.6).
+    function isValidQuestionShape(data) {
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
                  'incorrect_answers', 'createdBy', 'createdAt', 'status',
-                 'sourceUrl', 'sourceTitle', 'explanation']
+                 'sourceUrl', 'sourceTitle', 'explanation', 'rejectionReason']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
             && data.type in ['multiple', 'boolean']
@@ -341,7 +369,12 @@ service cloud.firestore {
             // the first place — fixing only the reader would leave the next
             // reader to rediscover it.
             && !(data.correct_answer in data.incorrect_answers)
-            && data.incorrect_answers.toSet().size() == data.incorrect_answers.size()
+            && data.incorrect_answers.toSet().size() == data.incorrect_answers.size();
+    }
+
+    function isValidCustomQuestion() {
+      let data = request.resource.data;
+      return isValidQuestionShape(data)
             // Attribution is mandatory and self-asserting only: a submitter
             // can name themselves and nobody else. This is what makes an abuse
             // report actionable, and what lets account deletion find a user's
@@ -349,6 +382,11 @@ service cloud.firestore {
             // can invent an author for a document that never recorded one.
             && data.createdBy is string && data.createdBy == request.auth.uid
             && isNearRequestTime(data.createdAt)
+            // A contributor does not write the reviewer's note about their own
+            // work. The key is allowlisted above so the document may hold one,
+            // and refused here so the author cannot be the one who put it there
+            // (`FEAT-007`).
+            && !('rejectionReason' in data)
             // Mandatory, not optional-if-present. An optional field would let
             // a client cached from before this change keep writing documents
             // with no status at all, which the backfill has already run past —
@@ -360,6 +398,66 @@ service cloud.firestore {
             // checkout-session schema change and the leaderboard retirement
             // (`data-model.md` §3).
             && data.status == statusOnSubmission();
+    }
+
+    // Whether the caller is the author of the question being written
+    // (`FEAT-007`). Two populations can never satisfy this and both are named
+    // rather than left to fall out of the comparison:
+    //
+    // - **A document with no `createdBy` at all** predates attribution (A10),
+    //   and nobody recorded who wrote it. There is no owner to compare against,
+    //   so the rule fails closed rather than treating a missing field as a
+    //   match.
+    // - **The `[deleted-user]` sentinel** means an author existed and was
+    //   deliberately erased by `deleteAccount`, which is what lets the question
+    //   survive the person. It is not a uid, and an account that somehow
+    //   produced that exact string must not inherit somebody else's
+    //   contributions.
+    //
+    // Both are explicit reject cases in `firestore-tests/`, because either
+    // would otherwise be caught only by a rule that happens to fail for an
+    // unrelated reason.
+    //
+    // The `in` guard is deliberately redundant and is stated anyway. Measured:
+    // deleting it fails no test, because reading a field a document does not
+    // have raises an error and an erroring rule denies. It is here so a reader
+    // does not have to know that, and so nobody removes it believing the
+    // comparison below is doing the work — but do not mistake it for the thing
+    // that closes the case; the language is.
+    function isQuestionAuthor() {
+      return request.auth != null
+             && 'createdBy' in resource.data
+             && resource.data.createdBy is string
+             && resource.data.createdBy != '[deleted-user]'
+             && resource.data.createdBy == request.auth.uid;
+    }
+
+    // What an author may turn their own question into (`FEAT-007`).
+    //
+    // Deliberately **not** gated on `isProUser()`. Creating a question is a Pro
+    // entitlement; correcting or withdrawing one you already wrote is not. A
+    // lapsed subscriber who spots an error in their own question and cannot fix
+    // it leaves a wrong question in circulation for everybody, and the person
+    // best placed to remove bad content is the one who wrote it. The rules
+    // tests pin the lapsed-author accept case, because that is the half a suite
+    // of `assertFails` cannot see.
+    function isValidOwnerEdit() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return isValidQuestionShape(after)
+            // Authorship and the submission time are the document's history and
+            // are not the author's to rewrite. Required to be *unchanged*
+            // rather than fresh, which is the whole difference from create.
+            && after.createdBy == before.createdBy
+            && after.createdAt == before.createdAt
+            // An edited question goes back through review. `'pending'` rather
+            // than "unchanged": an approved question that has been rewritten is
+            // not the question that was approved.
+            && after.status == 'pending'
+            // ...and the reviewer's note about the *previous* version goes with
+            // it. Leaving it standing would show the author a rejection reason
+            // for text they have since replaced.
+            && !('rejectionReason' in after);
     }
 
     // Moderation roles, granted by hand. Empty today: nothing reads it yet
@@ -495,8 +593,8 @@ service cloud.firestore {
     // question requires both the anti-flood gate (real, non-anonymous,
     // verified-if-password account) and an active Pro subscription — this
     // is a paid-tier feature, see PricingComponent/AddQuestionComponent —
-    // subject to schema validation above; editing/removing an existing one
-    // is console-only.
+    // subject to schema validation above. Editing or removing one is the
+    // author's own to do, from `/my-questions`, and needs no subscription.
     match /custom_questions/{questionId} {
       // Approved questions are public; anything else is reviewers only.
       //
@@ -520,36 +618,82 @@ service cloud.firestore {
       // `scripts/backfill-question-status.mjs` stamped every document that
       // predated the field, and `isValidCustomQuestion()` has required it on
       // create since 4b-i, so there is no window in which one could exist.
-      allow read: if resource.data.status == 'approved' || isReviewer();
+      //
+      // The third branch is `/my-questions` (`FEAT-007`): an author can see
+      // their own contributions whatever status they are in, which is the whole
+      // purpose of that screen — without it a contributor who comes back to
+      // check on a submission is refused by this rule. It goes **last** for
+      // cost, not for correctness: the public branch is evaluated first, so a
+      // player reading an approved question still never pays for the
+      // `user_roles` lookup, and an author reading their own pending question
+      // pays for exactly one.
+      //
+      // Rules are not filters here either, so `getUserQuestions` has to carry
+      // `where('createdBy','==',uid)` for Firestore to be able to prove this
+      // branch — the same contract the approved filter has. The rules tests
+      // cover both directions with a query Firestore *can* prove and an
+      // unfiltered one it cannot (`CLAUDE.md` §4.6).
+      allow read: if resource.data.status == 'approved'
+                  || isReviewer()
+                  || resource.data.createdBy == request.auth.uid;
 
       allow create: if isRealAuthedUser()
                     && isProUser()
                     && isValidCustomQuestion()
                     && withinQuestionQuota();
 
-      // Moderation: a reviewer may move a question between statuses and may
-      // change nothing else about it.
+      // Two people may update a question, and they may change disjoint things.
       //
-      // `affectedKeys().hasOnly(['status'])` is what makes that true, and it is
-      // doing more work than it looks. It stops a reviewer editing the question
-      // text (that is item 6's job, for the author, and a moderator quietly
-      // rewriting somebody's submission is a different feature nobody asked
-      // for), stops `createdBy` being rewritten to steal or disown authorship,
-      // and stops new fields being introduced outside the `hasOnly()` allowlist
-      // that `create` enforces — an allowlist `update` would otherwise sail
-      // straight past, since `isValidCustomQuestion()` only guards creates.
+      // **The author** (`FEAT-007`) may rewrite the content of their own
+      // question, which sends it back to `pending` — see `isValidOwnerEdit()`
+      // for what that permits and `isQuestionAuthor()` for the two populations
+      // that can never be an owner.
+      //
+      // **A reviewer** may move a question between statuses and attach a reason
+      // for rejecting it, and may change nothing else about it.
+      // `affectedKeys().hasOnly(['status', 'rejectionReason'])` is what makes
+      // that true, and it is doing more work than it looks. It stops a reviewer
+      // editing the question text (that is the author's to do, and a moderator
+      // quietly rewriting somebody's submission is a different feature nobody
+      // asked for), stops `createdBy` being rewritten to steal or disown
+      // authorship, and stops new fields being introduced outside the
+      // `hasOnly()` allowlist that `create` enforces.
       //
       // Note the status is *not* required to differ. A no-op write is harmless,
       // and demanding a change would make an idempotent retry fail — the client
       // cannot always know whether the write that timed out actually landed.
-      allow update: if isReviewer()
-                    && request.resource.data.diff(resource.data)
-                         .affectedKeys().hasOnly(['status'])
-                    && request.resource.data.status in ['approved', 'pending', 'rejected'];
+      // The same permissiveness is what lets a reviewer add a reason to a
+      // question they have **already** rejected, without pretending to decide
+      // it again: the reason clause below asks what the resulting document's
+      // status is, not what the write changed it from.
+      //
+      // A reason may exist only on a rejected question. Approving one therefore
+      // has to clear it in the same write, which is deliberate: a rejection
+      // note left standing on an approved question is a false statement shown
+      // to its author on `/my-questions`.
+      //
+      // The author's branch is first so that `||` short-circuits past the
+      // `user_roles` lookup for the far commoner caller.
+      allow update: if (isQuestionAuthor() && isValidOwnerEdit())
+                    || (isReviewer()
+                        && request.resource.data.diff(resource.data)
+                             .affectedKeys().hasOnly(['status', 'rejectionReason'])
+                        && request.resource.data.status in ['approved', 'pending', 'rejected']
+                        && (!('rejectionReason' in request.resource.data)
+                            || (request.resource.data.status == 'rejected'
+                                && request.resource.data.rejectionReason is string
+                                && request.resource.data.rejectionReason.size() > 0
+                                && request.resource.data.rejectionReason.size()
+                                     <= maxRejectionReasonLength())));
 
-      // Deletion stays console-only. A reviewer can stop a question being
-      // served; erasing it is a different power, and nothing yet needs it.
-      allow delete: if false;
+      // An author may withdraw their own question from the app (`FEAT-007`),
+      // and nobody else may delete one — a reviewer can stop a question being
+      // served by rejecting it, and erasing somebody else's contribution is a
+      // different power that still nothing needs.
+      //
+      // Ownership only: there is no payload to validate, and no Pro check, for
+      // the same reason the edit has none.
+      allow delete: if isQuestionAuthor();
     }
 
     // The per-hour submission counter, and the only reason a question write is
