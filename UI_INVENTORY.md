@@ -113,7 +113,7 @@ A hairline-bordered bar below `<main>`, hidden with the top bar in embed mode.
 - **Right**, a `Legal` nav: **"Buy me a coffee"** (coffee glyph, amber on hover), then "Privacy Policy" → `/privacy`, then "Terms of Service" → `/terms`.
 - **The donation CTA is absent on `/play`** — removed rather than hidden, so it is out of the tab order too. It is the disclosure trigger for the dialog (`aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`), and focus returns to it when the dialog closes, whichever control opened it.
 
-**The dialog** (`role="dialog"`, `aria-modal`, focus trapped in both directions, Escape closes) is mounted once here — behind an `@defer`, so its code is fetched by the click that opens it rather than shipped to every visitor — and opened from either the CTA or the auth menu:
+**The dialog** (`role="dialog"`, `aria-modal`, focus trapped in both directions, Escape closes) is mounted once here and opened from either the CTA or the auth menu:
 
 - **Header**: coffee glyph + "Buy me a coffee", and a close "x".
 - **Blurb**: "Trivimind is free to play and always will be. A one-off tip helps pay for the servers."
