@@ -1,0 +1,160 @@
+<div class="min-h-screen bg-slate-50 dark:bg-slate-950 px-4 sm:px-6 py-10 sm:py-14">
+  <div class="max-w-3xl mx-auto">
+    <a
+      routerLink="/"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
+    >
+      <app-icon name="arrow-left" [size]="15" />
+      Back to game
+    </a>
+
+    <h1
+      class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-2"
+    >
+      Your stats
+    </h1>
+    <p class="text-slate-500 dark:text-slate-400 mb-8">
+      Your lifetime totals across every game you have finished while signed in. Only you can see
+      them.
+    </p>
+
+    <!-- Everything on this card arrives after a round trip, and none of it
+         changes anything a screen reader is told unless it is announced (G3,
+         `CLAUDE.md` §4.5). Permanent and only its text changes: a live region
+         inserted into the DOM already carrying its message is routinely
+         missed. -->
+    <p role="status" class="sr-only">{{ statusAnnouncement() }}</p>
+
+    <div
+      data-cy="stats-card"
+      class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-900/8 dark:border-white/10 shadow-card p-6 sm:p-8"
+    >
+      <!--
+        One grid cell holding every message this card can show, so the space it
+        takes is the tallest of them and none of the five states resizes the
+        card (`CLAUDE.md` §4.4). A hard-coded `min-h` would be a number to
+        re-measure every time one of these sentences changed.
+
+        `invisible` (`visibility: hidden`) rather than `hidden`: the box stays
+        laid out, which is what reserves the height, while the text drops out
+        of the accessibility tree and out of `innerText` so only the live state
+        is ever read out.
+      -->
+      <div class="grid mb-6">
+        <p
+          class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+          [class.invisible]="view() !== 'loading'"
+          data-cy="stats-loading"
+        >
+          Loading your lifetime totals&hellip;
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+          [class.invisible]="view() !== 'signedOut'"
+          data-cy="stats-signed-out"
+        >
+          Sign in and your totals start counting from the next game you finish.
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+          [class.invisible]="view() !== 'empty'"
+          data-cy="stats-empty"
+        >
+          Nothing banked yet — finish a game and your totals will show up here.
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+          [class.invisible]="view() !== 'failed'"
+          data-cy="stats-failed"
+        >
+          Could not load your stats just now.
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+          [class.invisible]="view() !== 'stats'"
+          data-cy="stats-since"
+        >
+          @if (trackingSince(); as since) {
+            Tracking since {{ since }}.
+          } @else {
+            Tracking your lifetime totals.
+          }
+        </p>
+      </div>
+
+      <!--
+        Rendered in every state, with an em-dash where a number will go, so the
+        answer fills boxes that are already on the page rather than creating
+        them. Labels never change, so only the one-line value differs between
+        loading and loaded and the grid keeps its height by construction.
+
+        A `<dl>`, because every tile is a term and its value. The wrapping
+        `<div>` is the shape the spec allows for grouping one `dt` with its
+        `dd`, and it may hold **nothing else** — so the decorative icon lives
+        inside the `<dt>` rather than beside it, which is also where it
+        belongs: it labels the term, and `app-icon` renders its svg
+        `aria-hidden`.
+      -->
+      <dl class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        @for (tile of tiles(); track tile.id) {
+          <div
+            class="rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-900/6 dark:border-white/5 px-4 py-3"
+          >
+            <dt class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+              <app-icon
+                [name]="tile.icon"
+                [size]="16"
+                class="text-emerald-600 dark:text-emerald-400"
+              />
+              {{ tile.label }}
+            </dt>
+            <dd
+              [attr.data-cy]="'stat-' + tile.id"
+              class="mt-0.5 text-2xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight tabular-nums"
+            >
+              {{ tile.value }}
+            </dd>
+          </div>
+        }
+      </dl>
+
+      <!--
+        The card's one action, and there is always exactly one. Three controls
+        in a single grid cell, each the same box with the same padding and the
+        same type scale, so the row is the same height whichever is showing —
+        the second of §4.4's techniques, identical by construction rather than
+        by happening to agree.
+      -->
+      <div class="grid mt-6">
+        <a
+          routerLink="/"
+          data-cy="stats-play"
+          class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
+          [class.invisible]="view() === 'signedOut' || view() === 'failed'"
+        >
+          <app-icon name="zap" [size]="15" />
+          Start a game
+        </a>
+        <button
+          type="button"
+          data-cy="stats-sign-in"
+          (click)="openSignIn()"
+          class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
+          [class.invisible]="view() !== 'signedOut'"
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          data-cy="stats-retry"
+          (click)="retry()"
+          class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold px-5 py-2.5 transition-colors"
+          [class.invisible]="view() !== 'failed'"
+        >
+          <app-icon name="rotate-ccw" [size]="15" />
+          Try again
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
