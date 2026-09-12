@@ -65,9 +65,20 @@
 
   <!--
     Mounted here rather than in `app.html`, so there is exactly one of it and
-    it sits beside the button focus returns to when it closes. It renders
-    nothing at all until it is opened, and the footer's own embed-mode gating
-    (`app.html`) is what keeps it out of an embedded widget.
+    it sits beside the button focus returns to when it closes. The footer's own
+    embed-mode gating (`app.html`) is what keeps it out of an embedded widget.
+
+    **`@defer`, and it is a measurement rather than a habit.** The footer is
+    eager — it is on every screen — so a statically imported dialog puts itself,
+    the currency switch, `DonationService` and the money formatter into the
+    initial bundle for every visitor, most of whom never open it: measured at
+    +13.04 kB raw / +2.06 kB transfer, which took the Lighthouse performance
+    median from 0.85 to 0.84 against a 0.85 threshold. Deferred on the open
+    signal, the chunk is fetched on the click that needs it. No `@placeholder`,
+    because the dialog renders nothing until it is opened either way, so there
+    is no box to hold.
   -->
-  <app-donation-dialog [returnFocusTo]="donateTriggerElement()" />
+  @defer (when isDialogOpen()) {
+    <app-donation-dialog [returnFocusTo]="donateTriggerElement()" />
+  }
 </footer>

@@ -137,10 +137,17 @@ describe('FooterComponent donation CTA', () => {
     expect(cta?.getAttribute('aria-controls')).toBe('donation-dialog');
   });
 
-  it('opens the dialog it hosts, and says so on the trigger', () => {
+  /*
+   * `await fixture.whenStable()` rather than `detectChanges()` alone: the
+   * dialog is behind an `@defer`, so opening it fetches a chunk before there
+   * is anything to assert on. TestBed plays defer blocks through as the
+   * browser does, which is what makes this test cover the real thing.
+   */
+  it('opens the dialog it hosts, and says so on the trigger', async () => {
     const { host, fixture } = renderAt('/');
 
     host.querySelector<HTMLButtonElement>('[data-cy="donate-cta"]')?.click();
+    await fixture.whenStable();
     fixture.detectChanges();
 
     expect(TestBed.inject(DonationDialogStateService).isOpen()).toBe(true);
@@ -152,11 +159,20 @@ describe('FooterComponent donation CTA', () => {
 
   // Mounted here and nowhere else, so two copies of a `role="dialog"` can
   // never be on the page at once.
-  it('hosts exactly one donation dialog', () => {
+  it('hosts exactly one donation dialog', async () => {
     const { host, fixture } = renderAt('/');
     TestBed.inject(DonationDialogStateService).open();
+    await fixture.whenStable();
     fixture.detectChanges();
 
     expect(host.querySelectorAll('[data-cy="donation-dialog"]')).toHaveLength(1);
+  });
+
+  // The other half of the `@defer`: nothing of the dialog is in the DOM, and
+  // nothing of it is in the initial bundle, until somebody asks for it.
+  it('renders no dialog at all until it is opened', () => {
+    const { host } = renderAt('/');
+
+    expect(host.querySelector('[data-cy="donation-dialog"]')).toBeNull();
   });
 });
