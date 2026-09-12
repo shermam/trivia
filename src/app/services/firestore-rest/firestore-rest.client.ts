@@ -46,6 +46,23 @@ export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DOCUMENT_ID_FIELD = '__name__';
 
 /**
+ * Whether a value can address a document here: a non-empty string carrying no
+ * `/`, since this client expands a bare ID into the full resource path and a
+ * path passed in would be expanded twice.
+ *
+ * Exported because a caller filtering on {@link DOCUMENT_ID_FIELD} may hold ids
+ * it did not choose — `question_reports.questionId` is whatever was stored,
+ * console-written documents included — and has to be able to **ask** rather
+ * than find out by catching: a query built from an unusable id throws, and one
+ * bad id in a page would otherwise take the whole read down with it. The
+ * predicate lives here so the caller's filter and the builder's check cannot
+ * drift apart.
+ */
+export function isDocumentId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && !value.includes('/');
+}
+
+/**
  * Field paths in an `updateMask` are a path *expression*: a dot separates map
  * segments, so a field literally named `a.b` would write to `b` inside a map
  * `a` unless it is backtick-quoted. Every field this app writes is a plain
@@ -101,6 +118,19 @@ export interface RestQuery {
   startAtDocumentId?: string;
   /** Exclusive upper bound, by document ID. Requires ordering by `__name__`. */
   endBeforeDocumentId?: string;
+  /**
+   * Exclusive lower bound in the query's **own** order — the SDK's
+   * `startAfter` — as one value per {@link RestQuery.orderBy} entry, in the
+   * same order. An entry for {@link DOCUMENT_ID_FIELD} takes a bare document
+   * ID, like the cursors above.
+   *
+   * This is what pages a query ordered by anything other than the document ID.
+   * Exclusive rather than inclusive because that is what a page boundary wants:
+   * an inclusive cursor repeats its own row, and dropping it afterwards is a
+   * second thing to get right. Mutually exclusive with `startAtDocumentId` —
+   * both are the one `startAt` the wire format has.
+   */
+  startAfterValues?: readonly unknown[];
 }
 
 /** One document write inside a batched {@link FirestoreRestClient.commit}. */
@@ -518,10 +548,36 @@ function buildStructuredQuery(
   // the value is excluded (the SDK's `endBefore`). Getting either backwards
   // shifts the sampling window by one document and nothing fails visibly,
   // which is why both directions are pinned by a test.
+  if (query.startAtDocumentId !== undefined && query.startAfterValues !== undefined) {
+    throw new TypeError(
+      'A query has one start cursor: pass startAtDocumentId or startAfterValues, not both.',
+    );
+  }
   if (query.startAtDocumentId !== undefined) {
     structuredQuery['startAt'] = {
       values: [documentIdCursor(resourceName, query.collectionPath, query.startAtDocumentId)],
       before: true,
+    };
+  }
+  // `before: false` is the exclusive form — the SDK's `startAfter`. The values
+  // are positional against `orderBy`, and Firestore refuses a cursor with more
+  // values than the query has ordering fields, so that is checked here rather
+  // than left to come back as an opaque `INVALID_ARGUMENT`.
+  if (query.startAfterValues !== undefined) {
+    const order = query.orderBy ?? [];
+    if (query.startAfterValues.length === 0 || query.startAfterValues.length > order.length) {
+      throw new TypeError(
+        `A startAfter cursor takes 1..${order.length} values, one per orderBy field; ` +
+          `got ${query.startAfterValues.length}.`,
+      );
+    }
+    structuredQuery['startAt'] = {
+      values: query.startAfterValues.map((value, index) =>
+        order[index].field === DOCUMENT_ID_FIELD
+          ? documentIdCursor(resourceName, query.collectionPath, asDocumentId(value))
+          : encodeValue(value),
+      ),
+      before: false,
     };
   }
   if (query.endBeforeDocumentId !== undefined) {
@@ -569,7 +625,7 @@ function documentIdFilterValue(
 }
 
 function asDocumentId(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value.includes('/')) {
+  if (!isDocumentId(value)) {
     throw new TypeError(
       `Cannot filter on ${DOCUMENT_ID_FIELD} with ${JSON.stringify(value)}: it takes a bare ` +
         'document ID, which this client expands into the full resource path.',

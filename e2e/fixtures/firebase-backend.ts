@@ -13,6 +13,7 @@ import {
   ProPriceSeed,
   ProSubscriptionSeed,
   QuestionReportRecord,
+  QuestionReportSeed,
   ReviewerSeed,
   VerifiedUserSeed,
 } from './types';
@@ -109,6 +110,27 @@ export class FirebaseBackend {
       .where('questionId', 'in', questionIds)
       .get();
     return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as QuestionReportRecord);
+  }
+
+  /**
+   * Writes reports straight into `question_reports`, bypassing Firestore rules.
+   *
+   * For the one thing filing them through the UI cannot reach: a page boundary.
+   * The reporting form writes one report per five-minute slot per uid, so
+   * twenty-six of them would need twenty-six browser sessions; the reviewer's
+   * queue pages at twenty-five.
+   *
+   * **Emulator-only, like every other report in this suite.** `question_reports`
+   * is keyed by nothing the preview sweep tracks, which is why
+   * `playwright.preview.config.ts` keeps the specs that write them off the real
+   * project rather than trying to clean up after them.
+   */
+  async seedQuestionReports(reports: QuestionReportSeed[]): Promise<void> {
+    const batch = this.firestore.batch();
+    for (const { id, ...report } of reports) {
+      batch.set(this.firestore.collection('question_reports').doc(id), report);
+    }
+    await batch.commit();
   }
 
   /**

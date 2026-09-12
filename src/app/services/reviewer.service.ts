@@ -1,7 +1,7 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { QuestionReport, QuestionReportReason } from '../models/question.model';
 import { AuthService } from './auth.service';
-import { FirestoreRestClient } from './firestore-rest/firestore-rest.client';
+import { DOCUMENT_ID_FIELD, FirestoreRestClient } from './firestore-rest/firestore-rest.client';
 
 const USER_ROLES_COLLECTION = 'user_roles';
 const ROLE_READ_TIMEOUT_MS = 10_000;
@@ -16,13 +16,26 @@ const REPORTS_READ_TIMEOUT_MS = 10_000;
  * collection is capped per reporter by the document-ID window and not at all in
  * aggregate, so an unbounded read is billed per document and grows with other
  * people's complaints. The **order** is what makes the bound meaningful — a
- * page of 25 arbitrary documents is not a page of anything — and `createdAt`
- * descending rides the automatic single-field index, so this needs no composite
- * and brings none of finding D3's deploy risk with it. Every report has the
- * field: `firestore.rules` refuses a create without one, and a document missing
- * an ordered field is invisible to the query rather than merely last.
+ * page of 25 arbitrary documents is not a page of anything.
  */
 export const REPORTS_PAGE_SIZE = 25;
+
+/**
+ * Where the next page of reports starts: the last row's `createdAt` and its
+ * document ID, in the order the query sorts by.
+ *
+ * Opaque to the caller on purpose — it holds the **raw** stored `createdAt`
+ * rather than the narrowed one, because it has to mean the same thing to
+ * Firestore as the ordering does, whatever a console-written document put
+ * there.
+ */
+export type ReportCursor = readonly [createdAt: unknown, id: string];
+
+/** One page of reports, and where the next one begins (`null` at the end). */
+export interface ReportPage {
+  reports: QuestionReport[];
+  next: ReportCursor | null;
+}
 
 const REPORT_REASONS: readonly QuestionReportReason[] = [
   'incorrect',
@@ -113,7 +126,8 @@ export class ReviewerService {
   }
 
   /**
-   * One page of filed reports, newest first (`FEAT-026`).
+   * One page of filed reports, newest first, starting after `after`
+   * (`FEAT-026`).
    *
    * **It lives here rather than in `FirebaseService` because of who may read
    * it.** `question_reports` is the only collection in the app whose read rule
@@ -129,22 +143,60 @@ export class ReviewerService {
    * complaint, not the complainant" is a property of the type the queue gets,
    * not a rule somebody has to remember while writing markup.
    *
+   * **This collection has to page**: nothing is ever marked handled, so unlike
+   * the status tabs — where reviewing a question removes it and the next
+   * arrives — "reload for more" would hand back the same newest page forever.
+   * Paging by growing the `limit` re-reads every page already on screen and is
+   * billed for each of them, so the next page comes from a cursor.
+   *
+   * **Two ordering facts here were measured against the emulator rather than
+   * assumed, and both are load-bearing.**
+   *
+   * - `orderBy(__name__, 'desc')` **as the only order is refused outright** —
+   *   "Firestore does not support descending key scans" — so paging on the
+   *   document ID alone, which is the one cursor shape the REST client had, is
+   *   not available. As a *tiebreaker after* another descending field it is
+   *   accepted, which is what this query does.
+   * - A cursor on `createdAt` alone **silently skips a report** whenever two
+   *   share a millisecond: the page ends at one of them and the next page
+   *   starts after the value, taking its twin with it. Probed with deliberate
+   *   ties, where a page boundary lost exactly one document. The `__name__`
+   *   tiebreaker in both the order and the cursor is what makes each row's
+   *   position unique.
+   *
+   * `startAfterValues` is exclusive, so there is no cursor row to filter back
+   * out — the page is what it says it is.
+   *
    * Failures are thrown rather than swallowed. A refused or timed-out read is
    * not "no reports", and telling a reviewer their queue is empty when it is
    * merely unreadable is exactly the false narration `CLAUDE.md` §4.4 forbids
    * — the caller renders an error instead.
    */
-  async getQuestionReports(limit = REPORTS_PAGE_SIZE): Promise<QuestionReport[]> {
+  async getQuestionReports(after?: ReportCursor): Promise<ReportPage> {
     const documents = await this.rest.runQuery(
       {
         collectionPath: QUESTION_REPORTS_COLLECTION,
-        orderBy: [{ field: 'createdAt', direction: 'DESCENDING' }],
-        limit,
+        orderBy: [
+          { field: 'createdAt', direction: 'DESCENDING' },
+          { field: DOCUMENT_ID_FIELD, direction: 'DESCENDING' },
+        ],
+        limit: REPORTS_PAGE_SIZE,
+        ...(after === undefined ? {} : { startAfterValues: after }),
       },
       { timeoutMs: REPORTS_READ_TIMEOUT_MS },
     );
 
-    return documents.map((document) => toQuestionReport(document.id, document.data));
+    const last = documents[documents.length - 1];
+    return {
+      reports: documents.map((document) => toQuestionReport(document.id, document.data)),
+      // A short page is the end of the collection. A full one might also be,
+      // which costs one empty read to find out — the trade every cursor-paged
+      // list makes, and cheaper than counting a collection that has no count.
+      next:
+        last === undefined || documents.length < REPORTS_PAGE_SIZE
+          ? null
+          : [last.data['createdAt'], last.id],
+    };
   }
 }
 

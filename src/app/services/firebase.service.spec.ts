@@ -958,6 +958,39 @@ describe('FirebaseService.getQuestionsByIds (FEAT-026)', () => {
     expect(await firstValueFrom(service.getQuestionsByIds([]))).toEqual([]);
     expect(queries).toHaveLength(0);
   });
+
+  /**
+   * **One malformed id must not take the page down with it.**
+   *
+   * These ids come out of `question_reports`, which is writable from the
+   * Firebase console where nothing validates `questionId` — and
+   * `ReviewerService` maps a non-string one to `''` rather than dropping the
+   * complaint. A `__name__` filter refuses an empty id and one carrying a `/`
+   * by throwing, and that throw would come out of the whole batched read: the
+   * reviewer would lose every report on the page behind "Could not load the
+   * reports", with a Try again that can never succeed while that document
+   * exists. Dropped, the row that names it falls through to the same "no longer
+   * in the bank" branch as a deleted question, which is all the reviewer can do
+   * about it anyway.
+   */
+  it('drops an id that cannot address a document, and reads the rest', async () => {
+    const { service, queries } = setup(seed);
+
+    const result = await firstValueFrom(
+      service.getQuestionsByIds(['q1', '', 'custom_questions/q2', 42 as never, 'q3']),
+    );
+
+    expect(result.map((q) => q.id).sort()).toEqual(['q1', 'q3']);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].documentIds).toEqual(['q1', 'q3']);
+  });
+
+  it('reads nothing rather than throwing when every id is malformed', async () => {
+    const { service, queries } = setup(seed);
+
+    expect(await firstValueFrom(service.getQuestionsByIds(['', 'a/b']))).toEqual([]);
+    expect(queries).toHaveLength(0);
+  });
 });
 
 describe('FirebaseService.getGameplayStats (FEAT-005)', () => {

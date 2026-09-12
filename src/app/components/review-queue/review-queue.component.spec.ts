@@ -4,7 +4,7 @@ import { signal } from '@angular/core';
 import { Subject, of, throwError } from 'rxjs';
 import { CustomQuestionDoc, QuestionReport, QuestionStatus } from '../../models/question.model';
 import { FirebaseService } from '../../services/firebase.service';
-import { ReviewerService } from '../../services/reviewer.service';
+import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
 import { ReportRow, ReviewQueueComponent, ReviewView } from './review-queue.component';
 
 /**
@@ -37,6 +37,8 @@ function setup(
   options: {
     byStatus?: Partial<Record<QuestionStatus, Q[]>>;
     reports?: QuestionReport[];
+    /** The cursor the faked page hands back — `null` means "this is the end". */
+    reportsNext?: ReportCursor | null;
     questionsById?: Q[];
     loadFails?: boolean;
     reportsFail?: boolean;
@@ -47,6 +49,7 @@ function setup(
   const {
     byStatus = {},
     reports = [],
+    reportsNext = null,
     questionsById = [],
     loadFails = false,
     reportsFail = false,
@@ -63,11 +66,13 @@ function setup(
   const setQuestionStatus = vi.fn(() =>
     writeFails ? Promise.reject(new Error('refused')) : Promise.resolve(),
   );
-  // The limit is declared even though the fake ignores it: `mock.calls` is
-  // typed from the signature, and a zero-argument one makes "asked for a bigger
-  // page" unassertable.
-  const getQuestionReports = vi.fn((_limit?: number) =>
-    reportsFail ? Promise.reject(new Error('permission-denied')) : Promise.resolve(reports),
+  // The cursor is declared even though the fake ignores it: `mock.calls` is
+  // typed from the signature, and a zero-argument one makes "asked for the page
+  // after this row" unassertable.
+  const getQuestionReports = vi.fn((_after?: ReportCursor) =>
+    reportsFail
+      ? Promise.reject(new Error('permission-denied'))
+      : Promise.resolve({ reports, next: reportsNext }),
   );
 
   TestBed.configureTestingModule({
@@ -108,7 +113,7 @@ interface InternalReviewQueue {
   questions(): Q[];
   reports(): ReportRow[];
   reportsView(): 'loading' | 'failed' | 'empty' | 'loaded';
-  isReportsFull(): boolean;
+  hasMoreReports(): boolean;
   isLoading(): boolean;
   loadError(): string | null;
   actionError(): string | null;
@@ -411,17 +416,42 @@ describe('ReviewQueueComponent reports tab', () => {
     expect(component.reports()).toEqual([]);
   });
 
-  it('asks for a larger page when the reviewer wants more', async () => {
+  /**
+   * The page after the last row, appended — not a bigger first page. A growing
+   * limit re-reads everything already on screen on every click, and Firestore
+   * bills per document read; this is the difference between a second click
+   * costing 25 reads and costing 50.
+   */
+  it('asks for the page after the cursor it was handed, and appends it', async () => {
+    const cursor: ReportCursor = [1_760_000_000_000, 'r2'];
     const { component, getQuestionReports } = setup({
-      reports: [report('r1')],
+      reports: [report('r1'), report('r2')],
+      reportsNext: cursor,
       questionsById: [question('p1')],
     });
     await component.select('reports');
-    const firstLimit = getQuestionReports.mock.calls[0][0]!;
+    expect(getQuestionReports.mock.calls[0][0]).toBeUndefined();
+    expect(component.hasMoreReports()).toBe(true);
 
+    getQuestionReports.mockResolvedValueOnce({ reports: [report('r3')], next: null });
     await component.showMoreReports();
 
-    expect(getQuestionReports.mock.calls[1][0]).toBe(firstLimit * 2);
+    expect(getQuestionReports.mock.calls[1][0]).toBe(cursor);
+    expect(component.reports().map((row) => row.report.id)).toEqual(['r1', 'r2', 'r3']);
+    // The end of the collection takes the affordance away rather than leaving a
+    // button that fetches nothing.
+    expect(component.hasMoreReports()).toBe(false);
+  });
+
+  it('offers more only while the service says there is a next page', async () => {
+    const { component } = setup({
+      reports: [report('r1')],
+      questionsById: [question('p1')],
+    });
+
+    await component.select('reports');
+
+    expect(component.hasMoreReports()).toBe(false);
   });
 
   /**
@@ -481,6 +511,53 @@ describe('ReviewQueueComponent reports tab', () => {
     expect(component.reports()[0].question?.status).toBe('pending');
     expect(component.actionError()).toBeTruthy();
   });
+
+  /**
+   * The mirror of the late-answer test above, for the error path — and the
+   * sharper of the two, because an error message names a tab. A reports read
+   * that fails after the reviewer has moved on would otherwise put "Could not
+   * load the reports" over a perfectly good list of pending questions, with a
+   * Try again that reloads the tab it is not about.
+   */
+  it('does not paint a reports failure over the tab the reviewer moved to', async () => {
+    let rejectReports!: (error: Error) => void;
+    const getQuestionReports = vi.fn(
+      () => new Promise<never>((_resolve, reject) => (rejectReports = reject)),
+    );
+
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: FirebaseService,
+          useValue: {
+            getQuestionsByStatus: () => of([question('p1')]),
+            getQuestionsByIds: () => of([]),
+            setQuestionStatus: vi.fn(),
+          },
+        },
+        {
+          provide: ReviewerService,
+          useValue: {
+            isReviewer: signal(true),
+            isResolved: signal(true),
+            getQuestionReports,
+          },
+        },
+      ],
+    });
+    const component = TestBed.runInInjectionContext(
+      () => new ReviewQueueComponent(),
+    ) as never as InternalReviewQueue;
+
+    const slowReports = component.select('reports');
+    await component.select('pending');
+    rejectReports(new Error('permission-denied'));
+    await slowReports;
+
+    expect(component.activeView()).toBe('pending');
+    expect(component.loadError()).toBeNull();
+    expect(component.questions().map((q) => q.id)).toEqual(['p1']);
+  });
 });
 
 /**
@@ -509,7 +586,7 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
           useValue: {
             isReviewer: signal(true),
             isResolved: signal(true),
-            getQuestionReports: () => Promise.resolve(options.reports),
+            getQuestionReports: () => Promise.resolve({ reports: options.reports, next: null }),
           },
         },
       ],
@@ -583,6 +660,39 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
     expect(row.querySelector('[data-cy="reported-question"]')).toBeNull();
     expect(row.querySelector('[data-cy="reported-question-missing"]')?.textContent).toContain(
       'deleted-question',
+    );
+  });
+
+  /**
+   * One unusable `questionId` must not take the page down with it.
+   *
+   * `question_reports` is writable from the Firebase console, where nothing
+   * validates the field, so a stored `42` or a value carrying a `/` can reach
+   * the queue — and `ReviewerService` maps a non-string to `''` rather than
+   * dropping the complaint. Both are ids a `__name__` filter refuses, so the
+   * batched lookup has to leave them out instead of throwing: otherwise every
+   * report on the page disappears behind "Could not load the reports", and
+   * Try again can never clear it while that one document exists.
+   * `firebase.service.spec.ts` covers the dropping; this covers what the
+   * reviewer is left looking at.
+   */
+  it('renders the good reports beside a malformed one rather than failing the page', async () => {
+    const host = await renderReports({
+      reports: [
+        report('r1', { questionId: 'p1' }),
+        report('r2', { questionId: '' }),
+        report('r3', { questionId: 'custom_questions/p1' }),
+      ],
+      questionsById: [question('p1')],
+    });
+
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-cy="review-report"]')];
+    expect(rows).toHaveLength(3);
+    expect(rows[0].querySelector('[data-cy="reported-question"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-cy="reported-question-missing"]')).not.toBeNull();
+    expect(rows[2].querySelector('[data-cy="reported-question-missing"]')).not.toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-cy="reports-failed"]')!.className).toContain(
+      'invisible',
     );
   });
 });

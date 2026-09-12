@@ -391,6 +391,59 @@ describe('FirestoreRestClient.runQuery', () => {
     });
   });
 
+  /**
+   * The cursor that pages a query ordered by anything but the document ID.
+   *
+   * Two details are pinned because getting either wrong is silent: the values
+   * are **positional against `orderBy`**, so a `__name__` entry has to become a
+   * reference while its neighbour stays a plain value; and `before: false` is
+   * the exclusive form, where `true` would repeat the cursor's own row on every
+   * page boundary.
+   */
+  it('encodes a startAfter cursor positionally, with __name__ as a reference', async () => {
+    respondWith([]);
+    await makeClient().runQuery({
+      collectionPath: 'question_reports',
+      orderBy: [
+        { field: 'createdAt', direction: 'DESCENDING' },
+        { field: DOCUMENT_ID_FIELD, direction: 'DESCENDING' },
+      ],
+      startAfterValues: [1_760_000_000_000, 'r24'],
+    });
+
+    expect(structuredQuery()['startAt']).toEqual({
+      values: [
+        { integerValue: '1760000000000' },
+        { referenceValue: `${RESOURCE_ROOT}/question_reports/r24` },
+      ],
+      before: false,
+    });
+  });
+
+  it('refuses a startAfter cursor with more values than the query is ordered by', async () => {
+    respondWith([]);
+    await expect(
+      makeClient().runQuery({
+        collectionPath: 'question_reports',
+        orderBy: [{ field: 'createdAt', direction: 'DESCENDING' }],
+        startAfterValues: [1, 'r24'],
+      }),
+    ).rejects.toThrow(/one per orderBy field/);
+  });
+
+  // Both write the same `startAt`, so passing both means one silently wins.
+  it('refuses two start cursors at once', async () => {
+    respondWith([]);
+    await expect(
+      makeClient().runQuery({
+        collectionPath: 'custom_questions',
+        orderBy: [{ field: DOCUMENT_ID_FIELD }],
+        startAtDocumentId: 'a',
+        startAfterValues: ['b'],
+      }),
+    ).rejects.toThrow(/not both/);
+  });
+
   it('turns an endBefore document ID into an exclusive end cursor', async () => {
     respondWith([]);
     await makeClient().runQuery({

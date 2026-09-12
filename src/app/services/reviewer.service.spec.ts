@@ -227,7 +227,14 @@ describe('ReviewerService.getQuestionReports', () => {
     createdAt: 1_760_000_000_000,
   };
 
-  it('asks for one bounded page, newest first', async () => {
+  /**
+   * The order is two fields, and both are there for a measured reason (see the
+   * method): `__name__` descending **on its own** is refused by Firestore —
+   * "does not support descending key scans" — and `createdAt` on its own gives
+   * a cursor that skips a report whenever two share a millisecond. A test that
+   * only checked "ordered by createdAt" would pass against both broken forms.
+   */
+  it('asks for one bounded page, newest first, with a unique tiebreaker', async () => {
     const h = reportsSetup([]);
 
     await h.service.getQuestionReports();
@@ -235,22 +242,62 @@ describe('ReviewerService.getQuestionReports', () => {
     expect(h.runQuery).toHaveBeenCalledWith(
       {
         collectionPath: 'question_reports',
-        orderBy: [{ field: 'createdAt', direction: 'DESCENDING' }],
+        orderBy: [
+          { field: 'createdAt', direction: 'DESCENDING' },
+          { field: '__name__', direction: 'DESCENDING' },
+        ],
         limit: REPORTS_PAGE_SIZE,
       },
       expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
   });
 
-  it('takes the page size from the caller, for a queue asking for more', async () => {
-    const h = reportsSetup([]);
+  /**
+   * Paging is a cursor rather than a growing limit, so a second page costs one
+   * page of reads instead of two — and the cursor carries **both** ordering
+   * values, positionally, or the tiebreaker above buys nothing.
+   */
+  it('hands back a cursor, and pages from it exclusively', async () => {
+    const page = Array.from({ length: REPORTS_PAGE_SIZE }, (_, index) =>
+      reportDoc(`r${index}`, { ...FULL_REPORT, createdAt: 1_760_000_000_000 - index }),
+    );
+    const h = reportsSetup(page);
 
-    await h.service.getQuestionReports(REPORTS_PAGE_SIZE * 2);
+    const first = await h.service.getQuestionReports();
+    expect(first.next).toEqual([1_760_000_000_000 - (REPORTS_PAGE_SIZE - 1), 'r24']);
 
-    expect(h.runQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: REPORTS_PAGE_SIZE * 2 }),
+    await h.service.getQuestionReports(first.next!);
+
+    expect(h.runQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        startAfterValues: [1_760_000_000_000 - (REPORTS_PAGE_SIZE - 1), 'r24'],
+        limit: REPORTS_PAGE_SIZE,
+      }),
       expect.anything(),
     );
+  });
+
+  // A short page is the end of the collection, and saying so is what takes the
+  // "Show more" affordance away rather than leaving it to return nothing.
+  it('reports no next page when the page came back short', async () => {
+    const h = reportsSetup([reportDoc('r1', FULL_REPORT)]);
+
+    expect((await h.service.getQuestionReports()).next).toBeNull();
+  });
+
+  // The cursor carries the **stored** value, not the narrowed one: it has to
+  // mean to Firestore what the ordering means, whatever a console-written
+  // document put in the field.
+  it('cursors on the stored createdAt even when the queue could not read it', async () => {
+    const page = Array.from({ length: REPORTS_PAGE_SIZE }, (_, index) =>
+      reportDoc(`r${index}`, { ...FULL_REPORT, createdAt: '2026-09-12' }),
+    );
+    const h = reportsSetup(page);
+
+    const { reports, next } = await h.service.getQuestionReports();
+
+    expect(reports[0].createdAt).toBeNull();
+    expect(next).toEqual(['2026-09-12', 'r24']);
   });
 
   /**
@@ -264,7 +311,7 @@ describe('ReviewerService.getQuestionReports', () => {
   it('drops reportedBy before the report reaches anything that renders', async () => {
     const h = reportsSetup([reportDoc('5954006-3-anon-uid', FULL_REPORT)]);
 
-    const [report] = await h.service.getQuestionReports();
+    const [report] = (await h.service.getQuestionReports()).reports;
 
     expect(Object.keys(report).sort()).toEqual([
       'createdAt',
@@ -282,7 +329,7 @@ describe('ReviewerService.getQuestionReports', () => {
   it('keeps the document id as the row key, and the rest of the complaint', async () => {
     const h = reportsSetup([reportDoc('5954006-3-anon-uid', FULL_REPORT)]);
 
-    expect(await h.service.getQuestionReports()).toEqual([
+    expect((await h.service.getQuestionReports()).reports).toEqual([
       {
         id: '5954006-3-anon-uid',
         questionId: 'q1',
@@ -297,7 +344,7 @@ describe('ReviewerService.getQuestionReports', () => {
     const { detail: _detail, ...withoutDetail } = FULL_REPORT;
     const h = reportsSetup([reportDoc('r1', withoutDetail)]);
 
-    const [report] = await h.service.getQuestionReports();
+    const [report] = (await h.service.getQuestionReports()).reports;
 
     expect('detail' in report).toBe(false);
   });
@@ -309,7 +356,7 @@ describe('ReviewerService.getQuestionReports', () => {
   it('reads an unrecognised reason as other rather than dropping the report', async () => {
     const h = reportsSetup([reportDoc('r1', { ...FULL_REPORT, reason: 'dislike' })]);
 
-    const [report] = await h.service.getQuestionReports();
+    const [report] = (await h.service.getQuestionReports()).reports;
 
     expect(report.reason).toBe('other');
   });
@@ -317,7 +364,7 @@ describe('ReviewerService.getQuestionReports', () => {
   it('reads a non-numeric createdAt as unknown rather than as a date', async () => {
     const h = reportsSetup([reportDoc('r1', { ...FULL_REPORT, createdAt: '2026-09-12' })]);
 
-    const [report] = await h.service.getQuestionReports();
+    const [report] = (await h.service.getQuestionReports()).reports;
 
     expect(report.createdAt).toBeNull();
   });

@@ -18,7 +18,7 @@ import {
   QuestionStatus,
 } from '../../models/question.model';
 import { FirebaseService, REVIEW_PAGE_SIZE } from '../../services/firebase.service';
-import { REPORTS_PAGE_SIZE, ReviewerService } from '../../services/reviewer.service';
+import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
@@ -91,14 +91,18 @@ export class ReviewQueueComponent implements OnInit {
   protected readonly loadError = signal<string | null>(null);
 
   /**
-   * The reports page, and how much of it has been asked for. The limit grows
-   * rather than paging on a cursor: reports are never resolved, so "reload for
-   * more" — which is what the question tabs offer, because reviewing a question
-   * removes it — would hand back the same newest page forever.
+   * The rows on screen, and where the next page starts.
+   *
+   * **This tab pages on a cursor rather than by growing a limit**, and the
+   * reason is cost: a growing limit re-reads every page already on screen on
+   * every click (25, then 50, then 75…), and Firestore bills per document read.
+   * `showMoreReports` asks for the page *after* the last row instead and
+   * appends it, so each click costs one page. The cursor is `ReviewerService`'s
+   * to shape — the component only holds it and hands it back.
    */
   protected readonly reports = signal<ReportRow[]>([]);
-  protected readonly reportsLimit = signal(REPORTS_PAGE_SIZE);
-  protected readonly isReportsFull = computed(() => this.reports().length >= this.reportsLimit());
+  protected readonly reportsCursor = signal<ReportCursor | null>(null);
+  protected readonly hasMoreReports = computed(() => this.reportsCursor() !== null);
 
   /**
    * Which of the reports tab's four messages is showing.
@@ -161,11 +165,12 @@ export class ReviewQueueComponent implements OnInit {
     this.loadError.set(null);
     try {
       if (view === 'reports') {
-        const rows = await this.loadReports();
+        const page = await this.loadReports();
         // The tab may have changed while this was in flight; the late answer
         // for the previous tab must not overwrite the current one.
         if (this.activeView() === view) {
-          this.reports.set(rows);
+          this.reports.set(page.rows);
+          this.reportsCursor.set(page.next);
         }
       } else {
         const questions = await firstValueFrom(this.firebaseService.getQuestionsByStatus(view));
@@ -179,11 +184,18 @@ export class ReviewQueueComponent implements OnInit {
       // did not verify is exactly what `CLAUDE.md` §4.4 forbids. What it must
       // never do is fall through to the empty state: "no reports have been
       // filed" is a claim, and a read that failed is not evidence for it.
-      this.loadError.set(
-        view === 'reports'
-          ? 'Could not load the reports. Please try again.'
-          : 'Could not load the queue. Please try again.',
-      );
+      //
+      // Guarded by the same check as the success path, and for a sharper
+      // reason: an error message is about a tab, so a reports read failing
+      // after the reviewer moved on would put "Could not load the reports" over
+      // a perfectly good list of pending questions.
+      if (this.activeView() === view) {
+        this.loadError.set(
+          view === 'reports'
+            ? 'Could not load the reports. Please try again.'
+            : 'Could not load the queue. Please try again.',
+        );
+      }
     } finally {
       if (this.activeView() === view) {
         this.isLoading.set(false);
@@ -191,10 +203,37 @@ export class ReviewQueueComponent implements OnInit {
     }
   }
 
-  /** Asks for another page of reports, keeping the ones already on screen. */
+  /**
+   * Appends the page after the last row on screen.
+   *
+   * Nothing already read is read again. Like `load()` it drops its answer if
+   * the reviewer has left the tab, and it checks that the cursor it started
+   * from is still the one on screen — two clicks in flight at once, or a
+   * reload landing in between, would otherwise append the same page twice.
+   */
   protected async showMoreReports(): Promise<void> {
-    this.reportsLimit.update((limit) => limit + REPORTS_PAGE_SIZE);
-    await this.load();
+    const cursor = this.reportsCursor();
+    if (cursor === null || this.isLoading()) {
+      return;
+    }
+
+    this.isLoading.set(true);
+    this.loadError.set(null);
+    try {
+      const page = await this.loadReports(cursor);
+      if (this.activeView() === 'reports' && this.reportsCursor() === cursor) {
+        this.reports.update((rows) => [...rows, ...page.rows]);
+        this.reportsCursor.set(page.next);
+      }
+    } catch {
+      if (this.activeView() === 'reports') {
+        this.loadError.set('Could not load more reports. Please try again.');
+      }
+    } finally {
+      if (this.activeView() === 'reports') {
+        this.isLoading.set(false);
+      }
+    }
   }
 
   /**
@@ -220,16 +259,25 @@ export class ReviewQueueComponent implements OnInit {
    * batched lookup of the distinct questions it mentions
    * (`FirebaseService.getQuestionsByIds`). A question the lookup does not
    * return is one that has been deleted from the bank since the report was
-   * filed, and the row says so rather than disappearing.
+   * filed — or one whose stored `questionId` cannot address a document at all —
+   * and the row says so rather than disappearing or taking the page with it.
    */
-  private async loadReports(): Promise<ReportRow[]> {
-    const reports = await this.reviewerService.getQuestionReports(this.reportsLimit());
+  private async loadReports(
+    after?: ReportCursor,
+  ): Promise<{ rows: ReportRow[]; next: ReportCursor | null }> {
+    const page = await this.reviewerService.getQuestionReports(after);
     const questions = await firstValueFrom(
-      this.firebaseService.getQuestionsByIds(reports.map((report) => report.questionId)),
+      this.firebaseService.getQuestionsByIds(page.reports.map((report) => report.questionId)),
     );
     const byId = new Map(questions.map((question) => [question.id, question]));
 
-    return reports.map((report) => ({ report, question: byId.get(report.questionId) ?? null }));
+    return {
+      rows: page.reports.map((report) => ({
+        report,
+        question: byId.get(report.questionId) ?? null,
+      })),
+      next: page.next,
+    };
   }
 
   protected async decide(question: ReviewQuestion, status: QuestionStatus): Promise<void> {

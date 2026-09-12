@@ -219,6 +219,67 @@ test.describe('the review queue', () => {
   });
 
   /**
+   * Paging the reports tab, against a real Firestore.
+   *
+   * This is the half of the cursor no unit test can reach: whether a
+   * `__name__`-descending query with an inclusive `startAt` actually returns
+   * the next page. A faked `runQuery` proves the arguments and nothing about
+   * what Firestore does with them.
+   *
+   * **The seeds are backdated on purpose.** The queue orders by `createdAt`
+   * descending, so timestamps an hour old put all of them *below* anything
+   * another worker files during the run — which is what keeps this test from
+   * pushing other specs' reports off their own first page, and what makes its
+   * own assertions independent of how many other reports exist.
+   *
+   * `PAGE` mirrors `REPORTS_PAGE_SIZE` in `reviewer.service.ts` deliberately
+   * rather than importing it: e2e specs compile under their own tsconfig and
+   * none of them reaches into `src/`. If the two drift, the last assertion
+   * fails loudly — which is the point of writing `PAGE + 1` seeds.
+   */
+  test('pages the reports tab with a cursor, keeping the rows already read', async ({
+    page,
+    firebase,
+  }) => {
+    const PAGE = 25;
+    const backdated = Date.now() - 3_600_000;
+    const seeded = Array.from({ length: PAGE + 1 }, (_, index) => ({
+      // Report 0 is the oldest, report 25 the newest — the order the
+      // assertions below reason about. The ID keeps the `{window}-{slot}-{uid}`
+      // shape a real report has, though nothing here depends on it.
+      id: `${Math.floor(backdated / 300_000)}-${String(index).padStart(2, '0')}-${tag}`,
+      questionId: `approved-${tag}`,
+      reason: 'spam' as const,
+      detail: `Seeded report ${index} (${tag})`,
+      reportedBy: `seed-${tag}`,
+      createdAt: backdated + index,
+    }));
+    await firebase.seedQuestionReports(seeded);
+
+    await signInAsReviewer(page, firebase);
+    await page.goto('/review');
+    await reviewTab(page, 'reports').click();
+
+    const mine = page.getByTestId('review-report').filter({ hasText: tag });
+    const newest = page.getByTestId('review-report').filter({ hasText: `report ${PAGE} (${tag})` });
+    const oldest = page.getByTestId('review-report').filter({ hasText: `report 0 (${tag})` });
+
+    // The oldest of the 26 cannot be on a 25-row first page, whatever else the
+    // emulator holds: this test's own 25 newer reports sort above it.
+    await expect(newest).toHaveCount(1);
+    await expect(oldest).toHaveCount(0);
+
+    await page.getByTestId('show-more-reports').click();
+
+    // All 26, once — the rows already read are kept rather than replaced, and
+    // the cursor's own row is not repeated, which an inclusive `startAt` does
+    // by default.
+    await expect(oldest).toHaveCount(1);
+    await expect(newest).toHaveCount(1);
+    await expect(mine).toHaveCount(PAGE + 1);
+  });
+
+  /**
    * Item 4c end to end, and the only test that covers the whole promise: a
    * contribution is stored, is *not* served, appears in the queue, and starts
    * being served the moment it is approved.

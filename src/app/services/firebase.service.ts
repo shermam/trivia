@@ -14,6 +14,7 @@ import {
   FirestoreRestClient,
   RestFieldFilter,
   RestQuery,
+  isDocumentId,
   isFirestorePermissionDenied,
 } from './firestore-rest/firestore-rest.client';
 
@@ -369,10 +370,22 @@ export class FirebaseService {
    * can outlive the question it names, because `custom_questions` is deletable
    * from the console and `question_reports` has no cascade. The caller renders
    * the report and says the question is gone.
+   *
+   * **An id that cannot address a document is dropped rather than sent**, and
+   * that is the same promise rather than a second one. These ids are read out
+   * of documents this app did not necessarily write — `question_reports` is
+   * also writable from the console, where nothing validates `questionId` — so
+   * an empty string or one carrying a `/` can reach here. A `__name__` filter
+   * refuses both (`isDocumentId`), and the throw would propagate out of the
+   * whole batched read: one malformed document would take every report on the
+   * page down with it and leave a "could not load" that retrying can never
+   * clear. Dropped, it falls through to the absent case above and the row that
+   * names it says the question is gone, which is what the reviewer needs to
+   * know about it anyway.
    */
   getQuestionsByIds(ids: string[]): Observable<(CustomQuestionDoc & { id: string })[]> {
     return defer(async () => {
-      const unique = [...new Set(ids)];
+      const unique = [...new Set(ids.filter(isDocumentId))];
       const batches: string[][] = [];
       for (let start = 0; start < unique.length; start += QUESTION_ID_BATCH_SIZE) {
         batches.push(unique.slice(start, start + QUESTION_ID_BATCH_SIZE));

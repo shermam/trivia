@@ -15,6 +15,7 @@ import {
   orderBy,
   query,
   setDoc,
+  startAfter,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -220,16 +221,27 @@ const PLAIN = 'plain-uid';
 const DEMOTED = 'demoted-uid';
 
 /**
- * One page of reports as `ReviewerService.getQuestionReports` asks for it.
+ * One page of reports as `ReviewerService.getQuestionReports` asks for it —
+ * **the same query, field for field**.
  *
  * The bound is in the query because the *client* puts it there, not because
  * the rule can see it: rules are handed the shape of a query and never its
  * `limit`, so nothing below would change if the app asked for the whole
  * collection. Sending the real shape anyway is what keeps these rows about the
- * read the app issues rather than about one nobody performs.
+ * read the app issues rather than about one nobody performs — and it is the
+ * only place outside the e2e suite where that query meets a real Firestore.
+ * That is not hypothetical: an earlier version of the service ordered by
+ * `documentId()` alone, which Firestore refuses ("does not support descending
+ * key scans"), and this helper is where a query the emulator will not run gets
+ * caught.
  */
 const reportsPage = (ctx: RulesTestContext) =>
-  query(collection(ctx.firestore(), 'question_reports'), orderBy('createdAt', 'desc'), limit(25));
+  query(
+    collection(ctx.firestore(), 'question_reports'),
+    orderBy('createdAt', 'desc'),
+    orderBy(documentId(), 'desc'),
+    limit(25),
+  );
 
 describe('question_reports: read — the reviewers, and nobody else', () => {
   const seededId = () => reportDocId('anon', 5);
@@ -251,6 +263,25 @@ describe('question_reports: read — the reviewers, and nobody else', () => {
 
   it('allows a reviewer the bounded, ordered page the queue reads', async () => {
     await assertSucceeds(getDocs(reportsPage(asVerifiedPassword(env, REVIEWER))));
+  });
+
+  // The second page, from the cursor the first one hands back. A rules test
+  // rather than only a unit one because a cursor is a query shape, and a query
+  // shape is something only a real Firestore can accept or refuse.
+  it('allows a reviewer the next page, from a cursor', async () => {
+    const first = await getDocs(reportsPage(asVerifiedPassword(env, REVIEWER)));
+    const last = first.docs[first.docs.length - 1];
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(asVerifiedPassword(env, REVIEWER).firestore(), 'question_reports'),
+          orderBy('createdAt', 'desc'),
+          orderBy(documentId(), 'desc'),
+          startAfter(last.data()['createdAt'], last.id),
+          limit(25),
+        ),
+      ),
+    );
   });
 
   /**

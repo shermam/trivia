@@ -323,7 +323,7 @@ Full-screen centered card. **No route guard** — access is decided in-page from
 - **Action buttons** per card: **Approve** (hidden when the question is already approved) and **Reject** (hidden when it is already rejected), so the button that would be a no-op is never offered
 - **Truncation note** when the queue is full — the query is capped, and the list says so rather than implying it is the whole queue
 - **Reports list** (the Reports tab): a one-line status block above the list, then one card per filed report — the reason in words ("The answer is wrong", "Inappropriate or offensive", "Spam or nonsense", "Something else") with "Reported {date}" opposite it, the reporter's optional detail in their own words below, and under a divider the **whole question card** described above, action buttons included. **Nothing identifies who filed the report.** A report whose question has since been deleted shows its question id and "…is no longer in the bank, so there is nothing left to act on" in place of the card
-- **"Show more reports"** below the list, only once a page has come back full
+- **"Show more reports"** below the list, present only while there is a next page to fetch — it appends that page rather than replacing what is on screen, and disappears at the end of the collection
 
 ### States
 
