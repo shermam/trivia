@@ -989,7 +989,32 @@ export class SubscriptionService {
       await this.beginCheckoutHandshake(uid, priceId);
     } catch {
       // See above: unasked-for work, so an unasked-for failure. Clicking
-      // Subscribe runs the same handshake and shows what it says.
+      // Subscribe runs the same handshake and shows what it says. No retry
+      // either: a failure is not a reason to spend another session nobody
+      // asked for.
+      return;
+    }
+
+    /**
+     * The reader may have changed currency while that handshake was running,
+     * in which case the `prepareCheckout` it triggered turned itself away at
+     * the pending guard above and nothing else will ask again. One retry, now
+     * that the slot is free; it terminates because the next attempt is for
+     * whatever is selected *then*, and the per-window ration bounds it
+     * regardless.
+     *
+     * **Here and not in `beginCheckoutHandshake`.** Subscribe runs the same
+     * handshake, and a retry attached to it fires on the click path too — the
+     * handler is registered before `startProCheckout`'s own continuation, so
+     * it would dispatch a fresh `createCheckoutSession` *before*
+     * `location.assign`, expiring the session the tab is navigating to. It
+     * would also fire with no user action at all, because `startProCheckout`
+     * resolves the price from the freshly loaded catalog while this condition
+     * reads the cached signal, so a returning visitor who clicks before
+     * revalidation lands looks like a currency change.
+     */
+    if (this.selectedProPrice()?.priceId !== priceId) {
+      void this.prepareCheckout();
     }
   }
 
@@ -1014,6 +1039,11 @@ export class SubscriptionService {
    * function expires the customer's open sessions as part of creating this
    * one, so the old URL is dead from this moment and keeping it would hand the
    * reader an expired Stripe page.
+   *
+   * **`startProCheckout` runs this too**, so anything attached here happens on
+   * the click path as well — and before that caller's own `await` resumes,
+   * since this handler is registered first. Follow-up work that only makes
+   * sense for a pre-creation belongs in `prepareCheckout`, after its `await`.
    */
   private beginCheckoutHandshake(uid: string, priceId: string): Promise<string> {
     this.forgetReadyCheckout();
@@ -1035,14 +1065,6 @@ export class SubscriptionService {
         if (this.pendingCheckout === attempt) {
           this.pendingCheckout = null;
           this.rememberReadyCheckout({ uid, priceId, url, readyAt: Date.now() });
-          // The reader may have changed currency while this was running, in
-          // which case `prepareCheckout` turned itself away at the guard above
-          // and nothing else will ask again. One retry, now that the slot is
-          // free; it terminates because the next attempt is for whatever is
-          // selected *then*, and the per-window ration bounds it regardless.
-          if (this.selectedProPrice()?.priceId !== priceId) {
-            void this.prepareCheckout();
-          }
         }
       },
       () => {
@@ -1051,8 +1073,6 @@ export class SubscriptionService {
         }
         // Nothing is cached for a rejection (`CLAUDE.md` §4.4) — the next
         // click starts a fresh handshake rather than replaying this failure.
-        // No retry here either: a failure is not a reason to spend another
-        // session nobody asked for.
       },
     );
 

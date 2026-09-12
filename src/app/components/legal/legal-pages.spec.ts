@@ -205,10 +205,14 @@ describe('legal pages', () => {
     expect(text).toContain('what Pro costs in each currency');
     expect(text).toContain('discarded after 24 hours');
     expect(text).toContain('kept on this device for up to 20 hours');
-    expect(text).toContain('discarded when you use it, when you sign out');
-    // The claim the old per-tab wording made and this one must not: nothing
-    // here promises the link dies with the tab.
+    expect(text).toContain('discarded when you sign out or when a newer one replaces it');
+    // Two claims this paragraph must not make, because neither is true. The
+    // link does not die with the tab — that was the old per-tab wording. And
+    // using it does not discard it: `startProCheckout` navigates without
+    // clearing, deliberately, because a Checkout Session stays open when the
+    // reader backs out of Stripe and the next click should reuse it.
     expect(text).not.toContain('discarded when you close the tab');
+    expect(text).not.toContain('discarded when you use it');
   });
 
   /**

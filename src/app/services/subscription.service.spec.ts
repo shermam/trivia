@@ -1989,6 +1989,45 @@ describe('SubscriptionService pre-created checkout', () => {
     });
 
     /**
+     * The same gesture, but during a *click* rather than a pre-creation — and
+     * here the follow-up that is right for pre-creation is catastrophic.
+     *
+     * `startProCheckout` shares `beginCheckoutHandshake`, and a retry attached
+     * to that handshake runs before the caller's own `await` resumes: it
+     * dispatches a second `createCheckoutSession` while the tab is still on
+     * its way to `location.assign`, and that create expires the session being
+     * navigated to. The reader lands on Stripe's "this session has expired"
+     * page having done nothing but flick a switch. So the retry belongs to
+     * `prepareCheckout`, after its `await`, and this pins it: one document,
+     * and the redirect goes to it.
+     *
+     * Mutation-checked by moving the retry back into the handshake's success
+     * handler, which writes `['price_usd', 'price_brl']` and fails here.
+     */
+    it('spends no second session when the currency changes during the click', async () => {
+      const fake = fakeFirestore({ products: bothCurrencies, writeBackAfterReads: 1 });
+      const { service } = configure(user);
+      await service.loadProPrices();
+
+      // Nothing waiting — this click runs the handshake itself, which is the
+      // state a reader who never idled on the page is in.
+      const clicked = service.startProCheckout();
+      await flush();
+      expect(fake.writes).toHaveLength(1);
+      expect(fake.writes[0].data['price']).toBe('price_usd');
+
+      // The switch, while the button still says "Redirecting…".
+      service.selectCurrency('brl');
+      await clicked;
+      // Several turns, so a stray retry has every chance to land its write
+      // before the assertion rather than after the test.
+      await flush();
+
+      expect(fake.writes.map((write) => write.data['price'])).toEqual(['price_usd']);
+      expect(redirectedTo()).toBe('https://stripe.test/s');
+    });
+
+    /**
      * Three, out of the ten sessions per five minutes `firestore.rules`
      * allows. Pre-creation happens without anybody asking for it, so left
      * unbounded a reader flicking the switch while they decide would exhaust
