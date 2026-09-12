@@ -58,13 +58,53 @@ import { readFileSync, readdirSync } from 'node:fs';
  * specs went red at once. `test` now pins it explicitly.
  */
 
-const PRODUCTION_PROJECT_ID = 'intellectura-3b26a';
+/**
+ * The production project id, read from `.firebaserc` rather than restated
+ * here.
+ *
+ * `.firebaserc` is where it lives — check 2 below exists to keep it the only
+ * place a developer's machine can reach it — so a copy in this file would be a
+ * second thing to update if the project is ever renamed, and the copy that
+ * went stale would be this checker, waving through every file naming the id it
+ * was written to catch. `e2e/fixtures/firebase-preview-target.ts` derives its
+ * own refusal from the same file for the same reason.
+ */
+const PRODUCTION_PROJECT_ID = (() => {
+  const config = JSON.parse(readFileSync('.firebaserc', 'utf8'));
+  const projectId = config.projects?.default;
+  if (!projectId) {
+    console.error(
+      '\n  .firebaserc names no default project, so there is no production id to check ' +
+        'anything against. That file is where it lives; this check cannot run without it.\n',
+    );
+    process.exit(1);
+  }
+  return projectId;
+})();
 
 /** Build configurations that must not run against production. */
 const NON_PRODUCTION_BUILDS = ['development', 'e2e', 'lighthouse', 'dev-project'];
 
-/** Files a developer's machine can reach that must never name production. */
-const DEV_FACING_FILES = ['src/proxy.conf.json', 'package.json'];
+/**
+ * Files a developer's machine can reach that must never name production.
+ *
+ * **Every** `e2e/fixtures/*.ts` is covered, rather than the one file that
+ * happens to decide the project id today. Those fixtures are where the
+ * end-to-end suite's Admin SDK is configured and used, and that SDK bypasses
+ * `firestore.rules` entirely — it seeds users and documents and, for the
+ * preview target, deletes them again. A project id is one edited string away
+ * from pointing all of that at the real database, and nothing else in the
+ * pipeline would notice: the suite would go green, against production. Naming
+ * a single path would have checked whichever file was written first and waved
+ * the next one through.
+ */
+const DEV_FACING_FILES = [
+  'src/proxy.conf.json',
+  'package.json',
+  ...readdirSync('e2e/fixtures')
+    .filter((file) => file.endsWith('.ts'))
+    .map((file) => `e2e/fixtures/${file}`),
+];
 
 /**
  * CI that writes to a Firebase project, and must write to the dev one.

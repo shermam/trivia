@@ -3,9 +3,12 @@ import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 import { FirestoreRestError } from './firestore-rest/firestore-rest.client';
+import { GeoService } from './geo.service';
 import {
+  type ProPriceOption,
   SubscriptionError,
   SubscriptionService,
+  defaultProCurrency,
   subscriptionFailureMessage,
 } from './subscription.service';
 
@@ -43,11 +46,20 @@ interface RecordedQuery {
   limit?: number;
 }
 
+interface PriceSeed {
+  id: string;
+  active: boolean;
+  interval: string;
+  /** Omitted means `usd`; `null` means the document carries no currency at all. */
+  currency?: string | null;
+  unitAmount?: number | null;
+}
+
 interface ProductSeed {
   id: string;
   role: string | null;
   active: boolean;
-  prices: { id: string; active: boolean; interval: string }[];
+  prices: PriceSeed[];
   /** Lets a test make the *first* product the slowest to answer. */
   delayMs?: number;
 }
@@ -243,7 +255,18 @@ function fakeFirestore(options: FakeOptions = {}) {
         return ok(
           docsFor(
             collectionPath,
-            prices.map((p) => ({ id: p.id, data: { interval: p.interval } })),
+            prices.map((p) => ({
+              id: p.id,
+              data: {
+                interval: p.interval,
+                // Defaults, so a seed that does not care about money still
+                // produces the document shape the catalog really holds — the
+                // currency is what the service now groups prices by, and a
+                // fake that left it out would make every price look alike.
+                currency: p.currency === undefined ? 'usd' : p.currency,
+                unit_amount: p.unitAmount === undefined ? 99 : p.unitAmount,
+              },
+            })),
           ),
         );
       }
@@ -302,7 +325,42 @@ function fakeFirestore(options: FakeOptions = {}) {
   };
 }
 
-function configure(user: unknown, hasProClaim = false) {
+/**
+ * What the app believes about where the reader is, as a test double.
+ *
+ * Faked rather than driven through the real `GeoService`, because the two
+ * things it reads are the two things a test cannot choose: the machine's own
+ * IANA time zone and a `fetch` to an endpoint that does not exist under
+ * Vitest. `geo.service.spec.ts` covers the real chain; what these tests are
+ * about is what `SubscriptionService` does with its answer.
+ *
+ * The double keeps the real contract's shape, including the fallback:
+ * `resolveCountry()` answers the server's country if there is one and the time
+ * zone's otherwise, exactly as the service does. A `Promise` passed as
+ * `server` is used as is, which is how a test holds the answer open long
+ * enough to click something before it lands.
+ */
+function geoStub(
+  options: {
+    timeZone?: string | null;
+    server?: string | null | Promise<string | null>;
+  } = {},
+) {
+  const timeZone = options.timeZone ?? null;
+  return {
+    timeZoneCountry: () => timeZone,
+    resolveCountry: () =>
+      options.server instanceof Promise
+        ? options.server
+        : Promise.resolve(options.server ?? timeZone),
+  };
+}
+
+function configure(
+  user: unknown,
+  hasProClaim = false,
+  geo: Pick<GeoService, 'timeZoneCountry' | 'resolveCountry'> = geoStub(),
+) {
   const refreshIdToken = vi.fn(() => Promise.resolve());
   TestBed.configureTestingModule({
     providers: [
@@ -319,6 +377,7 @@ function configure(user: unknown, hasProClaim = false) {
           getIdToken: () => Promise.resolve('id-token'),
         },
       },
+      { provide: GeoService, useValue: geo },
     ],
   });
   return { service: TestBed.inject(SubscriptionService), refreshIdToken };
@@ -339,7 +398,7 @@ describe('SubscriptionService session handshake', () => {
 
   beforeEach(() => {
     // `window.location.assign` is non-configurable in a real browser, but this
-    // is jsdom; the redirect itself is covered for real by pricing.cy.ts.
+    // is jsdom; the redirect itself is covered for real by pricing.spec.ts.
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
   });
 
@@ -606,7 +665,7 @@ describe('SubscriptionService handshake polling', () => {
 });
 
 /**
- * Finding C5. `getProPriceId()` read the product catalog and then awaited each
+ * Finding C5. `getProPrices()` read the product catalog and then awaited each
  * product's `prices` subcollection **one at a time**, so the wait was the sum
  * of the round trips rather than the slowest — on the click that starts
  * checkout, where a delay is most visible. Neither query carried a `limit`
@@ -619,7 +678,17 @@ describe('SubscriptionService handshake polling', () => {
  * price the server is bound to reject, and checkout would simply stop working.
  */
 describe('SubscriptionService Pro price lookup (C5)', () => {
-  const monthly = (id: string) => ({ id, active: true, interval: 'month' });
+  const monthly = (
+    id: string,
+    currency?: string | null,
+    unitAmount?: number | null,
+  ): PriceSeed => ({
+    id,
+    active: true,
+    interval: 'month',
+    currency,
+    unitAmount,
+  });
 
   beforeEach(() => {
     vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
@@ -745,6 +814,394 @@ describe('SubscriptionService Pro price lookup (C5)', () => {
 
     await expect(pending).rejects.toBeInstanceOf(SubscriptionError);
     await expect(pending).rejects.toThrow(/no active monthly Pro price/i);
+  });
+});
+
+/**
+ * Which currency the reader is quoted, and therefore which Stripe Price ID
+ * checkout is started against.
+ *
+ * This is the whole feature, and the reason it is not cosmetic: a
+ * Brazilian-issued card cannot be charged in USD by a Brazilian Stripe
+ * account, and Adaptive Pricing does not help because it localises only for
+ * buyers *outside* the merchant's country. So a BR visitor landing on the USD
+ * price does not see a slightly odd number — they see a declined card. The
+ * default has to be right before anybody clicks anything.
+ */
+describe('SubscriptionService currency selection', () => {
+  const user = { uid: 'user-1', isAnonymous: false };
+  const monthly = (
+    id: string,
+    currency?: string | null,
+    unitAmount?: number | null,
+  ): PriceSeed => ({
+    id,
+    active: true,
+    interval: 'month',
+    currency,
+    unitAmount,
+  });
+  const bothCurrencies = [
+    {
+      id: 'prod_pro',
+      role: 'pro',
+      active: true,
+      prices: [monthly('price_usd', 'usd', 99), monthly('price_brl', 'brl', 590)],
+    },
+  ];
+
+  /**
+   * Points the fake at a different catalog part-way through a test.
+   *
+   * `fakeFirestore` stubs `fetch`, so a second catalog needs the first stub
+   * out of the way — and `location`, stubbed by `beforeEach`, goes with it and
+   * has to be put back. The `GeoService` double is a provider rather than a
+   * global, so it deliberately survives: which currencies are on sale is the
+   * variable here, and where the reader is is not.
+   */
+  function recatalog(products: ProductSeed[]) {
+    vi.unstubAllGlobals();
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+    return fakeFirestore({ products });
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('location', { origin: 'https://example.web.app', assign: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  it('offers one price per currency, in catalog order', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.proPriceOptions()).toEqual([
+      { priceId: 'price_usd', currency: 'usd', unitAmount: 99 },
+      { priceId: 'price_brl', currency: 'brl', unitAmount: 590 },
+    ]);
+  });
+
+  // Two monthly prices in the same currency is a Dashboard mistake rather than
+  // a choice, and offering both would put two identical-looking options in
+  // front of the reader.
+  it('keeps only the first price in each currency', async () => {
+    fakeFirestore({
+      products: [
+        {
+          id: 'prod_pro',
+          role: 'pro',
+          active: true,
+          prices: [monthly('price_usd_old', 'usd', 99), monthly('price_usd_new', 'usd', 149)],
+        },
+      ],
+    });
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.proPriceOptions().map((o) => o.priceId)).toEqual(['price_usd_old']);
+  });
+
+  // A price with no currency cannot be quoted in one, and showing it as an
+  // unnamed option would be worse than not showing it.
+  it('drops a price the catalog carries no currency for', async () => {
+    fakeFirestore({
+      products: [
+        {
+          id: 'prod_pro',
+          role: 'pro',
+          active: true,
+          prices: [monthly('price_broken', null), monthly('price_usd', 'usd', 99)],
+        },
+      ],
+    });
+    const { service } = configure(user);
+
+    await service.loadProPrices();
+
+    expect(service.proPriceOptions().map((o) => o.priceId)).toEqual(['price_usd']);
+  });
+
+  it('opens on BRL for a visitor the server places in Brazil, when BRL is on sale', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user, false, geoStub({ server: 'BR' }));
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('brl');
+    expect(service.selectedProPrice()).toEqual({
+      priceId: 'price_brl',
+      currency: 'brl',
+      unitAmount: 590,
+    });
+  });
+
+  it('opens on USD for everybody else', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user, false, geoStub({ server: 'US' }));
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+  });
+
+  /**
+   * The time zone answers while the server is still being asked, so a
+   * Brazilian machine is quoted in reais from the first frame the control
+   * exists rather than a beat later. Held apart from the server case because
+   * this is the path that runs on `ng serve` and on a preview channel, where
+   * the endpoint does not exist at all.
+   */
+  it('opens on BRL from the browser’s time zone before the server has answered', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    // Deliberately never settled: the claim is about what the page shows while
+    // the server is still being waited on.
+    const neverAnswers = new Promise<string | null>(() => undefined);
+    const { service } = configure(user, false, geoStub({ timeZone: 'BR', server: neverAnswers }));
+
+    void service.loadProPrices();
+    await flush();
+
+    expect(service.selectedCurrency()).toBe('brl');
+  });
+
+  /**
+   * The server outranks the time zone, and the difference is not academic: a
+   * laptop still set to São Paulo in a New York hotel is a Brazilian *clock*
+   * and an American *card*, and the address is the half that decides whether
+   * the charge goes through.
+   */
+  it('lets the server’s country overrule the time zone when they disagree', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user, false, geoStub({ timeZone: 'BR', server: 'US' }));
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+  });
+
+  /**
+   * The one ordering that can undo a real gesture. The reader sees the control
+   * as soon as the catalog lands, which is up to two seconds before the server
+   * says where they are — so a click in that window must survive the answer.
+   */
+  it('keeps a currency chosen before the server answers', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    let answerServer!: (country: string | null) => void;
+    const server = new Promise<string | null>((resolve) => {
+      answerServer = resolve;
+    });
+    const { service } = configure(user, false, geoStub({ server }));
+
+    const loading = service.loadProPrices();
+    await flush();
+    expect(service.selectedCurrency()).toBe('usd');
+
+    service.selectCurrency('brl');
+    answerServer('US');
+    await loading;
+
+    expect(service.selectedCurrency()).toBe('brl');
+  });
+
+  // The other half of that: with no gesture to respect, a late answer is
+  // exactly what the reader wants applied.
+  it('moves an unchosen selection when the server answers late', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    let answerServer!: (country: string | null) => void;
+    const server = new Promise<string | null>((resolve) => {
+      answerServer = resolve;
+    });
+    const { service } = configure(user, false, geoStub({ server }));
+
+    const loading = service.loadProPrices();
+    await flush();
+    expect(service.selectedCurrency()).toBe('usd');
+
+    answerServer('BR');
+    await loading;
+
+    expect(service.selectedCurrency()).toBe('brl');
+  });
+
+  // The catalog decides what exists. A Brazilian visitor with no BRL price on
+  // sale gets the USD one rather than a currency that isn't there.
+  it('falls back to what is on sale when the reader’s currency is not', async () => {
+    fakeFirestore({
+      products: [{ id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_usd')] }],
+    });
+    const { service } = configure(user, false, geoStub({ server: 'BR' }));
+
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+    expect(service.proPriceOptions()).toHaveLength(1);
+  });
+
+  it('checks out against the price of the currency the reader picked', async () => {
+    const fake = fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user);
+    await service.loadProPrices();
+
+    service.selectCurrency('brl');
+    await service.startProCheckout();
+
+    expect(fake.writes.at(-1)!.data['price']).toBe('price_brl');
+  });
+
+  // The selection decides which price ID checkout uses, so a currency with no
+  // price behind it would be a Subscribe button that cannot work.
+  it('ignores a currency the catalog does not offer', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user);
+    await service.loadProPrices();
+
+    service.selectCurrency('eur');
+
+    expect(service.selectedCurrency()).toBe('usd');
+  });
+
+  /**
+   * A refused selection is not a choice, so it must not freeze the default
+   * either — otherwise a stray `selectCurrency('eur')` would leave the reader
+   * on USD for the rest of the page load even once the server said Brazil.
+   */
+  it('does not treat a refused selection as the reader having chosen', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    let answerServer!: (country: string | null) => void;
+    const server = new Promise<string | null>((resolve) => {
+      answerServer = resolve;
+    });
+    const { service } = configure(user, false, geoStub({ server }));
+
+    const loading = service.loadProPrices();
+    await flush();
+    service.selectCurrency('eur');
+    answerServer('BR');
+    await loading;
+
+    expect(service.selectedCurrency()).toBe('brl');
+  });
+
+  /**
+   * What `loadProPrices()` promises is not "a selection exists" but "the
+   * selection is one of the currencies the catalog offers", and the two come
+   * apart when a currency is withdrawn under a reader who had chosen it:
+   * every radio asks whether it *is* the selection, so none of them would be
+   * checked, while `selectedProPrice` falls back to the first price — a card
+   * quoting an amount no control claims.
+   *
+   * **The memo is dropped by hand, because nothing else can drop it.** A
+   * successful lookup is memoised for the service's lifetime and only a
+   * *rejected* one clears the cache, so no sequence of public calls reads the
+   * catalog twice — which is exactly why no reader can walk into this today.
+   * The guard is here so the invariant survives the memo changing (a refresh,
+   * a TTL, a second service instance), and a test that could only be written
+   * after that change would be a test written too late.
+   */
+  it('re-defaults a selection the catalog has stopped offering', async () => {
+    fakeFirestore({ products: bothCurrencies });
+    const { service } = configure(user);
+    await service.loadProPrices();
+    service.selectCurrency('brl');
+    expect(service.selectedCurrency()).toBe('brl');
+
+    (service as unknown as { proPricesPromise: unknown }).proPricesPromise = null;
+    recatalog([{ id: 'prod_pro', role: 'pro', active: true, prices: [monthly('price_usd')] }]);
+    await service.loadProPrices();
+
+    expect(service.selectedCurrency()).toBe('usd');
+    expect(service.selectedProPrice()?.currency).toBe('usd');
+  });
+
+  // The page shows a placeholder and the Subscribe click reports the cause;
+  // what must not happen is the load rejecting into nothing and taking the
+  // page's own bootstrap with it.
+  it('leaves the page priceless rather than throwing when the catalog cannot be read', async () => {
+    fakeFirestore({ products: [] });
+    const { service } = configure(user);
+
+    await expect(service.loadProPrices()).resolves.toBeUndefined();
+
+    expect(service.proPriceOptions()).toEqual([]);
+    expect(service.selectedProPrice()).toBeNull();
+  });
+
+  // `CLAUDE.md` §4.4: a memoised promise that is never cleared on rejection
+  // turns one failed read into a permanently priceless page.
+  it('retries a failed catalog read rather than replaying the failure', async () => {
+    const first = fakeFirestore({ products: [] });
+    const { service } = configure(user);
+    await service.loadProPrices();
+    expect(first.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(1);
+
+    const second = recatalog(bothCurrencies);
+    await service.loadProPrices();
+
+    expect(second.queries.filter((q) => q.collectionPath === 'products')).toHaveLength(1);
+    expect(service.proPriceOptions()).toHaveLength(2);
+  });
+});
+
+/**
+ * The country → currency rule on its own, away from Firestore and away from
+ * however the country was arrived at.
+ *
+ * Exported and tested directly because the Brazilian case is the point of the
+ * feature: it decides whether a real card is accepted or declined, and it must
+ * not depend on anything about the machine running the suite.
+ */
+describe('defaultProCurrency', () => {
+  const option = (currency: string): ProPriceOption => ({
+    priceId: `price_${currency}`,
+    currency,
+    unitAmount: 100,
+  });
+  const both = [option('usd'), option('brl')];
+
+  it('sends a Brazilian visitor to the Brazilian price', () => {
+    expect(defaultProCurrency(both, 'BR')).toBe('brl');
+  });
+
+  // The code is normalised on the way in by both producers, but this function
+  // is exported and the rule is about the country rather than its spelling.
+  it('matches the country code case-insensitively', () => {
+    expect(defaultProCurrency(both, 'br')).toBe('brl');
+  });
+
+  it('quotes everybody else in the default currency', () => {
+    expect(defaultProCurrency(both, 'PT')).toBe('usd');
+    expect(defaultProCurrency(both, 'US')).toBe('usd');
+  });
+
+  /**
+   * The three ways a country can be missing — never asked, could not be told,
+   * or a reader somewhere the app prices normally — all have to land on the
+   * same answer, because the page cannot tell them apart and neither can the
+   * reader.
+   */
+  it('quotes the default currency when the country is unknown', () => {
+    expect(defaultProCurrency(both, null)).toBe('usd');
+  });
+
+  // The catalog decides what exists: a mapping to a currency nothing is priced
+  // in would leave the Subscribe button quoting a price that is not for sale.
+  it('ignores the country’s currency when the catalog does not carry it', () => {
+    expect(defaultProCurrency([option('usd')], 'BR')).toBe('usd');
+  });
+
+  it('falls back to the catalog’s first currency when neither rule matches', () => {
+    expect(defaultProCurrency([option('gbp'), option('eur')], 'GB')).toBe('gbp');
+  });
+
+  it('has nothing to select from an empty catalog', () => {
+    expect(defaultProCurrency([], 'BR')).toBeNull();
   });
 });
 

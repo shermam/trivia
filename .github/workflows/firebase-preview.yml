@@ -7,12 +7,13 @@ name: Deploy Preview Channel
 # firebase-deploy.yml, which is merge-to-deploy only).
 #
 # **That project is `trivimind-dev`, and until FEAT-012 it was production.**
-# Not read-only, either: the Cypress tasks here create real Auth users, real
+# Not read-only, either: the e2e job here creates real Auth users, real
 # `custom_questions` documents and real `leaderboards/{limit}/entries` rows,
-# swept afterwards by a best-effort `finalCleanup` — on every PR, from any
-# contributor whose PR a maintainer approved for workflow runs. It was the
-# single largest production exposure in the repo, and it was invisible because
-# the sweep mostly worked.
+# swept afterwards — on every PR, from any contributor whose PR a maintainer
+# approved for workflow runs. It was the single largest production exposure in
+# the repo, and it was invisible because the sweep mostly worked, which is why
+# that sweep now fails the job rather than reporting nothing when it cannot
+# delete something.
 #
 # `trivimind-dev` runs the same production build against the same rules, the
 # same indexes and the same `firebase.json` headers, so what the preview
@@ -107,12 +108,23 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
   e2e-preview:
+    # NOTE: this `name` is the status-check context (`E2E (preview)`), and it is
+    # required by main's ruleset. Don't change it — a required context is stored
+    # by name, so renaming silently detaches the requirement and lets PRs merge
+    # without the preview suite having run.
     name: E2E (preview)
     needs: deploy-preview
-    # Redundant today — `needs` on a skipped job skips this one too — and
-    # deliberately stated anyway. This job also reads the service account (for
-    # the preview-cleanup tasks), so the guard should not depend on a cascade
-    # that an `if: always()` or a dropped `needs:` would quietly remove.
+    # A scoped slice of the suite (docs/ci-cd.md §4.3) against the channel
+    # `deploy-preview` has just published, and therefore against the real
+    # `trivimind-dev` project — which is what makes it worth running next to the
+    # emulator suite in e2e.yml: real headers, a real service worker, real rules
+    # and real Cloud Functions. One runner, no shard; the slice is 79 tests and
+    # takes under two minutes.
+    #
+    # Stated rather than inherited from `deploy-preview`'s own guard: this job
+    # reads the service account too (the sweep deletes the accounts and
+    # documents the run created), so the Dependabot guard should not depend on a
+    # `needs` cascade that an `if: always()` would quietly remove.
     if: github.actor != 'dependabot[bot]' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
@@ -130,28 +142,38 @@ jobs:
             package-lock.json
             functions/package-lock.json
 
-      - name: Cache Cypress binary
+      # Keyed on the lockfile, because the lockfile is what decides which
+      # Chromium build `playwright install` fetches: the browser revision is a
+      # property of the pinned `@playwright/test` version, not something chosen
+      # here. A bumped version therefore misses the cache and downloads the
+      # browser that version expects.
+      - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/Cypress
-          key: cypress-binary-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         run: npm ci
 
-      # Only the seed/cleanup Node-side tasks (cypress/tasks/firebase-preview-tasks.ts)
-      # use this — the app itself under test still fetches its Firebase
-      # config from the deployed preview channel's own /__/firebase/init.json
-      # (patched around at the browser level, see cypress/support/e2e.preview.ts
-      # — Cypress's own reserved-path handling collides with Firebase Hosting's
-      # `/__/` namespace), same as a real visitor otherwise.
+      # `--with-deps` installs the system libraries headless Chromium needs. It
+      # is a no-op for the browser itself when the cache hit above already
+      # provided it.
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+
+      # No emulators and no dev server: the app under test is the channel that
+      # was just deployed, fetching its own Firebase config from that channel's
+      # `/__/firebase/init.json` exactly as a real visitor does. The credential
+      # below is for the Node side only — `e2e/fixtures/firebase-preview-target.ts`,
+      # which seeds what the specs need and sweeps it all up afterwards.
       # `env`, not `${{ }}` inside `run:` — see firebase-deploy.yml (A11).
-      - name: Run Cypress against the deployed preview (unauthenticated + limited authenticated flows)
+      - name: Run the preview slice against the deployed channel (unauthenticated + limited authenticated flows)
         env:
           PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
-          # Read by `cypress/tasks/firebase-preview-tasks.ts`, which refuses to
+          # Read by `e2e/fixtures/firebase-preview-target.ts`, which refuses to
           # start without it rather than defaulting to anything. There is no
           # value it could safely default *to*: the only obvious one is the
           # project it used to be hard-coded to.
@@ -164,12 +186,17 @@ jobs:
         if: always()
         run: rm -f "${{ runner.temp }}/firebase-service-account.json"
 
-      - name: Upload Cypress screenshots on failure
+      # The trace of a failed test replays the run frame by frame with the DOM
+      # at every step, which is what makes a failure that only happens against a
+      # real deployment diagnosable without reproducing it.
+      - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: cypress-preview-screenshots
-          path: cypress/screenshots
+          name: playwright-preview-report
+          path: |
+            playwright-report
+            test-results
           if-no-files-found: ignore
 
   cleanup-preview:

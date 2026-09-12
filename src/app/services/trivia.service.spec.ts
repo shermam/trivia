@@ -180,9 +180,9 @@ describe('TriviaService offline fallback', () => {
   });
 
   it('initOfflinePrefetch() does not schedule anything when navigator.webdriver is true', () => {
-    // navigator.webdriver is set by every browser-automation framework (Cypress, Selenium,
-    // Playwright) — a real preview-e2e CI run confirmed this task's own background requests
-    // can compete with the same Cypress-driven tests for a real, shared, rate-limited backend
+    // navigator.webdriver is set by every browser-automation framework (Playwright,
+    // Selenium) — a real preview-e2e CI run confirmed this task's own background requests
+    // can compete with the tests driving them for a real, shared, rate-limited backend
     // closely enough to cause unrelated specs to time out.
     // jsdom's Navigator has no `webdriver` property at all — vi.spyOn requires the property to
     // already exist to spy on its getter, so it's defined directly instead.

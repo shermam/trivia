@@ -7,7 +7,7 @@
  *
  * - `verify-csp.mjs` applies it to the policy **written in `firebase.json`**,
  *   in `lint.yml`, before anything is built.
- * - `cypress/e2e/unauthenticated/service-worker-oauth-origins.cy.ts` applies it
+ * - `e2e/specs/unauthenticated/service-worker-oauth-origins.spec.ts` applies it
  *   to the policy **actually served by a deployed Hosting channel**, which is a
  *   different question: a headers rule that stops matching `**`, a deploy that
  *   didn't take, or a CDN rewriting the header are all invisible on disk.
@@ -22,8 +22,9 @@
  * origin written only in `default-src` that the script caught. Neither would
  * have been wrong about its own copy. That is the whole argument for this file.
  *
- * Keep it dependency-free. The spec is bundled into a browser by Cypress, so
- * anything imported here has to survive that.
+ * Keep it dependency-free and free of Node built-ins. The spec that imports it
+ * runs under a test runner that transpiles rather than bundles, and the
+ * assertions it feeds are made about a page in a real browser.
  */
 
 /**
@@ -67,9 +68,15 @@ export const authDomainOrigin = (projectId) => `https://${projectId}.firebaseapp
 /**
  * The origin `httpsCallable` builds: `https://{region}-{project}.cloudfunctions.net`.
  *
- * There is no Hosting rewrite for functions here and no region override, so
- * `DEFAULT_REGION` from `@firebase/functions` applies. Setting a region on the
- * functions means changing this.
+ * No **callable** is reached through a Hosting rewrite, and there is no region
+ * override, so `DEFAULT_REGION` from `@firebase/functions` applies. Setting a
+ * region on the functions means changing this.
+ *
+ * One function *is* rewritten — `/api/geo` — and it deliberately needs no
+ * entry anywhere in this file: the browser fetches it from the app's own
+ * origin, which `connect-src 'self'` already covers. That is the reason for
+ * routing it that way, and it is the shape to copy for anything else the page
+ * has to ask the backend directly.
  */
 export const callableOrigin = (projectId) => `https://us-central1-${projectId}.cloudfunctions.net`;
 

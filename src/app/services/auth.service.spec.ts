@@ -48,6 +48,8 @@ const h = vi.hoisted(() => {
     lastResetEmail: string | null;
     errorCredential: unknown;
     lastCredential: unknown;
+    /** Thrown by the *retry* — signInWithCredential — not by the first link. */
+    credentialSignInError: unknown;
     calls: string[];
     /** Runs right after signOut's listener-with-null fires — the exact moment
      * the "verify your email" flash used to happen. */
@@ -67,6 +69,7 @@ const h = vi.hoisted(() => {
     lastResetEmail: null,
     errorCredential: null,
     lastCredential: null,
+    credentialSignInError: null,
     calls: [],
     probeAfterSignOutNull: null,
   };
@@ -84,6 +87,7 @@ const h = vi.hoisted(() => {
     state.lastResetEmail = null;
     state.errorCredential = null;
     state.lastCredential = null;
+    state.credentialSignInError = null;
     state.calls = [];
     state.probeAfterSignOutNull = null;
   };
@@ -215,6 +219,9 @@ vi.mock('firebase/auth', () => {
     signInWithCredential: async (_auth: unknown, credential: unknown) => {
       s.calls.push('signInWithCredential');
       s.lastCredential = credential;
+      if (s.credentialSignInError) {
+        throw s.credentialSignInError;
+      }
     },
     GoogleAuthProvider: class {
       static credentialFromError = () => h.state.errorCredential;
@@ -306,7 +313,7 @@ describe('AuthService: a failed bootstrap must not poison the session', () => {
    * timed out, was reused for the life of the tab. Every later call got the
    * same rejection back.
    *
-   * `FirebaseAppService.getApp()` and `SubscriptionService.getProPriceId()`
+   * `FirebaseAppService.getApp()` and `SubscriptionService.getProPrices()`
    * both already cleared on failure and both cite the rule; this one was
    * simply missed.
    */
@@ -521,6 +528,62 @@ describe('AuthService OAuth upgrade fallbacks', () => {
     expect(h.state.calls).toContain('signInWithCredential');
     expect(h.state.lastCredential).toBe(credential);
     expect(h.state.calls.filter((c) => c === 'signInWithPopup')).toEqual([]);
+  });
+
+  /**
+   * The same recovery, reached by the other error code. Under this project's
+   * "one account per email" setting, linking a Google credential whose address
+   * already belongs to an **email/password** account fails with
+   * `auth/email-already-in-use` rather than `credential-already-in-use` — and
+   * that mapped to "An account with this email already exists. Try signing in
+   * instead.", which is a dead end for somebody who is signing in. It happened
+   * to the owner's own Google account.
+   */
+  it('signs into the existing account when the provider email is already a password account', async () => {
+    const service = setup();
+    await service.ensureSignedIn();
+    await settle();
+    const credential = { fromError: true };
+    h.state.errorCredential = credential;
+    h.state.popupError = Object.assign(new Error('email exists'), {
+      code: 'auth/email-already-in-use',
+    });
+
+    await expect(service.signInWithOAuth('google.com')).resolves.toBeUndefined();
+
+    expect(h.state.calls).toContain('signInWithCredential');
+    expect(h.state.lastCredential).toBe(credential);
+    expect(h.state.calls.filter((c) => c === 'signInWithPopup')).toEqual([]);
+  });
+
+  it('asks for the account again in a fresh popup when the error carried no credential', async () => {
+    const service = setup();
+    await service.ensureSignedIn();
+    await settle();
+    h.state.errorCredential = null;
+    h.state.popupError = Object.assign(new Error('email exists'), {
+      code: 'auth/email-already-in-use',
+    });
+
+    await expect(service.signInWithOAuth('google.com')).resolves.toBeUndefined();
+
+    expect(h.state.calls).toContain('signInWithPopup');
+    expect(h.state.calls).not.toContain('signInWithCredential');
+  });
+
+  it('reports a friendly error when the retry itself fails', async () => {
+    const service = setup();
+    await service.ensureSignedIn();
+    await settle();
+    h.state.errorCredential = { fromError: true };
+    h.state.popupError = Object.assign(new Error('email exists'), {
+      code: 'auth/email-already-in-use',
+    });
+    h.state.credentialSignInError = Object.assign(new Error('offline'), {
+      code: 'auth/network-request-failed',
+    });
+
+    await expect(service.signInWithOAuth('google.com')).rejects.toThrow(/network error/i);
   });
 
   // A blocked popup is a thing the person in front of the screen can fix, and

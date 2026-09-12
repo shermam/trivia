@@ -1,0 +1,125 @@
+export interface CustomQuestionSeed {
+  id?: string;
+  category: string;
+  type: 'multiple' | 'boolean';
+  difficulty: 'easy' | 'medium' | 'hard';
+  question: string;
+  correct_answer: string;
+  incorrect_answers: string[];
+  /**
+   * Attribution (see `docs/data-model.md` §3). Optional here even though
+   * `firestore.rules` requires it on a client create, because these seeds go
+   * in via the Admin SDK and bypass rules — which lets a spec deliberately
+   * seed an unattributed question to stand in for one predating attribution.
+   */
+  createdBy?: string;
+  /**
+   * Moderation status. Defaults to `'approved'` in the seeding helper, which
+   * is what every question in the real bank carries once
+   * `scripts/backfill-question-status.mjs` has run — a fixture without one
+   * would model a state that no longer exists. Overridable so a spec can seed
+   * a pending or rejected question.
+   */
+  status?: 'approved' | 'pending' | 'rejected';
+  createdAt?: number;
+  /**
+   * Optional source attribution (`FEAT-022`). Optional in the schema too, not
+   * merely here — almost no question in the bank has one, so a spec asserting
+   * the *absence* of a source link is testing the common case.
+   */
+  sourceUrl?: string;
+  sourceTitle?: string;
+}
+
+export interface VerifiedUserSeed {
+  email: string;
+  password: string;
+  displayName?: string;
+}
+
+/**
+ * Drives the app into a "Pro" state the same way our Stripe webhook handler
+ * would — a `stripeRole: 'pro'` custom claim plus a synced `subscriptions`
+ * doc — without ever calling Stripe. See `firebase-backend.ts`.
+ */
+export interface ProSubscriptionSeed {
+  uid: string;
+}
+
+/**
+ * One monthly Pro price, as `stripeWebhook` would mirror it.
+ *
+ * A currency is a **separate Stripe Price** on the same product rather than a
+ * `currency_options` entry on one — Stripe freezes a price once it has been
+ * used — so seeding a second currency means seeding a second price here too
+ * (`docs/data-model.md`, `products`).
+ */
+export interface ProPriceSeed {
+  id: string;
+  currency: string;
+  /** Smallest unit of that currency: 99 for $0.99, 590 for R$ 5,90. */
+  unitAmount: number;
+}
+
+/** A checkout-session document as the client wrote it, read back for assertions. */
+export interface CheckoutSessionRecord {
+  id: string;
+  price: string;
+  origin: string;
+}
+
+/**
+ * A `question_reports` document as read back by `getQuestionReports`, ID
+ * included — the ID carries the `{window}-{slot}-{uid}` volume cap, so specs
+ * assert on its shape as well as on the payload (finding H4).
+ */
+export interface QuestionReportRecord {
+  id: string;
+  questionId: string;
+  reason: 'incorrect' | 'inappropriate' | 'spam' | 'other';
+  detail?: string;
+  reportedBy: string;
+  createdAt: number;
+}
+
+/**
+ * The boards, one per timing constraint (finding G7). Must match `isValidBoard`
+ * in `firestore.rules`. Seeding and cleanup both have to visit every one of
+ * them, so the list lives here rather than at each call site.
+ */
+export const LEADERBOARD_BOARDS = ['15', '30', 'unlimited'] as const;
+
+export interface LeaderboardSeed {
+  uid: string;
+  name: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  createdAt?: number;
+  /** Which board to seed into. Defaults to the 15-second board. */
+  timeLimit?: string;
+}
+
+/** Grants (or explicitly withholds) the moderation role for one account. */
+export interface ReviewerSeed {
+  uid: string;
+  /** `false` is a distinct fixture from absent — it is the H6 shape. */
+  reviewer: boolean;
+}
+
+/** Which uid (and optionally which contributed question) to inspect after an account deletion. */
+export interface AccountStateQuery {
+  uid: string;
+  questionId?: string;
+}
+
+/** What `inspectAccountState` reports back — see the method for why it reads all five at once. */
+export interface AccountState {
+  authUserExists: boolean;
+  leaderboardExists: boolean;
+  customerExists: boolean;
+  questionExists: boolean;
+  questionCreatedBy: string | null;
+  /** `users/{uid}` in full, or null when the account has never finished a game. */
+  gameplayStats: Record<string, unknown> | null;
+}

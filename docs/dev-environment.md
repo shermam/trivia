@@ -45,7 +45,7 @@ required `lint` check) is what stops all three coming back.
 > which on a phone is the centre track of a three-column grid already close to
 > full: measured at 320px it pushed the brand 32px into the account chip, and
 > at 390px it cleared by 2.5px. Nothing would have caught it —
-> `mobile-nav.cy.ts` asserts exactly that clearance but runs at 390, and the
+> `mobile-nav.spec.ts` asserts exactly that clearance but runs at 390, and the
 > badge never renders in an e2e build at all. On a phone the URL is the signal
 > instead: `localhost`, or a `*.web.app` preview channel, neither of which can
 > be mistaken for the production domain.
@@ -137,14 +137,25 @@ introduced by hand, below.
    catalog query filters on, so without it the product is invisible to the
    pricing page; the price's is where the `stripeRole` claim the app gates on
    comes from, so without it an active subscription grants nothing (audit H6).
-   Then set the dev project's secrets:
+
+   **Create one recurring monthly price per currency the app sells in** — a USD
+   one and a BRL one — as separate Prices on that same product, each with its
+   own `firebaseRole: pro`. That is the shape `SubscriptionService` reads
+   (`app.md` §1.6) and the reason dev has to mirror it: with only the USD price
+   in test mode, the currency switch never appears here and the Brazilian path
+   is untestable outside production. Alternative `currency_options` on a single
+   price is deliberately **not** the model — Stripe freezes those once a price
+   has been used (`stack.md` §2.4). Then set the dev project's secrets:
+
    ```bash
    firebase functions:secrets:set STRIPE_SECRET_KEY --project trivimind-dev
    firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --project trivimind-dev
    ```
+
    Use the **test-mode** key. The livemode assertion derives which Stripe it is
    talking to from the key itself, not from the project name (audit §4.3), so a
    test key here is not merely safe — it is what makes the check correct.
+
 9. **Point a Stripe test webhook** at the dev project's `stripeWebhook`
    function URL
    (`https://us-central1-trivimind-dev.cloudfunctions.net/stripeWebhook`),
@@ -168,11 +179,12 @@ are not enabled here.
 **That is sufficient for CI and insufficient for one kind of manual check**, so
 it is worth being precise about which:
 
-- The preview e2e suite needs **Anonymous** (every visitor gets an anonymous
-  uid on load) and **Email/Password** (`sign-in-save-score.cy.ts`,
-  `profile.cy.ts`). Both enabled. `service-worker-oauth-origins.cy.ts` looks
-  like a third requirement and is not: it checks that the CSP and the service
-  worker leave `apis.google.com` reachable, and never performs a sign-in.
+- The preview e2e slice (`ci-cd.md` §4.3) needs **Anonymous** (every visitor
+  gets an anonymous uid
+  on load) and **Email/Password** (`sign-in-save-score`, `profile`). Both
+  enabled. `service-worker-oauth-origins` looks like a third requirement and is
+  not: it checks that the CSP and the service worker leave `apis.google.com`
+  reachable, and never performs a sign-in.
 - **Validating a change to the "more sign-in options" disclosure cannot be done
   on dev.** Those five providers will fail with `auth/operation-not-allowed`.
   A green dev run says nothing about them — which is the failure mode a dev
@@ -267,13 +279,15 @@ domain, which dev does not have.
     which needs `setIamPolicy` on it; `roles/secretmanager.viewer` fixes only
     the `get` and fails at the next step.
 
-11. ✅ **Repoint the preview workflow** — done in code, not by hand. All three
-    jobs (deploy, e2e, cleanup) now use `trivimind-dev` and the secret from
-    step 10, and `cypress/tasks/firebase-preview-tasks.ts` takes the project
-    from `FIREBASE_PREVIEW_PROJECT_ID` with **no default** — it throws if the
-    variable is missing, and throws again if it is set to production, because
-    those tasks hold Admin-SDK credentials and bypass `firestore.rules`.
-    `npm run env:verify` fails if the workflow ever names production again.
+11. ✅ **Repoint the preview workflow** — done in code, not by hand. Every job
+    (deploy, e2e, cleanup) uses `trivimind-dev` and the secret from step 10, and
+    the Node side of the suite — `e2e/fixtures/firebase-preview-target.ts` —
+    takes the project from `FIREBASE_PREVIEW_PROJECT_ID` with **no default**: it
+    throws if the variable is missing, and throws again if it is set to
+    production, because it holds Admin-SDK credentials and bypasses
+    `firestore.rules`.
+    `npm run env:verify` fails if the workflow ever names production again, and
+    if any `e2e/fixtures/*.ts` does.
 12. **Leave `e2e.yml` and `lighthouse.yml` alone.** They already run under
     `demo-trivia-app-e2e` on emulators and hold no credential. The spec's claim
     that "CI runs against production credentials" was wrong about these two and

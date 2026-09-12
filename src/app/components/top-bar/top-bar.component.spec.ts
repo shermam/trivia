@@ -14,7 +14,7 @@ import { environment } from '../../../environments/environment';
  *
  * Which links are *visible* at which width is decided by Tailwind classes and
  * is therefore invisible to jsdom — that half is covered in
- * `cypress/e2e/unauthenticated/mobile-nav.cy.ts`, at a real viewport. What is
+ * `e2e/specs/unauthenticated/mobile-nav.spec.ts`, at a real viewport. What is
  * covered here is the behaviour `CLAUDE.md` §4.5 requires of a disclosure and
  * that nothing automated will otherwise check: `aria-expanded`, Escape,
  * focus moving in and coming back, and the breakpoint teardown.
@@ -114,7 +114,7 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolea
      * the accessibility tree, not clickable — while the class is one of three
      * implementation details behind it. jsdom parses `inert` without enforcing
      * any of that, which is exactly why the enforcement is asserted in
-     * `mobile-nav.cy.ts` and only the wiring is asserted here.
+     * `mobile-nav.spec.ts` and only the wiring is asserted here.
      */
     isOpen: () => el('[data-cy="nav-menu-overlay"]').getAttribute('inert') === null,
     authStub,
@@ -431,7 +431,7 @@ describe('TopBarComponent: the account chip while auth settles', () => {
    * `minmax(0,1fr)` grid track on a phone. Without it the chip renders 54px
    * tall in a 64px bar — which shipped, because the mobile-nav spec measured
    * width, overlap and centring but never height. jsdom does no layout, so the
-   * height itself is asserted in `mobile-nav.cy.ts`; this pins the mechanism.
+   * height itself is asserted in `mobile-nav.spec.ts`; this pins the mechanism.
    */
   it('forbids the sign-in label from wrapping', () => {
     const h = setup({ auth: { authReady: true, user: null, isAnonymous: true } });
@@ -462,7 +462,7 @@ describe('TopBarComponent: the chip label region', () => {
    * test here passed against it, and in a real browser the `0fr` track did not
    * collapse at all — an `fr` track only collapses when the grid container has
    * a width of its own to divide, and every box in this chip is shrink-to-fit.
-   * `profile.cy.ts` is what asks whether the class *means* anything.
+   * `profile.spec.ts` is what asks whether the class *means* anything.
    */
   const labelRegion = (h: ReturnType<typeof setup>) =>
     h.chip().querySelector('span.overflow-hidden') as HTMLElement;
@@ -634,7 +634,7 @@ describe('TopBarComponent: the chip label region', () => {
  * jsdom implements neither `checkVisibility` (so these exercise the
  * `getComputedStyle` fallback arm, not the branch a browser takes) nor the
  * refusal itself (`focus()` on a hidden element works here). Both are why the
- * end-to-end version of this lives in `sign-in-save-score.cy.ts`.
+ * end-to-end version of this lives in `sign-in-save-score.spec.ts`.
  */
 describe('TopBarComponent: focus returning to the opener', () => {
   function openFromExternalTrigger(hide: 'hidden' | 'detached' | 'none') {

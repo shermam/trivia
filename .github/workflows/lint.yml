@@ -6,7 +6,7 @@
 # gain. Same family of mistake as the job-name warning below.
 name: Lint & Format
 
-# Static checks — Prettier formatting, ESLint, and the Cypress typecheck — on
+# Static checks — Prettier formatting, ESLint, and the e2e typecheck — on
 # every PR targeting main, plus main itself as a safety net.
 #
 # Its own workflow rather than extra steps inside unit-tests.yml, matching
@@ -17,7 +17,7 @@ name: Lint & Format
 # surface on the same push rather than the first hiding the second; and the
 # red check names the actual problem without anyone opening the log.
 #
-# All three checks live in one job on purpose — they're a single "does this
+# All the checks live in one job on purpose — they're a single "does this
 # code meet the bar" question, and splitting them would pay for another
 # `npm ci` to tell us something a step name already makes obvious.
 #
@@ -29,11 +29,12 @@ name: Lint & Format
 # `functions-tests` has been sitting in. Making a check real today beat
 # making it tidy and inert.
 #
-# It covers `cypress/` alone because that is the only tree nothing else
-# typechecks: `src/` goes through `ng build`/`ng test`, and `functions/`
-# through the `tsc` that `functions:test` runs first. `cypress/tsconfig.json`
-# was referenced by no script and no CI step until now, and was hiding a real
-# error when it was finally run.
+# It covers `e2e/` because that is the only tree nothing else typechecks:
+# `src/` goes through `ng build`/`ng test`, and `functions/` through the `tsc`
+# that `functions:test` runs first. `playwright test` transpiles its specs
+# without typechecking them, so a type error there would otherwise surface as a
+# runtime failure in a job that takes minutes, or not at all in a branch no
+# test reaches.
 on:
   pull_request:
     branches: [main]
@@ -71,8 +72,8 @@ jobs:
       - name: Lint (ESLint + angular-eslint)
         run: npm run lint
 
-      - name: Typecheck the Cypress suite
-        run: npm run typecheck:cypress
+      - name: Typecheck the e2e suite
+        run: npm run typecheck:e2e
 
       # Measures the committed PNGs against the `purpose` the manifest
       # declares for them. Here for the same reason as the typecheck: nothing
