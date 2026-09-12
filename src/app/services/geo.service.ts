@@ -1,4 +1,5 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { PricingCacheService } from './pricing-cache.service';
 
 /**
  * Where the visitor is, as far as the app can honestly tell — used for one
@@ -11,15 +12,19 @@ import { Injectable } from '@angular/core';
  * browses in `en-US`, so a default keyed on `navigator.languages` quotes them
  * dollars and lands them on exactly the refusal this feature exists to avoid.
  *
- * So the country comes from three sources in decreasing order of confidence,
+ * So the country comes from four sources in decreasing order of confidence,
  * and every one of them can be absent:
  *
  * 1. **The app's own server** (`/api/geo`, a Hosting rewrite to a Cloud
  *    Function that reads the `X-Country-Code` header Hosting resolves from the
- *    client IP). First-party, same-origin, and nothing is stored.
- * 2. **The browser's IANA time zone**, which is a statement about where the
+ *    client IP). First-party, same-origin.
+ * 2. **The server's last answer**, kept in `localStorage` for a day
+ *    (`PricingCacheService`) so a returning visitor's currency is right on the
+ *    first frame rather than two seconds in. It is still a server answer, which
+ *    is why it outranks the clock below.
+ * 3. **The browser's IANA time zone**, which is a statement about where the
  *    machine is set rather than what it reads, and needs no request at all.
- * 3. **Nothing** — the caller falls back to the catalog's own default price.
+ * 4. **Nothing** — the caller falls back to the catalog's own default price.
  *
  * All of it is UI (`CLAUDE.md` §4.2): it decides which of the catalog's prices
  * is preselected, the reader can switch, and what is actually charged is
@@ -126,6 +131,7 @@ export function countryFromGeoBody(body: unknown): string | null {
 
 @Injectable({ providedIn: 'root' })
 export class GeoService {
+  private readonly pricingCache = inject(PricingCacheService);
   private serverCountryPromise: Promise<string | null> | null = null;
 
   /**
@@ -142,8 +148,25 @@ export class GeoService {
   }
 
   /**
+   * The best answer available **without asking anyone**: the server's last
+   * answer if this browser still holds a fresh one, and the time zone
+   * otherwise.
+   *
+   * This is what a cache-first render opens on, and the order is the same one
+   * `resolveCountry` applies — a day-old answer about an IP address is still
+   * an answer about an address, and the clock is still only a clock. The case
+   * it gets wrong is a reader who has crossed a border since their last visit,
+   * which the background revalidation then corrects in the same page load
+   * (unless they have already chosen a currency themselves, which wins over
+   * both).
+   */
+  knownCountry(): string | null {
+    return this.pricingCache.readCountry() ?? this.timeZoneCountry();
+  }
+
+  /**
    * The best country signal available: the server's answer, falling back to
-   * the time zone, falling back to nothing.
+   * its own last answer, then to the time zone, then to nothing.
    *
    * **Never rejects.** Every failure — a timeout, a 5xx, an HTML page from a
    * deployment where the function does not exist, a body that is not what it
@@ -157,10 +180,12 @@ export class GeoService {
    * asks again — and this runs on every visit to `/pricing`, so the retry
    * costs one request on a page that already makes two. The memo is on the
    * *server* half rather than on the chain, so a time-zone answer standing in
-   * for a failed request does not also suppress the next attempt at it.
+   * for a failed request does not also suppress the next attempt at it. The
+   * same rule applies to the durable copy in `PricingCacheService`: only a
+   * real answer is ever written there.
    */
   async resolveCountry(): Promise<string | null> {
-    return (await this.cachedServerCountry()) ?? this.timeZoneCountry();
+    return (await this.cachedServerCountry()) ?? this.knownCountry();
   }
 
   private cachedServerCountry(): Promise<string | null> {
@@ -169,7 +194,12 @@ export class GeoService {
       void this.serverCountryPromise.then((country) => {
         if (country === null) {
           this.serverCountryPromise = null;
+          return;
         }
+        // Written here rather than inside `serverCountry` so there is one
+        // place that decides what counts as a real answer, and one place that
+        // records it.
+        this.pricingCache.writeCountry(country);
       });
     }
     return this.serverCountryPromise;

@@ -32,16 +32,19 @@ const MEASURING_VIEWPORT = { width: 390, height: 1000 };
  *
  * The response is fetched immediately and only its *delivery* is held, so the
  * released page is one round trip from rendering a price rather than starting
- * one. The count is returned because the intercept is load-bearing: an
+ * one. Both counts are returned because the intercept is load-bearing: an
  * intercept that silently stopped matching would leave the test measuring the
- * loaded state twice and passing by luck (`CLAUDE.md` §4.6).
+ * loaded state twice and passing by luck (`CLAUDE.md` §4.6). `delivered` is
+ * how a test waits for the released answer to reach the page when the answer
+ * is one that changes **nothing** on screen — which is exactly the case for a
+ * render that came from the cache and turns out to be right.
  */
 async function holdCatalogRead(page: Page) {
   let release!: () => void;
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const held = { queries: 0 };
+  const held = { queries: 0, delivered: 0 };
 
   await page.route(CATALOG_QUERY, async (route) => {
     if (route.request().method() !== 'POST') {
@@ -52,6 +55,7 @@ async function holdCatalogRead(page: Page) {
     held.queries += 1;
     await released;
     await route.fulfill({ response });
+    held.delivered += 1;
   });
 
   return { release: () => release(), held };
@@ -86,6 +90,65 @@ async function mockGeo(
       body: JSON.stringify({ country: options.country ?? null }),
     });
   });
+}
+
+/**
+ * Seeds the browser storage a returning visitor would already have.
+ *
+ * `addInitScript` rather than an `evaluate` after loading, because the claim
+ * every caller makes is about the **first frame**: a value written after the
+ * page has booted proves nothing about what it rendered before it. The shape
+ * is the one `PricingCacheService` writes, restated here on purpose — a helper
+ * that imported the app's own serialiser would pass against a format change
+ * that breaks every real visitor's cache.
+ */
+async function seedPricingCache(
+  page: Page,
+  options: {
+    catalog: { priceId: string; currency: string; unitAmount: number }[];
+    country?: string;
+    storedAt?: number;
+  },
+): Promise<void> {
+  await page.addInitScript(
+    ({ catalog, country, storedAt }) => {
+      localStorage.setItem(
+        'trivia-pricing-catalog',
+        JSON.stringify({ storedAt, options: catalog }),
+      );
+      if (country) {
+        localStorage.setItem('trivia-pricing-country', JSON.stringify({ storedAt, country }));
+      }
+    },
+    {
+      catalog: options.catalog,
+      country: options.country,
+      storedAt: options.storedAt ?? Date.now(),
+    },
+  );
+}
+
+/**
+ * Waits until the browser is holding a **usable** pre-created checkout.
+ *
+ * The session document appears the instant the client writes it, which is
+ * before `createCheckoutSession` has written the URL back — and the entry is
+ * only stored once it has. So a test that reloads, or opens a second tab, as
+ * soon as the document exists is racing the handshake: the page it interrupts
+ * stores nothing, and the next one legitimately creates a session of its own.
+ * That cost a failing run before it was written down here. Anything asserting
+ * that the entry is *reused* has to wait for the entry, not for the document.
+ *
+ * The key is restated rather than imported for the same reason
+ * `seedPricingCache` restates the catalog's shape: a helper that read the
+ * app's own constant would keep passing if the app stopped storing it.
+ */
+async function waitForReadyCheckout(page: Page): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('trivia-checkout-ready')), {
+      message: 'the pre-created checkout the browser is holding',
+    })
+    .not.toBeNull();
 }
 
 /**
@@ -241,6 +304,219 @@ test.describe('pricing / Stripe checkout', () => {
       .toMatch(/^#mock-checkout-session-/);
   });
 
+  /**
+   * The click is a redirect, not a wait — because the session already exists.
+   *
+   * `PricingComponent` starts the handshake a second after the currency
+   * settles, so by the time a reader has read the feature list the URL is
+   * waiting. What has to be true is that the click then creates **nothing**:
+   * a second session document would spend another of the ten per five minutes
+   * `firestore.rules` allows and, worse, expire the one it was about to use
+   * (`functions/src/checkout-sessions.ts` clears the customer's open sessions
+   * before creating another).
+   *
+   * Counted through the Admin SDK rather than inferred from the screen, which
+   * shows the same mock redirect either way.
+   */
+  test('checks out through the session created while the reader was reading', async ({
+    page,
+    firebase,
+  }) => {
+    const email = uniqueEmail();
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+    await page.goto('/pricing');
+
+    await expect
+      .poll(async () => (await firebase.getCheckoutSessions(uid)).length, {
+        message: 'the session created before anybody clicked',
+      })
+      .toBe(1);
+
+    await page.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }).click();
+
+    await expect
+      .poll(() => new URL(page.url()).hash, { message: 'the mock checkout redirect target' })
+      .toMatch(/^#mock-checkout-session-/);
+    expect(
+      await firebase.getCheckoutSessions(uid),
+      'session documents after the click',
+    ).toHaveLength(1);
+  });
+
+  /**
+   * A second tab must reuse the live session rather than destroy it.
+   *
+   * `createCheckoutSession` expires the customer's open sessions before
+   * creating its own, so a tab that could not see the first tab's entry would
+   * pre-create, kill that session, and leave the first tab holding a URL that
+   * now leads to Stripe's "this session has expired" page — with no way for
+   * the client to know. The entry therefore lives in `localStorage` and is
+   * re-read at click time.
+   *
+   * **`context.newPage()`, not a second `BrowserContext`.** A fresh context
+   * has its own storage and its own anonymous session, so it would be a
+   * different device and a different reader: the collision this test is about
+   * could not occur in it, and the test would pass against the bug.
+   */
+  test('reuses the waiting session in a second tab instead of replacing it', async ({
+    page,
+    context,
+    firebase,
+  }) => {
+    const email = uniqueEmail();
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+    await page.goto('/pricing');
+
+    await expect
+      .poll(async () => (await firebase.getCheckoutSessions(uid)).length, {
+        message: 'the session the first tab created',
+      })
+      .toBe(1);
+    // Not merely "the document exists": the second tab must open against a
+    // session this one can actually reuse.
+    await waitForReadyCheckout(page);
+    const [waiting] = await firebase.getCheckoutSessions(uid);
+
+    const second = await context.newPage();
+    await second.goto('/pricing');
+    await expect(
+      second.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }),
+    ).toBeVisible();
+    // Real time, because the claim is that the second tab creates **nothing** —
+    // twice the one-second settle it would otherwise act after, and there is no
+    // event for "decided not to" to wait on.
+    await second.waitForTimeout(2_000);
+    expect(
+      await firebase.getCheckoutSessions(uid),
+      'session documents after a second tab opened the page',
+    ).toHaveLength(1);
+
+    // …and the first tab's click still goes to the session it was holding,
+    // which is the one that is still open on Stripe's side.
+    await page.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }).click();
+    await expect
+      .poll(() => new URL(page.url()).hash, { message: 'the mock checkout redirect target' })
+      .toBe(`#mock-checkout-session-${waiting.id}`);
+  });
+
+  /**
+   * Reloading is the commonest thing somebody does on a page they are thinking
+   * about, and each reload would otherwise spend one of the ten sessions the
+   * volume cap allows — five refreshes and checkout starts refusing. The entry
+   * therefore lives in `localStorage`, which survives both a reload and a
+   * second tab.
+   *
+   * The wait is the honest part: the claim is that something does **not**
+   * happen, and an assertion made before the page had the chance to act would
+   * pass against the very regression it exists to catch. Two seconds is twice
+   * the one-second settle the component waits, and there is no observable
+   * event for "decided not to create a session" to wait on instead
+   * (`adjustable-timer.spec.ts` waits in real time for the same reason).
+   */
+  test('does not spend another session when the page is reloaded', async ({ page, firebase }) => {
+    const email = uniqueEmail();
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+    await page.goto('/pricing');
+
+    await expect
+      .poll(async () => (await firebase.getCheckoutSessions(uid)).length, {
+        message: 'the session created before anybody clicked',
+      })
+      .toBe(1);
+    await waitForReadyCheckout(page);
+
+    await page.reload();
+    await expect(
+      page.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }),
+    ).toBeVisible();
+    await page.waitForTimeout(2_000);
+
+    expect(
+      await firebase.getCheckoutSessions(uid),
+      'session documents after a reload',
+    ).toHaveLength(1);
+
+    await page.getByRole('button', { name: 'Subscribe — $0.99/mo', exact: true }).click();
+    await expect
+      .poll(() => new URL(page.url()).hash, { message: 'the mock checkout redirect target' })
+      .toMatch(/^#mock-checkout-session-/);
+    expect(
+      await firebase.getCheckoutSessions(uid),
+      'session documents after the click',
+    ).toHaveLength(1);
+  });
+
+  /**
+   * A second visit does not wait for the network to say what Pro costs.
+   *
+   * The catalog and the country are kept in `localStorage` for a day
+   * (`PricingCacheService`), so the amount, the currency and the switch are
+   * all on the first frame — which is measurable only here, because the claim
+   * is about a render that happens *before* a network response exists. The
+   * catalog read is held open for exactly that reason: if the page were still
+   * waiting on it, the em-dash placeholder would be showing.
+   *
+   * The card is measured too, for the same guarantee the loading-state test
+   * above pins from the other direction (`CLAUDE.md` §4.4): a cache-first
+   * render must be the same height as the loaded one, or a returning visitor
+   * gets the layout jump in reverse.
+   */
+  test('quotes the price from the last visit before the catalog answers', async ({ page }) => {
+    await page.setViewportSize(MEASURING_VIEWPORT);
+    await seedPricingCache(page, {
+      catalog: [{ priceId: 'price_test_pro', currency: 'usd', unitAmount: 99 }],
+    });
+    const catalog = await holdCatalogRead(page);
+
+    await page.goto('/pricing');
+
+    await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+    await expect(page.getByTestId('pro-currency')).toHaveText('USD');
+    const card = page.getByTestId('pro-card');
+    const fromCache = await settledHeight(card, 'the Pro card rendered from the cache');
+
+    // Waited on the intercept rather than on the screen, because the whole
+    // point of this case is that the answer **agrees** with what is already
+    // rendered: there is no text to watch change, and an assertion made before
+    // the response reached the page would be measuring the cached state twice.
+    catalog.release();
+    await expect
+      .poll(() => catalog.held.delivered, { message: 'the held catalog answer reaching the page' })
+      .toBeGreaterThan(0);
+
+    expect(catalog.held.queries, 'catalog queries held open by the intercept').toBeGreaterThan(0);
+    await expectSameHeight(card, fromCache, 'the Pro card once the catalog has answered');
+  });
+
+  /**
+   * …and the cached answer is first, not final. A price edited in the Stripe
+   * Dashboard has to reach a returning visitor, so every load revalidates
+   * behind the render and replaces what it finds.
+   *
+   * The stale amount is deliberately one the catalog has never carried, so
+   * "the page corrected itself" cannot be confused with "the page never read
+   * the cache at all".
+   */
+  test('replaces a cached amount the catalog no longer agrees with', async ({ page }) => {
+    await seedPricingCache(page, {
+      catalog: [{ priceId: 'price_test_pro', currency: 'usd', unitAmount: 1234 }],
+    });
+    const catalog = await holdCatalogRead(page);
+
+    await page.goto('/pricing');
+    await expect(page.getByTestId('pro-price')).toHaveText('$12.34');
+
+    catalog.release();
+
+    await expect(page.getByTestId('pro-price')).toHaveText('$0.99');
+  });
+
   test('shows the Pro badge once subscribed and hides the Subscribe button', async ({
     page,
     firebase,
@@ -333,14 +609,25 @@ test.describe('pricing / choosing a currency', () => {
       .poll(() => new URL(page.url()).hash, { message: 'the mock checkout redirect target' })
       .toMatch(/^#mock-checkout-session-/);
 
-    // The whole feature, asserted where it is actually decided. The screen
-    // cannot show which price was sent, so the session document is read back
-    // through the Admin SDK.
-    await expect
-      .poll(async () => (await firebase.getCheckoutSessions(uid)).map((s) => s.price), {
-        message: 'the price ID the checkout session carries',
-      })
-      .toEqual([BRL_PRICE_ID]);
+    /**
+     * The whole feature, asserted where it is actually decided. The screen
+     * cannot show which price was sent, so the session document is read back
+     * through the Admin SDK.
+     *
+     * **The document the redirect names**, not "the only document there is":
+     * the page also creates a session in the background a second after the
+     * currency settles (`SubscriptionService.prepareCheckout`), so a reader
+     * who changes currency inside that second legitimately leaves two behind.
+     * The mock URL's hash is the session's own document id
+     * (`functions/src/checkout-sessions.ts`), which is what makes "the session
+     * this click used" addressable at all rather than inferred from a count.
+     */
+    const sessionId = new URL(page.url()).hash.replace('#mock-checkout-session-', '');
+    const sessions = await firebase.getCheckoutSessions(uid);
+    expect(
+      sessions.find((session) => session.id === sessionId)?.price,
+      'the price ID the checkout session the browser was sent to carries',
+    ).toBe(BRL_PRICE_ID);
   });
 
   /**

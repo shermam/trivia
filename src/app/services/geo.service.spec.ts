@@ -6,6 +6,7 @@ import {
   countryFromGeoBody,
   countryFromTimeZone,
 } from './geo.service';
+import { PricingCacheService } from './pricing-cache.service';
 
 /**
  * The country chain, one source at a time.
@@ -137,13 +138,23 @@ describe('countryFromGeoBody', () => {
 });
 
 describe('GeoService', () => {
+  /**
+   * The store is cleared around every test because the server's answer is now
+   * kept there for a day (`PricingCacheService`), and `localStorage` outlives a
+   * `TestBed` reset — so without this, the first test to record `BR` would
+   * hand it to every later test that expects "could not say". That is not an
+   * artefact of the suite: it is exactly the behaviour under test one file
+   * further down, which is why it is cleared rather than mocked away.
+   */
   beforeEach(() => {
+    localStorage.clear();
     TestBed.configureTestingModule({});
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    localStorage.clear();
     TestBed.resetTestingModule();
   });
 
@@ -258,5 +269,68 @@ describe('GeoService', () => {
     const { fetchMock } = answering({ body: { country: 'US' } });
     await expect(service.resolveCountry()).resolves.toBe('US');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * What the next page load starts from.
+   *
+   * The in-memory memo above dies with the tab, and the country is the slow
+   * half of the pricing page's first paint — two seconds of `AbortSignal`
+   * budget before the control can be checked. Keeping the answer for a day
+   * turns the second visit into no wait at all, and `knownCountry()` is what
+   * a cache-first render reads.
+   */
+  describe('remembering what the server said', () => {
+    it('answers from the last visit’s server answer, with no request', async () => {
+      answering({ body: { country: 'BR' } });
+      await TestBed.inject(GeoService).resolveCountry();
+
+      // A fresh service, as the next page load builds.
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({});
+      inTimeZone('America/New_York');
+
+      expect(TestBed.inject(GeoService).knownCountry()).toBe('BR');
+    });
+
+    /**
+     * A day-old answer about an IP address still beats a clock: a laptop set
+     * to São Paulo in a New York hotel is a Brazilian clock and an American
+     * card, and it was the *server* that said which.
+     */
+    it('prefers a remembered server answer to the time zone', () => {
+      TestBed.inject(PricingCacheService).writeCountry('US');
+      inTimeZone('America/Sao_Paulo');
+
+      expect(TestBed.inject(GeoService).knownCountry()).toBe('US');
+    });
+
+    it('falls back to the time zone when nothing is remembered', () => {
+      inTimeZone('America/Sao_Paulo');
+
+      expect(TestBed.inject(GeoService).knownCountry()).toBe('BR');
+    });
+
+    /**
+     * `CLAUDE.md` §4.4 again, and the durable copy is the version that would
+     * hurt: an in-memory memo of a failure costs the tab, a stored one costs
+     * the reader a day of never asking again.
+     */
+    it('never remembers a failure', async () => {
+      answering({ body: { country: null } });
+      inTimeZone('America/Sao_Paulo');
+
+      await TestBed.inject(GeoService).resolveCountry();
+
+      expect(TestBed.inject(PricingCacheService).readCountry()).toBeNull();
+    });
+
+    it('falls back to a remembered answer when this visit’s request fails', async () => {
+      TestBed.inject(PricingCacheService).writeCountry('BR');
+      failingWith(new TypeError('Failed to fetch'));
+      inTimeZone('Europe/Lisbon');
+
+      await expect(TestBed.inject(GeoService).resolveCountry()).resolves.toBe('BR');
+    });
   });
 });

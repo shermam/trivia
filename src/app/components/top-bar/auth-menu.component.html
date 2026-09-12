@@ -243,6 +243,8 @@
       <a
         routerLink="/pricing"
         (click)="closeRequested.emit()"
+        (mouseenter)="subscriptionService.primePricing()"
+        (focus)="subscriptionService.primePricing()"
         class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 mb-3"
       >
         Upgrade to Pro to add questions
