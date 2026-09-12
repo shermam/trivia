@@ -344,6 +344,101 @@ describe('TopBarComponent: the mobile navigation drawer', () => {
 });
 
 /**
+ * The mute (`FEAT-003`).
+ *
+ * The real `AudioService` rather than a stub, on purpose: the thing worth
+ * asserting is that the button and the stored preference are the *same* state,
+ * and a stubbed signal would let the two agree in the spec while disagreeing in
+ * the app. jsdom has no `AudioContext`, so nothing is ever played here — which
+ * is the service's documented no-op path and not a gap in this file.
+ */
+describe('TopBarComponent: the sound toggle in the drawer', () => {
+  const soundToggle = (h: ReturnType<typeof setup>) =>
+    h.fixture.nativeElement.querySelector('[data-cy="nav-menu-sound-toggle"]') as HTMLButtonElement;
+
+  beforeEach(() => {
+    localStorage.removeItem('trivia_sound_muted');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('trivia_sound_muted');
+  });
+
+  it('sits in the drawer beside the theme toggle, unpressed and offering to mute', () => {
+    const h = setup();
+    h.open();
+
+    const button = soundToggle(h);
+    expect(button).not.toBeNull();
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.textContent?.trim()).toBe('Mute sounds');
+  });
+
+  it('flips both the state and the label when pressed', () => {
+    const h = setup();
+    h.open();
+
+    soundToggle(h).click();
+    h.fixture.detectChanges();
+
+    expect(soundToggle(h).getAttribute('aria-pressed')).toBe('true');
+    expect(soundToggle(h).textContent?.trim()).toBe('Unmute sounds');
+  });
+
+  /**
+   * The same rule as the theme toggle beside it: the control you would use to
+   * change your mind is in this panel, so shutting the panel hides it — and a
+   * player muting mid-question is the case the drawer exists to serve at all.
+   */
+  it('stays open when the sound is muted from inside it', () => {
+    const h = setup();
+    h.open();
+
+    soundToggle(h).click();
+    h.fixture.detectChanges();
+
+    expect(h.isOpen()).toBe(true);
+  });
+
+  it('persists the mute, so the next page load opens already muted', () => {
+    const h = setup();
+    h.open();
+    soundToggle(h).click();
+    h.fixture.detectChanges();
+
+    expect(localStorage.getItem('trivia_sound_muted')).toBe('true');
+
+    // A second bar, as the next page load would build it.
+    h.fixture.destroy();
+    TestBed.resetTestingModule();
+    const reloaded = setup();
+    reloaded.open();
+
+    expect(soundToggle(reloaded).getAttribute('aria-pressed')).toBe('true');
+    expect(soundToggle(reloaded).textContent?.trim()).toBe('Unmute sounds');
+  });
+
+  /**
+   * §4.4: a control must not resize as its state changes. It cannot here —
+   * the button is a flex item in a `flex-col` panel, so it stretches to the
+   * panel's width whatever the label says — and the property that makes that
+   * true is that both states are rendered from one class list. jsdom has no
+   * layout, so the class list is what can be checked;
+   * `e2e/specs/unauthenticated/sound-effects.spec.ts` measures the box.
+   */
+  it('renders both states from the same box', () => {
+    const h = setup();
+    h.open();
+    const unmuted = soundToggle(h).className;
+
+    soundToggle(h).click();
+    h.fixture.detectChanges();
+
+    expect(soundToggle(h).className).toBe(unmuted);
+  });
+});
+
+/**
  * The "Sign in" label itself, not one of the wrappers around it.
  *
  * `textContent` matches every ancestor too, and the label now sits two spans

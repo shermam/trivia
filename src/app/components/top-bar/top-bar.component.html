@@ -526,5 +526,35 @@
       <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
       {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
     </button>
+
+    <!--
+      The mute (`FEAT-003`). It is in the drawer and nowhere else for the reason
+      the theme toggle is: the bar's own controls are `hidden sm:flex`, so on a
+      phone this is the only surface a player can reach *while the clock is
+      running*, which is exactly when somebody decides they want silence. Like
+      the theme toggle it deliberately does not close the drawer — you may want
+      to change your mind, and the button you would use is in here.
+
+      **`aria-pressed` as well as a label that changes**, matching the quiz's
+      flag button (`docs/app.md` §1.2): the label says what pressing it will
+      *do*, which is what a reader acting on it needs, and `aria-pressed`
+      carries the state, which is what a reader arriving at it needs. Neither
+      alone covers both, and the state is the half a colour or an icon would
+      otherwise be carrying on its own (WCAG 1.4.1).
+
+      Both states are the same size without reserving anything: the button is a
+      flex item in a `flex-col` panel, so it stretches to the panel's width
+      whatever the label says (`CLAUDE.md` §4.4).
+    -->
+    <button
+      type="button"
+      (click)="toggleSound()"
+      data-cy="nav-menu-sound-toggle"
+      [attr.aria-pressed]="audioService.isMuted()"
+      class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
+    >
+      <app-icon [name]="audioService.isMuted() ? 'volume-x' : 'volume-2'" [size]="16" />
+      {{ audioService.isMuted() ? 'Unmute sounds' : 'Mute sounds' }}
+    </button>
   </div>
 </div>

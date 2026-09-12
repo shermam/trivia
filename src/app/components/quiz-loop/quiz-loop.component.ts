@@ -10,6 +10,7 @@ import {
 import { NgClass } from '@angular/common';
 import { Answer, DEFAULT_TIME_LIMIT, LifelineId } from '../../models/question.model';
 import { STREAK_INDICATOR_THRESHOLD, multiplierLabel } from '../../models/scoring';
+import { AudioService } from '../../services/audio.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
@@ -39,6 +40,15 @@ const ANSWER_DELAY_MS = 2000;
  */
 const EXTRA_TIME_SECONDS = 15;
 /**
+ * How many seconds of a timed question end with an audible tick (`FEAT-003`).
+ *
+ * The same five seconds the ring already turns red for, so the two cues say the
+ * same thing in two channels rather than each inventing its own deadline. An
+ * unlimited game has no deadline and therefore no tick at all — the countdown
+ * that would drive it is never started.
+ */
+const TICK_WINDOW_SECONDS = 5;
+/**
  * Option labels are derived from the index rather than read out of a fixed
  * array. The array had four entries while `firestore.rules` permitted up to
  * six answers, so a five-answer question rendered a blank badge — finding B2.
@@ -63,6 +73,7 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 })
 export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly gameController = inject(GameControllerService);
+  private readonly audio = inject(AudioService);
 
   /**
    * True when this game's questions came from the offline pool instead of the
@@ -325,6 +336,18 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   private advanceTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   /** Wall-clock instant (ms since epoch) the current question's countdown expires. */
   private deadline = 0;
+  /**
+   * The last whole second the countdown ticked *audibly* on, so the cue fires
+   * at most once per second (`FEAT-003`).
+   *
+   * The interval runs four times a second and the tick rides it rather than a
+   * timer of its own — a second `setInterval` would be a second thing to tear
+   * down, and it would drift against the deadline this one derives from the
+   * wall clock (`CLAUDE.md` §4.4). Reset per question by `startTimer()`, and
+   * seeded with the question's own duration so the first reading of that second
+   * is not itself a tick.
+   */
+  private lastTickedSecond = 0;
 
   /**
    * A hidden tab has its `setInterval` throttled to as little as one tick a
@@ -372,6 +395,9 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (!this.gameController.useFiftyFifty()) {
       return;
     }
+    // After the consume, never before it: the cue reports that the lifeline was
+    // spent, and a sound on a press that did nothing would be a false report.
+    this.audio.playLifeline();
     const remaining = this.gameController
       .currentQuestion()
       ?.all_answers.filter((answer) => !this.isEliminated(answer)).length;
@@ -388,6 +414,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (!this.gameController.consumeLifeline('extraTime')) {
       return;
     }
+    this.audio.playLifeline();
     this.deadline += EXTRA_TIME_SECONDS * 1000;
     this.questionDuration.update((seconds) => seconds + EXTRA_TIME_SECONDS);
     // Repaint the countdown now rather than up to a tick later, so the number
@@ -403,6 +430,9 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (!this.gameController.consumeLifeline('skip')) {
       return;
     }
+    // The lifeline cue and *only* the lifeline cue: a skip ends the question
+    // without an outcome, so neither answer cue applies to it.
+    this.audio.playLifeline();
     this.stopTimer();
     // No result banner and no `ANSWER_DELAY_MS` pause: there is no result to
     // read. The whole point of Skip is not to sit here.
@@ -491,6 +521,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     this.deadline = Date.now() + limit * 1000;
     this.timeLeft.set(limit);
     this.questionDuration.set(limit);
+    this.lastTickedSecond = limit;
     this.timerHandle = setInterval(() => this.tickTimer(), TIMER_TICK_MS);
   }
 
@@ -502,10 +533,33 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    */
   private tickTimer(): void {
     const remainingMs = this.deadline - Date.now();
-    this.timeLeft.set(Math.max(0, Math.ceil(remainingMs / 1000)));
+    const secondsLeft = Math.max(0, Math.ceil(remainingMs / 1000));
+    this.timeLeft.set(secondsLeft);
+    this.playCountdownTick(secondsLeft);
     if (remainingMs <= 0) {
       this.stopTimer();
       this.commitAnswer(null);
+    }
+  }
+
+  /**
+   * At most one tick per remaining second, and only inside the last few.
+   *
+   * Driven by the *second the clock reads* rather than by how often the
+   * interval fired, which is what makes it right in the two cases that would
+   * otherwise double- or under-count: the interval runs four times a second,
+   * and a tab returning from the background re-reads the clock and finds
+   * several seconds gone at once (one tick, not six). Zero is deliberately
+   * excluded — the question resolving plays its own cue, and two sounds on the
+   * same instant is a clash rather than emphasis.
+   */
+  private playCountdownTick(secondsLeft: number): void {
+    if (secondsLeft === this.lastTickedSecond) {
+      return;
+    }
+    this.lastTickedSecond = secondsLeft;
+    if (secondsLeft > 0 && secondsLeft <= TICK_WINDOW_SECONDS && !this.isAnswered()) {
+      this.audio.playTimerTick();
     }
   }
 
@@ -524,6 +578,16 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
     this.selectedAnswer.set(answer);
     this.isAnswered.set(true);
+    // A timeout and a wrong answer get the same cue, because they are the same
+    // event to the player: the question is over and it scored nothing. Skip
+    // gets none at all — `useSkip()` never reaches here, and a sound on a
+    // question the player chose to leave would be the app reacting to a
+    // decision rather than to an outcome.
+    if (answer?.isCorrect === true) {
+      this.audio.playCorrect();
+    } else {
+      this.audio.playIncorrect();
+    }
     // Read before the answer is registered, so the comparison below is against
     // the tier this question was played under rather than the one it produced.
     const multiplierBefore = this.gameController.scoreMultiplier();
