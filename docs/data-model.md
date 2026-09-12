@@ -17,7 +17,7 @@ user_roles/{uid}
   reviewer: boolean
 ```
 
-One document per account, named by uid, holding role flags. **Empty today** — nothing reads it yet. It ships ahead of the rules that will consult it (`BACKLOG.md` item 4) so that the register, its lockdown and its tests are deployed and provable before any privilege depends on them, and so roles can be granted before there is anything to grant them for.
+One document per account, named by uid, holding role flags. **`isReviewer()` in `firestore.rules` reads it** — it is what gates the `/review` queue, the reviewer's `status` write on `custom_questions`, and the read of a question that is not yet approved. It shipped one release ahead of those rules on purpose, so the register, its lockdown and its tests were deployed and provable before any privilege depended on them, and so a reviewer could be appointed before there was anything to appoint them for.
 
 - **Read**: `get` on your own document only (`request.auth != null && request.auth.uid == uid`). Any uid, anonymous included — see below.
 - **List**: never, by anyone.

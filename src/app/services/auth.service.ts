@@ -106,6 +106,35 @@ function isUserCancelledPopup(error: unknown): boolean {
 }
 
 /**
+ * The two ways linking an OAuth credential to the anonymous session fails
+ * because the account it names already exists. Both are recoverable the same
+ * way — sign in as that account with the credential the popup just produced —
+ * so `signInWithOAuth` handles them in one branch.
+ *
+ * - `credential-already-in-use`: this exact provider account (`FEDERATED_USER_ID_ALREADY_LINKED`)
+ *   is linked to a different uid.
+ * - `email-already-in-use`: the provider's **email address** belongs to
+ *   another account, which under this project's "one account per email"
+ *   setting is enough for the server to refuse the link (`EMAIL_EXISTS`).
+ *   In practice that other account is an email/password one, and this used to
+ *   fall through to "An account with this email already exists. Try signing in
+ *   instead." — a dead end offered to somebody who was *already* trying to
+ *   sign in. It reached the owner's own account: his Google address had a
+ *   password account here, so "Continue with Google" could not get him in at
+ *   all. The friendly sentence is still right for the sign-up form it was
+ *   written for; it was only ever wrong on this path.
+ *
+ * Both errors are tagged by the SDK with the IdP response (`customData._tokenResponse`),
+ * which is what `credentialFromError` reads — the popup and link strategies
+ * always request it (`returnIdpCredential: true`), so the credential is
+ * normally there and the fallback popup below is genuinely a rare case.
+ */
+function isExistingAccountConflict(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === 'auth/credential-already-in-use' || code === 'auth/email-already-in-use';
+}
+
+/**
  * Thin wrapper around the Firebase modular Auth SDK (dynamically imported,
  * same lazy-load convention as FirebaseService). Every player gets an
  * anonymous uid on load with zero friction; signing in with a real provider
@@ -348,11 +377,13 @@ export class AuthService {
   /**
    * Tries to upgrade the current anonymous session in place with
    * `linkWithPopup` so the uid (and anything saved under it) is preserved.
-   * If that provider credential already belongs to an existing account,
-   * Firebase's error carries the exact credential the user just produced in
+   * If the account that credential names already exists — either the provider
+   * account itself or just its email address (see `isExistingAccountConflict`)
+   * — Firebase's error carries the exact credential the user just produced in
    * the popup (`error.customData`), so we sign in with that directly via
    * `signInWithCredential` instead of making the user pick their account a
-   * second time in a fresh popup.
+   * second time in a fresh popup. That switches uid, which is the trade the
+   * anonymous session loses: there is no merging two accounts.
    */
   async signInWithOAuth(providerId: OAuthProviderId): Promise<void> {
     const { auth, authModule } = await this.getAuth();
@@ -374,7 +405,7 @@ export class AuthService {
       if (isUserCancelledPopup(error)) {
         return;
       }
-      if ((error as { code?: string }).code === 'auth/credential-already-in-use') {
+      if (isExistingAccountConflict(error)) {
         const credential = this.credentialFromError(authModule, providerId, error);
         try {
           if (credential) {
