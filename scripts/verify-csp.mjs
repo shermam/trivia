@@ -12,9 +12,10 @@
  * served by `ng serve`, and the e2e suite therefore cannot see it.
  *
  * That is not hypothetical. `httpsCallable` builds
- * `https://{region}-{project}.cloudfunctions.net/{name}` (there is no Hosting
- * rewrite for functions here, and no region override, so `DEFAULT_REGION` from
- * `@firebase/functions` applies), and that host was in no directive — so
+ * `https://{region}-{project}.cloudfunctions.net/{name}` (no callable is
+ * reached through a Hosting rewrite, and there is no region override, so
+ * `DEFAULT_REGION` from `@firebase/functions` applies), and that host was in no
+ * directive — so
  * `deleteAccount` and `exportAccountData`, the two paths the Privacy Policy
  * promises, were refused in production and nowhere else.
  *

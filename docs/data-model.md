@@ -247,8 +247,10 @@ products/{id}/prices/{id}
 
 Every document `stripeWebhook` mirrors carries `eventCreated` — the `created` timestamp of the Stripe event that last wrote it. Stripe guarantees at-least-once delivery and nothing about **order**, so without it a stale `customer.subscription.updated` (cancelled) could land on top of a fresh one (active) and the `stripeRole` claim would be recomputed from the older truth. The write is a transaction that drops any event older than the mark. Equal timestamps are allowed through: a redelivery carries exactly the mark it wrote, and two genuine updates can share a second.
 
-- **Read**: public on both levels — lets `/pricing` and `SubscriptionService.getProPriceId()` (`app.md` §1.6) resolve the current Pro price with no secrets involved.
+- **Read**: public on both levels — lets `/pricing` and `SubscriptionService` (`app.md` §1.6) resolve the current Pro prices with no secrets involved. Both queries are bounded: `products` filtered on `role == 'pro'` with a limit, and each product's `prices` on `active == true` with a limit.
 - **Write**: client-side none at all; kept in sync from Stripe Dashboard `product.*`/`price.*` events by `stripeWebhook` (`stack.md` §2.4) via the Admin SDK.
+
+**One price per currency, and the currency lives on the price.** The Pro product carries an active monthly price for each currency it is sold in — `price_…` in USD, another in BRL — rather than one price with alternative `currency_options`, because Stripe freezes a price's currency options once that price has been used. `SubscriptionService` reads them all and offers the reader a choice between them (`app.md` §1.6); a second monthly price in a currency already offered is a Dashboard mistake rather than a choice, so the client keeps the first in catalog order and ignores the rest. Nothing about this needs a rules change: the client still sends one `price` ID, and `createCheckoutSession` still checks it against this catalog. Each price needs its own `firebaseRole: pro` metadata — see the note above for what breaks silently when one of them is missing it.
 
 ### `leaderboard` — high scores
 

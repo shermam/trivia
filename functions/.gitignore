@@ -12,7 +12,7 @@
 .secret.local
 
 # `.env.demo-trivia-app-e2e` IS committed on purpose: it only sets
-# STRIPE_MOCK_CHECKOUT=true for the throwaway e2e project so Cypress/CI never
+# STRIPE_MOCK_CHECKOUT=true for the throwaway e2e project so Playwright/CI never
 # need real Stripe credentials — see src/stripe-client.ts. The root
 # .gitignore's blanket `.env.*` rule would otherwise catch this file too.
 !.env.demo-trivia-app-e2e

@@ -68,9 +68,15 @@ export const authDomainOrigin = (projectId) => `https://${projectId}.firebaseapp
 /**
  * The origin `httpsCallable` builds: `https://{region}-{project}.cloudfunctions.net`.
  *
- * There is no Hosting rewrite for functions here and no region override, so
- * `DEFAULT_REGION` from `@firebase/functions` applies. Setting a region on the
- * functions means changing this.
+ * No **callable** is reached through a Hosting rewrite, and there is no region
+ * override, so `DEFAULT_REGION` from `@firebase/functions` applies. Setting a
+ * region on the functions means changing this.
+ *
+ * One function *is* rewritten — `/api/geo` — and it deliberately needs no
+ * entry anywhere in this file: the browser fetches it from the app's own
+ * origin, which `connect-src 'self'` already covers. That is the reason for
+ * routing it that way, and it is the shape to copy for anything else the page
+ * has to ask the backend directly.
  */
 export const callableOrigin = (projectId) => `https://us-central1-${projectId}.cloudfunctions.net`;
 

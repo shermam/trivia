@@ -5,9 +5,11 @@ import { FirebaseTarget } from './firebase-target';
 import {
   AccountState,
   AccountStateQuery,
+  CheckoutSessionRecord,
   CustomQuestionSeed,
   LEADERBOARD_BOARDS,
   LeaderboardSeed,
+  ProPriceSeed,
   ProSubscriptionSeed,
   QuestionReportRecord,
   ReviewerSeed,
@@ -132,7 +134,7 @@ export class FirebaseBackend {
   }
 
   /**
-   * Seeds the `products`/`prices` catalog `SubscriptionService.getProPriceId()`
+   * Seeds the `products`/`prices` catalog `SubscriptionService.getProPrices()`
    * reads to resolve the current Pro price — normally kept in sync by
    * `stripeWebhook` (`functions/src/products.ts`) from real Stripe
    * `product.*`/`price.*` events, which obviously never fire against the
@@ -145,18 +147,69 @@ export class FirebaseBackend {
       name: 'Pro',
       role: 'pro',
     });
+    await this.seedProPrice({ id: 'price_test_pro', currency: 'usd', unitAmount: 99 });
+  }
+
+  /**
+   * Adds another monthly price to the seeded Pro product — one more currency
+   * the pricing page can offer.
+   *
+   * Separate from `seedProProduct` so the single-currency catalog stays the
+   * default: most specs want a Pro tier that is on sale, not a currency
+   * choice, and a second price would put a control in front of every one of
+   * them.
+   */
+  async seedProPrice(price: ProPriceSeed): Promise<void> {
     await this.firestore
       .collection('products')
       .doc('prod_test_pro')
       .collection('prices')
-      .doc('price_test_pro')
+      .doc(price.id)
       .set({
         active: true,
-        currency: 'usd',
-        unit_amount: 99,
+        currency: price.currency,
+        unit_amount: price.unitAmount,
         type: 'recurring',
         interval: 'month',
       });
+  }
+
+  /**
+   * Removes a price from the seeded Pro product again.
+   *
+   * The catalog is global to the emulator — one `products` collection shared
+   * by every worker — so a spec that seeds a second currency has to put the
+   * catalog back, or it decides what a later test sees.
+   */
+  async removeProPrice(priceId: string): Promise<void> {
+    await this.firestore
+      .collection('products')
+      .doc('prod_test_pro')
+      .collection('prices')
+      .doc(priceId)
+      .delete();
+  }
+
+  /**
+   * The checkout-session documents one account has created, as the **client**
+   * wrote them.
+   *
+   * Which price ID a currency choice actually sends is not visible from the
+   * screen — the redirect target is the same mock URL either way — so this is
+   * the only place that claim can be checked (`CLAUDE.md` §4.6: assert the
+   * thing the feature is about, not a proxy for it).
+   */
+  async getCheckoutSessions(uid: string): Promise<CheckoutSessionRecord[]> {
+    const sessions = await this.firestore
+      .collection('customers')
+      .doc(uid)
+      .collection('checkout_sessions')
+      .get();
+    return sessions.docs.map((session) => ({
+      id: session.id,
+      price: session.get('price') as string,
+      origin: session.get('origin') as string,
+    }));
   }
 
   /**

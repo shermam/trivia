@@ -320,7 +320,7 @@ describe('QuizLoopComponent: the result banner', () => {
    * — right as the reader looked at the answer they had just picked.
    *
    * jsdom does no layout, so the height itself is asserted in
-   * `game-flow.cy.ts`. What is pinned here is the structure it depends on: the
+   * `game-flow.spec.ts`. What is pinned here is the structure it depends on: the
    * container exists from the first render, and it is never the thing that
    * gets added.
    */

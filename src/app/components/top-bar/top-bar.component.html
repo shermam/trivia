@@ -85,7 +85,7 @@
         cleared by 2.5px, which is not clearance, it is luck that a longer
         label or a different font would spend.
 
-        Nothing would have caught it. `mobile-nav.cy.ts` asserts exactly this
+        Nothing would have caught it. `mobile-nav.spec.ts` asserts exactly this
         ("keeps the account chip clear of the brand") but runs at 390, where it
         passes by those 2.5px — and the badge does not render in the e2e build
         at all, because `environment.e2e.ts` leaves the label empty. Hiding it
@@ -264,7 +264,7 @@
             measured, because a label wider than its cap is clipped *forever* —
             every generic fallback face is narrower than the shipped one (sans
             50.8px, serif 48.1px against 53.4px), and a larger root font scales
-            the cap along with the text. `mobile-nav.cy.ts` fails if that ever
+            the cap along with the text. `mobile-nav.spec.ts` fails if that ever
             stops being true.
 
             The region is empty in every state but this one, which is what
@@ -384,7 +384,7 @@
   anything calls `focus()`, and it was not: a plain `effect()` runs ahead of
   the bindings it reads. That is why the focus effect in the component is an
   `afterRenderEffect` — the full trace is in the comment on it. jsdom parses
-  `inert` and enforces nothing, so `mobile-nav.cy.ts` is where this is checked.
+  `inert` and enforces nothing, so `mobile-nav.spec.ts` is where this is checked.
 
   **The `visibility` transition is part of the closed class list only, and
   that asymmetry is load-bearing.** A CSS transition reads its properties from
@@ -417,14 +417,14 @@
 
     It began as `flex-1` — a flex sibling filling only the strip the panel does
     not cover — because an `inset-0` backdrop has its own centre buried under
-    the panel, which Cypress reads as "covered by another element" and refuses
-    to click. That was solving the test's problem and creating the user's: with
-    nothing behind the panel, sliding the panel out uncovers bare page, and the
-    dim ends in a hard vertical line that tracks the panel's edge across the
-    screen for the length of the exit. The whole viewport has to be dimmed for
-    the fade to read as a fade. The e2e click is aimed at the backdrop's right
-    edge instead, which is genuinely uncovered — a real click at a real point,
-    not `{force: true}` suppressing the check.
+    the panel, which Playwright's actionability check reads as intercepted by
+    another element and refuses to click. That was solving the test's problem
+    and creating the user's: with nothing behind the panel, sliding the panel
+    out uncovers bare page, and the dim ends in a hard vertical line that tracks
+    the panel's edge across the screen for the length of the exit. The whole
+    viewport has to be dimmed for the fade to read as a fade. The e2e click is
+    aimed at the backdrop's right edge instead, which is genuinely uncovered — a
+    real click at a real point, not `{ force: true }` suppressing the check.
 
     `absolute` takes it out of the flex flow, so the panel is the only flex
     item and still stretches to full height. Both are positioned with `z-index:

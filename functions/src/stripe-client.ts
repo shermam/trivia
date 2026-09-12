@@ -21,7 +21,7 @@ export function currentProjectId(): string | undefined {
 /**
  * True only for the throwaway `demo-trivia-app-e2e` project (see
  * `.env.demo-trivia-app-e2e`) — never for a real, Stripe-backed deploy.
- * Lets Cypress/CI exercise the full checkout-session-creation path without
+ * Lets Playwright/CI exercise the full checkout-session-creation path without
  * any real Stripe credentials.
  *
  * Gated on the project ID as well as the flag, so no environment variable

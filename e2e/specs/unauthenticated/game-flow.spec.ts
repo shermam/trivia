@@ -7,26 +7,8 @@ import {
   startGame,
   waitForPlayRoute,
 } from '../../support/game';
+import { drift, expectUnmoved } from '../../support/layout';
 import { CORRECT_ANSWERS, questionsFixture, stubOpenTrivia } from '../../support/open-trivia';
-
-/**
- * The pixel tolerance every layout assertion below uses.
- *
- * Sub-pixel, because these tests are about a box moving and a box staying put:
- * anything looser would pass through the 43px and 508px jumps they exist to
- * catch, and anything tighter would fail on fractional layout rounding.
- * Anything larger than the tolerance is returned as-is, so a failure names the
- * jump rather than merely reporting that there was one.
- */
-function drift(actual: number, expected: number): number {
-  const delta = actual - expected;
-  return Math.abs(delta) <= 0.5 ? 0 : delta;
-}
-
-/** A single comparison, for a measurement already gated on a settled state. */
-function expectUnmoved(actual: number, expected: number, what: string): void {
-  expect(drift(actual, expected), `${what} (${actual} vs ${expected})`).toBe(0);
-}
 
 test.describe('anonymous game flow (open_trivia source)', () => {
   test('plays a full game, tracks score, and offers to sign in to save it', async ({ page }) => {

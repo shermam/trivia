@@ -1,10 +1,12 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import * as logger from 'firebase-functions/logger';
+import type Stripe from 'stripe';
 import {
   RejectedRequestError,
   clientMessageFor,
   isAllowedRedirectOrigin,
   isPriceIdShaped,
+  openCheckoutSessionIdsToExpire,
 } from './checkout-request';
 import { getOrCreateStripeCustomerId } from './customers';
 import { isPriceSellableAsPro } from './products';
@@ -32,6 +34,71 @@ interface CheckoutSessionRequest {
  * is something a user can act on differently.
  */
 const REJECTED_MESSAGE = 'Could not start checkout. Please reload the page and try again.';
+
+/**
+ * How many of the customer's open Checkout Sessions one Subscribe click
+ * clears (Stripe's own maximum for a single page is 100).
+ *
+ * A bound rather than an exhaustive sweep, so a single click can never turn
+ * into an unbounded run of Stripe calls inside a function that has to finish.
+ * Twenty is far more than an abandoned-checkout history holds in practice —
+ * `firestore.rules` caps session creation at ten per five-minute window and
+ * Stripe expires an open session after 24 hours, so reaching it takes
+ * deliberate effort — and whatever a determined clicker leaves beyond it is
+ * cleared by the next click.
+ */
+const OPEN_SESSIONS_TO_CLEAR = 20;
+
+/**
+ * Expires every Checkout Session this customer still has open, before a new
+ * one is created for them.
+ *
+ * A click on Subscribe is a request for a fresh session; whatever is still
+ * open was left behind by an attempt that did not finish — a declined card, a
+ * closed tab — and nobody is going back to it. That much is tidiness. What
+ * makes it a fix is the currency: **a Stripe customer can only be billed in
+ * one currency, and an open subscription-mode session holds that currency for
+ * as long as it lives.** So a buyer who abandons a USD checkout and then
+ * chooses BRL is refused outright — "You cannot combine currencies on a single
+ * customer" — by a session they walked away from, for up to 24 hours.
+ * Expiring it first is what lets the second choice work.
+ *
+ * **Nothing in here may fail the checkout.** A list or an expire that throws
+ * is logged and the create runs anyway, so the buyer sees what Stripe
+ * actually says about the request they made, rather than a failure of this
+ * cleanup wearing that costume (`CLAUDE.md` §4.4). Expiring the sessions
+ * concurrently rather than in sequence keeps the added latency at one round
+ * trip whatever the count.
+ */
+async function expireOpenCheckoutSessions(
+  stripe: Stripe,
+  customerId: string,
+  uid: string,
+): Promise<void> {
+  try {
+    const open = await stripe.checkout.sessions.list({
+      customer: customerId,
+      status: 'open',
+      limit: OPEN_SESSIONS_TO_CLEAR,
+    });
+    const ids = openCheckoutSessionIdsToExpire(open.data);
+    if (ids.length === 0) {
+      return;
+    }
+    logger.info(`Expiring ${ids.length} open checkout session(s) for uid=${uid}`, ids);
+    const outcomes = await Promise.allSettled(ids.map((id) => stripe.checkout.sessions.expire(id)));
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status === 'rejected') {
+        logger.warn(
+          `Could not expire open checkout session ${ids[index]} for uid=${uid}`,
+          outcome.reason,
+        );
+      }
+    });
+  } catch (error) {
+    logger.warn(`Could not list open checkout sessions for uid=${uid}`, error);
+  }
+}
 
 /**
  * The Angular client (`SubscriptionService.startProCheckout`) creates a doc
@@ -82,8 +149,8 @@ export const createCheckoutSession = onDocumentCreated(
         // Deliberately same-origin (the caller's own origin, e.g.
         // `http://localhost:4200`), not a fake external host: the client for
         // real calls `window.location.assign` on this URL, and
-        // Location.assign/href can't be stubbed in a real Chromium/Electron
-        // (it's non-configurable/read-only) — so Cypress has to let that
+        // Location.assign/href can't be stubbed in a real Chromium
+        // (it's non-configurable/read-only) — so Playwright has to let that
         // navigation actually happen. A same-origin, hash-only target makes
         // that a harmless in-page navigation instead of an attempt to reach a
         // domain that doesn't exist.
@@ -98,6 +165,13 @@ export const createCheckoutSession = onDocumentCreated(
       }
 
       const stripe = getStripeClient();
+
+      // Before the create, not as a retry after it fails: an open session in
+      // another currency makes the create fail outright, so there is nothing
+      // to retry into. See the helper for why a stale session is able to do
+      // that at all.
+      await expireOpenCheckoutSessions(stripe, customerId, uid);
+
       const session = await stripe.checkout.sessions.create({
         // Hardcoded rather than read from the document: this app has exactly
         // one paid tier and it is a subscription. A client-chosen mode bought
@@ -105,6 +179,19 @@ export const createCheckoutSession = onDocumentCreated(
         mode: 'subscription',
         customer: customerId,
         line_items: [{ price, quantity: 1 }],
+        // **Adaptive Pricing is cross-border only, and that is the whole
+        // reason the catalog carries more than one price.** It localises a
+        // price for a buyer in a *different* country from the merchant, and
+        // never for one in the merchant's own — so for this Brazilian Stripe
+        // account it does nothing at all for a Brazilian buyer, whose
+        // Brazilian-issued card can only be charged in BRL and is otherwise
+        // declined with "your card doesn't support this currency". No
+        // parameter changes that; a BRL price on the Pro product does, and is
+        // what `SubscriptionService` offers a BR visitor (`app.md` §1.6).
+        // Stated explicitly rather than left to the Dashboard setting so the
+        // behaviour is readable here and cannot change under the app from a
+        // console toggle nobody in this repo can see.
+        adaptive_pricing: { enabled: true },
         success_url: `${origin}/pricing?checkout=success`,
         cancel_url: `${origin}/pricing?checkout=cancelled`,
         // Carried onto the resulting Subscription object itself (not just
