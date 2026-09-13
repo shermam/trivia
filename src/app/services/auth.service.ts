@@ -574,9 +574,11 @@ export class AuthService {
    * Starts the bootstrap if nothing else has, since the caller is asking a
    * question only the bootstrap can answer, and swallows its failures for the
    * same reason `whenAuthStateReady()` does: a caller that cannot reach auth
-   * should go on with the free-tier answer, not reject. Bounded by the
-   * runtime-config fetch's own `AbortSignal.timeout`, so it cannot wait
-   * forever on a connection that never settles.
+   * should go on with the free-tier answer, not reject. The runtime-config
+   * fetch is bounded by its own `AbortSignal.timeout`, so a connection that
+   * never settles *there* still resolves this; the one half nothing bounds is
+   * the `firebase/auth` chunk import stalling without failing, which is the
+   * same exposure every other consumer of the bootstrap already has.
    */
   async whenProStatusReady(): Promise<void> {
     await this.whenAuthStateReady();
