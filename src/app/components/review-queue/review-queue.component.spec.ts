@@ -119,6 +119,9 @@ interface InternalReviewQueue {
   actionError(): string | null;
   actionResult(): string | null;
   isFull(): boolean;
+  reasonFor(question: Q): string;
+  setReason(questionId: string, value: string): void;
+  isReasonTooLong(question: Q): boolean;
 }
 
 function report(id: string, overrides: Partial<QuestionReport> = {}): QuestionReport {
@@ -176,7 +179,7 @@ describe('ReviewQueueComponent', () => {
 
     await component.decide(question('p1'), 'approved');
 
-    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'approved');
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'approved', '');
     expect(component.questions().map((q) => q.id)).toEqual(['p2']);
     expect(getQuestionsByStatus).toHaveBeenCalledTimes(1);
   });
@@ -469,7 +472,7 @@ describe('ReviewQueueComponent reports tab', () => {
 
     await component.decide(question('p1', { status: 'approved' }), 'rejected');
 
-    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected');
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
     expect(component.reports()).toHaveLength(1);
     expect(component.reports()[0].question?.status).toBe('rejected');
     expect(component.actionResult()).toMatch(/rejected/);
@@ -694,5 +697,239 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
     expect(host.querySelector<HTMLElement>('[data-cy="reports-failed"]')!.className).toContain(
       'invisible',
     );
+  });
+});
+
+/**
+ * The reviewer's rejection note (`FEAT-007`).
+ *
+ * The interesting half is not that the string reaches the write — it is the
+ * three ways it must *not*. A reason typed about one question must not travel
+ * with another one's decision (one `ng-template` renders every row, so a single
+ * value would); approving must send no reason at all, because
+ * `firestore.rules` refuses one on anything but a rejected question and the
+ * write would be refused outright; and a note longer than the rules accept has
+ * to be named here rather than arriving as a bare `permission-denied`.
+ */
+describe('ReviewQueueComponent rejection reasons', () => {
+  it('sends the reason typed for that row when rejecting', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1')] },
+    });
+    await component.load();
+
+    component.setReason('p1', '  The date is wrong.  ');
+    await component.decide(question('p1'), 'rejected');
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', 'The date is wrong.');
+  });
+
+  // The trap the keyed drafts exist for: the card is one template rendered per
+  // row, so a single shared value would put question one's words on question
+  // two's rejection.
+  it('keeps each draft with the row it was typed on', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1'), question('p2')] },
+    });
+    await component.load();
+
+    component.setReason('p1', 'About the first one.');
+    await component.decide(question('p2'), 'rejected');
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p2', 'rejected', '');
+  });
+
+  // `firestore.rules` refuses a reason on a question that is not rejected, so
+  // an approval carrying one is refused outright rather than merely untidy.
+  it('sends no reason when approving, even with words in the box', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1')] },
+    });
+    await component.load();
+
+    component.setReason('p1', 'Typed and then thought better of.');
+    await component.decide(question('p1'), 'approved');
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'approved', '');
+  });
+
+  it('refuses a reason longer than the rules accept, and says so', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: { pending: [question('p1')] },
+    });
+    await component.load();
+
+    component.setReason('p1', 'x'.repeat(501));
+    expect(component.isReasonTooLong(question('p1'))).toBe(true);
+
+    await component.decide(question('p1'), 'rejected');
+
+    expect(setQuestionStatus).not.toHaveBeenCalled();
+    expect(component.actionError()).toMatch(/500 characters or fewer/);
+  });
+
+  // Rejecting an already-rejected question — to fix a typo in the note, say —
+  // must not wipe what the author has already been shown just because the box
+  // was never touched.
+  it('starts the box from the reason already stored', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: {
+        rejected: [question('p1', { status: 'rejected', rejectionReason: 'Too vague.' })],
+      },
+    });
+    await component.select('rejected');
+
+    expect(component.reasonFor(question('p1', { rejectionReason: 'Too vague.' }))).toBe(
+      'Too vague.',
+    );
+
+    await component.decide(
+      question('p1', { status: 'rejected', rejectionReason: 'Too vague.' }),
+      'rejected',
+    );
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', 'Too vague.');
+  });
+
+  it('lets a reviewer clear a stored reason deliberately', async () => {
+    const { component, setQuestionStatus } = setup({
+      byStatus: {
+        rejected: [question('p1', { status: 'rejected', rejectionReason: 'Too vague.' })],
+      },
+    });
+    await component.select('rejected');
+
+    component.setReason('p1', '');
+    await component.decide(
+      question('p1', { status: 'rejected', rejectionReason: 'Too vague.' }),
+      'rejected',
+    );
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
+  });
+});
+
+/**
+ * The Rejected tab, rendered (`FEAT-007`).
+ *
+ * `firestore.rules` deliberately lets a reviewer attach or change a reason on a
+ * question they have **already** rejected. That was unreachable in the first
+ * cut: the reason box rendered on every card, so on this tab it pre-filled with
+ * the stored note and read as editable, while the button that would have sent
+ * it was hidden as a no-op — leaving Approve, which discards what was typed
+ * *and* clears the stored reason. A widened rule with no control that reaches
+ * it is a rule nobody can use.
+ */
+describe('ReviewQueueComponent rejected tab, rendered', () => {
+  const setQuestionStatus = vi.fn(() => Promise.resolve());
+
+  async function renderRejected(rejected: Q[]) {
+    setQuestionStatus.mockClear();
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: FirebaseService,
+          useValue: {
+            getQuestionsByStatus: (status: QuestionStatus) =>
+              of(status === 'rejected' ? rejected : []),
+            setQuestionStatus,
+          },
+        },
+        {
+          provide: ReviewerService,
+          useValue: { isReviewer: signal(true), isResolved: signal(true) },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(ReviewQueueComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    host.querySelector<HTMLElement>('[data-cy="review-tab"][data-status="rejected"]')!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    return {
+      fixture,
+      host,
+      settle: async () => {
+        await fixture.whenStable();
+        fixture.detectChanges();
+      },
+    };
+  }
+
+  const rejectedQuestion = () =>
+    question('p1', { status: 'rejected', rejectionReason: 'The date is wrong.' });
+
+  it('offers a control that reaches the write, labelled for what it does there', async () => {
+    const { host } = await renderRejected([rejectedQuestion()]);
+
+    const button = host.querySelector<HTMLElement>('[data-cy="reject-question"]');
+    expect(button).not.toBeNull();
+    expect(button?.textContent?.trim()).toBe('Update reason');
+    // Approve stays, because approving a rejected question is still a decision
+    // a reviewer makes from here.
+    expect(host.querySelector('[data-cy="approve-question"]')).not.toBeNull();
+  });
+
+  it('sends the edited reason without moving the question out of the tab', async () => {
+    const { host, settle } = await renderRejected([rejectedQuestion()]);
+
+    const box = host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!;
+    expect(box.value).toBe('The date is wrong.');
+    box.value = 'The date is wrong, and the source says so.';
+    box.dispatchEvent(new Event('input'));
+    await settle();
+
+    host.querySelector<HTMLElement>('[data-cy="reject-question"]')!.click();
+    await settle();
+
+    expect(setQuestionStatus).toHaveBeenCalledWith(
+      'p1',
+      'rejected',
+      'The date is wrong, and the source says so.',
+    );
+    // The row still belongs to the tab it was decided in — dropping it, which
+    // is right for every decision that moves a question, would make it vanish
+    // from the list it is still a member of.
+    expect(host.querySelectorAll('[data-cy="review-question"]')).toHaveLength(1);
+  });
+
+  // "Question marked rejected" about a question that was already rejected
+  // narrates something that did not happen (`CLAUDE.md` §4.4).
+  it('announces a reason update as an update, not as a decision', async () => {
+    const { host, settle } = await renderRejected([rejectedQuestion()]);
+
+    host.querySelector<HTMLElement>('[data-cy="reject-question"]')!.click();
+    await settle();
+
+    const status = Array.from(host.querySelectorAll('[role="status"]'))
+      .map((node) => node.textContent?.trim())
+      .filter(Boolean);
+    expect(status).toContain('Reason updated.');
+  });
+
+  it('clears the note when the box is emptied deliberately', async () => {
+    const { host, settle } = await renderRejected([rejectedQuestion()]);
+
+    const box = host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!;
+    box.value = '';
+    box.dispatchEvent(new Event('input'));
+    await settle();
+
+    host.querySelector<HTMLElement>('[data-cy="reject-question"]')!.click();
+    await settle();
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
+    // ...and the box stays empty. The draft is deleted once the write lands, so
+    // `reasonFor()` falls back to the row's own value and the `[value]` binding
+    // rewrites the textarea from it — which put the old note back on screen
+    // under an announcement saying it had been cleared. The write was right and
+    // the screen was wrong, which is the worst version of this to debug.
+    expect(host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!.value).toBe('');
   });
 });

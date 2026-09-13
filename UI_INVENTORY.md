@@ -95,6 +95,7 @@ A single panel (white card, rounded-2xl, shadowed, ~320px wide, small "x" close 
 - **Input** (text, prefilled with current display name, max 30 chars) + **"Save" button** (indigo) alongside it — on a successful save, the button transiently shows a checkmark + "Saved!" (green) for 2 seconds before reverting
 - **Account email line**: shows the account's email; if it's a password account, appends "✓ Verified" (green)
 - **Link**: "Your stats" (outlined, full width, trophy icon) — routes to `/profile` (§8)
+- **Link**: "Your questions" (outlined, full width, pencil icon) — routes to `/my-questions` (§9). No PRO badge: editing and withdrawing a contribution need no current subscription
 - **Link/button**: "Add a question" (outlined, full width) — routes to `/add-question`; carries a **PRO badge** next to the label (indigo/filled if the user is Pro, grey/muted if not)
 - Below that, one of:
   - Not Pro: text link "Upgrade to Pro to add questions" → `/pricing`
@@ -358,7 +359,8 @@ Full-screen centered card. **No route guard** — access is decided in-page from
 - **Title**: "Review Queue"
 - **View picker**: a labelled tab group (`sr-only` heading "Choose what to review") with **Pending / Approved / Rejected / Reports**; the active tab is filled, the others outlined
 - **Question list** (the three status tabs): one card per question in the active status — question text, its answers with the correct one marked, then `Category:` / `Difficulty:` / `Submitted:` / `Status:` / `Author:` metadata, and below that the contributor's optional **source** (an external-link glyph and a link opening in a new tab, labelled with the source name, followed in muted grey by the URL's hostname — the reviewer is shown where the link goes, not only what the contributor called it; the hostname alone is the label when no source name was given) and **Justification** (a tinted block headed "Justification" holding the contributor's prose). Neither renders when the question carries none, which is the usual case
-- **Action buttons** per card: **Approve** (hidden when the question is already approved) and **Reject** (hidden when it is already rejected), so the button that would be a no-op is never offered
+- **Rejection reason box** per card: a labelled two-row textarea — "Reason for rejecting (optional)", or "Reason shown to the author (optional)" once the question is rejected — placeholder "What would have to change for this to be approved?". Rendered on every card rather than revealed by clicking Reject, so the row does not resize under the cursor and the reason is typed before the decision. Pre-filled with whatever reason the question already carries; over 500 characters it shows a field error and the button refuses to send
+- **Action buttons** per card: **Approve**, hidden when the question is already approved because there the button would be a no-op; and the reject button, which is always offered because on a rejected card it is not one — it reads **"Update reason"** there and writes the edited note without deciding the question again
 - **Truncation note** when the queue is full — the query is capped, and the list says so rather than implying it is the whole queue
 - **Reports list** (the Reports tab): a one-line status block above the list, then one card per filed report — the reason in words ("The answer is wrong", "Inappropriate or offensive", "Spam or nonsense", "Something else") with "Reported {date}" opposite it, the reporter's optional detail in their own words below, and under a divider the **whole question card** described above, action buttons included. **Nothing identifies who filed the report.** A report whose question has since been deleted shows its question id and "…is no longer in the bank, so there is nothing left to act on" in place of the card
 - **"Show more reports"** below the list, present only while there is a next page to fetch — it appends that page rather than replacing what is on screen, and disappears at the end of the collection
@@ -487,20 +489,54 @@ A single card on a light slate background. **No route guard** — access is deci
 
 **Every state is the same height**, and the construction is what makes that true rather than a measurement: each number is rendered from first paint as an em-dash, the five distinct status sentences are stacked in one grid cell so the space reserved is the tallest of them, and the three actions are one grid cell holding the same button box three times. Accuracy shows "—" rather than "0%" when no questions have been answered — `0 / 0` is `NaN`.
 
-Two details a test has to know about. **"Sign in" is not rendered under `?embed=1`** (§9.7) — it opens the top bar's auth menu, and an embed has no top bar; the signed-out state is then the sentence alone, at the same height. And **"Try again" hands focus to the status line before it re-reads**, because the retry puts the card back into its loading state and hides the button that was focused; the status line is where the answer to the retry appears, and "Try again" is one Tab away from it if the second read fails too.
+Two details a test has to know about. **"Sign in" is not rendered under `?embed=1`** (§10.7) — it opens the top bar's auth menu, and an embed has no top bar; the signed-out state is then the sentence alone, at the same height. And **"Try again" hands focus to the status line before it re-reads**, because the retry puts the card back into its loading state and hides the button that was focused; the status line is where the answer to the retry appears, and "Try again" is one Tab away from it if the second read fails too.
 
 ---
 
-## 9. Cross-cutting elements & patterns
+## 9. Route: `/my-questions` — Your questions (`MyQuestionsComponent`)
 
-### 9.1 PRO badge
+Full-width list on the standard page ground. **No route guard** — a signed-out or anonymous visitor gets an explanation rather than a redirect, because an anonymous session can never have contributed a question and there is nowhere to redirect them to.
+
+### Hierarchy
+
+- **Back link**: "← Back to game" → `/`
+- **Title**: "Your questions", with a subtitle — "Everything you have contributed to the shared bank, and what became of it. Editing a question sends it back for review; removing one takes it out of play."
+- **Status block**: one grid cell holding all five messages, switched with `invisible` so the page does not resize when the read lands
+- **Question list**: one card per contribution — the question text with a coloured **status pill** opposite it (amber "Pending review", emerald "Approved", red "Rejected"), then `Category:` / `Difficulty:` / `Submitted:` metadata; on a rejected one, a red block headed "Why it was rejected" holding the reviewer's words or "No reason was given."
+- **Action buttons** per card: **Edit** (pencil icon, outlined) and **Remove** (trash icon, red outline)
+- **"Show more"** below the list, present only while there is a next page to fetch — it appends that page rather than replacing what is on screen
+
+### States
+
+| State                    | Content                                                                                                                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Auth still resolving** | "Loading your questions…" — the neutral state, never a claim about the account or its contributions                                                                          |
+| **Signed out**           | "Sign in to see the questions you have contributed. Guest sessions cannot add questions, so there is nothing here for one." with a **Sign in** button (hidden in embed mode) |
+| **Loading**              | "Loading your questions…"                                                                                                                                                    |
+| **Nothing contributed**  | "You have not contributed a question yet." with an **Add a question** link to `/add-question`                                                                                |
+| **Load failed**          | "Could not load your questions. Please try again." and a **Try again** button — never the empty state, because a read that failed says nothing about what has been written   |
+| **Loaded**               | "Newest first." above the list                                                                                                                                               |
+
+### Edit dialog
+
+Modal over a dimmed backdrop, headed "Edit your question" with the note "Saving sends it back for review, so it will not be served until a reviewer approves it again." Body is the same field set as `/add-question` (§4) — category, difficulty, question type, question, answers, source link, source name, justification — followed by **Cancel** and **Save and resubmit** ("Saving…" while in flight). Escape or the backdrop closes it; a validation failure names the field in the shared summary and moves focus to it.
+
+### Remove dialog
+
+Modal headed "Remove this question from the app?", showing the question text, then: "It stops being served in games straight away. It does not withdraw the licence you granted when you contributed it, and it cannot reach copies already played or saved offline. See the Terms." Buttons **Cancel** and **Remove from the app** ("Removing…" while in flight). The copy deliberately never says "delete permanently" — the contributed-content licence is irrevocable, so that would be a promise the app cannot keep.
+
+---
+
+## 10. Cross-cutting elements & patterns
+
+### 10.1 PRO badge
 
 A small rounded pill, bold uppercase "PRO" text. Two visual variants used consistently everywhere it appears (game-setup footer link, Auth Menu "Add a question" link, top-bar account trigger):
 
 - **Locked** (non-Pro user): grey background, muted grey text
 - **Unlocked** (Pro user): indigo-100 background, indigo-600 text (indigo-600/white on the "Add a question" button itself, which is solid indigo)
 
-### 9.2 Buttons
+### 10.2 Buttons
 
 Consistent visual vocabulary across the whole app:
 
@@ -511,7 +547,7 @@ Consistent visual vocabulary across the whole app:
 - **Danger-adjacent text buttons**: none — errors are always shown as banners, not button color changes
 - **Destructive-looking dark button**: "Play Again" uses a dark slate fill (distinct from primary indigo), signaling a full reset action
 
-### 9.3 Inline banners (consistent 3-color system across every screen)
+### 10.3 Inline banners (consistent 3-color system across every screen)
 
 - **Red** (`bg-red-50`/`border-red-200`/`text-red-700`): hard errors (failed save, failed load, failed submit)
 - **Amber** (`bg-amber-50`/`border-amber-200`/`text-amber-700`): soft warnings / non-fatal notices (categories failed to load but game still playable; checkout cancelled; existing best score was already higher)
@@ -519,22 +555,22 @@ Consistent visual vocabulary across the whole app:
 - **Indigo** (`bg-indigo-50`/`bg-indigo-100`): neutral call-to-action prompts, not errors (sign-in prompts, verify-email prompts, Pro upsell box, save-score prompt)
 - Most banners now carry a small leading icon reinforcing their color (triangle-alert/circle-alert for amber/red, circle-check-big for green, mail for the verify-email prompt)
 
-### 9.4 Loading / busy conventions
+### 10.4 Loading / busy conventions
 
 - Buttons that trigger an async action disable themselves and swap their label to a present-participle phrase ending in an ellipsis: "Loading Questions…", "Saving…", "Please wait…", "Redirecting…", "Opening billing portal…"
 - The top bar and Pricing's Subscribe button both guard on `authReady()` specifically (distinct from "anonymous") to avoid a one-frame flash of the wrong state before Firebase's first auth callback resolves — shown as "Loading…" in both places.
 
-### 9.5 Form field conventions
+### 10.5 Form field conventions
 
 - All labels are `<label>` elements, small, semibold, slate-500/600, positioned directly above their control with a small gap
 - All text/select inputs share the same shape: `rounded-xl` corners, thin slate border, indigo focus ring; `<select>`s use a custom chevron-down icon (native arrow hidden via `appearance-none`)
 - Segmented "pill" radio groups (Question Source, Question Type, True/False, Multiple/True-False question type) are used instead of native radio buttons or dropdowns wherever the option set is small (2–3 choices) — the underlying `<input type="radio">` is visually hidden (`sr-only`) and its wrapping `<label>` is styled as the visible control, with the selected option getting an indigo-100 fill + indigo-600 bold text; unselected labels use slate-600 (not a lighter grey) to keep body text at a readable contrast ratio against the segmented control's slate-100 track
 
-### 9.6 Elevation & shape tokens
+### 10.6 Elevation & shape tokens
 
 Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s shadow scale so every surface pulls from the same set: `shadow-card` (subtle card shadow), `shadow-card-lg` (quiz/game-over/leaderboard cards), `shadow-hero-card` (game-setup's large gradient-backed card), `shadow-dropdown` (auth menu), `shadow-cta`/`shadow-cta-hover` (primary gradient buttons), `shadow-pro-card` (pricing's Pro card). Corner radii follow Tailwind's default scale: `rounded-3xl` (24px, cards), `rounded-2xl` (16px, dropdowns/sub-cards), `rounded-xl` (12px, buttons/inputs/segmented controls).
 
-### 9.7 Embed mode (`?embed=1`)
+### 10.7 Embed mode (`?embed=1`)
 
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
 - Every other button that opens the auth menu is hidden with it, since there is nowhere for it to open a menu into: Game Over's "Sign in" in the anonymous-player prompt (§3), and `/profile`'s "Sign in" in the signed-out state (§8). Both leave the explanatory text, at the same height.
@@ -544,7 +580,7 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 ---
 
-## 10. Full route table
+## 11. Full route table
 
 | Path            | Component                 | Guard                                             | Purpose                                                   |
 | --------------- | ------------------------- | ------------------------------------------------- | --------------------------------------------------------- |
@@ -555,17 +591,18 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 | `/profile`      | `ProfileStatsComponent`   | none (in-page gating on a signed-in real account) | A player's own lifetime gameplay totals                   |
 | `/pricing`      | `PricingComponent`        | none                                              | Compare Starter vs. Pro, subscribe via Stripe             |
 | `/review`       | `ReviewQueueComponent`    | none (in-page gating on the reviewer role)        | Approve or reject submitted questions; read filed reports |
+| `/my-questions` | `MyQuestionsComponent`    | none (in-page gating on a signed-in real account) | An author's own contributions; edit or remove one         |
 | `/privacy`      | `PrivacyPolicyComponent`  | none                                              | Published Privacy Policy                                  |
 | `/terms`        | `TermsOfServiceComponent` | none                                              | Published Terms of Service                                |
 | `*` (unmatched) | —                         | redirects to `/`                                  | —                                                         |
 
 ---
 
-## 11. Full copy inventory (verbatim strings)
+## 12. Full copy inventory (verbatim strings)
 
 Grouped by screen, for quick reference when building Figma text styles / content models.
 
-**Global / Top Bar / Auth Menu**: Trivimind · Pricing · Review · Your stats · Menu · Close menu · Site menu · Dark mode · Light mode · Mute sounds · Unmute sounds · Loading… · Sign in · Sign up · Create an account · Continue with Google · or · Email · Password · Please wait… · Already have an account? Sign in · Don't have an account? Sign up · More sign-in options · Hide other sign-in options · Facebook · GitHub · Microsoft · Apple · Twitter / X · Yahoo · Account created! We've sent a verification link to your email. · Verify your email · We sent a verification link to {{email}}. Verify it to finish signing in and save scores to the leaderboard. · Resend verification email · Verification email sent — check your inbox. · Sign out · Your profile · Display name · Save · Saved! · Verified · Add a question · Upgrade to Pro to add questions · Manage subscription · Opening billing portal… · Could not update your name. Please try again. · Could not open the billing portal. Please try again. · Sign in before managing your subscription. · Timed out waiting for the billing portal to open. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not send the verification email. Please try again.
+**Global / Top Bar / Auth Menu**: Trivimind · Pricing · Review · Your stats · Menu · Close menu · Site menu · Dark mode · Light mode · Mute sounds · Unmute sounds · Loading… · Sign in · Sign up · Create an account · Continue with Google · or · Email · Password · Please wait… · Already have an account? Sign in · Don't have an account? Sign up · More sign-in options · Hide other sign-in options · Facebook · GitHub · Microsoft · Apple · Twitter / X · Yahoo · Account created! We've sent a verification link to your email. · Verify your email · We sent a verification link to {{email}}. Verify it to finish signing in and save scores to the leaderboard. · Resend verification email · Verification email sent — check your inbox. · Sign out · Your profile · Display name · Save · Saved! · Verified · Your questions · Add a question · Upgrade to Pro to add questions · Manage subscription · Opening billing portal… · Could not update your name. Please try again. · Could not open the billing portal. Please try again. · Sign in before managing your subscription. · Timed out waiting for the billing portal to open. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not send the verification email. Please try again.
 
 **Game Setup**: Trivimind · Configure your quiz and test your knowledge · Could not load categories from Open Trivia DB. You can still start with "Any Category". · No questions were found for the selected options. Try a different category, difficulty, or source. · Failed to load questions. Please check your connection and try again. · Number of Questions · Category · Any Category · Difficulty · Any Difficulty · Easy · Medium · Hard · Question Source · Open Trivia · Custom · Mixed · Start Game · Loading Questions… · + Create custom question
 
@@ -577,7 +614,9 @@ Grouped by screen, for quick reference when building Figma text styles / content
 
 **Pricing**: Back to game · Pricing · Play free forever, or go Pro to contribute your own questions. · Subscription started! It may take a few seconds to finish activating. · Start playing · Dismiss · Checkout was cancelled — no charge was made. · Starter · Everything you need to play and compete. · Free ($0/month) · Play unlimited games · Submit scores to the global leaderboard · Your current plan · Pro · Contribute questions and shape the game. · {amount}/month · Currency · USD · BRL · Everything in Starter · Create and add custom questions to the global question bank · More features coming soon · You're subscribed · Loading… · Sign in to subscribe · Redirecting… · Subscribe · Subscribe — {amount}/mo · Verify your email first, then come back to subscribe. · Could not start checkout. Please try again. · Sign in before subscribing. · Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later. · Timed out waiting for Stripe checkout to start. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not start checkout. Please reload the page and try again. · Your account is already set up to pay in {currency}, so Pro can only be bought in {currency} from this account. · Cancel anytime. No hidden fees.
 
-**Review Queue**: Review Queue · Back to game · Choose what to review · Pending · Approved · Rejected · Reports · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Status: · Author: · Approve · Reject · This page is for question reviewers. If you think you should have access, ask the site owner. · Questions players have contributed to the shared bank, and the reports players have filed about them. Rejecting a question stops it being served in games; it is not deleted. · Nothing {{status}} right now. · Could not load the queue. Please try again. · Try again · Question marked {{status}}. · Could not save that decision. Please try again. · Showing the first {{n}}. Review these and reload for more. · Loading reports… · No reports have been filed. · Newest first. Nothing is marked handled — a report stays as the record that somebody complained. · Could not load the reports. Please try again. · The answer is wrong · Inappropriate or offensive · Spam or nonsense · Something else · Reported {{date}} · Question {{id}} is no longer in the bank, so there is nothing left to act on. · Show more reports
+**Review Queue**: Review Queue · Back to game · Choose what to review · Pending · Approved · Rejected · Reports · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Status: · Author: · Reason for rejecting (optional) · Reason shown to the author (optional) · What would have to change for this to be approved? · A reason must be 500 characters or fewer. · A rejection reason has to be 500 characters or fewer. · Question marked {{status}}. · Reason updated. · Reason cleared. · Approve · Reject · Update reason · This page is for question reviewers. If you think you should have access, ask the site owner. · Questions players have contributed to the shared bank, and the reports players have filed about them. Rejecting a question stops it being served in games; it is not deleted. · Nothing {{status}} right now. · Could not load the queue. Please try again. · Try again · Could not save that decision. Please try again. · Showing the first {{n}}. Review these and reload for more. · Loading reports… · No reports have been filed. · Newest first. Nothing is marked handled — a report stays as the record that somebody complained. · Could not load the reports. Please try again. · The answer is wrong · Inappropriate or offensive · Spam or nonsense · Something else · Reported {{date}} · Question {{id}} is no longer in the bank, so there is nothing left to act on. · Show more reports
+
+**Your questions**: Back to game · Your questions · Everything you have contributed to the shared bank, and what became of it. Editing a question sends it back for review; removing one takes it out of play. · Loading your questions… · Sign in to see the questions you have contributed. Guest sessions cannot add questions, so there is nothing here for one. · Sign in · You have not contributed a question yet. · Add a question · Could not load your questions. Please try again. · Could not load more of your questions. Please try again. · Try again · Newest first. · Pending review · Approved · Rejected · Unknown · Category: · Difficulty: · Submitted: · Why it was rejected · No reason was given. · Edit · Remove · Show more · Edit your question · Saving sends it back for review, so it will not be served until a reviewer approves it again. · Cancel · Save and resubmit · Saving… · Could not save your changes. Please try again. · Remove this question from the app? · It stops being served in games straight away. It does not withdraw the licence you granted when you contributed it, and it cannot reach copies already played or saved offline. See the Terms. · Remove from the app · Removing… · Could not remove that question. Please try again. · Question updated. It is pending review again. · Question removed from the app.
 
 **Your stats**: Back to game · Your stats · Your lifetime totals across every game you have finished while signed in. Only you can see them. · Loading your lifetime totals… · Sign in and your totals start counting from the next game you finish. · Nothing banked yet — finish a game and your totals will show up here. · Could not load your stats just now. · Tracking since {{date}}. · Tracking your lifetime totals. · Games played · Questions answered · Correct answers · Accuracy · Best streak · Start a game · Sign in · Try again · Your stats are ready. · No finished games yet. · Signed out. Stats are only kept for a signed-in account. · Could not load your stats.
 

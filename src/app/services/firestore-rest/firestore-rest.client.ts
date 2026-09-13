@@ -150,6 +150,30 @@ export interface RestRequestOptions {
   timeoutMs?: number;
 }
 
+export interface RestWriteOptions extends RestRequestOptions {
+  /**
+   * Field names to **remove** from the document, named in the `updateMask`
+   * without being sent among the fields.
+   *
+   * That asymmetry is Firestore's own patch contract rather than an invention
+   * here: a path in the mask with no value in the payload deletes the field.
+   * It is the only way to clear one without replacing the whole document, and a
+   * replace is refused anyway wherever `firestore.rules` constrains which keys
+   * a write may affect.
+   *
+   * Two writes need it, and both are about a value that must not outlive what
+   * it described: an author's edit clears the reviewer's `rejectionReason`
+   * because the text it was about is gone, and a reviewer approving a question
+   * clears it because the rules refuse a reason on anything but a rejected
+   * document (`FEAT-007`).
+   *
+   * Deleting a field that is already absent is a no-op rather than an error,
+   * and — usefully — it does not count as an affected key, so it cannot trip a
+   * rule's `affectedKeys()` allowlist.
+   */
+  deleteFields?: readonly string[];
+}
+
 /**
  * Every failure this client produces, so a call site has one type to catch.
  *
@@ -257,14 +281,37 @@ export class FirestoreRestClient {
   async setDocument(
     documentPath: string,
     data: Record<string, unknown>,
-    options: RestRequestOptions = {},
+    options: RestWriteOptions = {},
   ): Promise<void> {
     assertDocumentPath(documentPath);
     const { url } = await this.getDocumentsRoot();
     const fields = encodeFields(data);
     await this.request<WireDocument>(
-      `${url}/${encodePath(documentPath)}?${updateMaskFor(fields)}`,
+      `${url}/${encodePath(documentPath)}?${updateMaskFor(fields, options.deleteFields)}`,
       { method: 'PATCH', body: JSON.stringify({ fields }) },
+      options,
+    );
+  }
+
+  /**
+   * Removes a document — the REST equivalent of `deleteDoc`.
+   *
+   * The only client-side delete this app makes: an author withdrawing their own
+   * contributed question (`FEAT-007`). Every other collection refuses `delete`
+   * outright in `firestore.rules`, which is why this arrived years after the
+   * rest of the client rather than with it.
+   *
+   * Deleting a document that is not there **succeeds**, which is Firestore's
+   * behaviour and the right one here: two clicks on Remove, or a retry after a
+   * response that never arrived, should not report a failure for work that is
+   * already done.
+   */
+  async deleteDocument(documentPath: string, options: RestRequestOptions = {}): Promise<void> {
+    assertDocumentPath(documentPath);
+    const { url } = await this.getDocumentsRoot();
+    await this.request<unknown>(
+      `${url}/${encodePath(documentPath)}`,
+      { method: 'DELETE' },
       options,
     );
   }
@@ -417,6 +464,27 @@ export class FirestoreRestClient {
 
     if (!response.ok) {
       throw await toResponseError(response);
+    }
+    // A successful DELETE answers `{}`, and a 204 or a proxy that strips the
+    // body answers with nothing at all — on which `json()` throws a
+    // SyntaxError. Thrown from here that would report a delete the server has
+    // *already done* as a failure, and the retry would then 404, so an
+    // unparseable success is read as "nothing to read" instead.
+    //
+    // **Scoped to DELETE**, because it is the one verb whose caller reads
+    // nothing back. Widening it to every verb happens to fail a truncated read
+    // anyway — `toRestDocument` does `document.name.indexOf(...)` on the `{}`
+    // it would be handed and throws a TypeError instead of a SyntaxError — so
+    // no test here can tell the two apart, and none pretends to. The scope is
+    // kept regardless: that protection is an **accident** of one unguarded
+    // property access, and the day `toRestDocument` grows a guard the wide
+    // version starts letting a half-delivered response pass for a document.
+    if (init.method === 'DELETE') {
+      try {
+        return (await response.json()) as T;
+      } catch {
+        return {} as T;
+      }
     }
     return (await response.json()) as T;
   }
@@ -644,8 +712,8 @@ function assertPlainFieldName(name: string): string {
   return name;
 }
 
-function updateMaskFor(fields: FirestoreFields): string {
-  return Object.keys(fields)
+function updateMaskFor(fields: FirestoreFields, deleteFields: readonly string[] = []): string {
+  return [...Object.keys(fields), ...deleteFields]
     .map((name) => `updateMask.fieldPaths=${encodeURIComponent(assertPlainFieldName(name))}`)
     .join('&');
 }

@@ -1,14 +1,8 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  AbstractControl,
-  FormBuilder,
-  ReactiveFormsModule,
-  ValidationErrors,
-  Validators,
-} from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { Difficulty, NewCustomQuestionDoc, QuestionType } from '../../models/question.model';
+import { NewCustomQuestionDoc } from '../../models/question.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { FirebaseService, QuestionQuotaExceededError } from '../../services/firebase.service';
@@ -16,44 +10,21 @@ import { isFirestorePermissionDenied } from '../../services/firestore-rest/fires
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
-
-/**
- * Optional, but `https://` when present — the same rule `firestore.rules`
- * enforces, checked here so the contributor gets a field error instead of a
- * `permission-denied` they cannot act on.
- *
- * Deliberately not a full URL regex. The rule this mirrors is a prefix check,
- * and a client validator stricter than the server's would refuse writes the
- * backend would have accepted. An empty or whitespace-only value passes: the
- * field is optional, and the submit drops it rather than writing one.
- */
-function httpsUrl(control: AbstractControl): ValidationErrors | null {
-  const value = typeof control.value === 'string' ? control.value.trim() : '';
-  if (value.length === 0) {
-    return null;
-  }
-  return value.startsWith('https://') && value.length > 'https://'.length
-    ? null
-    : { httpsUrl: true };
-}
-
-/**
- * `Validators.required` accepts `"   "`, and `firestore.rules` does not: it
- * checks `size() > 0` on the *trimmed* value this component sends. Without a
- * trim-aware check the form would happily submit whitespace and the write
- * would come back as a bare `permission-denied` — a rejection the user cannot
- * act on, for a rule the client already knows about.
- */
-function nonBlank(control: AbstractControl): ValidationErrors | null {
-  return typeof control.value === 'string' && control.value.trim().length === 0
-    ? { required: true }
-    : null;
-}
+import { QuestionFieldsComponent } from '../question-form/question-fields.component';
+import {
+  applyIncorrectAnswerValidators,
+  createQuestionForm,
+  describeInvalidFields,
+  duplicateAnswerMessage,
+  focusFirstInvalidControl,
+  questionFields,
+  toQuestionContent,
+} from '../question-form/question-form';
 
 @Component({
   selector: 'app-add-question',
   standalone: true,
-  imports: [ReactiveFormsModule, IconComponent],
+  imports: [ReactiveFormsModule, IconComponent, QuestionFieldsComponent],
   templateUrl: './add-question.component.html',
   styleUrl: './add-question.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -72,47 +43,12 @@ export class AddQuestionComponent implements OnInit {
   protected readonly submitError = signal<string | null>(null);
   protected readonly hasSubmitted = signal(false);
 
-  protected readonly form = this.fb.nonNullable.group({
-    category: ['', [Validators.required, nonBlank, Validators.maxLength(100)]],
-    difficulty: ['medium' as Difficulty, Validators.required],
-    type: ['multiple' as QuestionType, Validators.required],
-    question: ['', [Validators.required, nonBlank, Validators.maxLength(500)]],
-    correctAnswer: ['', [Validators.required, nonBlank, Validators.maxLength(200)]],
-    // Optional on purpose. Requiring a citation would push contributors toward
-    // pasting *something*, and a bad citation is worse than none because it
-    // looks checked. `https` only, matching `firestore.rules` — the CSP would
-    // not load an `http` page, so the rule refuses what the reader could not
-    // open anyway, and catching it here turns a bare `permission-denied` into
-    // a field error the contributor can act on.
-    sourceUrl: ['', [httpsUrl, Validators.maxLength(500)]],
-    // No `nonBlank` here, unlike every required field above: `nonBlank`
-    // rejects the empty string too, which is exactly right for a control that
-    // must be filled in and exactly wrong for one that may be left alone — it
-    // made the whole form invalid for every contributor who did not cite a
-    // source, i.e. almost all of them, and the symptom was a submit button
-    // that silently did nothing. Whitespace-only needs no validator of its
-    // own: it trims to '' and is omitted from the write.
-    sourceTitle: ['', [Validators.maxLength(200)]],
-    // The "Justification" box, for a question whose answer is not obvious even
-    // to somebody who knows the subject. Optional for the same reason the two
-    // above are, and bounded at 1000 to match `firestore.rules` — twice the
-    // question's own cap, because it has to explain the question, the right
-    // answer and the wrong ones. No `nonBlank`: whitespace-only trims to '' and
-    // is dropped from the write rather than making the whole form invalid.
-    explanation: ['', [Validators.maxLength(1000)]],
-    // Required only for a "multiple" question — for a boolean one these three
-    // are irrelevant and hidden, and the opposite value is derived instead.
-    // The validators are therefore applied and cleared as `type` changes
-    // (see the constructor) rather than checked by hand at submit time: that
-    // keeps `form.invalid` the single source of truth, which is what lets the
-    // template render per-field errors and the submit handler focus the first
-    // offending control.
-    incorrectAnswers: this.fb.nonNullable.array([
-      this.fb.nonNullable.control(''),
-      this.fb.nonNullable.control(''),
-      this.fb.nonNullable.control(''),
-    ]),
-  });
+  /**
+   * The shared question form (`question-form.ts`), which `/my-questions`' edit
+   * dialog builds from the same factory — one set of bounds mirroring
+   * `firestore.rules`, rather than two that can drift.
+   */
+  protected readonly form = createQuestionForm(this.fb);
 
   /**
    * Set when a submit was refused before it left the browser. Rendered next
@@ -122,23 +58,10 @@ export class AddQuestionComponent implements OnInit {
   protected readonly validationSummary = signal<string | null>(null);
 
   constructor() {
-    this.applyIncorrectAnswerValidators(this.form.controls.type.value);
+    applyIncorrectAnswerValidators(this.form, this.form.controls.type.value);
     this.form.controls.type.valueChanges
       .pipe(takeUntilDestroyed())
-      .subscribe((type) => this.applyIncorrectAnswerValidators(type));
-  }
-
-  private applyIncorrectAnswerValidators(type: QuestionType): void {
-    for (const control of this.form.controls.incorrectAnswers.controls) {
-      if (type === 'multiple') {
-        control.setValidators([Validators.required, nonBlank, Validators.maxLength(200)]);
-      } else {
-        control.clearValidators();
-      }
-      // `emitEvent: false` — this runs inside a `valueChanges` subscription on
-      // the same form, and re-emitting from here would re-enter it.
-      control.updateValueAndValidity({ emitEvent: false });
-    }
+      .subscribe((type) => applyIncorrectAnswerValidators(this.form, type));
   }
 
   // Angular calls `ngOnInit` and discards whatever it returns, so an `async`
@@ -180,48 +103,33 @@ export class AddQuestionComponent implements OnInit {
       return;
     }
 
-    // Every field's validity now lives on the form itself (see
-    // `applyIncorrectAnswerValidators`), so an invalid submit can say *what*
-    // is wrong and put the cursor on it. It used to `markAllAsTouched()` and
-    // return into a template that rendered no field errors at all — so
-    // forgetting the category produced a Save button that silently did
-    // nothing, with no way to discover why.
+    // Every field's validity lives on the form itself, so an invalid submit can
+    // say *what* is wrong and put the cursor on it. It used to
+    // `markAllAsTouched()` and return into a template that rendered no field
+    // errors at all — so forgetting the category produced a Save button that
+    // silently did nothing, with no way to discover why.
     if (this.form.invalid) {
       this.form.markAllAsTouched();
-      this.validationSummary.set(this.describeMissingFields());
-      this.focusFirstInvalidControl();
+      const fields = questionFields(this.form);
+      this.validationSummary.set(describeInvalidFields(fields));
+      focusFirstInvalidControl(fields);
       return;
     }
     this.validationSummary.set(null);
 
-    const raw = this.form.getRawValue();
-    const isBoolean = raw.type === 'boolean';
-    const sourceUrl = raw.sourceUrl.trim();
-    const sourceTitle = raw.sourceTitle.trim();
-    const explanation = raw.explanation.trim();
-    const incorrectAnswers = isBoolean
-      ? [raw.correctAnswer.trim() === 'True' ? 'False' : 'True']
-      : raw.incorrectAnswers.map((answer) => answer.trim());
-
+    const { content, duplicate, invalidBoolean } = toQuestionContent(this.form.getRawValue());
     // The one rule the form's own validators can't express: a boolean
     // question's correct answer has to be one of exactly two literals.
-    if (isBoolean && raw.correctAnswer !== 'True' && raw.correctAnswer !== 'False') {
+    if (invalidBoolean) {
       this.form.controls.correctAnswer.markAsTouched();
       this.validationSummary.set('Choose whether the statement is true or false.');
       return;
     }
-
-    // `firestore.rules` rejects these outright (finding B1), so without a
-    // check here the submitter's only feedback would be a raw
-    // permission-denied that names nothing. Compared case-insensitively on
-    // trimmed text: "Paris" and "paris " are the same answer to a player, and
-    // a question offering both is broken whatever the rules make of it.
-    const duplicate = findDuplicateAnswer(raw.correctAnswer.trim(), incorrectAnswers);
     if (duplicate) {
-      this.submitError.set(
-        `"${duplicate}" is listed more than once. Every answer has to be different, ` +
-          `or the question would have two right answers.`,
-      );
+      this.submitError.set(duplicateAnswerMessage(duplicate));
+      return;
+    }
+    if (!content) {
       return;
     }
 
@@ -234,23 +142,12 @@ export class AddQuestionComponent implements OnInit {
     }
 
     const question: NewCustomQuestionDoc = {
-      category: raw.category.trim(),
-      type: raw.type,
-      difficulty: raw.difficulty,
-      question: raw.question.trim(),
-      correct_answer: raw.correctAnswer.trim(),
-      incorrect_answers: incorrectAnswers,
+      ...content,
       // Attribution. `firestore.rules` requires createdBy to equal the
       // caller's own uid and createdAt to be near server time, so a submission
       // can't be attributed to someone else or backdated.
       createdBy: author.uid,
       createdAt: Date.now(),
-      // Omitted entirely when blank rather than written as an empty string:
-      // `firestore.rules` refuses an empty `sourceTitle` or `explanation`, and
-      // a key that is absent is the honest representation of "not given".
-      ...(sourceUrl ? { sourceUrl } : {}),
-      ...(sourceTitle ? { sourceTitle } : {}),
-      ...(explanation ? { explanation } : {}),
     };
 
     this.isSubmitting.set(true);
@@ -310,71 +207,6 @@ export class AddQuestionComponent implements OnInit {
     return 'Could not save your question. Please try again.';
   }
 
-  /** Field labels in form order, for the summary and the focus target. */
-  private readonly fieldLabels: { control: AbstractControl; id: string; label: string }[] = [
-    { control: this.form.controls.category, id: 'category', label: 'Category' },
-    { control: this.form.controls.question, id: 'question', label: 'Question' },
-    { control: this.form.controls.correctAnswer, id: 'correctAnswer', label: 'Correct answer' },
-    ...this.form.controls.incorrectAnswers.controls.map((control, index) => ({
-      control,
-      id: `incorrect-answer-${index}`,
-      label: `Incorrect answer ${index + 1}`,
-    })),
-    // Optional fields still belong here. This table is not "the required
-    // fields" — it is what `describeMissingFields()` and
-    // `focusFirstInvalidControl()` can *see*, and a control missing from it is
-    // invisible to both: a malformed source link blocked the submit, produced
-    // the fallback "Please check the form and try again." naming nothing, and
-    // moved focus nowhere. That is the finding-B4 symptom exactly, reached by
-    // a different route.
-    { control: this.form.controls.sourceUrl, id: 'sourceUrl', label: 'Source link' },
-    { control: this.form.controls.sourceTitle, id: 'sourceTitle', label: 'Source name' },
-    { control: this.form.controls.explanation, id: 'explanation', label: 'Justification' },
-  ];
-
-  private describeMissingFields(): string {
-    const invalid = this.fieldLabels.filter((field) => field.control.invalid);
-    if (invalid.length === 0) {
-      return 'Please check the form and try again.';
-    }
-    if (invalid.length === 1) {
-      return `${invalid[0].label} needs your attention before this can be saved.`;
-    }
-    return `${invalid.length} fields need your attention: ${invalid
-      .map((field) => field.label.toLowerCase())
-      .join(', ')}.`;
-  }
-
-  /**
-   * Puts the cursor on the first thing that's wrong. Without it, a long form
-   * can report an error that is scrolled off screen — the same "nothing
-   * happened" experience in a different costume.
-   */
-  private focusFirstInvalidControl(): void {
-    const first = this.fieldLabels.find((field) => field.control.invalid);
-    if (first) {
-      document.getElementById(first.id)?.focus();
-    }
-  }
-
-  /** Whether to show a field's error — only once the user has engaged with it. */
-  protected showsError(control: AbstractControl): boolean {
-    return control.invalid && (control.touched || control.dirty);
-  }
-
-  protected errorFor(control: AbstractControl, label: string, maxLength: number): string {
-    if (control.hasError('required')) {
-      return `${label} is required.`;
-    }
-    if (control.hasError('maxlength')) {
-      return `${label} must be ${maxLength} characters or fewer.`;
-    }
-    if (control.hasError('httpsUrl')) {
-      return `${label} has to be a full address starting with https://.`;
-    }
-    return '';
-  }
-
   protected addAnother(): void {
     this.hasSubmitted.set(false);
     this.submitError.set(null);
@@ -388,23 +220,4 @@ export class AddQuestionComponent implements OnInit {
   protected goToPricing(): void {
     void this.router.navigateByUrl('/pricing');
   }
-}
-
-/**
- * The repeated answer, if any, comparing trimmed text case-insensitively.
- *
- * Returns the offending text rather than a boolean so the message can name it
- * — "one of your answers is duplicated" leaves the submitter hunting through
- * four fields.
- */
-function findDuplicateAnswer(correctAnswer: string, incorrectAnswers: string[]): string | null {
-  const seen = new Set<string>();
-  for (const answer of [correctAnswer, ...incorrectAnswers]) {
-    const key = answer.trim().toLowerCase();
-    if (seen.has(key)) {
-      return answer.trim();
-    }
-    seen.add(key);
-  }
-  return null;
 }

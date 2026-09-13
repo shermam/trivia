@@ -15,8 +15,10 @@ import { LEADERBOARD_BOARDS, allLeaderboardPathsFor, regionalEntryRefsFor } from
  * systems that no single client write can reach — Stripe, Auth, the
  * leaderboard, and the question bank — and because the Admin SDK bypasses
  * `firestore.rules`, which is the only way to touch documents the client is
- * deliberately forbidden from writing (no leaderboard has a delete rule at
- * all, and `custom_questions` is create-only).
+ * deliberately forbidden from writing: no leaderboard has a delete rule at
+ * all, and a `custom_questions` document is writable only by its own author
+ * — which is exactly the person this function is erasing, and who is
+ * therefore about to stop being able to write it.
  *
  * Order matters. Stripe is cancelled first, because it is the only step with
  * a cost attached to getting it wrong: if a later step fails after Auth is

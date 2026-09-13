@@ -88,6 +88,15 @@ interface RecordedWrite {
   path: string;
   /** The request body exactly as it went on the wire, still encoded. */
   fields: Record<string, unknown>;
+  /**
+   * The `updateMask.fieldPaths` the URL carried.
+   *
+   * Recorded because a path in the mask with **no** value in the body is how
+   * Firestore deletes a field, and that asymmetry is the whole mechanism behind
+   * clearing a `rejectionReason` (`FEAT-007`). A test asserting only on
+   * `fields` cannot see a deletion at all.
+   */
+  mask?: string[];
 }
 
 /** How the fake server should answer one write. */
@@ -103,6 +112,12 @@ interface FakeServer {
 function pathFromUrl(url: string): string {
   const [withoutQuery] = url.split('?');
   return withoutQuery.slice(`${URL_ROOT}/`.length);
+}
+
+/** The `updateMask.fieldPaths` values a write URL carried, in order. */
+function maskFromUrl(url: string): string[] {
+  const [, query = ''] = url.split('?');
+  return new URLSearchParams(query).getAll('updateMask.fieldPaths');
 }
 
 function cursorId(cursor: { values?: { referenceValue?: string }[] } | undefined) {
@@ -280,12 +295,14 @@ function fakeServer(
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
       }
 
-      // A write: PATCH at a chosen ID, or POST for a server-generated one.
+      // A write: PATCH at a chosen ID, POST for a server-generated one, or
+      // DELETE, which carries no body at all.
       const path = pathFromUrl(url);
       const record: RecordedWrite = {
         method: init.method,
         path,
-        fields: body!['fields'] as Record<string, unknown>,
+        fields: (body?.['fields'] ?? {}) as Record<string, unknown>,
+        mask: maskFromUrl(url),
       };
       server.attempts.push(record);
       const outcome = onWrite(path, writeAttempt++);
@@ -938,6 +955,229 @@ describe('FirebaseService: the review queue (item 4b-ii)', () => {
     const { service } = setup(seed, () => 'permission-denied');
 
     await expect(service.setQuestionStatus('p1', 'approved')).rejects.toThrow();
+  });
+
+  /**
+   * The reviewer's rejection note (`FEAT-007`).
+   *
+   * The half worth pinning is the *clearing*. `firestore.rules` refuses a
+   * `rejectionReason` on any question that is not `rejected`, so approving one
+   * that carries a stale note is refused outright rather than merely untidy —
+   * and the only way to clear a field without replacing the whole document is a
+   * path in the `updateMask` with no value in the body. A test reading `fields`
+   * alone cannot see that at all.
+   */
+  it('writes the reason alongside a rejection', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.setQuestionStatus('p1', 'rejected', '  The date is wrong.  ');
+
+    expect(writes[0].fields['rejectionReason']).toEqual({ stringValue: 'The date is wrong.' });
+    expect(writes[0].mask).toEqual(['status', 'rejectionReason']);
+  });
+
+  it('clears the reason when approving, in the mask rather than the body', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.setQuestionStatus('p1', 'approved', 'ignored on an approval');
+
+    expect(Object.keys(writes[0].fields)).toEqual(['status']);
+    expect(writes[0].mask).toEqual(['status', 'rejectionReason']);
+  });
+
+  it('clears the reason when rejecting with an empty one', async () => {
+    // "No reason given" is an absent key, not a blank string — the rules refuse
+    // an empty one, and the author's screen has a sentence for the absence.
+    const { service, writes } = setup(seed);
+
+    await service.setQuestionStatus('p1', 'rejected', '   ');
+
+    expect(Object.keys(writes[0].fields)).toEqual(['status']);
+    expect(writes[0].mask).toEqual(['status', 'rejectionReason']);
+  });
+});
+
+/**
+ * An author's own contributions (`FEAT-007`).
+ *
+ * Two properties are load-bearing and neither is visible in the result:
+ * the `createdBy` filter, because **rules are not filters** — without it the
+ * query is refused outright rather than narrowed to the caller's own rows — and
+ * the `limit`, which `CLAUDE.md` §4.1 requires of every collection read. The
+ * fake records the `structuredQuery` that actually went on the wire, which is
+ * the only place either can be seen.
+ */
+describe('FirebaseService.getUserQuestions (FEAT-007)', () => {
+  const mine: SeedDoc[] = Array.from({ length: 3 }, (_, i) => ({
+    id: `mine-${i}`,
+    data: makeQuestion({
+      question: `Mine ${i}?`,
+      createdBy: 'author-1',
+      createdAt: 1_760_000_000_000 + i,
+      status: 'pending',
+    }) as unknown as Record<string, unknown>,
+  }));
+  const theirs: SeedDoc = {
+    id: 'theirs',
+    data: makeQuestion({
+      question: 'Somebody else?',
+      createdBy: 'author-2',
+      createdAt: 1_760_000_000_000,
+    }) as unknown as Record<string, unknown>,
+  };
+
+  it('filters on the author and bounds the read', async () => {
+    const { service, queries } = setup([...mine, theirs]);
+
+    await service.getUserQuestions('author-1');
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0].collectionPath).toBe('custom_questions');
+    expect(queries[0].wheres).toEqual([{ field: 'createdBy', value: 'author-1' }]);
+    expect(queries[0].limit).toBe(25);
+  });
+
+  /**
+   * Newest first, with the document ID as a tiebreaker.
+   *
+   * The tiebreaker is not decoration: two questions submitted in the same
+   * millisecond put one of them at a page boundary and its twin immediately
+   * after the cursor value, where an exclusive `startAfter` on `createdAt`
+   * alone steps straight over it — measured on `question_reports`, where
+   * exactly one document vanished between pages.
+   */
+  it('orders newest first with the document id breaking ties', async () => {
+    const { service, queries } = setup(mine);
+
+    await service.getUserQuestions('author-1');
+
+    expect(queries[0].orderBy).toEqual([
+      { field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' },
+      { field: { fieldPath: '__name__' }, direction: 'DESCENDING' },
+    ]);
+  });
+
+  it('reports no next page when the page is short', async () => {
+    const { service } = setup(mine);
+
+    expect((await service.getUserQuestions('author-1')).next).toBeNull();
+  });
+
+  it('hands back a cursor when the page is full', async () => {
+    const full: SeedDoc[] = Array.from({ length: 25 }, (_, i) => ({
+      id: `full-${String(i).padStart(2, '0')}`,
+      data: makeQuestion({
+        createdBy: 'author-1',
+        createdAt: 1_760_000_000_000 + i,
+      }) as unknown as Record<string, unknown>,
+    }));
+    const { service } = setup(full);
+
+    const page = await service.getUserQuestions('author-1');
+
+    expect(page.questions).toHaveLength(25);
+    expect(page.next).not.toBeNull();
+  });
+});
+
+/**
+ * Editing and withdrawing one's own question (`FEAT-007`).
+ *
+ * Every assertion here is about the `updateMask`, because that is what makes
+ * the write legal: `createdBy` and `createdAt` are left *out* of it, so
+ * "unchanged" is true by construction rather than by the client resending the
+ * same values; every optional field is *in* it whether or not it has a value,
+ * so clearing a source link removes the key; and `rejectionReason` is always in
+ * it, because the rules refuse an owner edit that leaves the reviewer's note
+ * about the replaced text standing.
+ */
+describe('FirebaseService.updateUserQuestion / deleteUserQuestion (FEAT-007)', () => {
+  const content = {
+    category: 'History',
+    type: 'multiple' as const,
+    difficulty: 'hard' as const,
+    question: 'Corrected?',
+    correct_answer: 'Yes',
+    incorrect_answers: ['No', 'Maybe', 'Unsure'],
+  };
+  const seed: SeedDoc[] = [
+    {
+      id: 'mine',
+      data: makeQuestion({ createdBy: 'author-1' }) as unknown as Record<string, unknown>,
+    },
+  ];
+
+  it('sends the question back to pending and never touches its attribution', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.updateUserQuestion('mine', content);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].method).toBe('PATCH');
+    expect(writes[0].path).toBe('custom_questions/mine');
+    expect(writes[0].fields['status']).toEqual({ stringValue: 'pending' });
+    expect(writes[0].mask).not.toContain('createdBy');
+    expect(writes[0].mask).not.toContain('createdAt');
+  });
+
+  it('clears the reviewer note and every optional field the author left blank', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.updateUserQuestion('mine', content);
+
+    expect(Object.keys(writes[0].fields)).not.toContain('sourceUrl');
+    expect(writes[0].mask).toEqual(
+      expect.arrayContaining(['sourceUrl', 'sourceTitle', 'explanation', 'rejectionReason']),
+    );
+  });
+
+  it('writes the optional fields the author did fill in', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.updateUserQuestion('mine', {
+      ...content,
+      sourceUrl: 'https://example.com/a',
+      explanation: 'Because.',
+    });
+
+    expect(writes[0].fields['sourceUrl']).toEqual({ stringValue: 'https://example.com/a' });
+    expect(writes[0].fields['explanation']).toEqual({ stringValue: 'Because.' });
+    // Still cleared: the one the author left blank, and the reviewer's note.
+    expect(Object.keys(writes[0].fields)).not.toContain('sourceTitle');
+    expect(writes[0].mask).toEqual(expect.arrayContaining(['sourceTitle', 'rejectionReason']));
+  });
+
+  it('deletes the document when the author withdraws it', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.deleteUserQuestion('mine');
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].method).toBe('DELETE');
+    expect(writes[0].path).toBe('custom_questions/mine');
+  });
+
+  /**
+   * A 204, or a proxy that strips the body, leaves nothing for `json()` to
+   * parse. Reporting that as a failed removal would be wrong twice over: the
+   * server has already deleted the document, and the retry it invites answers
+   * 404. `ok` with no body is the answer, not an error.
+   */
+  it('treats a successful delete with no response body as done', async () => {
+    const { service } = setup(seed);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+    } as never);
+
+    await expect(service.deleteUserQuestion('mine')).resolves.toBeUndefined();
+  });
+
+  it('propagates a refused removal rather than reporting success', async () => {
+    const { service } = setup(seed, () => 'permission-denied');
+
+    await expect(service.deleteUserQuestion('mine')).rejects.toThrow();
   });
 });
 

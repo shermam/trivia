@@ -7,9 +7,13 @@ import {
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
+  documentId,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
   setDoc,
   updateDoc,
@@ -328,7 +332,18 @@ describe('custom_questions: contributor attribution (FEAT-022)', () => {
     );
   });
 
-  it('does not let the author rewrite their own justification after submitting', async () => {
+  /**
+   * The author *may* rewrite their own justification and their own source —
+   * that is `FEAT-007`, and it is the whole point of `/my-questions`. What was
+   * true when these three fields shipped, and is no longer, is that nobody
+   * could: `custom_questions` was create-only from the client, so the same
+   * write these two rows make was refused for want of any owner rule at all.
+   *
+   * They stay here rather than moving to the `FEAT-007` block because the
+   * subject is these fields: their bounds have to hold on an edit exactly as
+   * they do on a create, and the reviewer still may not touch them either way.
+   */
+  it('lets the author rewrite their own justification after submitting', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(
         doc(ctx.firestore(), 'custom_questions', 'q1'),
@@ -336,12 +351,29 @@ describe('custom_questions: contributor attribution (FEAT-022)', () => {
       );
     });
 
-    await assertFails(
+    await assertSucceeds(
       updateDoc(question(asPro(env, 'pro'), 'q1'), { explanation: 'Something else entirely.' }),
     );
   });
 
-  it('does not let the author rewrite their own source after submitting', async () => {
+  it('lets the author rewrite their own source after submitting', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { sourceUrl: 'https://example.org/original' }),
+      );
+    });
+
+    await assertSucceeds(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), {
+        sourceUrl: 'https://example.org/swapped',
+      }),
+    );
+  });
+
+  // The bounds are the create path's, and the owner rule re-applies them — so
+  // an edit cannot smuggle in what a submission could not.
+  it('refuses an author editing their source to a non-https one', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(
         doc(ctx.firestore(), 'custom_questions', 'q1'),
@@ -350,9 +382,33 @@ describe('custom_questions: contributor attribution (FEAT-022)', () => {
     });
 
     await assertFails(
-      updateDoc(question(asPro(env, 'pro'), 'q1'), {
-        sourceUrl: 'https://example.org/swapped',
-      }),
+      updateDoc(question(asPro(env, 'pro'), 'q1'), { sourceUrl: 'http://example.org/swapped' }),
+    );
+  });
+
+  it('refuses an author editing their justification past 1000 characters', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { explanation: 'The original reasoning.' }),
+      );
+    });
+
+    await assertFails(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), { explanation: 'x'.repeat(1001) }),
+    );
+  });
+
+  it('refuses somebody else rewriting the author justification', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { explanation: 'The original reasoning.' }),
+      );
+    });
+
+    await assertFails(
+      updateDoc(question(asPro(env, 'stranger'), 'q1'), { explanation: 'Not mine to change.' }),
     );
   });
 });
@@ -770,24 +826,550 @@ describe('custom_questions: moderation — a reviewer may change the status (ite
   });
 });
 
-describe('custom_questions: update and delete are console-only', () => {
+describe('custom_questions: nobody but the author or a reviewer may write', () => {
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), 'custom_questions', 'seeded'), validQuestion('pro-user'));
     });
   });
 
-  it('rejects an update even from a Pro subscriber', async () => {
+  it('rejects an update from a Pro subscriber who did not write it', async () => {
     await assertFails(
       setDoc(
-        question(asPro(env, 'pro-user'), 'seeded'),
+        question(asPro(env, 'stranger'), 'seeded'),
         validQuestion('pro-user', { question: 'Edited' }),
       ),
     );
   });
 
-  it('rejects a delete even from a Pro subscriber', async () => {
-    await assertFails(deleteDoc(question(asPro(env, 'pro-user'), 'seeded')));
+  it('rejects a delete from a Pro subscriber who did not write it', async () => {
+    await assertFails(deleteDoc(question(asPro(env, 'stranger'), 'seeded')));
+  });
+});
+
+/**
+ * `FEAT-007`: an author can see their own contributions whatever status they
+ * are in — which `/my-questions` cannot render a single row without.
+ *
+ * **Rules are not filters**, so the shape of the *query* is half the rule. The
+ * accept row below sends `where('createdBy','==',uid)`, which is what lets
+ * Firestore prove the ownership branch for every document the query could
+ * return; the unfiltered row is refused outright rather than narrowed. Both are
+ * needed: a suite that only asserts the refusal passes against a rule that
+ * denies everything (`CLAUDE.md` §4.6).
+ */
+describe('custom_questions: an author reads their own, whatever the status (FEAT-007)', () => {
+  const AUTHOR = 'author-uid';
+
+  /**
+   * The query `/my-questions` actually sends, order and bound included, rather
+   * than the `where` clause alone.
+   *
+   * The difference matters because Firestore decides whether a rule is provable
+   * from the **whole** query: an `orderBy` on a field the filter does not
+   * mention narrows the result set to documents that *have* that field, and a
+   * test built from a simpler query can pass for a shape the app never sends.
+   * `FirebaseService.getUserQuestions` is the thing this stands in for — if the
+   * two drift, this row keeps passing while the screen is refused.
+   */
+  const mine = (ctx: RulesTestContext) =>
+    query(
+      questions(ctx),
+      where('createdBy', '==', AUTHOR),
+      orderBy('createdAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(25),
+    );
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'mine-pending'),
+        validQuestion(AUTHOR, { status: 'pending' }),
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'mine-rejected'),
+        validQuestion(AUTHOR, { status: 'rejected', rejectionReason: 'The date is wrong.' }),
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'theirs-pending'),
+        validQuestion('somebody-else', { status: 'pending' }),
+      );
+    });
+  });
+
+  it('serves the author their own pending question by id', async () => {
+    await assertSucceeds(
+      getDoc(doc(asVerifiedPassword(env, AUTHOR).firestore(), 'custom_questions', 'mine-pending')),
+    );
+  });
+
+  it('serves the author their own rejected question by id', async () => {
+    await assertSucceeds(
+      getDoc(doc(asVerifiedPassword(env, AUTHOR).firestore(), 'custom_questions', 'mine-rejected')),
+    );
+  });
+
+  // The query `/my-questions` actually sends. Firestore can prove the ownership
+  // branch from the filter, so this is the shape the screen depends on — and
+  // the row that fails if the branch is deleted.
+  it('serves the query filtered on the author own uid', async () => {
+    await assertSucceeds(getDocs(mine(asVerifiedPassword(env, AUTHOR))));
+  });
+
+  it('still refuses an unfiltered query from that same author', async () => {
+    await assertFails(getDocs(questions(asVerifiedPassword(env, AUTHOR))));
+  });
+
+  it('refuses a signed-in stranger reading somebody else pending question', async () => {
+    await assertFails(
+      getDoc(
+        doc(asVerifiedPassword(env, 'stranger').firestore(), 'custom_questions', 'mine-pending'),
+      ),
+    );
+  });
+
+  // The filter names the author, but the *caller* is somebody else — so the
+  // branch does not hold and the query is refused. This is the row that would
+  // pass if the rule compared the filter against itself rather than against
+  // `request.auth.uid`.
+  it('refuses a stranger querying for the author uid', async () => {
+    await assertFails(getDocs(mine(asVerifiedPassword(env, 'stranger'))));
+  });
+
+  it('refuses an anonymous session querying for the author uid', async () => {
+    await assertFails(getDocs(mine(asAnonymous(env, 'anon'))));
+  });
+
+  it('keeps serving an approved question to everybody', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'live'),
+        validQuestion('somebody-else', { status: 'approved' }),
+      );
+    });
+    await assertSucceeds(
+      getDocs(query(questions(asSignedOut(env)), where('status', '==', 'approved'))),
+    );
+  });
+});
+
+/**
+ * `FEAT-007`: the author may rewrite their own question, and withdraw it.
+ *
+ * Two populations can never be an owner, and both are here as explicit reject
+ * rows because either would otherwise be caught only by a rule that happens to
+ * fail for an unrelated reason: a document with **no `createdBy`** (written
+ * before A10 — nobody recorded who wrote it) and one carrying the
+ * **`[deleted-user]` sentinel** (an author who erased their account, which is
+ * exactly what keeps the question alive without the person).
+ *
+ * The **lapsed-Pro accept case** is the load-bearing one. Creating a question
+ * needs the subscription and correcting one does not, so an author whose Pro
+ * has gone must still be able to fix their own mistake — and that is the half a
+ * suite of `assertFails` cannot see.
+ */
+describe('custom_questions: the author may edit and withdraw their own (FEAT-007)', () => {
+  const AUTHOR = 'author-uid';
+  /** Far enough in the past that `isNearRequestTime()` would refuse it on a create. */
+  const CREATED_AT = Date.now() - 30 * 24 * 3_600_000;
+
+  /** The whole document as an owner edit sends it: content, `pending`, no reason. */
+  function ownerEdit(overrides: Record<string, unknown> = {}) {
+    return {
+      ...validQuestion(AUTHOR, { status: 'pending', createdAt: CREATED_AT }),
+      question: 'A corrected question?',
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'mine'),
+        validQuestion(AUTHOR, {
+          status: 'rejected',
+          createdAt: CREATED_AT,
+          rejectionReason: 'The date is wrong.',
+        }),
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'unattributed'),
+        // No `createdBy` at all — the pre-A10 population.
+        {
+          category: 'Science',
+          type: 'multiple',
+          difficulty: 'easy',
+          question: 'Who wrote this?',
+          correct_answer: 'Nobody knows',
+          incorrect_answers: ['Somebody', 'Anybody'],
+          createdAt: CREATED_AT,
+          status: 'approved',
+        },
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'orphaned'),
+        validQuestion('[deleted-user]', { status: 'approved', createdAt: CREATED_AT }),
+      );
+    });
+  });
+
+  const mine = (ctx: RulesTestContext) => doc(ctx.firestore(), 'custom_questions', 'mine');
+
+  it('lets a Pro author rewrite their own question', async () => {
+    await assertSucceeds(setDoc(mine(asPro(env, AUTHOR)), ownerEdit()));
+  });
+
+  // The decision this feature turns on: editing is not a Pro entitlement.
+  it('lets a lapsed author — no stripeRole at all — rewrite their own question', async () => {
+    await assertSucceeds(setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit()));
+  });
+
+  it('lets an author with a role that is not pro rewrite their own question', async () => {
+    await assertSucceeds(setDoc(mine(asWrongRole(env, AUTHOR)), ownerEdit()));
+  });
+
+  it('lets the author change the optional fields under their existing bounds', async () => {
+    await assertSucceeds(
+      setDoc(
+        mine(asVerifiedPassword(env, AUTHOR)),
+        ownerEdit({
+          sourceUrl: 'https://example.com/source',
+          sourceTitle: 'Example',
+          explanation: 'Because the treaty was signed in March.',
+        }),
+      ),
+    );
+  });
+
+  it('refuses an edit whose source link is not https', async () => {
+    await assertFails(
+      setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ sourceUrl: 'http://example.com' })),
+    );
+  });
+
+  it('refuses an edit that leaves the question text blank', async () => {
+    await assertFails(setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ question: '' })));
+  });
+
+  it('refuses an edit whose correct answer is also one of the wrong ones', async () => {
+    await assertFails(
+      setDoc(
+        mine(asVerifiedPassword(env, AUTHOR)),
+        ownerEdit({ correct_answer: 'CO2', incorrect_answers: ['CO2', 'O2'] }),
+      ),
+    );
+  });
+
+  // `isValidCustomQuestion()` guards creates only, so without the shared shape
+  // check on the owner rule an author could write any document they liked.
+  it('refuses an edit that introduces a key outside the allowlist', async () => {
+    await assertFails(
+      setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ approvedBy: AUTHOR })),
+    );
+  });
+
+  it('refuses an edit that approves the question', async () => {
+    await assertFails(
+      setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ status: 'approved' })),
+    );
+  });
+
+  it('refuses an edit that leaves it rejected rather than sending it back for review', async () => {
+    await assertFails(
+      setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ status: 'rejected' })),
+    );
+  });
+
+  it('refuses an edit that keeps the reviewer note about the replaced text', async () => {
+    await assertFails(
+      setDoc(
+        mine(asVerifiedPassword(env, AUTHOR)),
+        ownerEdit({ rejectionReason: 'The date is wrong.' }),
+      ),
+    );
+  });
+
+  it('refuses an author writing their own rejection reason', async () => {
+    await assertFails(
+      setDoc(
+        mine(asVerifiedPassword(env, AUTHOR)),
+        ownerEdit({ rejectionReason: 'I think this is fine actually.' }),
+      ),
+    );
+  });
+
+  it('refuses an edit that rewrites createdBy to somebody else', async () => {
+    await assertFails(
+      setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ createdBy: 'somebody-else' })),
+    );
+  });
+
+  it('refuses an edit that backdates or refreshes createdAt', async () => {
+    await assertFails(
+      setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ createdAt: Date.now() })),
+    );
+  });
+
+  it('refuses a stranger rewriting somebody else question', async () => {
+    await assertFails(
+      setDoc(
+        doc(asPro(env, 'stranger').firestore(), 'custom_questions', 'mine'),
+        ownerEdit({ createdBy: AUTHOR }),
+      ),
+    );
+  });
+
+  // An anonymous session can never be an author — `create` refuses one, so no
+  // anonymous uid is ever in `createdBy`. The row that matters is therefore the
+  // ordinary one: a guest editing a question they did not write.
+  it('refuses an anonymous session editing somebody else question', async () => {
+    await assertFails(setDoc(mine(asAnonymous(env, 'anon')), ownerEdit()));
+  });
+
+  it('lets the author withdraw their own question', async () => {
+    await assertSucceeds(deleteDoc(mine(asVerifiedPassword(env, AUTHOR))));
+  });
+
+  it('lets a lapsed author withdraw their own question', async () => {
+    await assertSucceeds(deleteDoc(mine(asWrongRole(env, AUTHOR))));
+  });
+
+  it('refuses a stranger deleting somebody else question', async () => {
+    await assertFails(
+      deleteDoc(doc(asPro(env, 'stranger').firestore(), 'custom_questions', 'mine')),
+    );
+  });
+
+  it('refuses a reviewer deleting a question they did not write', async () => {
+    await grantReviewer(env, 'rev');
+    await assertFails(
+      deleteDoc(doc(asVerifiedPassword(env, 'rev').firestore(), 'custom_questions', 'mine')),
+    );
+  });
+
+  // The two populations nobody may edit. Both would look like an ordinary
+  // ownership miss if the rule merely compared a missing field, so both are
+  // asserted from the one direction that could go wrong: a caller whose uid is
+  // exactly what the document holds.
+  it('refuses an edit of a question with no createdBy at all', async () => {
+    await assertFails(
+      setDoc(
+        doc(asVerifiedPassword(env, AUTHOR).firestore(), 'custom_questions', 'unattributed'),
+        ownerEdit(),
+      ),
+    );
+  });
+
+  it('refuses a delete of a question with no createdBy at all', async () => {
+    await assertFails(
+      deleteDoc(
+        doc(asVerifiedPassword(env, AUTHOR).firestore(), 'custom_questions', 'unattributed'),
+      ),
+    );
+  });
+
+  it('refuses an account whose uid is literally [deleted-user] editing the sentinel', async () => {
+    await assertFails(
+      setDoc(
+        doc(asVerifiedPassword(env, '[deleted-user]').firestore(), 'custom_questions', 'orphaned'),
+        ownerEdit({ createdBy: '[deleted-user]' }),
+      ),
+    );
+  });
+
+  it('refuses an account whose uid is literally [deleted-user] deleting the sentinel', async () => {
+    await assertFails(
+      deleteDoc(
+        doc(asVerifiedPassword(env, '[deleted-user]').firestore(), 'custom_questions', 'orphaned'),
+      ),
+    );
+  });
+});
+
+/**
+ * `FEAT-007`: a reviewer may say **why** they rejected a question, and nothing
+ * else new.
+ *
+ * The widening is exactly one key. Everything the `affectedKeys()` allowlist
+ * already bought is re-asserted in the block above; what is here is the new
+ * clause — a reason may exist only on a rejected document, bounded at 500 — and
+ * the two directions that follow from it: approving a rejected question has to
+ * clear the note in the same write (a rejection reason on an approved question
+ * is a false statement shown to its author), and a reviewer may attach one to a
+ * question they have already rejected without pretending to decide it again.
+ */
+describe('custom_questions: the reviewer rejection reason (FEAT-007)', () => {
+  const REVIEWER = 'reviewer-uid';
+  const AUTHOR = 'pro-user';
+
+  beforeEach(async () => {
+    await grantReviewer(env, REVIEWER);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion(AUTHOR, { status: 'pending' }),
+      );
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'already-rejected'),
+        validQuestion(AUTHOR, { status: 'rejected', rejectionReason: 'Too vague.' }),
+      );
+    });
+  });
+
+  const pending = (ctx: RulesTestContext) => doc(ctx.firestore(), 'custom_questions', 'q1');
+  const rejected = (ctx: RulesTestContext) =>
+    doc(ctx.firestore(), 'custom_questions', 'already-rejected');
+
+  it('lets a reviewer reject with a reason', async () => {
+    await assertSucceeds(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 'The date is wrong.',
+      }),
+    );
+  });
+
+  it('lets a reviewer reject without one — a reason is optional', async () => {
+    await assertSucceeds(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), { status: 'rejected' }),
+    );
+  });
+
+  // Decided rather than inherited: a reviewer who thinks of the wording after
+  // rejecting should not have to re-write the status to record it.
+  it('lets a reviewer add a reason to a question already rejected', async () => {
+    await assertSucceeds(
+      updateDoc(rejected(asVerifiedPassword(env, REVIEWER)), {
+        rejectionReason: 'The date is wrong, and the source does not say otherwise.',
+      }),
+    );
+  });
+
+  it('lets a reviewer clear a reason while leaving the question rejected', async () => {
+    await assertSucceeds(
+      updateDoc(rejected(asVerifiedPassword(env, REVIEWER)), { rejectionReason: deleteField() }),
+    );
+  });
+
+  it('lets a reviewer approve a rejected question by clearing the reason in the same write', async () => {
+    await assertSucceeds(
+      updateDoc(rejected(asVerifiedPassword(env, REVIEWER)), {
+        status: 'approved',
+        rejectionReason: deleteField(),
+      }),
+    );
+  });
+
+  // The write the client must not send, and the reason `setQuestionStatus`
+  // always puts `rejectionReason` in the update mask: a stale note left on an
+  // approved question is a false statement shown to its author.
+  it('refuses an approval that leaves the rejection reason standing', async () => {
+    await assertFails(
+      updateDoc(rejected(asVerifiedPassword(env, REVIEWER)), { status: 'approved' }),
+    );
+  });
+
+  it('refuses a reason attached to a question being approved', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'approved',
+        rejectionReason: 'Approved but here is a note.',
+      }),
+    );
+  });
+
+  it('refuses a reason attached to a question being put back to pending', async () => {
+    await assertFails(
+      updateDoc(rejected(asVerifiedPassword(env, REVIEWER)), {
+        status: 'pending',
+        rejectionReason: 'Have another look.',
+      }),
+    );
+  });
+
+  it('refuses an empty reason — "none given" is an absent key', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: '',
+      }),
+    );
+  });
+
+  it('refuses a reason over 500 characters', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 'x'.repeat(501),
+      }),
+    );
+  });
+
+  it('accepts a reason of exactly 500 characters', async () => {
+    await assertSucceeds(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 'x'.repeat(500),
+      }),
+    );
+  });
+
+  it('refuses a reason that is not a string', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 42,
+      }),
+    );
+  });
+
+  it('refuses the author writing a reason on their own question', async () => {
+    await assertFails(
+      updateDoc(pending(asPro(env, AUTHOR)), {
+        status: 'rejected',
+        rejectionReason: 'I reject myself.',
+      }),
+    );
+  });
+
+  it('refuses a non-reviewer writing a reason on somebody else question', async () => {
+    await assertFails(
+      updateDoc(pending(asPro(env, 'stranger')), {
+        status: 'rejected',
+        rejectionReason: 'Not my call to make.',
+      }),
+    );
+  });
+
+  // The allowlist is still exactly two keys wide.
+  it('refuses a reviewer introducing any other field alongside the reason', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 'The date is wrong.',
+        reviewedBy: REVIEWER,
+      }),
+    );
+  });
+
+  it('refuses a reviewer rewriting the question text alongside the reason', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 'The date is wrong.',
+        question: 'something the author never wrote',
+      }),
+    );
+  });
+
+  it('refuses a submitter creating a question that already carries a reason', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { rejectionReason: 'Pre-rejected by me.' }),
+      }),
+    );
   });
 });
 
