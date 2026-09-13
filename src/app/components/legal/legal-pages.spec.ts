@@ -311,7 +311,7 @@ describe('legal pages', () => {
   /**
    * The donation disclosures, and specifically the two halves that are easiest
    * to falsify without touching a sentence: what a signed-in donation stores,
-   * and that a signed-out one stores nothing at all.
+   * and what a signed-out one does and does not.
    *
    * The second is not a courtesy — it is what makes the dialog's own notice
    * true, and it holds because `createDonationSession` attaches a
@@ -319,15 +319,23 @@ describe('legal pages', () => {
    * nothing without one. Attach that metadata to a guest session and this
    * paragraph becomes a misstatement about payment data with nothing going
    * red.
+   *
+   * It is pinned as *no donation record* rather than as "nothing at all",
+   * which is the stronger claim the page used to make and could not support:
+   * every visitor is signed in anonymously, so `startDonation` writes a
+   * session document under that uid before Stripe is ever reached. Widen the
+   * sentence back and this test is what refuses it.
    */
-  it('discloses what a donation stores, and that a guest donation stores nothing', async () => {
+  it('discloses what a donation stores, including the scratch document a guest leaves', async () => {
     // Whitespace-collapsed before matching, because these claims are long
     // enough to be reflowed across lines by the formatter — and a pin that
     // breaks when Prettier rewraps a paragraph is a pin nobody keeps.
     const text = collapse((await render(PrivacyPolicyComponent)).textContent);
 
     expect(text).toContain('the amount, the currency, the time, and the identifier Stripe gives');
-    expect(text).toContain('A donation made while signed out stores nothing here at all');
+    expect(text).toContain('A donation made while signed out leaves no donation record');
+    expect(text).toContain('the short-lived scratch document that carries you to Stripe');
+    expect(text).not.toContain('stores nothing here at all');
     expect(text).toContain('Take a one-off donation and record it against your account');
   });
 
