@@ -930,8 +930,6 @@ describe('ReviewQueueComponent rejected tab, rendered', () => {
     // rewrites the textarea from it — which put the old note back on screen
     // under an announcement saying it had been cleared. The write was right and
     // the screen was wrong, which is the worst version of this to debug.
-    expect(host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!.value).toBe(
-      '',
-    );
+    expect(host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!.value).toBe('');
   });
 });

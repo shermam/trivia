@@ -6,7 +6,7 @@ import type Stripe from 'stripe';
 import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
 import { buildAccountExport, timestampToIso } from './account-export';
-import { LEADERBOARD_BOARDS, leaderboardPathsFor } from './leaderboards';
+import { LEADERBOARD_BOARDS, allLeaderboardPathsFor, regionalEntryRefsFor } from './leaderboards';
 
 /**
  * Deletes the caller's account and everything attached to it.
@@ -43,10 +43,13 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     await cancelBillingFor(uid);
     await anonymiseContributedQuestions(uid);
     // Every board, not just one. Since G7 a player can hold an entry on each
-    // timing constraint, and the legacy flat collection may still hold a
-    // pre-migration row — a deletion that missed any of them would leave the
-    // user's name and score publicly readable after they asked to be removed.
-    await Promise.all(leaderboardPathsFor(uid).map((path) => firestore.doc(path).delete()));
+    // timing constraint, since FEAT-028 one on each *country* board under each
+    // of those, and the legacy flat collection may still hold a pre-migration
+    // row — a deletion that missed any of them would leave the user's name and
+    // score publicly readable after they asked to be removed, which is a
+    // promise in the Privacy Policy rather than merely a bug.
+    const leaderboardPaths = await allLeaderboardPathsFor(firestore, uid);
+    await Promise.all(leaderboardPaths.map((path) => firestore.doc(path).delete()));
     // Lifetime totals. A delete on a document that was never created is a
     // no-op, which is the normal case for an account that never finished a
     // game — the document is created lazily by `recordGameResult`.
@@ -86,9 +89,15 @@ export const exportAccountData = onCall(async (request) => {
   const customerRef = firestore.collection('customers').doc(uid);
 
   try {
+    // Which country boards exist has to be known before the reads can be
+    // issued, so it is awaited ahead of them rather than inside the
+    // `Promise.all` below (`FEAT-028`). One `listDocuments()` per board.
+    const regionalRefs = await regionalEntryRefsFor(firestore, uid);
+
     const [
       user,
       leaderboard,
+      regional,
       stats,
       questions,
       customer,
@@ -106,6 +115,11 @@ export const exportAccountData = onCall(async (request) => {
           firestore.doc(`leaderboards/${board}/entries/${uid}`).get(),
         ),
       ),
+      // The same reasoning one segment deeper: a regional entry is a public
+      // row carrying the player's name, score and declared country, so an
+      // export that omitted it would be answering a data-access request with
+      // less than the app publishes.
+      Promise.all(regionalRefs.map((entry) => firestore.doc(entry.path).get())),
       firestore.collection('users').doc(uid).get(),
       firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
       customerRef.get(),
@@ -122,11 +136,20 @@ export const exportAccountData = onCall(async (request) => {
       // player with an entry on only the second board would have it labelled
       // as the first — and having entries on some boards but not all is the
       // normal case, not an edge one.
-      leaderboardEntries: LEADERBOARD_BOARDS.map((board, index) => ({
-        board,
-        snapshot: leaderboard[index],
-      }))
+      leaderboardEntries: [
+        ...LEADERBOARD_BOARDS.map((board, index) => ({
+          board,
+          snapshot: leaderboard[index],
+        })),
+        ...regionalRefs.map((entry, index) => ({
+          board: entry.board,
+          snapshot: regional[index],
+        })),
+      ]
         .filter(({ snapshot }) => snapshot.exists)
+        // `region` rides along in the document's own data, so a regional row
+        // is distinguishable from a global one on the same board without the
+        // export having to label it separately.
         .map(({ board, snapshot }) => ({ board, ...snapshot.data() })),
       // Explicit null rather than an absent key when the account has never
       // finished a game — see `AccountExport.gameplayStats`.

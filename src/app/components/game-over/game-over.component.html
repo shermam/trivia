@@ -136,9 +136,15 @@
           <app-icon name="circle-check-big" [size]="18" class="shrink-0 mt-0.5" />
           <div>
             <p class="font-semibold">Score saved to the leaderboard!</p>
+            <!--
+              The rank is read off whichever board is on screen, so the claim
+              has to name that board: "#3 on the 15-second leaderboard" is a
+              statement about the world, and it would be false for a player
+              sitting third in Portugal.
+            -->
             @if (playerRank(); as rank) {
               <p class="text-sm text-emerald-800/80 dark:text-emerald-300/80">
-                You're ranked #{{ rank }} on the {{ boardLabel() }} leaderboard.
+                You're ranked #{{ rank }} on the {{ rankBoardLabel() }}.
               </p>
             }
           </div>
@@ -217,6 +223,67 @@
           <app-icon name="save" [size]="15" />
           Save your score to the {{ boardLabel() }} leaderboard
         </p>
+        <!--
+          The country the entry is published under (`FEAT-028`).
+
+          **Before the name and the button, in the DOM and therefore in the tab
+          order**, because it is part of what Save publishes: a control that
+          comes after the submit button is one a keyboard reader reaches only
+          by going back past the thing they just pressed.
+
+          A native `<select>` and no `autocomplete` token: the tokens describe
+          the *user* (`CLAUDE.md` §4.5), and `country`/`country-name` mean
+          "your address", which this is not — it is which board the player has
+          chosen to compete on.
+
+          **The selection is driven by `[selected]` on each option, not by
+          `[value]` on the `<select>`.** A `[value]` binding on the element is
+          applied before the `@for` has created any options to match it, and
+          Angular does not re-apply a binding whose value has not changed — so
+          a stored declaration set the signal and never reached the DOM. The
+          control then read "Prefer not to say" while the save published
+          Brazil, which falsifies the Privacy Policy's "what is published is
+          whatever the dropdown says", and choosing "Prefer not to say"
+          silently did nothing, because it was already the selected option and
+          selecting it fires no `change`. Binding the options is what makes the
+          DOM the truth: it is evaluated as each option is created, and again
+          whenever the signal moves.
+
+          The label spells out what the value does, because the two things a
+          reader wants to know before answering are what is published and to
+          whom: the answer is "beside your name and score, on a board anyone
+          can read".
+        -->
+        <div class="mb-3">
+          <label
+            for="save-score-region"
+            class="block text-xs font-semibold text-emerald-900 dark:text-emerald-200 mb-1"
+          >
+            Country to rank in
+          </label>
+          <select
+            id="save-score-region"
+            data-cy="save-score-region"
+            name="region"
+            (change)="onRegionChange($any($event.target).value)"
+            aria-describedby="save-score-region-hint"
+            class="w-full rounded-xl border border-emerald-600/25 dark:border-emerald-400/25 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
+          >
+            <option value="" [selected]="selectedRegion() === ''">Prefer not to say</option>
+            @for (option of regionOptions; track option.code) {
+              <option [value]="option.code" [selected]="option.code === selectedRegion()">
+                {{ option.name }}
+              </option>
+            }
+          </select>
+          <p
+            id="save-score-region-hint"
+            class="mt-1 text-xs text-emerald-900/70 dark:text-emerald-200/70"
+          >
+            Published beside your name and score on that country's public board, as well as the
+            global one. Leave it unset and only the global board gets your score.
+          </p>
+        </div>
         <form (ngSubmit)="saveScore()" class="flex flex-col sm:flex-row gap-2">
           <input
             type="text"
@@ -256,17 +323,96 @@
         class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
       >
         <app-icon name="medal" [size]="18" class="text-amber-500" />
-        <!--
-          Names the board, because there is more than one now (G7). "Top 10"
-          alone would quietly imply a single global ranking and make a modest
-          score on the no-limit board look like a modest score overall.
-        -->
-        <h2
-          class="text-base font-bold text-slate-900 dark:text-slate-50"
-          data-cy="leaderboard-title"
+        <div>
+          <!--
+            Names the board, because there is more than one now (G7). "Top 10"
+            alone would quietly imply a single global ranking and make a modest
+            score on the no-limit board look like a modest score overall.
+          -->
+          <h2
+            class="text-base font-bold text-slate-900 dark:text-slate-50"
+            data-cy="leaderboard-title"
+          >
+            Top 10 — {{ boardLabel() }} games
+          </h2>
+          <!--
+            Which population is being ranked (`FEAT-028`) — eight names on a
+            country board look exactly like eight names in the world otherwise.
+
+            A second line rendered always, rather than folded into the heading
+            above, so the header is the same height whichever board is showing:
+            "Top 10 in Brazil — 15-second games" is long enough to wrap onto a
+            second line at 390px and short enough not to at 1024px, which is
+            the viewport-dependent shift `CLAUDE.md` §4.4 warns about, in the
+            one place a check at a convenient window size would call fixed.
+          -->
+          <p class="text-xs text-slate-500 dark:text-slate-400" data-cy="leaderboard-scope">
+            {{ boardScopeLabel() }}
+          </p>
+        </div>
+      </div>
+
+      <!--
+        Global / Regional (`FEAT-028`).
+
+        **Real `<input type="radio">` elements hidden with `sr-only`**, inside a
+        `role="radiogroup"` carrying an `aria-labelledby` — the same shape as
+        the pricing page's currency switch (§1.6), and for more than
+        consistency. A pair of `role="radio"` buttons has to reimplement arrow
+        keys and roving focus to behave as a radio group does; native inputs
+        already do, and `expectRadiosAreGrouped` in the e2e suite sweeps every
+        `input[type="radio"]` on a page, so building it this way puts the
+        control inside a check that already exists rather than beside one.
+
+        The group's own label is `sr-only`: the heading above already tells a
+        sighted reader which board they are on, so it needs a name in the
+        accessibility tree and nowhere else.
+
+        **Both options render in both states, with fixed labels**, and the
+        regional one is selectable with no country set. That is the size rule
+        (§4.4) and the never-blocks rule at once: a toggle that appeared once a
+        country was declared would move the board down at the moment one is, a
+        label that became "Brazil" when the preselection resolved would change
+        width under the reader a second into the page (the account chip's
+        defect, #127), and a disabled option tells the reader nothing about
+        why. Which country is being ranked is in the header's second line,
+        rendered in both states. Selecting Regional with no country set shows
+        the one-line explanation in the board's reserved space.
+      -->
+      <div
+        class="flex items-center gap-2 px-6 py-3 border-b border-slate-900/6 dark:border-white/10"
+      >
+        <span id="board-scope-label" class="sr-only">Which leaderboard to show</span>
+        <div
+          role="radiogroup"
+          aria-labelledby="board-scope-label"
+          data-cy="board-scope"
+          class="inline-flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
         >
-          Top 10 — {{ boardLabel() }} games
-        </h2>
+          @for (option of BOARD_SCOPES; track option.scope) {
+            <label
+              class="flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors"
+              [class.bg-white]="boardScope() === option.scope"
+              [class.dark:bg-slate-900]="boardScope() === option.scope"
+              [class.shadow-sm]="boardScope() === option.scope"
+              [class.text-slate-900]="boardScope() === option.scope"
+              [class.dark:text-slate-50]="boardScope() === option.scope"
+              [class.text-slate-600]="boardScope() !== option.scope"
+              [class.dark:text-slate-400]="boardScope() !== option.scope"
+            >
+              <input
+                type="radio"
+                name="board-scope"
+                class="sr-only"
+                [attr.data-cy]="'board-scope-' + option.scope"
+                [attr.value]="option.scope"
+                [checked]="boardScope() === option.scope"
+                (change)="onBoardScopeChange(option.scope)"
+              />
+              {{ option.label }}
+            </label>
+          }
+        </div>
       </div>
 
       <!--

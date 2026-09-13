@@ -184,6 +184,24 @@ export interface LeaderboardEntry {
 }
 
 /**
+ * A leaderboard entry published under a country as well as a time limit
+ * (`FEAT-028`) — `leaderboards/{timeLimit}/regions/{region}/entries/{uid}`.
+ *
+ * A separate type rather than an optional field on `LeaderboardEntry`, because
+ * the two are separate documents under separate rules: the global entry's
+ * exact-key allowlist has no `region` in it and refuses one, and the regional
+ * entry's requires it. A single optional field would compile everywhere and be
+ * refused at exactly one of the two paths.
+ *
+ * The value is the player's own declaration from the picker, never an
+ * inference — see `RegionService`.
+ */
+export interface RegionalLeaderboardEntry extends LeaderboardEntry {
+  /** ISO 3166-1 alpha-2, and equal to the `{region}` path segment. */
+  region: string;
+}
+
+/**
  * Where a submitted question sits in moderation (`BACKLOG.md` item 4).
  *
  * Only `'approved'` is reachable today — `firestore.rules`' `statusOnSubmission()`

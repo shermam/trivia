@@ -21,7 +21,12 @@ export interface AccountExport {
     createdAt: string | null;
     lastSignInAt: string | null;
   };
-  /** One entry per board the player has a score on (finding G7); empty if none. */
+  /**
+   * One entry per board the player has a score on — each timing constraint
+   * (finding G7) and each country board under it (`FEAT-028`); empty if none.
+   * A regional row carries its own `region` field, so the two are told apart
+   * without a second key.
+   */
   leaderboardEntries: Record<string, unknown>[];
   /**
    * Lifetime totals from `users/{uid}`, or an explicit `null` when the account

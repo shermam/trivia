@@ -9,6 +9,7 @@ import {
   NewCustomQuestionDoc,
   QuestionStatus,
   NewQuestionReportDoc,
+  RegionalLeaderboardEntry,
 } from '../models/question.model';
 import {
   DOCUMENT_ID_FIELD,
@@ -30,6 +31,13 @@ const USERS_COLLECTION = 'users';
  */
 const LEADERBOARDS_COLLECTION = 'leaderboards';
 const BOARD_ENTRIES_SUBCOLLECTION = 'entries';
+/**
+ * The per-country boards under each of those (`FEAT-028`):
+ * `leaderboards/{board}/regions/{region}/entries/{uid}`. A second path segment
+ * for the same reason the first one exists — filtering a `region` field would
+ * need a composite index, and D3 is what that costs when it goes wrong.
+ */
+const BOARD_REGIONS_SUBCOLLECTION = 'regions';
 const QUESTION_REPORTS_COLLECTION = 'question_reports';
 // Must agree with the {window}-{slot} arithmetic in firestore.rules'
 // sessionWindow()/the question_reports ID pattern — same contract as
@@ -258,6 +266,14 @@ function asDocumentData<T>(data: Record<string, unknown>): T {
 /** `leaderboards/{board}/entries/{uid}` — one place the path is spelled. */
 function boardEntryPath(board: string, uid: string): string {
   return `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_ENTRIES_SUBCOLLECTION}/${uid}`;
+}
+
+/** The collection a country's board ranks: `leaderboards/{board}/regions/{region}/entries`. */
+function regionEntriesPath(board: string, region: string): string {
+  return (
+    `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_REGIONS_SUBCOLLECTION}/` +
+    `${region}/${BOARD_ENTRIES_SUBCOLLECTION}`
+  );
 }
 
 /**
@@ -723,6 +739,31 @@ export class FirebaseService {
   }
 
   /**
+   * The same write on the player's own country board (`FEAT-028`).
+   *
+   * A separate document under separate rules, not a variant of the one above:
+   * the global entry's exact-key allowlist refuses a `region` key and the
+   * regional entry's requires one, so a save publishes two documents and each
+   * is validated on its own terms. Both path segments come off the entry for
+   * the same reason `saveHighScore` takes the board off `timeLimit` — the
+   * fields the rules compare against the path cannot be passed inconsistently
+   * from here.
+   *
+   * Rejected independently of the global write, too. The improving-score check
+   * reads `resource.data` at this path, so a player whose global best already
+   * stands can still be first in their own country, and a player who has moved
+   * country starts from nothing on the new board — which is why the caller
+   * attempts both rather than gating one on the other.
+   */
+  async saveRegionalHighScore(entry: RegionalLeaderboardEntry): Promise<void> {
+    await this.rest.setDocument(
+      `${regionEntriesPath(entry.timeLimit, entry.region)}/${entry.uid}`,
+      { ...entry },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
+    );
+  }
+
+  /**
    * The caller's own leaderboard row, or null if they have never saved one.
    *
    * Exists so a rejected save can be *explained* rather than guessed at: the
@@ -784,10 +825,37 @@ export class FirebaseService {
    * subcollections — see `LEADERBOARDS_COLLECTION` above.
    */
   getTopScores(board: string, topN = 10): Observable<LeaderboardEntry[]> {
+    return this.topScoresAt(
+      `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_ENTRIES_SUBCOLLECTION}`,
+      topN,
+    );
+  }
+
+  /**
+   * The top `topN` of one country's board (`FEAT-028`).
+   *
+   * The same query one path segment deeper, and deliberately the same shape:
+   * `orderBy('score','desc').limit(n)` is served by Firestore's automatic
+   * single-field index on any collection, so a board per country adds no index
+   * and cannot repeat D3.
+   */
+  getRegionalTopScores(board: string, region: string, topN = 10): Observable<LeaderboardEntry[]> {
+    return this.topScoresAt(regionEntriesPath(board, region), topN);
+  }
+
+  /**
+   * The shared shape of both board reads.
+   *
+   * A bounded read with no `where`, which is the one place `CLAUDE.md` §4.1
+   * sanctions that: "the top ten of this collection" has no subset to name, so
+   * the `orderBy` is what makes the `limit` mean something rather than
+   * returning ten arbitrary rows.
+   */
+  private topScoresAt(collectionPath: string, topN: number): Observable<LeaderboardEntry[]> {
     return defer(() =>
       this.rest.runQuery(
         {
-          collectionPath: `${LEADERBOARDS_COLLECTION}/${board}/${BOARD_ENTRIES_SUBCOLLECTION}`,
+          collectionPath,
           orderBy: [{ field: 'score', direction: 'DESCENDING' }],
           limit: topN,
         },

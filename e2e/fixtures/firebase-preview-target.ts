@@ -190,6 +190,26 @@ export const previewTarget: FirebaseTarget = {
     // nothing seeded, so the sweep has to visit the union of both.
     const leaderboardUids = new Set([...created.authUids, ...created.leaderboardUids]);
 
+    /*
+     * Which country boards exist on the real project, asked rather than
+     * guessed (`FEAT-028`).
+     *
+     * A saved score now writes a second document under whatever country the
+     * picker was set to, and on a preview channel that is decided by the
+     * runner's own IP and time zone — so the sweep cannot know the country in
+     * advance and must not have to. `listDocuments()` is the call that finds
+     * these at all: nothing writes `regions/{region}`, so every country board
+     * is a missing parent with an `entries` subcollection under it, invisible
+     * to a `get()` and to a query alike. Same reasoning, and the same call, as
+     * `deleteAccount`'s own sweep in `functions/src/leaderboards.ts`.
+     */
+    const regionsByBoard = await Promise.all(
+      LEADERBOARD_BOARDS.map(async (board) => ({
+        board,
+        regions: await firestore.collection(`leaderboards/${board}/regions`).listDocuments(),
+      })),
+    );
+
     await Promise.all([
       ...[...created.authUids].flatMap((uid) => [
         attempt(
@@ -226,6 +246,18 @@ export const previewTarget: FirebaseTarget = {
           attempt(
             `leaderboards/${board}/entries/${uid}`,
             firestore.doc(`leaderboards/${board}/entries/${uid}`).delete(),
+          ),
+        ),
+      ),
+      // Every country board that exists, for every uid this run touched — the
+      // same union, one path segment deeper.
+      ...[...leaderboardUids].flatMap((uid) =>
+        regionsByBoard.flatMap(({ board, regions }) =>
+          regions.map((region) =>
+            attempt(
+              `leaderboards/${board}/regions/${region.id}/entries/${uid}`,
+              firestore.doc(`leaderboards/${board}/regions/${region.id}/entries/${uid}`).delete(),
+            ),
           ),
         ),
       ),

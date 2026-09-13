@@ -686,6 +686,75 @@ describe('FirebaseService leaderboard', () => {
   });
 });
 
+/**
+ * The per-country boards (`FEAT-028`), one path segment below the ones above.
+ *
+ * Both halves of the path are pinned here because `firestore.rules` compares
+ * both against fields on the document: `timeLimit` against the board segment
+ * and `region` against the country segment. A path assembled from anything but
+ * the entry itself could disagree with them, and the whole write would be
+ * refused with a bare `permission-denied`.
+ */
+describe('FirebaseService regional leaderboards (FEAT-028)', () => {
+  const ENTRY = {
+    uid: 'user-1',
+    name: 'Ada',
+    score: 8,
+    totalQuestions: 10,
+    percentage: 80,
+    createdAt: 1_755_000_000_000,
+    timeLimit: '30',
+    region: 'BR',
+  };
+
+  it('writes the entry under both path segments its own fields name', async () => {
+    const { service, writes } = setup([]);
+
+    await service.saveRegionalHighScore(ENTRY);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].path).toBe('leaderboards/30/regions/BR/entries/user-1');
+    expect(writes[0].method).toBe('PATCH');
+  });
+
+  it('sends region as a string beside the same integer fields', async () => {
+    const { service, writes } = setup([]);
+
+    await service.saveRegionalHighScore(ENTRY);
+
+    expect(writes[0].fields).toEqual({
+      uid: { stringValue: 'user-1' },
+      name: { stringValue: 'Ada' },
+      score: { integerValue: '8' },
+      totalQuestions: { integerValue: '10' },
+      percentage: { integerValue: '80' },
+      createdAt: { integerValue: '1755000000000' },
+      timeLimit: { stringValue: '30' },
+      region: { stringValue: 'BR' },
+    });
+  });
+
+  it('reads one country board, same bounded shape as the global one', async () => {
+    const seed: SeedDoc[] = [
+      { id: 'a', data: { ...ENTRY, uid: 'a', score: 3 } },
+      { id: 'b', data: { ...ENTRY, uid: 'b', score: 9 } },
+    ];
+    const { service, queries } = setup(seed);
+
+    const top = await firstValueFrom(service.getRegionalTopScores('unlimited', 'PT', 10));
+
+    expect(top.map((entry) => entry.uid)).toEqual(['b', 'a']);
+    expect(queries[0].collectionPath).toBe('leaderboards/unlimited/regions/PT/entries');
+    expect(queries[0].limit).toBe(10);
+    // The same `orderBy` as the global board, which is the reason a board per
+    // country needs no index of its own: Firestore's automatic single-field
+    // index on `score` serves it in any collection.
+    expect(queries[0].orderBy).toEqual([
+      { field: { fieldPath: 'score' }, direction: 'DESCENDING' },
+    ]);
+  });
+});
+
 describe('FirebaseService.addCustomQuestion (item 3: the hourly quota)', () => {
   const question = () => ({
     ...makeQuestion(),
