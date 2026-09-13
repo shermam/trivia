@@ -384,7 +384,18 @@ export class ReviewQueueComponent implements OnInit {
         this.questions.update((all) =>
           all.map((q) =>
             q.id === question.id
-              ? { ...q, status, ...(reason ? { rejectionReason: reason } : {}) }
+              ? {
+                  ...q,
+                  status,
+                  // Same form as the reports branch above, and for a sharper
+                  // reason here: the spread has to *overwrite* the old note
+                  // rather than leave it, because `reasonFor()` falls back to
+                  // the row's stored value once the draft is cleared and the
+                  // textarea's `[value]` binding would put the old text
+                  // straight back on screen — under an announcement saying it
+                  // had been cleared.
+                  rejectionReason: reason || undefined,
+                }
               : q,
           ),
         );

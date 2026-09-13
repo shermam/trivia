@@ -925,5 +925,13 @@ describe('ReviewQueueComponent rejected tab, rendered', () => {
     await settle();
 
     expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
+    // ...and the box stays empty. The draft is deleted once the write lands, so
+    // `reasonFor()` falls back to the row's own value and the `[value]` binding
+    // rewrites the textarea from it — which put the old note back on screen
+    // under an announcement saying it had been cleared. The write was right and
+    // the screen was wrong, which is the worst version of this to debug.
+    expect(host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!.value).toBe(
+      '',
+    );
   });
 });
