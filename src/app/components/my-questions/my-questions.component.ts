@@ -136,11 +136,29 @@ export class MyQuestionsComponent implements OnInit {
     return this.questions().length === 0 ? 'empty' : 'loaded';
   });
 
-  /** Announced on every outcome — an edit and a removal both mutate the list under the reader. */
+  /**
+   * Announced on every outcome — an edit and a removal both mutate the list
+   * under the reader, which is silent to assistive tech otherwise.
+   *
+   * There is deliberately no page-level *error* signal beside it. Both writes
+   * are made from inside a dialog and both report their failure into that
+   * dialog (`dialogError`), where the reader already is and where the retry
+   * is: an error banner behind the dialog would be one nobody is looking at.
+   */
   protected readonly actionResult = signal('');
-  protected readonly actionError = signal<string | null>(null);
 
   protected readonly dialog = signal<OpenDialog | null>(null);
+
+  /**
+   * Whether *this row's* dialog of *this kind* is the one showing, for the
+   * trigger's `aria-expanded`. Per row rather than per page: every row has its
+   * own Edit and Remove, so a bare "a dialog is open" would announce every
+   * trigger on the screen as expanded whenever any one of them was.
+   */
+  protected isDialogOpenFor(kind: OpenDialog['kind'], question: MyQuestion): boolean {
+    const open = this.dialog();
+    return open?.kind === kind && open.question.id === question.id;
+  }
   protected readonly isSaving = signal(false);
   protected readonly dialogError = signal<string | null>(null);
   protected readonly validationSummary = signal<string | null>(null);
@@ -148,6 +166,11 @@ export class MyQuestionsComponent implements OnInit {
   /** The shared question form, filled from the row being edited. */
   protected readonly form = createQuestionForm(this.fb);
 
+  /**
+   * The block of stacked messages. Focus target twice over: when a retry hides
+   * the button it was called from, and when a dialog closes onto a row that no
+   * longer exists — see `retry()` and the focus effect.
+   */
   private readonly statusBlock = viewChild<ElementRef<HTMLElement>>('statusBlock');
   private readonly dialogElement = viewChild<ElementRef<HTMLElement>>('dialogElement');
   private wasDialogOpen = false;
@@ -205,11 +228,21 @@ export class MyQuestionsComponent implements OnInit {
 
       if (!isOpen && this.wasDialogOpen) {
         const opener = this.dialogOpener;
+        const fallback = this.statusBlock();
         this.dialogOpener = null;
         queueMicrotask(() => {
           if (opener?.isConnected) {
             opener.focus();
+            return;
           }
+          // The opener is gone, which is the *expected* path for a removal:
+          // confirming it deletes the row the button lived on. Focus asked to
+          // stay on a detached element drops silently to `<body>`
+          // (`CLAUDE.md` §4.5), sending a keyboard user back to the top of the
+          // document — so it goes to the status block instead, which is
+          // present in every state and carries the sentence that says what
+          // just happened.
+          fallback?.nativeElement.focus();
         });
       }
 
@@ -307,7 +340,6 @@ export class MyQuestionsComponent implements OnInit {
     this.dialogOpener = event.currentTarget as HTMLElement | null;
     this.dialogError.set(null);
     this.validationSummary.set(null);
-    this.actionError.set(null);
     patchQuestionForm(this.form, question);
     this.dialog.set({ kind: 'edit', question });
   }
@@ -315,7 +347,6 @@ export class MyQuestionsComponent implements OnInit {
   protected openRemove(question: MyQuestion, event: Event): void {
     this.dialogOpener = event.currentTarget as HTMLElement | null;
     this.dialogError.set(null);
-    this.actionError.set(null);
     this.dialog.set({ kind: 'remove', question });
   }
 

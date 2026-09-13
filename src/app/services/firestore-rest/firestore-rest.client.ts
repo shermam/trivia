@@ -465,7 +465,17 @@ export class FirestoreRestClient {
     if (!response.ok) {
       throw await toResponseError(response);
     }
-    return (await response.json()) as T;
+    // A successful DELETE answers `{}`, and a 204 or a proxy that strips the
+    // body answers with nothing at all — on which `json()` throws a
+    // SyntaxError. Thrown from here that would report a delete the server has
+    // *already done* as a failure, and the retry would then 404. The response
+    // was `ok`, so the absence of a body is the answer rather than an error:
+    // every caller that reads one is on a verb that always sends one.
+    try {
+      return (await response.json()) as T;
+    } catch {
+      return {} as T;
+    }
   }
 }
 

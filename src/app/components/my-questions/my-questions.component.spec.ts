@@ -571,4 +571,64 @@ describe('MyQuestionsComponent rendered', () => {
 
     expect(query('[data-cy="remove-question-dialog"]')).toBeNull();
   });
+
+  it('announces both triggers as opening a dialog, and only the open one as expanded', async () => {
+    // `aria-haspopup` + `aria-expanded` are the disclosure contract
+    // (`CLAUDE.md` §4.5), and the expanded state is per row: every row has its
+    // own pair of buttons, so a page-level "a dialog is open" would announce
+    // every trigger on screen as expanded whenever any one of them was.
+    const { query, click } = await render({
+      questions: [myQuestion('q1'), myQuestion('q2')],
+    });
+
+    const editTriggers = () =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-cy="edit-question"]'));
+    for (const trigger of editTriggers()) {
+      expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    }
+    expect(query('[data-cy="remove-question"]')?.getAttribute('aria-haspopup')).toBe('dialog');
+
+    await click('[data-cy="edit-question"]');
+
+    expect(editTriggers()[0].getAttribute('aria-expanded')).toBe('true');
+    // The other row's Edit, and this row's Remove, are not the open dialog.
+    expect(editTriggers()[1].getAttribute('aria-expanded')).toBe('false');
+    expect(query('[data-cy="remove-question"]')?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  /**
+   * Focus on close, both ways round.
+   *
+   * The interesting half is the second: confirming a removal deletes the row
+   * the opener lived on, so the restore has nothing to go back to, and focus
+   * asked to stay on a detached element drops silently to `<body>` — a
+   * keyboard user returned to the top of the document with no announcement
+   * (`CLAUDE.md` §4.5). jsdom enforces that much, because a detached node
+   * genuinely cannot take focus.
+   */
+  it('returns focus to the trigger when a dialog is cancelled', async () => {
+    const { query, click, fixture } = await render();
+    await click('[data-cy="edit-question"]');
+    const opener = query('[data-cy="edit-question"]')!;
+
+    await click('[data-cy="cancel-edit"]');
+    await settle();
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('falls back to the status block when the trigger row has just been removed', async () => {
+    const { query, click, fixture } = await render();
+    await click('[data-cy="remove-question"]');
+
+    await click('[data-cy="confirm-remove"]');
+    await settle();
+    fixture.detectChanges();
+
+    expect(query('[data-cy="my-question"]')).toBeNull();
+    expect(document.activeElement).toBe(query('[data-cy="my-questions-status"]'));
+    expect(document.activeElement).not.toBe(document.body);
+  });
 });

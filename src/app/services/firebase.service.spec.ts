@@ -1088,6 +1088,23 @@ describe('FirebaseService.updateUserQuestion / deleteUserQuestion (FEAT-007)', (
     expect(writes[0].path).toBe('custom_questions/mine');
   });
 
+  /**
+   * A 204, or a proxy that strips the body, leaves nothing for `json()` to
+   * parse. Reporting that as a failed removal would be wrong twice over: the
+   * server has already deleted the document, and the retry it invites answers
+   * 404. `ok` with no body is the answer, not an error.
+   */
+  it('treats a successful delete with no response body as done', async () => {
+    const { service } = setup(seed);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+    } as never);
+
+    await expect(service.deleteUserQuestion('mine')).resolves.toBeUndefined();
+  });
+
   it('propagates a refused removal rather than reporting success', async () => {
     const { service } = setup(seed, () => 'permission-denied');
 

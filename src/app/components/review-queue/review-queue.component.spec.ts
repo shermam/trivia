@@ -808,3 +808,122 @@ describe('ReviewQueueComponent rejection reasons', () => {
     expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
   });
 });
+
+/**
+ * The Rejected tab, rendered (`FEAT-007`).
+ *
+ * `firestore.rules` deliberately lets a reviewer attach or change a reason on a
+ * question they have **already** rejected. That was unreachable in the first
+ * cut: the reason box rendered on every card, so on this tab it pre-filled with
+ * the stored note and read as editable, while the button that would have sent
+ * it was hidden as a no-op — leaving Approve, which discards what was typed
+ * *and* clears the stored reason. A widened rule with no control that reaches
+ * it is a rule nobody can use.
+ */
+describe('ReviewQueueComponent rejected tab, rendered', () => {
+  const setQuestionStatus = vi.fn(() => Promise.resolve());
+
+  async function renderRejected(rejected: Q[]) {
+    setQuestionStatus.mockClear();
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: FirebaseService,
+          useValue: {
+            getQuestionsByStatus: (status: QuestionStatus) =>
+              of(status === 'rejected' ? rejected : []),
+            setQuestionStatus,
+          },
+        },
+        {
+          provide: ReviewerService,
+          useValue: { isReviewer: signal(true), isResolved: signal(true) },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(ReviewQueueComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    host.querySelector<HTMLElement>('[data-cy="review-tab"][data-status="rejected"]')!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    return {
+      fixture,
+      host,
+      settle: async () => {
+        await fixture.whenStable();
+        fixture.detectChanges();
+      },
+    };
+  }
+
+  const rejectedQuestion = () =>
+    question('p1', { status: 'rejected', rejectionReason: 'The date is wrong.' });
+
+  it('offers a control that reaches the write, labelled for what it does there', async () => {
+    const { host } = await renderRejected([rejectedQuestion()]);
+
+    const button = host.querySelector<HTMLElement>('[data-cy="reject-question"]');
+    expect(button).not.toBeNull();
+    expect(button?.textContent?.trim()).toBe('Update reason');
+    // Approve stays, because approving a rejected question is still a decision
+    // a reviewer makes from here.
+    expect(host.querySelector('[data-cy="approve-question"]')).not.toBeNull();
+  });
+
+  it('sends the edited reason without moving the question out of the tab', async () => {
+    const { host, settle } = await renderRejected([rejectedQuestion()]);
+
+    const box = host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!;
+    expect(box.value).toBe('The date is wrong.');
+    box.value = 'The date is wrong, and the source says so.';
+    box.dispatchEvent(new Event('input'));
+    await settle();
+
+    host.querySelector<HTMLElement>('[data-cy="reject-question"]')!.click();
+    await settle();
+
+    expect(setQuestionStatus).toHaveBeenCalledWith(
+      'p1',
+      'rejected',
+      'The date is wrong, and the source says so.',
+    );
+    // The row still belongs to the tab it was decided in — dropping it, which
+    // is right for every decision that moves a question, would make it vanish
+    // from the list it is still a member of.
+    expect(host.querySelectorAll('[data-cy="review-question"]')).toHaveLength(1);
+  });
+
+  // "Question marked rejected" about a question that was already rejected
+  // narrates something that did not happen (`CLAUDE.md` §4.4).
+  it('announces a reason update as an update, not as a decision', async () => {
+    const { host, settle } = await renderRejected([rejectedQuestion()]);
+
+    host.querySelector<HTMLElement>('[data-cy="reject-question"]')!.click();
+    await settle();
+
+    const status = Array.from(host.querySelectorAll('[role="status"]'))
+      .map((node) => node.textContent?.trim())
+      .filter(Boolean);
+    expect(status).toContain('Reason updated.');
+  });
+
+  it('clears the note when the box is emptied deliberately', async () => {
+    const { host, settle } = await renderRejected([rejectedQuestion()]);
+
+    const box = host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!;
+    box.value = '';
+    box.dispatchEvent(new Event('input'));
+    await settle();
+
+    host.querySelector<HTMLElement>('[data-cy="reject-question"]')!.click();
+    await settle();
+
+    expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
+  });
+});

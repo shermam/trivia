@@ -112,15 +112,6 @@
          list under the reader, which is silent to assistive tech otherwise. -->
     <p role="status" class="sr-only">{{ actionResult() }}</p>
 
-    @if (actionError()) {
-      <p
-        role="alert"
-        class="mb-4 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
-      >
-        {{ actionError() }}
-      </p>
-    }
-
     @if (questions().length > 0) {
       <ul class="space-y-4">
         <!-- Tracked by the document id, never by the question text: two
@@ -204,10 +195,21 @@
               </div>
             }
 
+            <!--
+              Both triggers open a real `role="dialog"`, so both carry
+              `aria-haspopup="dialog"` and an `aria-expanded` that tracks
+              whether *this row's* dialog is the one showing — same contract as
+              game-over's report dialog (`CLAUDE.md` §4.5). The state is
+              per-row rather than per-page: every row has its own pair of
+              buttons, and a bare `dialog() !== null` would announce all of
+              them as expanded whenever any one was.
+            -->
             <div class="flex gap-2 mt-4">
               <button
                 type="button"
                 data-cy="edit-question"
+                aria-haspopup="dialog"
+                [attr.aria-expanded]="isDialogOpenFor('edit', question)"
                 (click)="openEdit(question, $event)"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
@@ -217,6 +219,8 @@
               <button
                 type="button"
                 data-cy="remove-question"
+                aria-haspopup="dialog"
+                [attr.aria-expanded]="isDialogOpenFor('remove', question)"
                 (click)="openRemove(question, $event)"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border border-red-200 dark:border-red-500/25 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
               >

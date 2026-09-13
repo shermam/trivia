@@ -374,13 +374,37 @@ export class ReviewQueueComponent implements OnInit {
               : row,
           ),
         );
+      } else if (status === view) {
+        // The decision did not move the question out of the tab it is being
+        // read in, so the row stays and is updated in place. Only one write
+        // does this — "Update reason" on the Rejected tab, which exists
+        // because the rules deliberately allow a reason to be attached to a
+        // question already rejected — but filtering unconditionally would make
+        // the row vanish from the list it still belongs to.
+        this.questions.update((all) =>
+          all.map((q) =>
+            q.id === question.id
+              ? { ...q, status, ...(reason ? { rejectionReason: reason } : {}) }
+              : q,
+          ),
+        );
       } else {
         // Drop the row locally rather than refetching: the reviewer's next
         // decision should not wait on a round trip, and the row no longer
         // belongs in the tab they are looking at.
         this.questions.update((all) => all.filter((q) => q.id !== question.id));
       }
-      this.actionResult.set(`Question marked ${status}.`);
+      // Announced, so the reviewer is told what happened rather than inferring
+      // it from a row that moved. A write that leaves the status where it was
+      // is a reason update, and saying "marked rejected" about a question that
+      // was already rejected narrates something that did not happen.
+      this.actionResult.set(
+        question.status === status && status === 'rejected'
+          ? reason
+            ? 'Reason updated.'
+            : 'Reason cleared.'
+          : `Question marked ${status}.`,
+      );
     } catch {
       this.actionError.set('Could not save that decision. Please try again.');
     } finally {

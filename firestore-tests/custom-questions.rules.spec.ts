@@ -9,8 +9,11 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  documentId,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
   setDoc,
   updateDoc,
@@ -858,7 +861,25 @@ describe('custom_questions: nobody but the author or a reviewer may write', () =
 describe('custom_questions: an author reads their own, whatever the status (FEAT-007)', () => {
   const AUTHOR = 'author-uid';
 
-  const mine = (ctx: RulesTestContext) => query(questions(ctx), where('createdBy', '==', AUTHOR));
+  /**
+   * The query `/my-questions` actually sends, order and bound included, rather
+   * than the `where` clause alone.
+   *
+   * The difference matters because Firestore decides whether a rule is provable
+   * from the **whole** query: an `orderBy` on a field the filter does not
+   * mention narrows the result set to documents that *have* that field, and a
+   * test built from a simpler query can pass for a shape the app never sends.
+   * `FirebaseService.getUserQuestions` is the thing this stands in for — if the
+   * two drift, this row keeps passing while the screen is refused.
+   */
+  const mine = (ctx: RulesTestContext) =>
+    query(
+      questions(ctx),
+      where('createdBy', '==', AUTHOR),
+      orderBy('createdAt', 'desc'),
+      orderBy(documentId(), 'desc'),
+      limit(25),
+    );
 
   beforeEach(async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
