@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DEFAULT_TIME_LIMIT, GameConfig, TimeLimitOption } from '../../models/question.model';
 import { ConnectivityService } from '../../services/connectivity.service';
 import {
@@ -23,6 +23,22 @@ import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 
+/** What `createDonationSession` sends the browser back to `/` carrying. */
+type DonationQueryStatus = 'success' | 'cancelled' | null;
+
+/**
+ * That value if it is one of the two the redirect can carry, and `null`
+ * otherwise.
+ *
+ * Narrowed rather than cast: the query string is whatever the address bar
+ * says, so a cast would let `?donation=anything` through typed as a state the
+ * template then has to render — a runtime type only one consumer checks is a
+ * type nobody checks (`CLAUDE.md` §4.4).
+ */
+function donationStatusFrom(value: string | null): DonationQueryStatus {
+  return value === 'success' || value === 'cancelled' ? value : null;
+}
+
 @Component({
   selector: 'app-game-setup',
   standalone: true,
@@ -35,6 +51,7 @@ export class GameSetupComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly triviaService = inject(TriviaService);
   protected readonly gameController = inject(GameControllerService);
   protected readonly subscriptionService = inject(SubscriptionService);
@@ -46,6 +63,22 @@ export class GameSetupComponent implements OnInit {
 
   protected readonly categories = signal<TriviaCategory[]>([]);
   protected readonly categoriesError = signal<string | null>(null);
+
+  /**
+   * Where Stripe sent the reader back from a donation, if that is why they are
+   * here — `/?donation=success` or `/?donation=cancelled`, the same shape
+   * `/pricing` already uses for a subscription.
+   *
+   * Read once from the snapshot, at construction, for two reasons. It is only
+   * ever meaningful on the initial landing rather than on later in-app
+   * navigation; and reading it before the first paint is what makes the banner
+   * part of the first frame instead of something that appears a beat later and
+   * pushes the card down (`CLAUDE.md` §4.4). Dismissing it is a deliberate act
+   * by the reader, which is the one case a resize is theirs to expect.
+   */
+  protected readonly donationStatus = signal<DonationQueryStatus>(
+    donationStatusFrom(this.route.snapshot.queryParamMap.get('donation')),
+  );
 
   protected readonly form = this.fb.nonNullable.group({
     // Max 25, matching the options actually offered below. It was 50, which
@@ -64,6 +97,11 @@ export class GameSetupComponent implements OnInit {
    * "No limit" is what the player is choosing; `'unlimited'` is what the
    * leaderboard path calls it.
    */
+  protected dismissDonationStatus(): void {
+    this.donationStatus.set(null);
+    void this.router.navigate([], { queryParams: {}, replaceUrl: true });
+  }
+
   protected readonly timeLimitOptions: { value: TimeLimitOption; label: string }[] = [
     { value: 15, label: '15 seconds' },
     { value: 30, label: '30 seconds' },

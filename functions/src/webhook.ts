@@ -7,6 +7,7 @@ import {
   syncPriceToFirestore,
   syncProductToFirestore,
 } from './products';
+import { recordDonation } from './donations';
 import { isEventForThisEnvironment } from './environment';
 import {
   currentProjectId,
@@ -81,6 +82,9 @@ export const stripeWebhook = onRequest(
             event.data.object as Stripe.Subscription,
             event.created,
           );
+          break;
+        case 'checkout-completed':
+          await recordDonation(event.data.object as Stripe.Checkout.Session, event.created);
           break;
         case 'product-sync':
           await syncProductToFirestore(event.data.object as Stripe.Product, event.created);

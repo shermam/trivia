@@ -3,12 +3,15 @@ import {
   Component,
   EventEmitter,
   Output,
+  computed,
   effect,
   inject,
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { NavigationEnd, Router, RouterLink } from '@angular/router';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { filter, map } from 'rxjs';
 import {
   AuthService,
   OAUTH_PROVIDER_LABELS,
@@ -17,10 +20,12 @@ import {
   SECONDARY_OAUTH_PROVIDERS,
 } from '../../services/auth.service';
 import { AccountService } from '../../services/account.service';
+import { DonationDialogStateService } from '../../services/donation-dialog-state.service';
 import {
   SubscriptionService,
   subscriptionFailureMessage,
 } from '../../services/subscription.service';
+import { isGameplayRoute } from '../../utils/gameplay-route.util';
 import { IconComponent } from '../icon/icon.component';
 import { ProviderIconComponent } from './provider-icon.component';
 
@@ -38,6 +43,8 @@ export class AuthMenuComponent {
   protected readonly authService = inject(AuthService);
   protected readonly subscriptionService = inject(SubscriptionService);
   private readonly accountService = inject(AccountService);
+  private readonly donationDialog = inject(DonationDialogStateService);
+  private readonly router = inject(Router);
 
   @Output() closeRequested = new EventEmitter<void>();
 
@@ -67,6 +74,38 @@ export class AuthMenuComponent {
       const user = this.authService.user();
       this.nameDraft.set(user?.displayName ?? '');
     });
+  }
+
+  /**
+   * The current URL as a signal, seeded with the one the app started on — the
+   * same reason `FooterComponent` seeds its own: a reader who lands directly
+   * on `/play` has produced no `NavigationEnd` yet, and that is exactly the
+   * route the donation entry is excluded from.
+   */
+  private readonly url = toSignal(
+    this.router.events.pipe(
+      filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+      map((event) => event.urlAfterRedirects),
+      takeUntilDestroyed(),
+    ),
+    { initialValue: this.router.url },
+  );
+
+  /**
+   * Whether to offer the donation entry. Excluded from the active quiz round,
+   * matching the footer's CTA — the exclusion is about the screen, not about
+   * which control it is reached from.
+   */
+  protected readonly showsDonateEntry = computed(() => !isGameplayRoute(this.url()));
+
+  /**
+   * Opens the dialog the footer hosts, and closes this panel on the way: two
+   * `role="dialog"` elements open at once is not a state to leave a screen
+   * reader in.
+   */
+  protected openDonationDialog(): void {
+    this.donationDialog.open();
+    this.closeRequested.emit();
   }
 
   protected toggleEmailFormMode(): void {

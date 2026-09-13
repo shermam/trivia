@@ -5,7 +5,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import type Stripe from 'stripe';
 import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
-import { buildAccountExport } from './account-export';
+import { buildAccountExport, timestampToIso } from './account-export';
 import { LEADERBOARD_BOARDS, leaderboardPathsFor } from './leaderboards';
 
 /**
@@ -84,24 +84,34 @@ export const exportAccountData = onCall(async (request) => {
   const customerRef = firestore.collection('customers').doc(uid);
 
   try {
-    const [user, leaderboard, stats, questions, customer, subscriptions, checkouts, portals] =
-      await Promise.all([
-        getAuth().getUser(uid),
-        // One read per board. A player can hold an entry on each timing
-        // constraint since G7, and an export that returned only one of them
-        // would be an incomplete answer to a data-access request.
-        Promise.all(
-          LEADERBOARD_BOARDS.map((board) =>
-            firestore.doc(`leaderboards/${board}/entries/${uid}`).get(),
-          ),
+    const [
+      user,
+      leaderboard,
+      stats,
+      questions,
+      customer,
+      subscriptions,
+      checkouts,
+      portals,
+      donations,
+    ] = await Promise.all([
+      getAuth().getUser(uid),
+      // One read per board. A player can hold an entry on each timing
+      // constraint since G7, and an export that returned only one of them
+      // would be an incomplete answer to a data-access request.
+      Promise.all(
+        LEADERBOARD_BOARDS.map((board) =>
+          firestore.doc(`leaderboards/${board}/entries/${uid}`).get(),
         ),
-        firestore.collection('users').doc(uid).get(),
-        firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
-        customerRef.get(),
-        customerRef.collection('subscriptions').get(),
-        customerRef.collection('checkout_sessions').get(),
-        customerRef.collection('portal_sessions').get(),
-      ]);
+      ),
+      firestore.collection('users').doc(uid).get(),
+      firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
+      customerRef.get(),
+      customerRef.collection('subscriptions').get(),
+      customerRef.collection('checkout_sessions').get(),
+      customerRef.collection('portal_sessions').get(),
+      customerRef.collection('donations').get(),
+    ]);
 
     return buildAccountExport({
       user,
@@ -121,9 +131,14 @@ export const exportAccountData = onCall(async (request) => {
       gameplayStats: stats.exists ? (stats.data() as Record<string, unknown>) : null,
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
+      // Serialised rather than passed through: `supporterSince` is a Firestore
+      // `Timestamp`, and an export is JSON handed straight to the person who
+      // asked for it — `{"_seconds":…}` answers nothing they asked.
+      supporterSince: timestampToIso(customer.data()?.['supporterSince']),
       subscriptions: subscriptions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       checkoutSessions: checkouts.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       portalSessions: portals.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      donations: donations.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
     });
   } catch (error) {
     logger.error(`Failed to export account data for ${uid}`, error);
@@ -197,7 +212,13 @@ async function deleteCustomerRecord(uid: string): Promise<void> {
   const firestore = getFirestore();
   const customerRef = firestore.collection('customers').doc(uid);
 
-  for (const name of ['checkout_sessions', 'portal_sessions', 'subscriptions']) {
+  for (const name of [
+    'checkout_sessions',
+    'donation_sessions',
+    'portal_sessions',
+    'subscriptions',
+    'donations',
+  ]) {
     const snapshot = await customerRef.collection(name).get();
     // A document's subcollections are not deleted with it — deleting the
     // parent alone would orphan these, leaving them readable by nobody and
