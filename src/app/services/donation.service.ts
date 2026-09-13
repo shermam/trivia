@@ -276,12 +276,23 @@ export class DonationService {
    * on every idle glance.
    */
   async startDonation(): Promise<void> {
+    // **Waits for the session rather than requiring one to be there already.**
+    // The donation is written as a document owned by this uid, so there is no
+    // version of this that proceeds without one — and since the bootstrap
+    // moved after first paint (`FEAT-017` §3.2) a reader who opens the dialog
+    // from the footer and clicks straight through can arrive before the
+    // anonymous session does. `DonationDialogStateService.open()` starts it so
+    // this is normally already resolved; the await is what makes a fast click
+    // wait a moment instead of being refused. Idempotent, and it swallows its
+    // own failures rather than rejecting.
+    await this.authService.ensureSignedIn();
     const uid = this.authService.user()?.uid;
     if (!uid) {
-      // Every page load signs in anonymously, so this is the first second of a
-      // cold start rather than a state anybody sits in. Saying so beats naming
-      // a cause that is not the reader's (`CLAUDE.md` §4.4).
-      throw new SubscriptionError('Still starting up — try that again in a moment.');
+      // Not "still starting up" any more: the bootstrap has been awaited, so
+      // the only way to be here is that auth could not be reached at all.
+      // Generic, because this cannot tell offline from misconfigured and a
+      // message must not narrate a cause it did not check (`CLAUDE.md` §4.4).
+      throw new SubscriptionError('Could not start the donation. Please try again.');
     }
     const priceId = this.selectedPriceIdSignal();
     if (!priceId) {

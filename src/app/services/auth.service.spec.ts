@@ -496,6 +496,49 @@ describe('AuthService entitlement signals', () => {
 
     expect(service.isProUser()).toBe(true);
   });
+
+  /**
+   * `proStatusReady` is what tells the difference between "not a subscriber"
+   * and "we have not looked yet" — two situations `isProUser()` renders
+   * identically as `false`.
+   *
+   * It matters because `authReady()` is not a substitute: that flips the
+   * instant `onAuthStateChanged` delivers a user, and the claim is read off
+   * that user's ID token afterwards. Since `FEAT-017` §3.2 the whole sequence
+   * starts after first paint, so the gap is long enough for a paying
+   * subscriber to be shown the free tier's upsell in it (`CLAUDE.md` §4.4).
+   */
+  it('does not claim to know the entitlement until the claim has been read', async () => {
+    const service = setup();
+    h.state.claims = { stripeRole: 'pro' };
+    h.state.persistedUser = fakeUser();
+
+    expect(service.proStatusReady(), 'nothing has looked yet').toBe(false);
+
+    await service.ensureSignedIn();
+    await settle();
+
+    expect(service.proStatusReady()).toBe(true);
+    await expect(service.whenProStatusReady()).resolves.toBeUndefined();
+  });
+
+  /**
+   * The branch a waiter's liveness depends on. `DailyGameLimitService` awaits
+   * `whenProStatusReady()` before refusing a player their sixth game, so an
+   * entitlement that never settles is a game that never starts — the failure
+   * would be an app that hangs on Start with no network rather than one that
+   * plays offline.
+   */
+  it('settles the entitlement even when auth can never load', async () => {
+    const service = setup({ appUnreachable: true });
+
+    await service.ensureSignedIn();
+    await settle();
+
+    expect(service.proStatusReady()).toBe(true);
+    expect(service.isProUser()).toBe(false);
+    await expect(service.whenProStatusReady()).resolves.toBeUndefined();
+  });
 });
 
 describe('AuthService OAuth upgrade fallbacks', () => {

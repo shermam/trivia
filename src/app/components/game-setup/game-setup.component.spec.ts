@@ -13,8 +13,23 @@ import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaService } from '../../services/trivia.service';
 import { GameSetupComponent } from './game-setup.component';
 
-function setup() {
+/**
+ * `allowance` is what `DailyGameLimitService` is currently reporting. The
+ * default is a fresh day, and the interesting combination is `hasGamesLeft`
+ * true with `remaining` at zero — the window in which the count has landed and
+ * the entitlement behind it has not.
+ */
+function setup(
+  allowance: { isUnlimited?: boolean; hasGamesLeft?: boolean; remaining?: number } = {},
+) {
   const startGame = vi.fn<(config: GameConfig) => Promise<void>>(() => Promise.resolve());
+  const dailyLimit = {
+    isUnlimited: signal(allowance.isUnlimited ?? false),
+    hasGamesLeft: signal(allowance.hasGamesLeft ?? true),
+    remaining: signal(allowance.remaining ?? DAILY_FREE_GAME_LIMIT),
+    refresh: vi.fn(() => Promise.resolve()),
+    consumeGame: vi.fn(() => Promise.resolve(true)),
+  };
 
   TestBed.configureTestingModule({
     providers: [
@@ -31,19 +46,10 @@ function setup() {
           limitReached: signal(false),
         },
       },
-      // Stubbed rather than left real: these tests are about the config the
-      // form emits, and the real service would open IndexedDB to answer a
-      // question they do not ask.
-      {
-        provide: DailyGameLimitService,
-        useValue: {
-          isUnlimited: signal(false),
-          hasGamesLeft: signal(true),
-          remaining: signal(DAILY_FREE_GAME_LIMIT),
-          refresh: vi.fn(() => Promise.resolve()),
-          consumeGame: vi.fn(() => Promise.resolve(true)),
-        },
-      },
+      // Stubbed rather than left real: the real service would open IndexedDB
+      // and read the `stripeRole` claim to answer a question these tests hand
+      // it the answer to.
+      { provide: DailyGameLimitService, useValue: dailyLimit },
       { provide: TriviaService, useValue: { getCategories: () => Promise.resolve([]) } },
       { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
       { provide: ConnectivityService, useValue: { isOnline: signal(true) } },
@@ -57,7 +63,7 @@ function setup() {
 
   const fixture = TestBed.createComponent(GameSetupComponent);
   fixture.detectChanges();
-  return { fixture, startGame };
+  return { fixture, startGame, dailyLimit };
 }
 
 /** Picks an option the way a player does — through the DOM, not through `setValue`. */
@@ -139,6 +145,40 @@ describe('GameSetupComponent — the config it emits (B11)', () => {
     expect(typeof config.difficulty).toBe('string');
     expect(config.source).toBe('open_trivia');
     expect(config.timeLimit).toBe(15);
+    fixture.destroy();
+  });
+});
+
+/**
+ * Which of the two controls the screen ends on, and what decides it.
+ *
+ * Since `FEAT-017` §3.2 the `stripeRole` claim can be up to two seconds behind
+ * the IndexedDB count, so `hasGamesLeft()` is deliberately optimistic until the
+ * entitlement is known and the template has to key the control on **that**
+ * rather than on the count beside it. Keying it on the count instead — which
+ * reads identically for a free player — would show the free tier's upsell to a
+ * subscriber and then swap a ~120px card for a ~50px button underneath their
+ * cursor (`CLAUDE.md` §4.4).
+ */
+describe('GameSetupComponent — the daily allowance', () => {
+  const card = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector('[data-cy="daily-limit-reached"]');
+  const startButton = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector('button[type="submit"]');
+
+  it('offers Start while the entitlement is unknown, with the count already spent', () => {
+    const { fixture } = setup({ hasGamesLeft: true, remaining: 0 });
+
+    expect(card(fixture), 'no upsell before we know whether this player has paid').toBeNull();
+    expect(startButton(fixture)).not.toBeNull();
+    fixture.destroy();
+  });
+
+  it('shows the upsell once the entitlement is known and the count is spent', () => {
+    const { fixture } = setup({ hasGamesLeft: false, remaining: 0 });
+
+    expect(card(fixture)).not.toBeNull();
+    expect(startButton(fixture)).toBeNull();
     fixture.destroy();
   });
 });

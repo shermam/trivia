@@ -161,6 +161,53 @@ export class AuthService {
   // this doesn't have to wait for the token's natural ~1hr refresh.
   private readonly stripeRoleSignal = signal<string | null>(null);
 
+  /**
+   * Whether the `stripeRole` claim above has been *looked at* yet — as
+   * distinct from what it says.
+   *
+   * `authReady()` is not this. It flips as soon as `onAuthStateChanged`
+   * delivers a user, and the claim is read from that user's ID token a beat
+   * later, so there is a real window in which auth is "ready" and a paying
+   * subscriber still reads as not Pro. That window used to be invisible
+   * because everything auth-shaped resolved during bootstrap; since the
+   * bootstrap moved off the critical path (`FEAT-017` §3.2) it is up to two
+   * seconds long, and anything that renders one thing for a subscriber and
+   * another for a free player has to wait for this rather than for
+   * `authReady()`, or it shows the free-tier answer to somebody who paid
+   * (`CLAUDE.md` §4.4 — default to the least alarming outcome while the data
+   * is still loading).
+   *
+   * True also means "and the answer may be nobody": a failed bootstrap and a
+   * signed-out visitor both settle here, because in both cases the claim is
+   * as known as it is ever going to be.
+   */
+  private readonly proStatusReadySignal = signal(false);
+
+  /** Resolves `proStatusReadyPromise`; declared first so the field below can capture it. */
+  private resolveProStatusReady: () => void = () => undefined;
+
+  /**
+   * The promise half of `proStatusReady`, for a caller that has to make a
+   * decision rather than render one.
+   *
+   * A deferred rather than "await `authStateReady()`, then await the claim
+   * read", which is the obvious shape and is subtly racy: `authStateReady()`
+   * resolves as soon as `auth.currentUser` is populated, while the SDK
+   * delivers `onAuthStateChanged` to its own listeners in a microtask — so the
+   * listener that *starts* the claim read is not guaranteed to have run, and a
+   * waiter can sail past a read that has not begun. Resolved wherever
+   * `proStatusReadySignal` is set (`markProStatusReady`), so the promise and
+   * the signal cannot disagree.
+   *
+   * It settles on the **first** answer, which is the window this exists for —
+   * the seconds after a cold load. A later sign-in re-reads the claim and
+   * moves the signal, and a caller mid-flight there is inside a round trip it
+   * just initiated rather than inside a bootstrap it never saw.
+   */
+  private readonly proStatusReadyPromise = new Promise<void>((resolve) => {
+    this.resolveProStatusReady = resolve;
+  });
+
   // `signOut()` immediately re-anonymizes (see below), but Firebase always
   // fires `onAuthStateChanged(null)` for the sign-out itself before the
   // follow-up anonymous sign-in's callback lands. Without suppressing that
@@ -171,6 +218,7 @@ export class AuthService {
 
   readonly user = this.userSignal.asReadonly();
   readonly authReady = this.authReadySignal.asReadonly();
+  readonly proStatusReady = this.proStatusReadySignal.asReadonly();
   readonly isProUser = computed(() => this.stripeRoleSignal() === 'pro');
 
   readonly isAnonymous = computed(() => this.user()?.isAnonymous ?? false);
@@ -250,6 +298,10 @@ export class AuthService {
         // "we know the answer, and the answer may be nobody". Everything
         // gating on it wants the second meaning — see `docs/app.md`.
         this.authReadySignal.set(true);
+        // Same reasoning one level down: there is no claim coming either, and
+        // a consumer waiting to be told what the entitlement is would wait
+        // forever rather than fall back to the free-tier answer.
+        this.markProStatusReady();
       });
     }
     return this.authPromise;
@@ -492,6 +544,7 @@ export class AuthService {
   private async loadStripeRoleClaim(authModule: AuthModule, user: User | null): Promise<void> {
     if (!user) {
       this.stripeRoleSignal.set(null);
+      this.markProStatusReady();
       return;
     }
     try {
@@ -499,7 +552,37 @@ export class AuthService {
       this.stripeRoleSignal.set((result.claims['stripeRole'] as string | undefined) ?? null);
     } catch {
       this.stripeRoleSignal.set(null);
+    } finally {
+      // `finally`, because a failed read is still an answer: "not Pro, as far
+      // as anyone can tell". Leaving it unset would hang every consumer that
+      // waits for the entitlement to be known on a transient token error.
+      this.markProStatusReady();
     }
+  }
+
+  /** The one place the entitlement stops being unknown, in both of its forms. */
+  private markProStatusReady(): void {
+    this.proStatusReadySignal.set(true);
+    this.resolveProStatusReady();
+  }
+
+  /**
+   * Resolves once the `stripeRole` claim has been read for whoever is signed
+   * in — the promise form of `proStatusReady`, for a caller that has to make a
+   * decision rather than render one.
+   *
+   * Starts the bootstrap if nothing else has, since the caller is asking a
+   * question only the bootstrap can answer, and swallows its failures for the
+   * same reason `whenAuthStateReady()` does: a caller that cannot reach auth
+   * should go on with the free-tier answer, not reject. The runtime-config
+   * fetch is bounded by its own `AbortSignal.timeout`, so a connection that
+   * never settles *there* still resolves this; the one half nothing bounds is
+   * the `firebase/auth` chunk import stalling without failing, which is the
+   * same exposure every other consumer of the bootstrap already has.
+   */
+  async whenProStatusReady(): Promise<void> {
+    await this.whenAuthStateReady();
+    await this.proStatusReadyPromise;
   }
 
   /**

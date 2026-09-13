@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -64,10 +65,45 @@ function readRaw(): Promise<unknown> {
 
 const today = () => localDateKey(new Date());
 
-function configure(isPro: boolean, db?: Partial<OfflineDbService>): DailyGameLimitService {
+/**
+ * The entitlement half of the stub, which is a *timeline* rather than a
+ * boolean since `FEAT-017` §3.2 moved the auth bootstrap off the critical
+ * path: the count is a local IndexedDB read and lands at once, while the
+ * `stripeRole` claim behind `isProUser` can be up to two seconds behind it. A
+ * stub that answers both instantly cannot express the window this service now
+ * has rules about, so it would pass against either behaviour.
+ */
+function entitlement(isPro: boolean, knownUpFront = true) {
+  const pro = signal(isPro);
+  const known = signal(knownUpFront);
+  let settleKnown: () => void = () => undefined;
+  const knownPromise = new Promise<void>((resolve) => {
+    settleKnown = resolve;
+  });
+  if (knownUpFront) {
+    settleKnown();
+  }
+  return {
+    isProUser: () => pro(),
+    isProStatusKnown: () => known(),
+    whenProStatusKnown: () => knownPromise,
+    /** The claim landing: what reading it off the ID token eventually does. */
+    settle(nowPro: boolean): void {
+      pro.set(nowPro);
+      known.set(true);
+      settleKnown();
+    },
+  };
+}
+
+function configure(
+  isPro: boolean,
+  db?: Partial<OfflineDbService>,
+  subscription: ReturnType<typeof entitlement> = entitlement(isPro),
+): DailyGameLimitService {
   TestBed.configureTestingModule({
     providers: [
-      { provide: SubscriptionService, useValue: { isProUser: () => isPro } },
+      { provide: SubscriptionService, useValue: subscription },
       ...(db ? [{ provide: OfflineDbService, useValue: db }] : []),
     ],
   });
@@ -231,6 +267,81 @@ describe('DailyGameLimitService', () => {
     it('defers entirely to isProUser, so it cannot be broader than the claim', () => {
       expect(service.isUnlimited()).toBe(false);
       expect(service.remaining()).toBe(DAILY_FREE_GAME_LIMIT);
+    });
+  });
+
+  /**
+   * The window `FEAT-017` §3.2 opened: the count is here and the claim is not.
+   *
+   * A subscriber reloading `/` past their fifth game of the day would otherwise
+   * be shown the free tier's upsell card — "that's your 5 free games for today"
+   * — and watch it turn back into the Start button a second or two later.
+   * `CLAUDE.md` §4.4: while the data a state depends on is still loading,
+   * render the least alarming outcome, then decide.
+   */
+  describe('while the entitlement is still loading', () => {
+    it('offers the game rather than the upsell, whatever the count says', async () => {
+      await putRaw({ id: DAILY_LIMIT_KEY, date: today(), count: DAILY_FREE_GAME_LIMIT });
+      TestBed.resetTestingModule();
+      const pending = entitlement(false, false);
+      const pro = configure(false, undefined, pending);
+      await pro.refresh();
+
+      // The count is spent and known to be, and the offer stands anyway.
+      expect(pro.remaining()).toBe(0);
+      expect(pro.hasGamesLeft()).toBe(true);
+
+      // …and stops standing the moment the claim says free rather than Pro,
+      // which is what makes the assertion above about the *pending* state
+      // rather than about an optimism that never resolves.
+      pending.settle(false);
+      expect(pro.hasGamesLeft()).toBe(false);
+    });
+
+    it('lets a subscriber play the sixth game, once the claim arrives to say so', async () => {
+      await putRaw({ id: DAILY_LIMIT_KEY, date: today(), count: DAILY_FREE_GAME_LIMIT });
+      TestBed.resetTestingModule();
+      const pending = entitlement(false, false);
+      const pro = configure(false, undefined, pending);
+      await pro.refresh();
+
+      // The refusal is not taken while the claim could still overturn it.
+      const decision = pro.consumeGame();
+      pending.settle(true);
+
+      expect(await decision).toBe(true);
+    });
+
+    it('still refuses a free player once the claim confirms it', async () => {
+      await putRaw({ id: DAILY_LIMIT_KEY, date: today(), count: DAILY_FREE_GAME_LIMIT });
+      TestBed.resetTestingModule();
+      const pending = entitlement(false, false);
+      const free = configure(false, undefined, pending);
+      await free.refresh();
+
+      const decision = free.consumeGame();
+      pending.settle(false);
+
+      expect(await decision).toBe(false);
+      expect(free.hasGamesLeft()).toBe(false);
+    });
+
+    /**
+     * The other half of the same rule, and the reason the wait above is in the
+     * last branch rather than at the top of `consumeGame`: a player who still
+     * has allowance does not need to know the answer, and making them wait for
+     * it would put the Firebase bootstrap back on the path of starting a game.
+     */
+    it('spends a game without waiting for a claim that cannot change the answer', async () => {
+      TestBed.resetTestingModule();
+      const pending = entitlement(false, false);
+      const free = configure(false, undefined, pending);
+      await free.refresh();
+
+      // Nothing settles the entitlement here — this resolving at all is the
+      // assertion. A `whenProStatusKnown()` on the happy path would hang.
+      expect(await free.consumeGame()).toBe(true);
+      expect(free.remaining()).toBe(DAILY_FREE_GAME_LIMIT - 1);
     });
   });
 });

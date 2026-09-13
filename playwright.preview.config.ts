@@ -44,7 +44,7 @@ export default defineConfig<object, E2EWorkerOptions>({
 
   /**
    * The slice that is safe against a real, persistent, publicly-readable
-   * project: all of `unauthenticated/` bar the two below, plus the two
+   * project: all of `unauthenticated/` bar the four below, plus the two
    * authenticated specs whose entire footprint is accounts and rows the sweep
    * can delete.
    *
@@ -97,10 +97,12 @@ export default defineConfig<object, E2EWorkerOptions>({
   ],
 
   /**
-   * Replaces the base config's list, which exists to keep
-   * `service-worker-oauth-origins.spec.ts` off the emulator. Here it is the one
-   * spec that can actually run: it needs a real `ngsw-worker.js` and the real
-   * `firebase.json` headers served with it, and a dev server has neither.
+   * Replaces the base config's list, which exists to keep the two
+   * service-worker specs off the emulator. Here they are the two that can
+   * actually run: `service-worker-oauth-origins.spec.ts` needs a real
+   * `ngsw-worker.js` and the real `firebase.json` headers served with it, and
+   * `service-worker-precache.spec.ts` needs the install a real `ngsw.json`
+   * drives. A dev server has none of those.
    */
   testIgnore: [
     /*
@@ -137,6 +139,20 @@ export default defineConfig<object, E2EWorkerOptions>({
      * the emulator already has.
      */
     '**/unauthenticated/question-dedup.spec.ts',
+    /*
+     * Emulator-only because its premise is "there is no service worker", and
+     * on a deployed channel that is true only by accident. The spec cuts the
+     * network and expects the app's own Open Trivia request to fail — but
+     * `context.setOffline(true)` does not reach a worker's fetches, so with one
+     * registered the request is re-issued and succeeds, the offline pool is
+     * never reached, and the assertion fails on a banner that had no reason to
+     * appear. Nothing registers a worker here today (`app.config.ts` gates it
+     * on `!navigator.webdriver`), which makes it pass for a reason no future
+     * spec in this directory is obliged to preserve. `ci-cd.md` §4.3 records
+     * the split; the precache half of the question is
+     * `service-worker-precache.spec.ts`, which belongs here and only here.
+     */
+    '**/unauthenticated/offline-play.spec.ts',
   ],
 
   use: {

@@ -332,6 +332,13 @@
         resolves would move the Start button down the screen at the exact moment
         the reader is looking at it, and hiding it for Pro would move it back up
         again. One row, one height, only the sentence inside it changes.
+
+        Keyed on the count, not on `hasGamesLeft()`, which is deliberately
+        optimistic while the entitlement is still loading (see the service).
+        What the count states — how much of today's free allowance this device
+        has spent — is a fact about the device, true whichever way the claim
+        lands, and it occupies one line in every wording. The control below
+        makes a claim about the *player*, and that one cannot be guessed at.
       -->
       <p
         class="mb-3 text-center text-xs text-slate-500 dark:text-slate-400"
@@ -339,7 +346,7 @@
       >
         @if (dailyLimit.isUnlimited()) {
           Unlimited games with Pro.
-        } @else if (dailyLimit.hasGamesLeft()) {
+        } @else if (dailyLimit.remaining() > 0) {
           {{ dailyLimit.remaining() }} of {{ dailyGameLimit }} free games left today.
         } @else {
           No free games left today.

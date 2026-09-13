@@ -93,7 +93,29 @@ export class DailyGameLimitService {
       : Math.max(0, DAILY_FREE_GAME_LIMIT - this.played()),
   );
 
-  readonly hasGamesLeft = computed(() => this.remaining() > 0);
+  /**
+   * **Optimistic until the entitlement is known**, and that is the point of it
+   * rather than a rounding error.
+   *
+   * The count comes from IndexedDB, which answers in a millisecond; whether
+   * this player is exempt from it comes from the `stripeRole` claim, which
+   * since `FEAT-017` §3.2 answers up to two seconds later. Reading the two
+   * together the moment the first lands shows a **subscriber** the free tier's
+   * "that's your 5 free games for today" card and then replaces it with the
+   * Start button when the claim arrives — a ~120px box becoming a ~50px one
+   * under the reader's cursor, and an upsell shown to somebody who has already
+   * paid. `CLAUDE.md` §4.4: while the data a state depends on is still
+   * loading, default to the least alarming outcome.
+   *
+   * The optimism costs nothing it should not, because this gates the *offer*
+   * and not the allowance: `consumeGame()` waits for the same answer before
+   * refusing anybody, so a free player past their limit who clicks Start
+   * inside that window is still refused — and refused into the same card,
+   * which is where the two paths meet.
+   */
+  readonly hasGamesLeft = computed(
+    () => !this.subscription.isProStatusKnown() || this.remaining() > 0,
+  );
 
   /** Loads today's count into the signal. Safe to call more than once. */
   async refresh(): Promise<void> {
@@ -106,6 +128,16 @@ export class DailyGameLimitService {
    * The signal moves first and the write follows, so the UI never waits on
    * IndexedDB to show a number the player has already earned by starting a
    * game. A failed write costs the count, not the game.
+   *
+   * **Waiting for the entitlement happens only where the entitlement can
+   * change the answer**, which is the last branch and nowhere else. Since
+   * `FEAT-017` §3.2 the claim can be up to two seconds behind the count, and
+   * awaiting it unconditionally would put the Firebase bootstrap back on the
+   * path of starting a game — the one interaction this screen exists for, in
+   * the very release that took it off the critical path. A player with
+   * allowance left does not need to know: spending one is the same act either
+   * way, and the worst case is a subscriber whose counter ticks up during the
+   * window and is then ignored for the rest of the day.
    */
   async consumeGame(): Promise<boolean> {
     if (this.isUnlimited()) {
@@ -114,15 +146,24 @@ export class DailyGameLimitService {
 
     const today = localDateKey(new Date());
     const played = await this.read();
-    if (played >= DAILY_FREE_GAME_LIMIT) {
-      this.played.set(played);
-      return false;
+    if (played < DAILY_FREE_GAME_LIMIT) {
+      const next = played + 1;
+      this.played.set(next);
+      await this.write({ id: DAILY_LIMIT_KEY, date: today, count: next });
+      return true;
     }
 
-    const next = played + 1;
-    this.played.set(next);
-    await this.write({ id: DAILY_LIMIT_KEY, date: today, count: next });
-    return true;
+    // Out of free games *if* this is a free player, and the claim is the only
+    // thing left that can say otherwise — so this is where it is worth waiting
+    // for. It resolves rather than rejects when auth is unreachable, so an
+    // offline player is treated as free rather than blocked, and it is bounded
+    // by the runtime-config fetch's own timeout.
+    await this.subscription.whenProStatusKnown();
+    if (this.isUnlimited()) {
+      return true;
+    }
+    this.played.set(played);
+    return false;
   }
 
   private async read(): Promise<number> {

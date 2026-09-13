@@ -234,8 +234,9 @@ function geoStub(country: string | null = null, server?: Promise<string | null>)
 function configure(
   user: unknown,
   geo: Pick<GeoService, 'timeZoneCountry' | 'knownCountry' | 'resolveCountry'> = geoStub(),
-  options: { authReady?: boolean } = {},
+  options: { authReady?: boolean; signsInAs?: unknown } = {},
 ) {
+  const userSignal = signal(user);
   TestBed.configureTestingModule({
     providers: [
       {
@@ -245,9 +246,18 @@ function configure(
       {
         provide: AuthService,
         useValue: {
-          user: signal(user),
+          user: userSignal,
           authReady: signal(options.authReady ?? true),
           getIdToken: () => Promise.resolve('id-token'),
+          // The real one mints an anonymous session if there is none and
+          // resolves either way, never rejecting. `signsInAs` is what that
+          // produces here — omitted, it is a bootstrap that has already run (or
+          // one that failed and left nobody signed in).
+          ensureSignedIn: vi.fn(async () => {
+            if (options.signsInAs !== undefined) {
+              userSignal.set(options.signsInAs);
+            }
+          }),
         },
       },
       { provide: GeoService, useValue: geo },
@@ -670,6 +680,25 @@ describe('DonationService handshake', () => {
     await service.loadPresets();
 
     await expect(service.startDonation()).rejects.toThrow(SubscriptionError);
+  });
+
+  /**
+   * The regression `FEAT-017` §3.2 introduced and `E2E (preview)`'s emulator
+   * twin caught: with the auth bootstrap moved after first paint, a reader who
+   * opens the donation dialog from the footer on `/` and clicks straight
+   * through arrives **before** the anonymous session does, and was told "still
+   * starting up" for a state they had done nothing to cause. The uid is not
+   * optional here — it owns the document the handshake writes — so the fix is
+   * to wait for it rather than to require it to have arrived already.
+   */
+  it('waits for the anonymous session instead of refusing a click that beat it', async () => {
+    const fake = fakeFirestore({ products: [donationProduct(usdPresets)] });
+    const service = configure(null, geoStub(), { signsInAs: { uid: 'anon-1', isAnonymous: true } });
+    await service.loadPresets();
+
+    await service.startDonation();
+
+    expect(fake.writes[0].path).toMatch(new RegExp('^customers/anon-1/donation_sessions/'));
   });
 });
 
