@@ -58,6 +58,23 @@ const LAZY_GROUP = 'deferred-routes';
  */
 const GAME_ROUTE_CHUNKS = ['game-setup.component-', 'quiz-loop.component-', 'game-over.component-'];
 
+/**
+ * Chunk names precached on purpose although no game route statically imports
+ * them, so the unclassified check below does not flag them every build.
+ *
+ * `index.esm` is Firebase's own entry-chunk name, and the build emits three of
+ * them — `firebase/app`, `firebase/auth` and `firebase/functions` — which no
+ * glob can tell apart, since all that distinguishes them is a content hash.
+ * Two are worth the install: restoring a signed-in session is a *local* read
+ * (Auth's persistence is IndexedDB), so a returning player who opens the app
+ * with no network sees their own account rather than a "Sign in" chip. The
+ * third, `firebase/functions` at 8 kB raw, comes along because naming it
+ * separately is not possible and demoting all three is the only alternative.
+ * A route the player has never visited buys nothing comparable, which is the
+ * line this list is drawn on.
+ */
+const DELIBERATELY_PREFETCHED = ['index.esm'];
+
 function fail(message) {
   console.error(`✗ ${message}`);
   process.exit(1);
@@ -145,27 +162,59 @@ if (demoted.length > 0) {
   );
 }
 
-const unclassified = files
-  .filter((file) => /\.component-[^.]+\.js$/.test(file))
-  .filter((file) => !needed.has(file) && !lazy.has(`/${file}`))
-  .sort();
+/**
+ * Every chunk the catch-all is precaching that the offline game does not need,
+ * split into the ones somebody chose and the ones nobody can address.
+ *
+ * The name is what decides which: `namedChunks` gives a chunk belonging to one
+ * lazy entry a readable one, and leaves a chunk **shared** between two of them
+ * as `chunk-<hash>.js`, because it belongs to no single route and no glob can
+ * pick it out. So a nameable chunk in neither list is a decision that was not
+ * made and the build stops; an anonymous one is the technique's known limit
+ * and is reported by size instead, so it stays visible rather than becoming
+ * folklore.
+ *
+ * Files with no content hash at all — `theme-init.js`, `ngsw-worker.js`, the
+ * two Angular safety workers — are copied from `public/` rather than emitted
+ * by the bundler, so they are not chunks and none of this applies to them.
+ */
+const HASHED_CHUNK = /^(.+)-[A-Za-z0-9_-]{8}\.js$/;
+
+/** The deliberate entries **and what they statically import**, which is prefetched with them. */
+const intentional = closure(
+  files.filter((file) => DELIBERATELY_PREFETCHED.includes(HASHED_CHUNK.exec(file)?.[1])),
+);
+
+const unclassified = [];
+const unnameable = [];
+for (const file of files.sort()) {
+  const name = HASHED_CHUNK.exec(file)?.[1];
+  if (name === undefined || needed.has(file) || intentional.has(file) || lazy.has(`/${file}`)) {
+    continue;
+  }
+  (name === 'chunk' ? unnameable : unclassified).push(file);
+}
+
 if (unclassified.length > 0) {
   fail(
-    `These route chunks are neither reachable from a game route nor named by the ` +
-      `'${LAZY_GROUP}' group, so they are being precached by the catch-all:\n    ` +
+    `These chunks are neither reachable from a game route nor named by the '${LAZY_GROUP}' ` +
+      `group, so the catch-all is precaching them for every visitor:\n    ` +
       `${unclassified.join('\n    ')}\n  Add each to ngsw-config.json's '${LAZY_GROUP}' globs ` +
-      `(the install then skips it and the worker caches it on first visit), or say here why the ` +
-      `offline game needs it.`,
+      `(the install then skips it and the worker caches it on first request), or — if the ` +
+      `offline game really does need it, or it is fetched on every load like Firebase — add its ` +
+      `name to DELIBERATELY_PREFETCHED here with the reason.`,
   );
 }
 
-const bytes = (urls) =>
-  [...urls]
-    .filter((url) => url.endsWith('.js'))
-    .reduce((total, url) => total + readFileSync(join(DIST, url.slice(1))).length, 0);
+const bytes = (paths) =>
+  paths.reduce((total, path) => total + readFileSync(join(DIST, path)).length, 0);
+
+const lazyBytes = bytes([...lazy].filter((url) => url.endsWith('.js')).map((url) => url.slice(1)));
+const residueBytes = bytes(unnameable);
 
 console.log(
   `✓ Service worker precache scoped: ${needed.size} chunks offline play needs are all in ` +
-    `'${PREFETCH_GROUP}'; ${lazy.size} route chunks (${bytes(lazy).toLocaleString()} bytes raw) ` +
-    `install lazily.`,
+    `'${PREFETCH_GROUP}'; ${lazy.size} route chunks (${lazyBytes.toLocaleString()} bytes raw) ` +
+    `install lazily; ${unnameable.length} shared chunk(s) (${residueBytes.toLocaleString()} bytes ` +
+    `raw) are precached because no glob can name them.`,
 );

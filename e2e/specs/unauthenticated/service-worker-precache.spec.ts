@@ -127,6 +127,12 @@ test.describe('Service worker precache scope', () => {
     expect(deferredUrls, 'the manifest names the deferred route chunks').toHaveLength(
       DEFERRED_CHUNKS.length,
     );
+    // Read once rather than polled, deliberately, and it is the one place in
+    // this spec where that is right: polling an assertion that something is
+    // *absent* would only wait for it to appear (`CLAUDE.md` §4.6). The
+    // install is already known to have finished — the polled positive above
+    // says so — so this instant is the one at which "still not cached" means
+    // something.
     expect(await cachedStates(deferredUrls)).toEqual(
       Object.fromEntries(deferredUrls.map((url) => [url, false])),
     );

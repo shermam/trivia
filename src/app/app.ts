@@ -54,17 +54,27 @@ export class App {
      * the browser need never keep: a page that stays busy would leave the
      * account chip on its loading state indefinitely. Two seconds is the
      * deadline by which auth starts regardless — long enough to be after the
-     * route on a slow device, short enough that nobody waits on it. Same
-     * idiom, and the same fallback for a browser without the API, as
-     * `TriviaService.initOfflinePrefetch()`.
+     * route on a slow device, short enough that nobody waits on it. The same
+     * shape as `TriviaService.initOfflinePrefetch()`, deliberately with
+     * shorter bounds: that one is topping a cache up and can afford ten
+     * seconds of idle and a two-second fallback, while this one gates what the
+     * account chip shows.
      *
      * **Neither is a startup dependency of the other work bootstrap does.**
      * `AuthService.getAuth()` is memoised and lazy: any consumer that needs
-     * auth — `whenAuthStateReady()`, `getIdToken()`, the account chip's own
-     * sign-in click — triggers the same bootstrap itself. This call only
-     * decides how *early* an anonymous session is minted, not whether one is,
-     * so nothing downstream waits longer than it would have; `authReady()`
-     * means exactly what it meant before.
+     * auth — `whenAuthStateReady()`, `getIdToken()`, opening the auth menu
+     * (`AuthMenuStateService`, which starts it explicitly for exactly this
+     * reason) — triggers the same bootstrap itself. This call only decides how
+     * *early* an anonymous session is minted, not whether one is, so nothing
+     * downstream waits longer than it would have; `authReady()` means exactly
+     * what it meant before.
+     *
+     * **No teardown, and the reason is the root component's lifetime rather
+     * than an oversight** (`CLAUDE.md` §4.4 wants one or the other written
+     * down; `SubscriptionService`'s idle prime makes the same call). `App` is
+     * destroyed only when the whole application is, so the window in which a
+     * cancel could matter does not exist: there is no later state for a stale
+     * callback to corrupt, and the page is going away with it.
      */
     afterNextRender(() => {
       const start = () => {

@@ -67,6 +67,10 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolea
     authReady: signal(auth.authReady ?? true),
     isAnonymous: signal(auth.isAnonymous ?? true),
     isFullyAuthenticated: signal(auth.isFullyAuthenticated ?? false),
+    // Opening the auth menu starts the bootstrap that `FEAT-017` §3.2 deferred
+    // (`AuthMenuStateService`, provided for real below), so the stub has to
+    // answer that call — these tests are about focus and layout, not auth.
+    ensureSignedIn: vi.fn(() => Promise.resolve()),
   };
   TestBed.configureTestingModule({
     imports: [TopBarComponent],

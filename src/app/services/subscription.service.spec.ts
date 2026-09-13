@@ -365,9 +365,12 @@ function configure(
   user: unknown,
   hasProClaim = false,
   geo: Pick<GeoService, 'timeZoneCountry' | 'knownCountry' | 'resolveCountry'> = geoStub(),
-  options: { fullyAuthenticated?: boolean } = {},
+  options: { fullyAuthenticated?: boolean; proStatusReady?: boolean } = {},
 ) {
   const refreshIdToken = vi.fn(() => Promise.resolve());
+  // The claim has been read by default — the pending case is `FEAT-017` §3.2's
+  // post-paint bootstrap window, and only the test about it asks for it.
+  const proStatusReady = signal(options.proStatusReady ?? true);
   // Defaults to what the real signal would say for this user — signed in and
   // not anonymous — so only a test about the *unverified* case has to say so.
   // It gates pre-creation, and a stub that always said `true` would let a
@@ -385,6 +388,8 @@ function configure(
           user: signal(user),
           isProUser: signal(hasProClaim),
           isFullyAuthenticated: signal(options.fullyAuthenticated ?? isRealUser),
+          proStatusReady,
+          whenProStatusReady: () => Promise.resolve(),
           refreshIdToken,
           getIdToken: () => Promise.resolve('id-token'),
         },
@@ -392,7 +397,7 @@ function configure(
       { provide: GeoService, useValue: geo },
     ],
   });
-  return { service: TestBed.inject(SubscriptionService), refreshIdToken };
+  return { service: TestBed.inject(SubscriptionService), refreshIdToken, proStatusReady };
 }
 
 /** Lets the effect's read and any queued microtasks land before asserting. */
@@ -1277,6 +1282,31 @@ describe('SubscriptionService entitlement signal', () => {
     fakeFirestore({ subscriptionDocs: [{ status: 'trialing', role: 'basic' }] });
     const { service } = configure(user);
     await flush();
+    expect(service.isProUser()).toBe(false);
+  });
+
+  /**
+   * `isProUser()` reads `false` both for a free player and for a subscriber
+   * nobody has looked up yet, and since `FEAT-017` §3.2 the second lasts until
+   * the post-paint bootstrap has read the claim. `isProStatusKnown` is how a
+   * screen tells them apart instead of rendering the free-tier answer at
+   * somebody who paid (`CLAUDE.md` §4.4) — it is the claim's own readiness,
+   * because the subscription document behind the other half of `isProUser` can
+   * only ever turn this answer from false to true later.
+   */
+  it('reports whether the entitlement is an answer yet, not just what it says', async () => {
+    fakeFirestore({ subscriptionDocs: [] });
+    const { service, proStatusReady } = configure(user, false, geoStub(), {
+      proStatusReady: false,
+    });
+    await flush();
+
+    expect(service.isProUser()).toBe(false);
+    expect(service.isProStatusKnown()).toBe(false);
+
+    proStatusReady.set(true);
+
+    expect(service.isProStatusKnown()).toBe(true);
     expect(service.isProUser()).toBe(false);
   });
 

@@ -8,13 +8,22 @@ import { AuthService } from './services/auth.service';
 import { RouteAnnouncerService } from './services/route-announcer.service';
 import { TriviaService } from './services/trivia.service';
 
-/** The providers `App` needs to stand up at all, plus the background task no unit test wants. */
+/** The providers `App` needs to stand up at all, plus the background tasks no unit test wants. */
 async function configureAppTestBed(): Promise<void> {
   // Real background prefetch schedules a timer + a real opentdb.com fetch (see
   // TriviaService.initOfflinePrefetch) — neither belongs in a unit test.
   vi.spyOn(TriviaService.prototype, 'initOfflinePrefetch').mockImplementation(() => {
     /* intentional no-op */
   });
+  // And the auth bootstrap, which since `FEAT-017` §3.2 is scheduled behind a
+  // timer rather than called from the constructor. Under jsdom that is a real
+  // 500ms `setTimeout` (no `requestIdleCallback` there), and every one of
+  // these tests finishes long before it fires — so today it lands after the
+  // fixture is gone, into a dynamic `firebase/auth` import that fails and is
+  // swallowed. Stubbed rather than left to chance: the fallback is a number
+  // somebody may shorten, and a suite whose green depends on out-running a
+  // timer is green by ordering luck.
+  vi.spyOn(AuthService.prototype, 'ensureSignedIn').mockResolvedValue(undefined);
 
   await TestBed.configureTestingModule({
     imports: [App],

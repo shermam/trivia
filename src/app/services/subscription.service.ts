@@ -346,6 +346,29 @@ export class SubscriptionService {
     () => this.authService.isProUser() || this.hasActiveSubscriptionDocSignal(),
   );
 
+  /**
+   * Whether `isProUser` above is an answer yet, rather than a default.
+   *
+   * It reads `false` in two different situations — "not a subscriber" and "we
+   * have not looked" — and since the auth bootstrap moved off the critical
+   * path (`FEAT-017` §3.2) the second one lasts up to two seconds on a screen
+   * a subscriber is looking at. Anything that renders the free-tier branch has
+   * to check this first, or it tells a paying customer they are out of free
+   * games (`CLAUDE.md` §4.4).
+   *
+   * Keyed on the claim, which is what the overwhelming majority of Pro loads
+   * answer from: a returning subscriber's cached token already carries it. The
+   * subscription-document half of `isProUser` exists for the minutes between
+   * paying and the claim being minted, and it can only ever flip this signal's
+   * answer from false to true later — never the alarming way round.
+   */
+  readonly isProStatusKnown = computed(() => this.authService.proStatusReady());
+
+  /** The promise form, for a decision that cannot be re-rendered later. */
+  whenProStatusKnown(): Promise<void> {
+    return this.authService.whenProStatusReady();
+  }
+
   constructor() {
     effect(() => {
       const user = this.authService.user();
