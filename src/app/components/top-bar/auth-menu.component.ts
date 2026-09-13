@@ -25,6 +25,7 @@ import {
   SubscriptionService,
   subscriptionFailureMessage,
 } from '../../services/subscription.service';
+import { isGameplayRoute } from '../../utils/gameplay-route.util';
 import { IconComponent } from '../icon/icon.component';
 import { ProviderIconComponent } from './provider-icon.component';
 
@@ -95,9 +96,7 @@ export class AuthMenuComponent {
    * matching the footer's CTA — the exclusion is about the screen, not about
    * which control it is reached from.
    */
-  protected readonly showsDonateEntry = computed(
-    () => this.url().split('?')[0].split('#')[0] !== '/play',
-  );
+  protected readonly showsDonateEntry = computed(() => !isGameplayRoute(this.url()));
 
   /**
    * Opens the dialog the footer hosts, and closes this panel on the way: two

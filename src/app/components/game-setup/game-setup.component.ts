@@ -26,6 +26,19 @@ import { LogoComponent } from '../logo/logo.component';
 /** What `createDonationSession` sends the browser back to `/` carrying. */
 type DonationQueryStatus = 'success' | 'cancelled' | null;
 
+/**
+ * That value if it is one of the two the redirect can carry, and `null`
+ * otherwise.
+ *
+ * Narrowed rather than cast: the query string is whatever the address bar
+ * says, so a cast would let `?donation=anything` through typed as a state the
+ * template then has to render — a runtime type only one consumer checks is a
+ * type nobody checks (`CLAUDE.md` §4.4).
+ */
+function donationStatusFrom(value: string | null): DonationQueryStatus {
+  return value === 'success' || value === 'cancelled' ? value : null;
+}
+
 @Component({
   selector: 'app-game-setup',
   standalone: true,
@@ -64,7 +77,7 @@ export class GameSetupComponent implements OnInit {
    * by the reader, which is the one case a resize is theirs to expect.
    */
   protected readonly donationStatus = signal<DonationQueryStatus>(
-    (this.route.snapshot.queryParamMap.get('donation') as DonationQueryStatus) ?? null,
+    donationStatusFrom(this.route.snapshot.queryParamMap.get('donation')),
   );
 
   protected readonly form = this.fb.nonNullable.group({

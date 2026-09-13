@@ -12,14 +12,9 @@ import { filter, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { buildLabel } from '../../build-info';
 import { DonationDialogStateService } from '../../services/donation-dialog-state.service';
+import { isGameplayRoute } from '../../utils/gameplay-route.util';
 import { DonationDialogComponent } from '../donation/donation-dialog.component';
 import { IconComponent } from '../icon/icon.component';
-
-/**
- * The route the donation CTA is excluded from, and the one screen in the app
- * with a zero-distraction rule: an active quiz round (`FEAT-013` §1).
- */
-const GAMEPLAY_ROUTE = '/play';
 
 /**
  * Site footer, carrying the legal links and the "Buy me a coffee" call to
@@ -80,14 +75,10 @@ export class FooterComponent {
   /**
    * Whether to offer the donation CTA. Excluded from the active quiz round
    * outright: the whole point of that screen is that nothing competes with the
-   * question.
-   *
-   * Matched on the path rather than the whole URL, since `/play` never carries
-   * a query today but `?embed=1` proves the app is willing to add one.
+   * question. The auth menu's entry is hidden by the same rule, from the same
+   * function.
    */
-  protected readonly showsDonateCta = computed(
-    () => this.url().split('?')[0].split('#')[0] !== GAMEPLAY_ROUTE,
-  );
+  protected readonly showsDonateCta = computed(() => !isGameplayRoute(this.url()));
 
   private readonly donateTrigger = viewChild<ElementRef<HTMLElement>>('donateTrigger');
 
