@@ -42,18 +42,18 @@ export default defineConfig({
   testDir: './e2e/specs',
 
   /**
-   * Two preview-only specs, and this runner has nothing for either to test:
-   * `ng serve --configuration=e2e` sets no `serviceWorker` in `angular.json`,
-   * so no `ngsw-worker.js` and no `ngsw.json` are emitted for a worker to
-   * install from, and a dev server sends none of `firebase.json`'s headers.
-   * `service-worker-oauth-origins.spec.ts` needs those headers;
-   * `offline-play.spec.ts` needs the precache the worker installs. Both run
-   * against a real deployed Hosting channel only —
+   * The two service-worker specs are preview-only, and this runner has nothing
+   * for either to test: `ng serve --configuration=e2e` sets no `serviceWorker`
+   * in `angular.json`, so no `ngsw-worker.js` and no `ngsw.json` are emitted
+   * for a worker to install from, and a dev server sends none of
+   * `firebase.json`'s headers. `service-worker-oauth-origins.spec.ts` needs
+   * those headers; `service-worker-precache.spec.ts` needs the install itself.
+   * Both run against a real deployed Hosting channel only —
    * `playwright.preview.config.ts` replaces this list with its own, which
    * names neither. Excluding at discovery rather than skipping inside the spec
    * means naming the file on the command line cannot run them here either.
    */
-  testIgnore: ['**/service-worker-oauth-origins.spec.ts', '**/offline-play.spec.ts'],
+  testIgnore: ['**/service-worker-*.spec.ts'],
 
   /**
    * Every test file runs in parallel, against **one shared emulator**. There is

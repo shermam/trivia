@@ -101,8 +101,8 @@ export default defineConfig<object, E2EWorkerOptions>({
    * service-worker specs off the emulator. Here they are the two that can
    * actually run: `service-worker-oauth-origins.spec.ts` needs a real
    * `ngsw-worker.js` and the real `firebase.json` headers served with it, and
-   * `offline-play.spec.ts` needs the precache a real `ngsw.json` installs. A
-   * dev server has none of those.
+   * `service-worker-precache.spec.ts` needs the install a real `ngsw.json`
+   * drives. A dev server has none of those.
    */
   testIgnore: [
     /*
