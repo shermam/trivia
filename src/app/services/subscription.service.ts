@@ -1,34 +1,21 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { pollUntil } from '../utils/poll-until.util';
+import { preferredCurrency } from '../utils/currency-preference.util';
 import { AuthService } from './auth.service';
-import {
-  FirestoreRestClient,
-  isFirestorePermissionDenied,
-  type RestDocument,
-} from './firestore-rest/firestore-rest.client';
+import { FirestoreRestClient, type RestDocument } from './firestore-rest/firestore-rest.client';
 import { GeoService } from './geo.service';
 import { PricingCacheService, type ReadyCheckout } from './pricing-cache.service';
+import {
+  SESSION_WINDOW_MS,
+  SessionHandshakeService,
+  SubscriptionError,
+} from './session-handshake.service';
+
+export { SubscriptionError, subscriptionFailureMessage } from './session-handshake.service';
 
 const CUSTOMERS_COLLECTION = 'customers';
 const PRODUCTS_COLLECTION = 'products';
 const CHECKOUT_TIMEOUT_MS = 20_000;
-
-/**
- * How often to re-read a session document while waiting for the Cloud Function
- * to write its URL back, and for how long in total.
- *
- * This replaces an `onSnapshot` listener, because REST has no equivalent
- * (`FIRESTORE_SDK_VS_REST.md` §4). The trade is arithmetic: a checkout costs up
- * to 40 reads instead of about 2. That is irrelevant at any volume this app
- * will see — checkout is rare by definition, and a listener was never free
- * either, billing the initial read plus every change delivered for as long as
- * the tab stayed open.
- *
- * 500 ms rather than the 1 s the design document sketched, because this delay
- * is in front of a user who has just clicked Subscribe and is looking at a
- * spinner.
- */
-const SESSION_POLL_INTERVAL_MS = 500;
 
 /**
  * The wait after returning from Stripe, on `/pricing?checkout=success`.
@@ -41,18 +28,6 @@ const SESSION_POLL_INTERVAL_MS = 500;
  */
 const PRO_ACTIVATION_POLL_INTERVAL_MS = 1_000;
 const PRO_ACTIVATION_TIMEOUT_MS = 20_000;
-
-/**
- * `firestore.rules` caps how many session documents one account can create —
- * and therefore how many Cloud Function invocations and Stripe API calls it
- * can trigger — by constraining the document ID to `{window}-{slot}`, where
- * the window is derived from *server* time and `create` (unlike a general
- * write) only ever applies to an ID that doesn't exist yet. Rules cannot count
- * a user's documents, so the ID is the only place the cap can live; these two
- * constants have to match `sessionWindow`/`isRateLimitedSessionId` there.
- */
-const SESSION_WINDOW_MS = 300_000;
-const SESSION_SLOTS_PER_WINDOW = 10;
 
 /**
  * How many of those ten slots a *pre-created* session may spend in one window.
@@ -107,40 +82,6 @@ const ACTIVE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
 const PRO_ROLE = 'pro';
 
 /**
- * The currency a visitor in this country has to be offered, when the catalog
- * carries a price in it.
- *
- * **Not a preference — a requirement.** This Stripe account is registered in
- * Brazil, and a Brazilian-issued card can only be charged in BRL; presented a
- * USD price it is declined with "your card doesn't support this currency".
- * Stripe's Adaptive Pricing does not rescue that case, because it localises
- * prices only for buyers **outside** the merchant's own country
- * (`functions/src/checkout-sessions.ts`). So a Brazilian buyer needs a real
- * BRL price, and this is what puts them on it by default.
- *
- * The country comes from `GeoService` — the app's own server first, the
- * browser's time zone second — and is a UI signal and nothing more
- * (`CLAUDE.md` §4.2): it decides which of the catalog's prices is preselected,
- * and the visitor can switch. What is actually charged is decided by the price
- * ID the session document carries, which the Cloud Function validates against
- * the mirrored catalog either way.
- *
- * **The input is a country and not a locale**, which is the whole reason
- * `GeoService` exists: a Brazilian reading English browses in `en-US`, so a
- * rule keyed on language quotes them dollars and their card is declined.
- * Language says what somebody reads; it says nothing about where their bank
- * is.
- */
-const COUNTRY_CURRENCIES: Record<string, string> = { BR: 'brl' };
-
-/**
- * Preferred when the visitor's own country asks for nothing in particular.
- * The catalog decides what exists; this only decides which of several it opens
- * on.
- */
-const FALLBACK_CURRENCY = 'usd';
-
-/**
  * Ceilings on the price lookup, so neither of its queries is unbounded
  * (`CLAUDE.md` §4.1 — every read needs a `where` *and* a `limit`).
  *
@@ -178,12 +119,6 @@ const NO_PRO_PRICE_MESSAGE =
  */
 const MAX_SUBSCRIPTIONS_PER_CUSTOMER = 20;
 
-/** What the Cloud Function eventually writes back onto a session document. */
-interface SessionOutcome {
-  url?: string;
-  error?: string;
-}
-
 /**
  * One currency the Pro tier is on sale in — a single mirrored Stripe Price.
  *
@@ -207,34 +142,19 @@ export interface ProPriceOption {
 }
 
 /**
- * Which currency to open on, given what the catalog offers and where the
- * reader appears to be.
- *
- * Pure and exported so the rule is testable without a Firestore fake: the
- * Brazilian case is the entire point of this feature and it must not depend on
- * the machine running the suite.
- *
- * **The country only decides anything when the catalog can honour it.** A
- * mapping to a currency nothing is priced in would leave the Subscribe button
- * quoting a price that does not exist, so an unmatched country falls through
- * to the same default as an unknown one — which is also what `null` means
- * here, and there are three ways to get it: the server was not asked, could
- * not tell, or the reader is simply somewhere the app prices normally.
+ * Which currency the Pro card opens on, given what the catalog offers and
+ * where the reader appears to be — `preferredCurrency` applied to the Pro
+ * prices, and exported so the Brazilian case stays pinned where the Pro flow's
+ * own tests can see it.
  */
 export function defaultProCurrency(
   options: readonly ProPriceOption[],
   country: string | null,
 ): string | null {
-  const offered = new Set(options.map((option) => option.currency));
-  const required = country ? COUNTRY_CURRENCIES[country.toUpperCase()] : undefined;
-  if (required && offered.has(required)) {
-    return required;
-  }
-  if (offered.has(FALLBACK_CURRENCY)) {
-    return FALLBACK_CURRENCY;
-  }
-  // Catalog order, so which currency wins never depends on network timing.
-  return options[0]?.currency ?? null;
+  return preferredCurrency(
+    options.map((option) => option.currency),
+    country,
+  );
 }
 
 /**
@@ -292,53 +212,6 @@ function firstPerCurrency(options: readonly ProPriceOption[]): ProPriceOption[] 
 }
 
 /**
- * A failure this service can explain, with a message written for the person
- * at the screen.
- *
- * Every rejection of `startProCheckout()`/`openBillingPortal()` is one of two
- * kinds, and the type is how a component tells them apart. This one carries a
- * verified cause — the caller is signed out, no Pro price is on sale, the
- * volume cap in `firestore.rules` is spent, the Cloud Function wrote an error
- * back (its own client-facing message; see `clientMessageFor` in
- * `functions/src/checkout-request.ts`), or the handshake reached its deadline
- * with nothing written — and its message is the thing to show. Anything else
- * that escapes is a transport failure (`FirestoreRestError`: a dropped
- * connection, a refused read, a 500) whose cause nobody verified, so a
- * component keeps its generic message for it (`subscriptionFailureMessage`).
- *
- * The distinction matters most to whoever is standing up a new environment:
- * an empty catalog and a function that never ran both end in a red line under
- * the Subscribe button, and "please try again" is the wrong instruction for
- * either. Naming the cause is what makes the difference visible from the
- * screen instead of from the function logs.
- */
-export class SubscriptionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SubscriptionError';
-  }
-}
-
-/**
- * What a component shows for a rejected `startProCheckout()` or
- * `openBillingPortal()`: the `SubscriptionError`'s own message, or `fallback`
- * for a failure this service could not explain.
- *
- * The client half of `clientMessageFor` (`functions/src/checkout-request.ts`),
- * applying the same rule from the other side: distinguish the cases or stay
- * generic (`CLAUDE.md` §4.4). An unexplained error is logged rather than
- * dropped — once the screen says "please try again", the console is the only
- * place its real cause survives.
- */
-export function subscriptionFailureMessage(error: unknown, fallback: string): string {
-  if (error instanceof SubscriptionError) {
-    return error.message;
-  }
-  console.error('[subscription] unexplained failure', error);
-  return fallback;
-}
-
-/**
  * Bridges the client to our own Cloud Functions backend (`functions/`,
  * `createCheckoutSession` + `stripeWebhook`) purely through the Firestore
  * collections that backend manages (`customers/{uid}/checkout_sessions`,
@@ -370,6 +243,7 @@ export function subscriptionFailureMessage(error: unknown, fallback: string): st
 export class SubscriptionService {
   private readonly authService = inject(AuthService);
   private readonly rest = inject(FirestoreRestClient);
+  private readonly handshake = inject(SessionHandshakeService);
   private readonly geoService = inject(GeoService);
   private readonly pricingCache = inject(PricingCacheService);
 
@@ -1048,7 +922,7 @@ export class SubscriptionService {
   private beginCheckoutHandshake(uid: string, priceId: string): Promise<string> {
     this.forgetReadyCheckout();
 
-    const promise = this.runSessionHandshake(uid, {
+    const promise = this.handshake.run(uid, {
       collectionName: 'checkout_sessions',
       payload: { price: priceId, origin: window.location.origin },
       timeoutMessage: 'Timed out waiting for Stripe checkout to start. Please try again.',
@@ -1143,7 +1017,7 @@ export class SubscriptionService {
    */
   async openBillingPortal(): Promise<void> {
     const uid = this.requireSignedInUid('Sign in before managing your subscription.');
-    const portalUrl = await this.runSessionHandshake(uid, {
+    const portalUrl = await this.handshake.run(uid, {
       collectionName: 'portal_sessions',
       payload: { origin: window.location.origin },
       timeoutMessage: 'Timed out waiting for the billing portal to open. Please try again.',
@@ -1180,143 +1054,5 @@ export class SubscriptionService {
   private signedInUid(): string | null {
     const user = this.authService.user();
     return user && !user.isAnonymous ? user.uid : null;
-  }
-
-  /**
-   * The create-then-wait half both flows share: write a session document, wait
-   * for the Cloud Function to write a `url` (or an `error`) back onto it, and
-   * return that URL. Both sides of the handshake are identical for checkout
-   * and the billing portal, so they share one implementation rather than two
-   * that can drift.
-   *
-   * The deadline used to be the delicate part. With `onSnapshot` it had to live
-   * *inside* the promise rather than racing it from outside, because giving up
-   * had to also mean detaching the listener — racing left the subscription
-   * attached for the rest of the session, still receiving writes and still
-   * billed for them, for a checkout nobody was waiting on. Polling has nothing
-   * to detach: when `pollUntil` returns, the last request has already
-   * completed and no timer is armed. That whole class of bug is gone by
-   * construction rather than by care.
-   */
-  private async runSessionHandshake(
-    uid: string,
-    options: {
-      collectionName: 'checkout_sessions' | 'portal_sessions';
-      payload: Record<string, string>;
-      timeoutMessage: string;
-      failureMessage: string;
-    },
-  ): Promise<string> {
-    const sessionPath = await this.createSessionDoc(uid, options.collectionName, options.payload);
-
-    // A read that fails is a not-yet, not a failure. The document is about to
-    // be written and there is budget left to ask again, and `onSnapshot`
-    // reconnected through a transient drop by itself — turning the payment
-    // path into one-strike would be a regression the migration has no reason
-    // to cause. The last error is kept rather than swallowed, so a deadline
-    // reached while reads were failing reports *that* instead of narrating a
-    // timeout it did not verify (`CLAUDE.md` §4.4); a read that succeeds
-    // clears it, so only an unresolved failure is ever reported.
-    let lastReadError: Error | null = null;
-    const outcome = await pollUntil(
-      async (remainingMs) => {
-        try {
-          const result = await this.readSessionOutcome(
-            sessionPath,
-            options.failureMessage,
-            remainingMs,
-          );
-          lastReadError = null;
-          return result;
-        } catch (error) {
-          lastReadError = error instanceof Error ? error : new Error(String(error));
-          return null;
-        }
-      },
-      { intervalMs: SESSION_POLL_INTERVAL_MS, timeoutMs: CHECKOUT_TIMEOUT_MS },
-    );
-
-    if (!outcome) {
-      // A deadline reached while the reads were answering (the document was
-      // there, with no URL yet) is a cause this code verified, so it is named.
-      // A deadline reached on a failing read is not: that error is handed on
-      // as the transport's own type, and the component stays generic for it.
-      throw lastReadError ?? new SubscriptionError(options.timeoutMessage);
-    }
-    if (outcome.error) {
-      // Written by the function for exactly this purpose (`clientMessageFor`).
-      throw new SubscriptionError(outcome.error);
-    }
-    return outcome.url!;
-  }
-
-  /**
-   * One look at a session document: the URL if it has arrived, the failure if
-   * the function reported one, and `null` for "still working" — which is both
-   * the document not existing yet and it existing with neither field set.
-   */
-  private async readSessionOutcome(
-    sessionPath: string,
-    failureMessage: string,
-    remainingMs: number,
-  ): Promise<SessionOutcome | null> {
-    // The budget left, not the whole budget. Giving each read the full
-    // `CHECKOUT_TIMEOUT_MS` composes two 20-second bounds into forty seconds of
-    // wall clock, because an attempt that starts at 19.5s is still allowed its
-    // own twenty — and the constant, the comments and the user-facing message
-    // all say twenty.
-    const document = await this.rest.getDocument(sessionPath, {
-      timeoutMs: remainingMs,
-    });
-    const data = document?.data;
-    if (!data) {
-      return null;
-    }
-    const error = data['error'] as { message?: string } | undefined;
-    if (error) {
-      return { error: error.message ?? failureMessage };
-    }
-    return typeof data['url'] === 'string' ? { url: data['url'] } : null;
-  }
-
-  /**
-   * Writes the session document at an ID the volume cap in `firestore.rules`
-   * accepts: `{current 5-minute window}-{slot}`, and returns its path.
-   *
-   * Slots are tried from a random starting point, so two checkouts inside the
-   * same window don't both collide on slot 0 — a rejected slot is one that has
-   * already been used this window, which for a real user only happens if they
-   * genuinely started checkout twice in five minutes. Running out of all ten
-   * is the cap actually biting.
-   *
-   * The message deliberately doesn't name a cause. A refusal here has two
-   * plausible ones — every slot used, or a client old enough to still be
-   * sending the pre-validation payload — and picking one to narrate would be
-   * wrong half the time. Reloading and retrying is the answer to both.
-   */
-  private async createSessionDoc(
-    uid: string,
-    collectionName: string,
-    payload: Record<string, string>,
-  ): Promise<string> {
-    const currentWindow = Math.floor(Date.now() / SESSION_WINDOW_MS);
-    const firstSlot = Math.floor(Math.random() * SESSION_SLOTS_PER_WINDOW);
-
-    for (let attempt = 0; attempt < SESSION_SLOTS_PER_WINDOW; attempt++) {
-      const slot = (firstSlot + attempt) % SESSION_SLOTS_PER_WINDOW;
-      const sessionPath = `${CUSTOMERS_COLLECTION}/${uid}/${collectionName}/${currentWindow}-${slot}`;
-      try {
-        await this.rest.setDocument(sessionPath, payload, { timeoutMs: CHECKOUT_TIMEOUT_MS });
-        return sessionPath;
-      } catch (error) {
-        if (!isFirestorePermissionDenied(error)) {
-          throw error;
-        }
-      }
-    }
-
-    throw new SubscriptionError(
-      'Too many attempts just now. Reload the page and try again in a few minutes.',
-    );
   }
 }

@@ -257,6 +257,20 @@ service cloud.firestore {
             && isAppOrigin(data.origin);
     }
 
+    // A donation session carries the same two fields a checkout session does,
+    // and has its own allowlist all the same. The two paths are separate on
+    // purpose — separate volume caps, separate catalog validation in the
+    // functions — and sharing one predicate here would quietly re-couple them:
+    // a field added for Pro would start being accepted on the donation path
+    // without anybody deciding that it should.
+    function isValidDonationSession() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['price', 'origin'])
+            && data.price is string
+            && data.price.matches('^price_[A-Za-z0-9_]{1,100}$')
+            && isAppOrigin(data.origin);
+    }
+
     function isValidPortalSession() {
       let data = request.resource.data;
       return data.keys().hasOnly(['origin'])
@@ -754,6 +768,38 @@ service cloud.firestore {
                       && request.auth.uid == uid
                       && isValidCheckoutSession()
                       && isRateLimitedSessionId(id);
+      }
+
+      match /donation_sessions/{id} {
+        // The tip jar's half of the same handshake, in a subcollection of its
+        // own so that a burst of donations cannot spend the ten slots per
+        // window a Pro checkout needs, and so the two payloads are validated
+        // apart (`createDonationSession`).
+        //
+        // **`request.auth != null`, not `isRealAuthedUser()`, and that is the
+        // one deliberate difference from every other path here.** Anyone
+        // signed in may donate, anonymous sessions included: donating is not a
+        // privilege, and friction in front of it costs donations while
+        // protecting nothing — the money goes to Stripe either way, and an
+        // anonymous uid cannot name anybody else's customer document. What the
+        // account decides is only whether the donation can be *attributed*,
+        // which `createDonationSession` settles by attaching a Stripe customer
+        // and a `firebaseUID` for a real account and neither for a guest.
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow create: if request.auth != null
+                      && request.auth.uid == uid
+                      && isValidDonationSession()
+                      && isRateLimitedSessionId(id);
+      }
+
+      match /donations/{id} {
+        // Written only by `stripeWebhook` via the Admin SDK, which bypasses
+        // these rules, from a Checkout Session Stripe says was paid. There is
+        // no client write rule at all — not create, not update — because a
+        // client that could write one could declare itself a supporter without
+        // paying, and `supporterSince` on the parent document is refused for
+        // the same reason (that document has no write rule either).
+        allow read: if request.auth != null && request.auth.uid == uid;
       }
 
       match /portal_sessions/{id} {

@@ -144,6 +144,29 @@
     see below.
   </p>
 
+  <h3>Donation records</h3>
+  <p>
+    If you make a one-off donation while signed in to an account, we store the amount, the currency,
+    the time, and the identifier Stripe gives that payment. We also record the date of your first
+    donation against your account. That is the whole of it: no card details, and nothing about how
+    you paid.
+  </p>
+  <p>
+    <strong>A donation made while signed out leaves no donation record.</strong> You can donate
+    without an account &mdash; the dialog says so before you pay &mdash; and when you do, there is
+    no account here for a record of it to belong to and nothing we hold that could link the payment
+    back to you. The payment itself is Stripe's, on the terms in &ldquo;Payments&rdquo; below. What
+    <em>is</em> written, whether you are signed in or not, is the short-lived scratch document that
+    carries you to Stripe, stored under the anonymous account described at the top of this page: the
+    amount you chose, this site's address, and the Stripe link they are exchanged for. It says
+    nothing about you, only the browser session that created it can read it, and it expires 24 hours
+    after it is created &mdash; see &ldquo;How long we keep it&rdquo; below.
+  </p>
+  <p>
+    Only you can read your own donation records; they are never shown to other players. Deleting
+    your account deletes them, and &ldquo;Export my data&rdquo; returns them in full.
+  </p>
+
   <h3>Which country you are in &mdash; to fill in two things you can change</h3>
   <p>
     On two screens the app asks <strong>its own server</strong> which country your IP address maps
@@ -209,6 +232,11 @@
       <tr>
         <td>Take payment and manage a Pro subscription</td>
         <td>Delivering the subscription you bought</td>
+        <td>Performance of a contract</td>
+      </tr>
+      <tr>
+        <td>Take a one-off donation and record it against your account</td>
+        <td>Carrying out the payment you asked us to take, and being able to answer for it</td>
         <td>Performance of a contract</td>
       </tr>
       <tr>
@@ -287,9 +315,12 @@
     address and an internal account identifier and ask it to prepare a checkout page for you, so
     that pressing Subscribe does not leave you waiting. That happens whether or not you go on to
     subscribe; an unused checkout page expires within 24 hours, and nothing is charged unless you
-    complete it. The identifier is what lets a subscription be matched to your Trivimind account.
-    Everything after that — the payment form, the billing portal, your saved payment methods —
-    happens on Stripe's own systems under
+    complete it. The identifier is what lets a subscription be matched to your Trivimind account. A
+    donation goes to Stripe the same way, and what we send with it depends on whether there is an
+    account to attach it to: from a signed-in account, your email address and the same internal
+    identifier; from a signed-out visitor, neither, which is why such a donation cannot be linked
+    back to anybody afterwards. Everything after that — the payment form, the billing portal, your
+    saved payment methods — happens on Stripe's own systems under
     <a href="https://stripe.com/privacy" rel="noopener noreferrer" target="_blank"
       >Stripe's privacy policy</a
     >.
@@ -381,7 +412,7 @@
       </tr>
       <tr>
         <td>Stripe</td>
-        <td>Payment and billing management</td>
+        <td>Subscription payments, donations and billing management</td>
         <td>
           Only when your browser is sent to Stripe's checkout or billing portal. (Our own server
           asks Stripe to prepare a checkout page earlier than that &mdash; see Payments above
@@ -432,13 +463,17 @@
   </p>
   <ul>
     <li>
-      <strong>Your account, leaderboard entries, gameplay totals and billing records</strong> are
-      kept for as long as your account exists. Delete your account and they go — see below.
+      <strong
+        >Your account, leaderboard entries, gameplay totals, subscription records and donation
+        records</strong
+      >
+      are kept for as long as your account exists. Delete your account and they go — see below.
     </li>
     <li>
-      <strong>Checkout and billing-portal records</strong> expire 24 hours after they are created
-      and are then deleted automatically. The sweep is best-effort, so treat 24 hours as the
-      earliest they go, not a guarantee of the latest.
+      <strong>Checkout, donation and billing-portal records</strong> — the short-lived scratch
+      documents that carry you to Stripe, not the record of a donation itself — expire 24 hours
+      after they are created and are then deleted automatically. The sweep is best-effort, so treat
+      24 hours as the earliest they go, not a guarantee of the latest.
     </li>
     <li>
       <strong>A game saved in your browser</strong> is discarded after six hours; the offline

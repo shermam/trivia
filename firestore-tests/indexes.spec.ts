@@ -57,14 +57,16 @@ describe('firestore.indexes.json', () => {
     }
   });
 
-  it('keeps a ttl field override on both Stripe session collections', () => {
-    // These are what stop `checkout_sessions`/`portal_sessions` growing forever
-    // (finding C2); losing one would be invisible until the collection did.
+  it('keeps a ttl field override on every Stripe session collection', () => {
+    // These are what stop the session collections growing forever (finding
+    // C2); losing one would be invisible until the collection did. A new
+    // handshake path is a new collection group, so it belongs here the day it
+    // ships rather than the day somebody notices the documents piling up.
     const ttlGroups = spec.fieldOverrides
       .filter((override) => override.ttl === true && override.fieldPath === 'expiresAt')
       .map((override) => override.collectionGroup)
       .sort();
 
-    expect(ttlGroups).toEqual(['checkout_sessions', 'portal_sessions']);
+    expect(ttlGroups).toEqual(['checkout_sessions', 'donation_sessions', 'portal_sessions']);
   });
 });

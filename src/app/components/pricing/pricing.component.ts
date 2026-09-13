@@ -14,6 +14,7 @@ import {
   subscriptionFailureMessage,
 } from '../../services/subscription.service';
 import { formatUnitAmount } from '../../utils/money.util';
+import { CurrencySwitchComponent } from '../currency-switch/currency-switch.component';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 
@@ -40,7 +41,7 @@ const CHECKOUT_PREPARE_DELAY_MS = 1_000;
 @Component({
   selector: 'app-pricing',
   standalone: true,
-  imports: [RouterLink, IconComponent, LogoComponent],
+  imports: [RouterLink, CurrencySwitchComponent, IconComponent, LogoComponent],
   templateUrl: './pricing.component.html',
   styleUrl: './pricing.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -85,6 +86,11 @@ export class PricingComponent {
    * control with a single option is a control that only looks like one.
    */
   protected readonly hasCurrencyChoice = computed(() => this.currencyOptions().length > 1);
+
+  /** Just the codes, in catalog order — what the shared switch renders from. */
+  protected readonly offeredCurrencies = computed(() =>
+    this.currencyOptions().map((option) => option.currency),
+  );
 
   /**
    * The currency code shown when there is no choice to offer.

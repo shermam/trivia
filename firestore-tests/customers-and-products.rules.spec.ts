@@ -14,6 +14,7 @@ import {
   createTestEnv,
   sessionDocId,
   validCheckoutSession,
+  validDonationSession,
   validPortalSession,
 } from './helpers';
 
@@ -331,6 +332,280 @@ describe('customers/{uid}/portal_sessions: nothing but an origin', () => {
         sub(asVerifiedPassword(env, OWNER), OWNER, 'portal_sessions', sessionDocId()),
         validPortalSession({ price: 'price_test_pro' }),
       ),
+    );
+  });
+});
+
+/*
+ * The tip jar's session subcollection. It mirrors `checkout_sessions` in
+ * everything but who may write one — donating is not a privilege, so an
+ * anonymous session is allowed here and nowhere else in this tree — which is
+ * why it does not share the block above. A shared `describe.each` would have
+ * had to make the auth case conditional, and a conditional expectation is how
+ * a rule that no longer holds keeps passing.
+ */
+describe('customers/{uid}/donation_sessions: anybody signed in may donate', () => {
+  const create = (
+    ctx: RulesTestContext,
+    uid: string,
+    id = sessionDocId(),
+    data = validDonationSession(),
+  ) => setDoc(sub(ctx, uid, 'donation_sessions', id), data);
+
+  it('can be created by a verified account', async () => {
+    await assertSucceeds(create(asVerifiedPassword(env, OWNER), OWNER));
+  });
+
+  // The friction this path deliberately does not have. An anonymous visitor is
+  // the common donor: every page load signs one in, and asking them to make an
+  // account first protects nothing — the payment goes to Stripe either way.
+  it('can be created by an anonymous session', async () => {
+    await assertSucceeds(create(asAnonymous(env, OWNER), OWNER));
+  });
+
+  // Unverified is accepted for the same reason. Pro refuses it because an
+  // unverified account can be minted at will and Pro grants a privilege; a
+  // donation grants nothing.
+  it('can be created by an unverified password account', async () => {
+    await assertSucceeds(create(asUnverifiedPassword(env, OWNER), OWNER));
+  });
+
+  it('rejects a signed-out caller', async () => {
+    await assertFails(create(asSignedOut(env), OWNER));
+  });
+
+  // Two tests rather than two assertions in one, because a mutation run counts
+  // tests: dropping the ownership check has to be visible as more than a single
+  // failure, and the anonymous case is the one this path uniquely allows.
+  it("rejects creating one under another user's customer document", async () => {
+    await assertFails(create(asVerifiedPassword(env, OTHER), OWNER));
+  });
+
+  it("rejects an anonymous session writing under somebody else's customer document", async () => {
+    await assertFails(create(asAnonymous(env, OTHER), OWNER));
+  });
+
+  it('can be read back by its owner to collect the URL the function writes', async () => {
+    await seed(['customers', OWNER, 'donation_sessions', 'sess'], validDonationSession());
+    await assertSucceeds(getDoc(sub(asAnonymous(env, OWNER), OWNER, 'donation_sessions', 'sess')));
+  });
+
+  it("rejects reading another user's donation session", async () => {
+    await seed(['customers', OWNER, 'donation_sessions', 'sess'], validDonationSession());
+    await assertFails(
+      getDoc(sub(asVerifiedPassword(env, OTHER), OWNER, 'donation_sessions', 'sess')),
+    );
+  });
+
+  it('rejects an update — the function owns the write-back', async () => {
+    await seed(['customers', OWNER, 'donation_sessions', 'sess'], validDonationSession());
+    await assertFails(
+      setDoc(sub(asVerifiedPassword(env, OWNER), OWNER, 'donation_sessions', 'sess'), {
+        ...validDonationSession(),
+        url: 'https://evil.test',
+      }),
+    );
+  });
+
+  it('rejects a delete', async () => {
+    await seed(['customers', OWNER, 'donation_sessions', 'sess'], validDonationSession());
+    await assertFails(
+      deleteDoc(sub(asVerifiedPassword(env, OWNER), OWNER, 'donation_sessions', 'sess')),
+    );
+  });
+
+  describe('schema', () => {
+    it('rejects any field outside the allowlist', async () => {
+      await assertFails(
+        create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(), {
+          ...validDonationSession(),
+          amount: 100_000,
+        }),
+      );
+      await assertFails(
+        create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(), {
+          ...validDonationSession(),
+          success_url: 'https://attacker.test/collect',
+        }),
+      );
+    });
+
+    // The whole reason the presets are catalog prices: an amount a client
+    // chooses is a billing value the server has nothing to check it against.
+    it('rejects a donation described by an amount instead of a price', async () => {
+      await assertFails(
+        create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(), {
+          origin: 'https://example.web.app',
+          amount: 500,
+          currency: 'brl',
+        }),
+      );
+    });
+
+    it('rejects a missing or malformed price', async () => {
+      await assertFails(
+        create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(), {
+          origin: 'https://example.web.app',
+        }),
+      );
+      await assertFails(
+        create(
+          asVerifiedPassword(env, OWNER),
+          OWNER,
+          sessionDocId(),
+          validDonationSession({ price: 'prod_123' }),
+        ),
+      );
+      await assertFails(
+        create(
+          asVerifiedPassword(env, OWNER),
+          OWNER,
+          sessionDocId(),
+          validDonationSession({ price: 99 }),
+        ),
+      );
+    });
+
+    it('rejects a missing or malformed origin', async () => {
+      await assertFails(
+        create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(), {
+          price: 'price_test_coffee',
+        }),
+      );
+      await assertFails(
+        create(
+          asVerifiedPassword(env, OWNER),
+          OWNER,
+          sessionDocId(),
+          validDonationSession({ origin: 'https://example.web.app/evil' }),
+        ),
+      );
+    });
+
+    // Shape is as far as rules can go — whether this ID is a *donation* price
+    // is checked again in `createDonationSession` against the mirrored
+    // catalog, which is the half rules structurally cannot do. The Pro price
+    // ID is well-formed and is refused there, not here.
+    it('accepts a well-formed price ID it cannot verify, including the Pro one', async () => {
+      await assertSucceeds(
+        create(
+          asVerifiedPassword(env, OWNER),
+          OWNER,
+          sessionDocId(),
+          validDonationSession({ price: 'price_test_pro' }),
+        ),
+      );
+    });
+  });
+
+  /*
+   * The same cap as `checkout_sessions`, counted separately because the
+   * subcollection is separate — which is the point: spending ten donation
+   * slots must not stop the same account starting a Pro checkout.
+   */
+  describe('volume cap', () => {
+    it('rejects the auto-generated ID an unbounded client would write', async () => {
+      await assertFails(
+        addDoc(
+          subCol(asVerifiedPassword(env, OWNER), OWNER, 'donation_sessions'),
+          validDonationSession(),
+        ),
+      );
+    });
+
+    it('accepts every one of the ten slots in a window, and nothing beyond them', async () => {
+      for (let slot = 0; slot < 10; slot++) {
+        await assertSucceeds(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(slot)));
+      }
+      await assertFails(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(10)));
+      await assertFails(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId('00')));
+    });
+
+    it('rejects re-using a slot already spent in this window', async () => {
+      const id = sessionDocId(4);
+      await assertSucceeds(create(asVerifiedPassword(env, OWNER), OWNER, id));
+      await assertFails(create(asVerifiedPassword(env, OWNER), OWNER, id));
+    });
+
+    it('accepts the neighbouring windows and refuses anything past them', async () => {
+      await assertSucceeds(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(0, -1)));
+      await assertSucceeds(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(1, 1)));
+      await assertFails(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(0, -2)));
+      await assertFails(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(0, 1000)));
+    });
+
+    // The two caps are independent, and that independence is the reason for a
+    // second subcollection rather than a second field on the first.
+    it('does not spend the checkout cap, or have its own spent by one', async () => {
+      for (let slot = 0; slot < 10; slot++) {
+        await assertSucceeds(create(asVerifiedPassword(env, OWNER), OWNER, sessionDocId(slot)));
+      }
+      await assertSucceeds(
+        setDoc(
+          sub(asVerifiedPassword(env, OWNER), OWNER, 'checkout_sessions', sessionDocId(0)),
+          validCheckoutSession(),
+        ),
+      );
+    });
+  });
+});
+
+describe('customers/{uid}/donations: the record of what was actually paid', () => {
+  beforeEach(() =>
+    seed(['customers', OWNER, 'donations', 'cs_1'], {
+      amount: 500,
+      currency: 'brl',
+      createdAt: new Date(),
+      eventCreated: 1_757_600_000,
+    }),
+  );
+
+  it('is readable by its owner', async () => {
+    await assertSucceeds(getDoc(sub(asVerifiedPassword(env, OWNER), OWNER, 'donations', 'cs_1')));
+  });
+
+  // A guest donation is never recorded, but the account an anonymous session
+  // *is* can still read its own subcollection — the read rule is about
+  // ownership, not about verification, and matches who may create a session.
+  it('is readable by an anonymous session that owns it', async () => {
+    await assertSucceeds(getDoc(sub(asAnonymous(env, OWNER), OWNER, 'donations', 'cs_1')));
+  });
+
+  it("rejects reading another user's donation", async () => {
+    await assertFails(getDoc(sub(asVerifiedPassword(env, OTHER), OWNER, 'donations', 'cs_1')));
+  });
+
+  it('rejects reading while signed out', async () => {
+    await assertFails(getDoc(sub(asSignedOut(env), OWNER, 'donations', 'cs_1')));
+  });
+
+  // The reject case that matters: a client able to write this could declare a
+  // donation nobody paid for.
+  it('rejects a user writing their own donation record', async () => {
+    await assertFails(
+      setDoc(sub(asVerifiedPassword(env, OWNER), OWNER, 'donations', 'cs_forged'), {
+        amount: 100_000,
+        currency: 'brl',
+        createdAt: new Date(),
+      }),
+    );
+  });
+
+  it('rejects a user amending or deleting one', async () => {
+    await assertFails(
+      setDoc(sub(asVerifiedPassword(env, OWNER), OWNER, 'donations', 'cs_1'), { amount: 999_999 }),
+    );
+    await assertFails(deleteDoc(sub(asVerifiedPassword(env, OWNER), OWNER, 'donations', 'cs_1')));
+  });
+
+  // `supporterSince` lives on `customers/{uid}`, which has no client write rule
+  // at all — so this is the same refusal from the other side, and it is the one
+  // that will matter the day a badge reads the field.
+  it('rejects a client writing its own supporter flag', async () => {
+    await assertFails(
+      setDoc(doc(asVerifiedPassword(env, OWNER).firestore(), 'customers', OWNER), {
+        supporterSince: new Date(),
+      }),
     );
   });
 });

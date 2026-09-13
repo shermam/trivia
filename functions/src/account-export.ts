@@ -41,11 +41,33 @@ export interface AccountExport {
   contributedQuestions: Record<string, unknown>[];
   billing: {
     stripeCustomerId: string | null;
+    /** ISO 8601, or `null` for an account that has never donated. */
+    supporterSince: string | null;
     subscriptions: Record<string, unknown>[];
     checkoutSessions: Record<string, unknown>[];
     portalSessions: Record<string, unknown>[];
+    /** One-time donations, newest and oldest alike; empty for an account with none. */
+    donations: Record<string, unknown>[];
   };
   notHeldHere: string[];
+}
+
+/**
+ * A Firestore `Timestamp` as an ISO 8601 string, or `null` for anything that
+ * is not one.
+ *
+ * Typed structurally rather than against the Admin SDK's class, so this module
+ * stays free of `firebase-admin` and its tests stay free of standing one up —
+ * the same reason the rest of the shaping lives here rather than in
+ * `account.ts`.
+ */
+export function timestampToIso(value: unknown): string | null {
+  const toDate = (value as { toDate?: () => Date } | null | undefined)?.toDate;
+  if (typeof toDate !== 'function') {
+    return null;
+  }
+  const date = toDate.call(value);
+  return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 /**
@@ -65,9 +87,11 @@ export function buildAccountExport(input: {
   contributedQuestions: Record<string, unknown>[];
   gameplayStats: Record<string, unknown> | null;
   stripeCustomerId: string | null;
+  supporterSince?: string | null;
   subscriptions: Record<string, unknown>[];
   checkoutSessions: Record<string, unknown>[];
   portalSessions: Record<string, unknown>[];
+  donations?: Record<string, unknown>[];
   now?: Date;
 }): AccountExport {
   return {
@@ -86,9 +110,11 @@ export function buildAccountExport(input: {
     contributedQuestions: input.contributedQuestions,
     billing: {
       stripeCustomerId: input.stripeCustomerId,
+      supporterSince: input.supporterSince ?? null,
       subscriptions: input.subscriptions,
       checkoutSessions: input.checkoutSessions,
       portalSessions: input.portalSessions,
+      donations: input.donations ?? [],
     },
     // Naming the gaps is part of an honest export. A reader who knows they
     // paid and sees no card details should be told why, not left guessing.

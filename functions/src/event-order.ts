@@ -1,4 +1,4 @@
-import { DocumentReference, getFirestore } from 'firebase-admin/firestore';
+import { DocumentReference, Transaction, getFirestore } from 'firebase-admin/firestore';
 
 /**
  * Making webhook-driven Firestore writes safe against Stripe's delivery model.
@@ -55,14 +55,34 @@ export async function setIfNotStale(
   data: Record<string, unknown>,
   eventCreated: number,
 ): Promise<boolean> {
-  return getFirestore().runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(ref);
-    if (isStaleEvent(snapshot.data()?.[EVENT_CREATED_FIELD], eventCreated)) {
-      return false;
-    }
-    transaction.set(ref, { ...data, [EVENT_CREATED_FIELD]: eventCreated }, { merge: true });
-    return true;
-  });
+  return getFirestore().runTransaction((transaction) =>
+    applySetIfNotStale(transaction, ref, data, eventCreated),
+  );
+}
+
+/**
+ * The body of the transaction above, taking the transaction rather than
+ * opening one — which is what makes it reachable from a unit test.
+ *
+ * The *decision* is `isStaleEvent`, tested directly. What is only testable
+ * here is what the write does once the decision is yes, and both halves of
+ * that are load-bearing: `merge: true`, because every caller is updating one
+ * facet of a document somebody else also writes, and the mark stamped
+ * alongside the data, because a write that landed without one leaves the
+ * document unable to refuse the next stale event.
+ */
+export async function applySetIfNotStale(
+  transaction: Transaction,
+  ref: DocumentReference,
+  data: Record<string, unknown>,
+  eventCreated: number,
+): Promise<boolean> {
+  const snapshot = await transaction.get(ref);
+  if (isStaleEvent(snapshot.data()?.[EVENT_CREATED_FIELD], eventCreated)) {
+    return false;
+  }
+  transaction.set(ref, { ...data, [EVENT_CREATED_FIELD]: eventCreated }, { merge: true });
+  return true;
 }
 
 /**

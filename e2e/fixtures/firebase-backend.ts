@@ -7,6 +7,8 @@ import {
   AccountStateQuery,
   CheckoutSessionRecord,
   CustomQuestionSeed,
+  DonationPriceSeed,
+  DonationSessionRecord,
   GameplayStatsSeed,
   LEADERBOARD_BOARDS,
   LeaderboardEntryQuery,
@@ -199,6 +201,105 @@ export class FirebaseBackend {
         type: 'recurring',
         interval: 'month',
       });
+  }
+
+  /**
+   * Seeds the donation product and three one-time prices, the catalog
+   * `DonationService` reads — normally kept in sync by `stripeWebhook`
+   * (`functions/src/products.ts`) from real Stripe `product.*`/`price.*`
+   * events, which never fire against the emulator.
+   *
+   * Both `kind: 'donation'` markers are seeded, on the product and on every
+   * price, because both are what the client and the Cloud Function check. A
+   * seed carrying only one of them would make the tip jar look empty for a
+   * reason no test names.
+   *
+   * Idempotent, and separate from `seedProProduct` so a spec asks for exactly
+   * the catalog it means to exercise.
+   */
+  async seedDonationProduct(prices?: DonationPriceSeed[]): Promise<void> {
+    await this.firestore.collection('products').doc('prod_test_coffee').set({
+      active: true,
+      name: 'Buy me a coffee',
+      kind: 'donation',
+      role: null,
+    });
+    const presets = prices ?? [
+      { id: 'price_test_coffee_small', currency: 'usd', unitAmount: 200 },
+      { id: 'price_test_coffee_medium', currency: 'usd', unitAmount: 500 },
+      { id: 'price_test_coffee_large', currency: 'usd', unitAmount: 1000 },
+    ];
+    await Promise.all(presets.map((price) => this.seedDonationPrice(price)));
+  }
+
+  /** Adds one more donation preset — another amount, or another currency. */
+  async seedDonationPrice(price: DonationPriceSeed): Promise<void> {
+    await this.firestore
+      .collection('products')
+      .doc('prod_test_coffee')
+      .collection('prices')
+      .doc(price.id)
+      .set({
+        active: true,
+        currency: price.currency,
+        unit_amount: price.unitAmount,
+        type: 'one_time',
+        kind: 'donation',
+      });
+  }
+
+  /**
+   * Takes the whole donation catalog away — the product and every price under
+   * it — so the empty state can be exercised against a real empty catalog
+   * rather than a stubbed response.
+   *
+   * Safe only because `donations.spec.ts` is serial and is the only spec that
+   * reads this product; `seedDonationProduct` in its `beforeEach` puts it back
+   * for the next test.
+   */
+  async removeDonationProduct(): Promise<void> {
+    const product = this.firestore.collection('products').doc('prod_test_coffee');
+    const prices = await product.collection('prices').get();
+    await Promise.all(prices.docs.map((price) => price.ref.delete()));
+    await product.delete();
+  }
+
+  /**
+   * Removes a donation preset again.
+   *
+   * The catalog is global to the emulator — one `products` collection shared
+   * by every worker — so a spec that seeds an extra currency has to put it
+   * back, or it decides what a later test sees.
+   */
+  async removeDonationPrice(priceId: string): Promise<void> {
+    await this.firestore
+      .collection('products')
+      .doc('prod_test_coffee')
+      .collection('prices')
+      .doc(priceId)
+      .delete();
+  }
+
+  /**
+   * The donation-session documents one account has created, as the **client**
+   * wrote them.
+   *
+   * Which preset a click actually sends is not visible from the screen — the
+   * redirect target is the same mock URL whichever amount was chosen — so this
+   * is the only place that claim can be checked (`CLAUDE.md` §4.6: assert the
+   * thing the feature is about, not a proxy for it).
+   */
+  async getDonationSessions(uid: string): Promise<DonationSessionRecord[]> {
+    const sessions = await this.firestore
+      .collection('customers')
+      .doc(uid)
+      .collection('donation_sessions')
+      .get();
+    return sessions.docs.map((session) => ({
+      id: session.id,
+      price: session.get('price') as string,
+      origin: session.get('origin') as string,
+    }));
   }
 
   /**
