@@ -14,6 +14,7 @@ import { AudioService } from '../../services/audio.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
+import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 
 /**
  * Fallback for a game whose config predates the adjustable timer (finding
@@ -66,7 +67,7 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 @Component({
   selector: 'app-quiz-loop',
   standalone: true,
-  imports: [NgClass, IconComponent],
+  imports: [NgClass, IconComponent, RenderedTextComponent],
   templateUrl: './quiz-loop.component.html',
   styleUrl: './quiz-loop.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

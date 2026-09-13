@@ -25,6 +25,7 @@ import {
 import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
+import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
 
 type ReviewQuestion = CustomQuestionDoc & { id: string };
@@ -78,6 +79,7 @@ const REASON_LABELS: Record<QuestionReportReason, string> = {
     IconComponent,
     SourceLinkComponent,
     QuestionJustificationComponent,
+    RenderedTextComponent,
   ],
   templateUrl: './review-queue.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,

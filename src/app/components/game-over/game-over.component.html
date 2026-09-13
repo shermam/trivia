@@ -580,9 +580,9 @@
          accessibility contracts. -->
     <ng-template #questionRow let-question>
       <div class="flex items-start justify-between gap-3">
-        <p class="text-sm text-slate-700 dark:text-slate-300 min-w-0">
-          {{ question.question }}
-        </p>
+        <div class="text-sm text-slate-700 dark:text-slate-300 min-w-0">
+          <app-rendered-text [text]="question.question" [format]="question.format" />
+        </div>
         @if (reportedQuestionIds().has(question.id)) {
           <!-- tabindex="-1": this badge is the focus target after a
                      successful submit removes both the panel and the
@@ -805,9 +805,18 @@
                     {{ row.number }}
                   </span>
                   <div class="min-w-0 flex-1">
-                    <p class="font-medium text-slate-900 dark:text-slate-50">
-                      {{ row.question.question }}
-                    </p>
+                    <!--
+                      A `<div>` rather than the `<p>` this was: the renderer
+                      emits block content for a Markdown question — a fenced
+                      code block, a display formula — and a `<p>` may hold
+                      neither (`FEAT-019`).
+                    -->
+                    <div class="font-medium text-slate-900 dark:text-slate-50">
+                      <app-rendered-text
+                        [text]="row.question.question"
+                        [format]="row.question.format"
+                      />
+                    </div>
                     <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                       <span
                         class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-600 dark:text-slate-300"
@@ -867,16 +876,26 @@
                           [size]="15"
                           class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
                         />
-                        <span class="text-emerald-800 dark:text-emerald-300">{{
-                          row.picked?.text
-                        }}</span>
+                        <span class="min-w-0 text-emerald-800 dark:text-emerald-300">
+                          <app-rendered-text
+                            [text]="row.picked?.text ?? ''"
+                            [format]="row.question.format"
+                            [inline]="true"
+                          />
+                        </span>
                       } @else {
                         <app-icon
                           name="x"
                           [size]="15"
                           class="mt-0.5 shrink-0 text-red-600 dark:text-red-400"
                         />
-                        <span class="text-red-800 dark:text-red-300">{{ row.picked?.text }}</span>
+                        <span class="min-w-0 text-red-800 dark:text-red-300">
+                          <app-rendered-text
+                            [text]="row.picked?.text ?? ''"
+                            [format]="row.question.format"
+                            [inline]="true"
+                          />
+                        </span>
                       }
                     </p>
 
@@ -887,9 +906,13 @@
                           [size]="15"
                           class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
                         />
-                        <span class="text-emerald-800 dark:text-emerald-300">
+                        <span class="min-w-0 text-emerald-800 dark:text-emerald-300">
                           <span class="sr-only">Correct answer:</span>
-                          {{ row.correct.text }}
+                          <app-rendered-text
+                            [text]="row.correct.text"
+                            [format]="row.question.format"
+                            [inline]="true"
+                          />
                         </span>
                       </p>
                     }
@@ -916,7 +939,10 @@
                       result. Absent on almost every question, and renders
                       nothing when it is.
                     -->
-                    <app-question-justification [text]="row.question.explanation" />
+                    <app-question-justification
+                      [text]="row.question.explanation"
+                      [format]="row.question.format"
+                    />
                   </div>
                 </div>
               </li>

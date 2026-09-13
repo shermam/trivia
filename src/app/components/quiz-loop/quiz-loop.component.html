@@ -3,6 +3,7 @@
     class="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center px-4 py-8"
   >
     <div
+      data-cy="question-card"
       class="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden"
     >
       <div
@@ -143,12 +144,24 @@
         </p>
 
         <div class="flex items-start justify-between gap-3 mb-6">
-          <h2
+          <!--
+            `role="heading" aria-level="2"` rather than an `<h2>`, and the
+            reason is `FEAT-019`: a Markdown question can carry a fenced code
+            block or a display formula, and a heading's content model is
+            phrasing content — a `<div>` or a `<pre>` inside an `<h2>` is
+            invalid. The ARIA pair is exactly equivalent to an `<h2>` for a
+            screen reader, and a `<div>` may legally contain flow content.
+            `min-w-0` lets a wide code block shrink inside the flex row instead
+            of stretching it (§4.4).
+          -->
+          <div
+            role="heading"
+            aria-level="2"
             data-cy="question-text"
-            class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-50 leading-snug"
+            class="min-w-0 text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-50 leading-snug"
           >
-            {{ question.question }}
-          </h2>
+            <app-rendered-text [text]="question.question" [format]="question.format" />
+          </div>
 
           <!-- Community questions only: an Open Trivia DB question isn't ours
                to moderate, and its id is minted per fetch, so a report about
@@ -227,7 +240,18 @@
                 [ngClass]="answerBadgeClass(answer)"
                 >{{ answerLabel(i) }}</span
               >
-              <span>{{ answer.text }}</span>
+              <!--
+                `inline`, because an option lives inside a `<button>`: no
+                paragraphs, no lists, no fences — a run of text with emphasis,
+                inline code and inline math in it, which is what an answer to a
+                coding or maths question needs.
+
+                The host element is `display: contents`, so the span the
+                component renders *is* the flex item here — which is why the
+                width bound it needs lives on `.rendered-text` in `styles.css`
+                and not on a class here, where it would silently do nothing.
+              -->
+              <app-rendered-text [text]="answer.text" [format]="question.format" [inline]="true" />
             </button>
           }
         </div>

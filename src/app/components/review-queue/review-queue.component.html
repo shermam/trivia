@@ -263,9 +263,15 @@
   else could know it).
 -->
 <ng-template #questionCard let-question let-status="status">
-  <p class="font-semibold text-slate-900 dark:text-slate-50 mb-3">
-    {{ question.question }}
-  </p>
+  <!--
+    A `<div>` rather than a `<p>`, because a Markdown question renders block
+    content the paragraph could not legally hold (`FEAT-019`) — and the
+    reviewer is the one reader who has to see the question exactly as a player
+    will, which is the whole argument for one renderer rather than five.
+  -->
+  <div class="font-semibold text-slate-900 dark:text-slate-50 mb-3">
+    <app-rendered-text [text]="question.question" [format]="question.format" />
+  </div>
 
   <ul class="space-y-1 mb-4 text-sm">
     @for (answer of answersFor(question); track $index) {
@@ -282,7 +288,7 @@
         } @else {
           <span aria-hidden="true" class="w-3.5 shrink-0"></span>
         }
-        {{ answer }}
+        <app-rendered-text [text]="answer" [format]="question.format" [inline]="true" />
       </li>
     }
   </ul>
@@ -334,7 +340,7 @@
     reviewer who has both can approve on evidence rather than on plausibility.
     Renders nothing when there is none, which is the common case.
   -->
-  <app-question-justification [text]="question.explanation" />
+  <app-question-justification [text]="question.explanation" [format]="question.format" />
 
   <!--
     Why the question is being rejected, in the reviewer's own words

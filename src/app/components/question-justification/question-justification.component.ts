@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { QuestionFormat } from '../../models/question.model';
+import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 
 /**
  * Renders a question's optional **Justification** — the contributor's own
@@ -14,12 +16,15 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
  *    contributions will not need one — so a heading over an empty box, or a
  *    reserved blank line, would appear on nearly every question in the app to
  *    report an absence. An absent optional field is not a defect to announce.
- * 2. **Line breaks the contributor typed are kept, and nothing else is.**
- *    `white-space: pre-line` preserves the paragraphing of a multi-line
- *    justification while collapsing the runs of spaces a paste tends to bring
- *    with it. The text goes through Angular interpolation, so it is escaped:
- *    this is user-generated content rendered to other users, and it is never
- *    HTML.
+ * 2. **The text is rendered by whatever the question's own `format` says.**
+ *    On a plain question — every question in the bank today — it goes through
+ *    `RenderedTextComponent`'s plain branch, which is Angular interpolation
+ *    into a `white-space: pre-line` box: the paragraphing of a multi-line
+ *    justification survives, the runs of spaces a paste brings with it
+ *    collapse, and the text is escaped rather than parsed. On a Markdown
+ *    question the same component parses and sanitises it, so a justification
+ *    can carry the same code and formulas the question does — which is the
+ *    kind of question that needs one (`FEAT-019`).
  *
  * No layout-stability concern (`CLAUDE.md` §4.4): both callers render this from
  * data that has already resolved, so the block does not appear or disappear
@@ -29,6 +34,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
   selector: 'app-question-justification',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RenderedTextComponent],
   template: `
     @if (body(); as text) {
       <div
@@ -36,13 +42,20 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
         data-cy="question-justification"
       >
         <p class="font-semibold text-slate-500 dark:text-slate-400 mb-0.5">Justification</p>
-        <p class="whitespace-pre-line">{{ text }}</p>
+        <app-rendered-text [text]="text" [format]="format()" />
       </div>
     }
   `,
 })
 export class QuestionJustificationComponent {
   readonly text = input<string | undefined>(undefined);
+
+  /**
+   * The owning question's `format`, passed straight through: a justification is
+   * written in the same box as the question it explains, so it is written in
+   * the same syntax. Absent means plain, here as everywhere.
+   */
+  readonly format = input<QuestionFormat | undefined>(undefined);
 
   /**
    * The justification with its surrounding whitespace removed, or `undefined`
