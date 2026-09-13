@@ -3,6 +3,24 @@ export type Difficulty = 'easy' | 'medium' | 'hard';
 export type QuestionSource = 'open_trivia' | 'custom' | 'mixed';
 
 /**
+ * How a question's text is meant to be read (`FEAT-019`).
+ *
+ * **Two values, and the absent one is the interesting part.** It is tempting to
+ * add a third for Open Trivia DB's entity-encoded text, so that one field
+ * describes every kind of text the app renders. It would be wrong: no Open
+ * Trivia question is ever stored. `TriviaService` maps them at fetch time and
+ * the decoder runs in that adapter, which is where `CLAUDE.md` §4.4 wants a
+ * per-source transformation. A stored field cannot describe a source with no
+ * stored documents, and reaching for one would move the decode away from the
+ * adapter for nothing.
+ *
+ * An **absent** field means `'plain'`, everywhere and permanently. That is what
+ * makes the field free to add: nothing has to be backfilled, because nothing
+ * dereferences it.
+ */
+export type QuestionFormat = 'plain' | 'markdown';
+
+/**
  * One option as presented to the player.
  *
  * Answers used to be plain strings, and the whole option list was a
@@ -112,6 +130,13 @@ export interface TriviaQuestion {
    * near-duplicate.
    */
   explanation?: string;
+  /**
+   * How `question`, `correct_answer`, the answer texts and `explanation` are
+   * meant to be read (`FEAT-019`). Absent on every Open Trivia question by
+   * construction and on every contribution written before the toggle existed,
+   * and absent means plain.
+   */
+  format?: QuestionFormat;
 }
 
 /**
@@ -240,6 +265,15 @@ export interface CustomQuestionContent {
    * empty string, so "none given" is an absent key.
    */
   explanation?: string;
+  /**
+   * Whether the contributor wrote Markdown (`FEAT-019`). Written only when the
+   * form's toggle is on Markdown: the field is optional and absent means plain,
+   * so writing `'plain'` explicitly would put a value in every future document
+   * to say what its absence already says.
+   *
+   * `firestore.rules` accepts either value or none, and refuses anything else.
+   */
+  format?: QuestionFormat;
 }
 
 /**

@@ -537,7 +537,7 @@ export class FirebaseService {
    * leaves it standing.
    */
   async updateUserQuestion(questionId: string, content: CustomQuestionContent): Promise<void> {
-    const optional = ['sourceUrl', 'sourceTitle', 'explanation'] as const;
+    const optional = ['sourceUrl', 'sourceTitle', 'explanation', 'format'] as const;
     const present = Object.fromEntries(
       optional.filter((key) => content[key]).map((key) => [key, content[key]]),
     );

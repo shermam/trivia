@@ -413,6 +413,130 @@ describe('custom_questions: contributor attribution (FEAT-022)', () => {
   });
 });
 
+/**
+ * `FEAT-019`. One more optional field: how the question's text is meant to be
+ * read.
+ *
+ * **The accept cases carry this block**, for the reason the attribution block
+ * above says and one more of its own. `format` is a two-value enum with an
+ * absent third state, so three of the five shapes a document can be in are
+ * legitimate — a rule that refused them all would be invisible in a suite of
+ * `assertFails`, and would show up in production as every Markdown submission
+ * failing with a bare `permission-denied`.
+ *
+ * **Mutation-verified** (`CLAUDE.md` §4.6). Deleting the `format` clause from
+ * `isValidQuestionShape()` fails the three reject cases below; deleting
+ * `'format'` from the `hasOnly()` key list fails the two accept ones. Both were
+ * checked by breaking the rule on purpose rather than assumed from reading it.
+ */
+describe('custom_questions: text format (FEAT-019)', () => {
+  it('accepts a question with no format at all — every question in the bank today', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: validQuestion('pro') }),
+    );
+  });
+
+  it('accepts an explicit plain format', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { format: 'plain' }),
+      }),
+    );
+  });
+
+  it('accepts a markdown format', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { format: 'markdown' }),
+      }),
+    );
+  });
+
+  /**
+   * A third value is the shape that matters: the renderer treats anything that
+   * is not `'markdown'` as plain, so a document carrying `'html'` would render
+   * harmlessly — and would still be a value nothing in the app can produce,
+   * sitting in a public collection waiting for a future reader to give it a
+   * meaning.
+   */
+  it('refuses a third format value', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { format: 'html' }),
+      }),
+    );
+  });
+
+  it('refuses a non-string format', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { format: 42 }),
+      }),
+    );
+  });
+
+  it('refuses a format that is a map', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { format: { kind: 'markdown' } }),
+      }),
+    );
+  });
+
+  /** The author's own edit re-applies the create bounds — `FEAT-007`'s rule. */
+  it('lets the author switch their own question to markdown', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'q1'), validQuestion('pro'));
+    });
+
+    await assertSucceeds(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), { format: 'markdown', status: 'pending' }),
+    );
+  });
+
+  it('refuses an author editing their format to a third value', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { format: 'markdown' }),
+      );
+    });
+
+    await assertFails(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), { format: 'html', status: 'pending' }),
+    );
+  });
+
+  /**
+   * The same regression the attribution fields have their own row for: widening
+   * the create allowlist must not widen what a reviewer may rewrite on somebody
+   * else's question. `affectedKeys().hasOnly(['status', 'rejectionReason'])` is
+   * the only thing standing between the two, and re-rendering an author's plain
+   * question as Markdown is a change to what it says.
+   */
+  it('does not let a reviewer change the format', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'q1'), validQuestion('author'));
+    });
+    await grantReviewer(env, 'mod');
+
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), { format: 'markdown' }),
+    );
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), {
+        status: 'approved',
+        format: 'markdown',
+      }),
+    );
+  });
+});
+
 describe('custom_questions: create — who may write', () => {
   it('rejects a signed-out caller', async () => {
     await assertFails(

@@ -543,6 +543,12 @@ export class TriviaService {
       ...('sourceUrl' in raw && raw.sourceUrl ? { sourceUrl: raw.sourceUrl } : {}),
       ...('sourceTitle' in raw && raw.sourceTitle ? { sourceTitle: raw.sourceTitle } : {}),
       ...('explanation' in raw && raw.explanation ? { explanation: raw.explanation } : {}),
+      // How the text is meant to be read (`FEAT-019`), and the fourth field
+      // only a `custom` question can carry. An Open Trivia question is
+      // `plain` by construction: its entity decoding happens in
+      // `decodeOpenTriviaText` above, which is where a per-source
+      // transformation belongs, and nothing stores it for a field to describe.
+      ...('format' in raw && raw.format ? { format: raw.format } : {}),
     };
   }
 }
