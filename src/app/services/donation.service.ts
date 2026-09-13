@@ -363,7 +363,15 @@ export class DonationService {
       { timeoutMs: DONATION_TIMEOUT_MS },
     );
 
-    const activeProducts = products.filter((product) => product.data['active'] === true);
+    // Every clause the server applies, not most of them (`CLAUDE.md` §4.2): a
+    // product carrying both `kind: 'donation'` and `firebaseRole: 'pro'` is a
+    // Dashboard mistake nothing prevents, and `isSellableDonationPrice`
+    // refuses it — so a client that checked only `active` would render presets
+    // the server is bound to reject, which the reader meets as a Donate button
+    // that cannot work.
+    const activeProducts = products.filter(
+      (product) => product.data['active'] === true && product.data['role'] !== 'pro',
+    );
 
     const priceLists = await Promise.all(
       activeProducts.map(async (product) => {

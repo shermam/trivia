@@ -36,6 +36,7 @@ interface ProductSeed {
   id: string;
   active?: boolean;
   kind?: string | null;
+  role?: string | null;
   prices: PriceSeed[];
 }
 
@@ -159,7 +160,11 @@ function fakeFirestore(options: FakeOptions = {}) {
               collectionPath,
               rows.map((product) => ({
                 id: product.id,
-                data: { kind: product.kind ?? null, active: product.active ?? true },
+                data: {
+                  kind: product.kind ?? null,
+                  active: product.active ?? true,
+                  role: product.role ?? null,
+                },
               })),
             ),
           );
@@ -363,6 +368,27 @@ describe('DonationService catalog', () => {
           { id: 'price_pro', currency: 'usd', unitAmount: 99, kind: null },
           { id: 'price_coffee', currency: 'usd', unitAmount: 500 },
         ]),
+      ],
+    });
+    const service = configure({ uid: 'user-1', isAnonymous: false });
+    await service.loadPresets();
+
+    expect(service.presets().map((preset) => preset.priceId)).toEqual(['price_coffee']);
+  });
+
+  /*
+   * The same exclusion from the product's side, and the half a client is most
+   * likely to leave out: `isSellableDonationPrice` refuses a product carrying
+   * *both* markers, so a client checking only `kind` would render presets the
+   * server is bound to reject and the reader would meet a Donate button that
+   * cannot work (`CLAUDE.md` §4.2 — mirror all of a server predicate, and pin
+   * the stricter half).
+   */
+  it('refuses a product that also claims the Pro role', async () => {
+    fakeFirestore({
+      products: [
+        { id: 'prod_both', kind: 'donation', role: 'pro', active: true, prices: usdPresets },
+        donationProduct([{ id: 'price_coffee', currency: 'usd', unitAmount: 500 }]),
       ],
     });
     const service = configure({ uid: 'user-1', isAnonymous: false });
