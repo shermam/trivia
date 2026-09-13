@@ -1,4 +1,4 @@
-import { Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { DocumentReference, Timestamp, Transaction, getFirestore } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import { CompletedCheckoutSession, donationRecordFrom } from './donation-record';
 import { setIfNotStale } from './event-order';
@@ -65,24 +65,55 @@ export async function recordDonation(
  * A transaction rather than a read-then-write for the same reason
  * `setIfNotStale` uses one: two deliveries for the same customer can be in
  * flight at once, and a plain read followed by a write would let both pass the
- * comparison and race.
- *
- * `merge: true`, because this document is also where `stripeId` lives and a
- * plain `set` would take it with it.
+ * comparison and race. What it does inside that transaction is
+ * `applySupporterSince` below.
  */
 async function markSupporterSince(uid: string, donatedAt: Date): Promise<void> {
   const customerRef = getFirestore().collection('customers').doc(uid);
-  await getFirestore().runTransaction(async (transaction) => {
-    const existing = (await transaction.get(customerRef)).data()?.['supporterSince'];
-    const existingMillis =
-      existing instanceof Timestamp ? existing.toMillis() : Number.POSITIVE_INFINITY;
-    if (donatedAt.getTime() >= existingMillis) {
-      return;
-    }
-    transaction.set(
-      customerRef,
-      { supporterSince: Timestamp.fromDate(donatedAt) },
-      { merge: true },
-    );
-  });
+  await getFirestore().runTransaction((transaction) =>
+    applySupporterSince(transaction, customerRef, donatedAt),
+  );
+}
+
+/**
+ * Whether this donation is earlier than the one `supporterSince` already
+ * names, and so the one it should name instead.
+ *
+ * Pulled out of the transaction because it is the claim that makes the field
+ * order-independent, and a claim worth making is a claim worth testing
+ * (`CLAUDE.md` §4.6). `null` is "no usable date stored" — the field absent, or
+ * holding something that is not a `Timestamp`, which comes to the same thing:
+ * there is nothing there to be earlier than.
+ *
+ * **Equal is not earlier.** A redelivery carries exactly the value already
+ * stored, and rewriting it would be a write that changes nothing — the same
+ * reasoning `isStaleEvent` applies to a tie, for the same reason.
+ */
+export function shouldMoveSupporterSince(
+  existingMillis: number | null,
+  donatedAtMillis: number,
+): boolean {
+  return existingMillis === null || donatedAtMillis < existingMillis;
+}
+
+/**
+ * The body of the transaction above, taking the transaction rather than
+ * opening one, so the write is reachable from a unit test.
+ *
+ * `merge: true` is the part worth pinning: `customers/{uid}` is also where
+ * `stripeId` lives, and a plain `set` would take it with it — silently, since
+ * nothing reads that field until the next checkout needs a customer and finds
+ * none.
+ */
+export async function applySupporterSince(
+  transaction: Transaction,
+  customerRef: DocumentReference,
+  donatedAt: Date,
+): Promise<void> {
+  const existing = (await transaction.get(customerRef)).data()?.['supporterSince'];
+  const existingMillis = existing instanceof Timestamp ? existing.toMillis() : null;
+  if (!shouldMoveSupporterSince(existingMillis, donatedAt.getTime())) {
+    return;
+  }
+  transaction.set(customerRef, { supporterSince: Timestamp.fromDate(donatedAt) }, { merge: true });
 }
