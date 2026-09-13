@@ -57,3 +57,72 @@ export function readSavedGame(page: Page): Promise<Record<string, unknown> | nul
     { dbName: DB_NAME, store: GAME_STATE_STORE, key: CURRENT_GAME_KEY },
   );
 }
+
+/** `OfflineQuestionsService`'s pool, and the key it dedupes on. */
+const QUESTIONS_STORE = 'questions';
+
+/**
+ * Puts questions straight into the offline pool, so a spec can play a round
+ * with the network gone without waiting on the background prefetch.
+ *
+ * **Seeded rather than prefetched, deliberately.** The pool is normally filled
+ * from Open Trivia DB on an idle callback, which would make the test depend on
+ * a third-party service, on how long idle takes to arrive, and on how many
+ * questions came back. None of that is what the test is about.
+ *
+ * Opened **without a version**, like `readSavedGame` above and for the same
+ * reason: the app has already created the database by the time this runs, and
+ * naming a version from a test risks triggering an upgrade the app is not
+ * expecting. The records match what `OfflineQuestionsService.saveQuestions`
+ * writes, `dedupeKey` and `cachedAt` included — a row missing either is a row
+ * the store cannot key or the trim cannot sort.
+ */
+export function seedOfflineQuestions(page: Page, count: number): Promise<void> {
+  return page.evaluate(
+    ({ dbName, store, total }) =>
+      new Promise<void>((resolve, reject) => {
+        const open = window.indexedDB.open(dbName);
+        open.onerror = () => reject(open.error as Error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const transaction = db.transaction(store, 'readwrite');
+          const questions = transaction.objectStore(store);
+          for (let i = 1; i <= total; i++) {
+            const text = `Offline question ${i}?`;
+            questions.put({
+              id: `offline-${i}`,
+              category: 'General Knowledge',
+              type: 'multiple',
+              difficulty: 'easy',
+              question: text,
+              correct_answer: 'Right',
+              incorrect_answers: [`Wrong ${i}a`, `Wrong ${i}b`, `Wrong ${i}c`],
+              // The correct option carries the same label on every seeded
+              // question, so a caller can answer a whole round with one
+              // locator without knowing the order the pool is shuffled into.
+              // The ids stay per-question, which is what identity is (§4.4);
+              // only the display text repeats.
+              all_answers: [
+                { id: `${i}-0`, text: 'Right', isCorrect: true },
+                { id: `${i}-1`, text: `Wrong ${i}a`, isCorrect: false },
+                { id: `${i}-2`, text: `Wrong ${i}b`, isCorrect: false },
+                { id: `${i}-3`, text: `Wrong ${i}c`, isCorrect: false },
+              ],
+              source: 'open_trivia',
+              cachedAt: Date.now(),
+              dedupeKey: `open_trivia:${text}`,
+            });
+          }
+          transaction.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          transaction.onerror = () => {
+            db.close();
+            reject(transaction.error as Error);
+          };
+        };
+      }),
+    { dbName: DB_NAME, store: QUESTIONS_STORE, total: count },
+  );
+}

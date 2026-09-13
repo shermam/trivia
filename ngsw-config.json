@@ -3,6 +3,22 @@
   "index": "/index.html",
   "assetGroups": [
     {
+      "name": "deferred-routes",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": [
+          "/add-question.component-*.js",
+          "/my-questions.component-*.js",
+          "/pricing.component-*.js",
+          "/privacy-policy.component-*.js",
+          "/profile-stats.component-*.js",
+          "/review-queue.component-*.js",
+          "/terms-of-service.component-*.js"
+        ]
+      }
+    },
+    {
       "name": "app",
       "installMode": "prefetch",
       "resources": {

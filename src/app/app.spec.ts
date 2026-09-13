@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 import { AppTitleStrategy } from './app-title.strategy';
 import { routes } from './app.routes';
+import { AuthService } from './services/auth.service';
 import { RouteAnnouncerService } from './services/route-announcer.service';
 import { TriviaService } from './services/trivia.service';
 
@@ -28,6 +29,85 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     const app = fixture.componentInstance;
     expect(app).toBeTruthy();
+  });
+});
+
+/**
+ * `FEAT-017` §3.2. Both of the root's background tasks pull the Firebase SDK,
+ * and neither is needed to render `/` — so they run after the first paint, on
+ * an idle callback with a bounded fallback, rather than from the constructor.
+ *
+ * What makes this worth a unit test rather than leaving it to the A/B is that
+ * the regression is silent: moving either call back into the constructor
+ * changes no behaviour anyone can see, passes every other test, and quietly
+ * puts 36 kB gzip of SDK back in front of first paint. The ordering *is* the
+ * feature.
+ *
+ * `requestIdleCallback` does not exist in jsdom, so these exercise the
+ * `setTimeout` fallback — which is the branch a browser without the API takes,
+ * and the one worth pinning, since a mistake there is invisible in Chrome.
+ */
+describe('App bootstrap ordering (FEAT-017)', () => {
+  let ensureSignedIn: ReturnType<typeof vi.spyOn>;
+  let initOfflinePrefetch: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    ensureSignedIn = vi.spyOn(AuthService.prototype, 'ensureSignedIn').mockResolvedValue(undefined);
+    initOfflinePrefetch = vi
+      .spyOn(TriviaService.prototype, 'initOfflinePrefetch')
+      .mockImplementation(() => {
+        /* intentional no-op */
+      });
+    await TestBed.configureTestingModule({
+      imports: [App],
+      providers: [provideRouter([]), provideHttpClient()],
+    }).compileComponents();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('starts neither Firebase-backed task before the first render', () => {
+    TestBed.createComponent(App);
+
+    expect(ensureSignedIn).not.toHaveBeenCalled();
+    expect(initOfflinePrefetch).not.toHaveBeenCalled();
+  });
+
+  it('still holds them back through the render itself', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+
+    // `afterNextRender` has run by now; the idle callback it scheduled has not.
+    expect(ensureSignedIn).not.toHaveBeenCalled();
+    expect(initOfflinePrefetch).not.toHaveBeenCalled();
+  });
+
+  it('starts both once the deadline passes', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    vi.advanceTimersByTime(500);
+
+    expect(ensureSignedIn).toHaveBeenCalledTimes(1);
+    expect(initOfflinePrefetch).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The deferral must not turn a rejected bootstrap into an unhandled
+   * rejection: `ensureSignedIn` swallows its own failures precisely because
+   * nothing awaits it here, and moving the call changed nothing about that
+   * contract.
+   */
+  it('does not await the auth bootstrap', () => {
+    ensureSignedIn.mockRejectedValueOnce(new Error('offline'));
+    const fixture = TestBed.createComponent(App);
+
+    expect(() => {
+      fixture.detectChanges();
+      vi.advanceTimersByTime(500);
+    }).not.toThrow();
   });
 });
 
