@@ -31,6 +31,12 @@ export interface CustomQuestionSeed {
   sourceUrl?: string;
   sourceTitle?: string;
   explanation?: string;
+  /**
+   * How the text is meant to be read (`FEAT-019`). Absent — which is every
+   * other seed in the suite — means plain, so a spec that says nothing about
+   * formatting is seeding the shape the whole bank has today.
+   */
+  format?: 'plain' | 'markdown';
 }
 
 export interface VerifiedUserSeed {
