@@ -223,6 +223,67 @@
           <app-icon name="save" [size]="15" />
           Save your score to the {{ boardLabel() }} leaderboard
         </p>
+        <!--
+          The country the entry is published under (`FEAT-028`).
+
+          **Before the name and the button, in the DOM and therefore in the tab
+          order**, because it is part of what Save publishes: a control that
+          comes after the submit button is one a keyboard reader reaches only
+          by going back past the thing they just pressed.
+
+          A native `<select>` and no `autocomplete` token: the tokens describe
+          the *user* (`CLAUDE.md` §4.5), and `country`/`country-name` mean
+          "your address", which this is not — it is which board the player has
+          chosen to compete on.
+
+          **The selection is driven by `[selected]` on each option, not by
+          `[value]` on the `<select>`.** A `[value]` binding on the element is
+          applied before the `@for` has created any options to match it, and
+          Angular does not re-apply a binding whose value has not changed — so
+          a stored declaration set the signal and never reached the DOM. The
+          control then read "Prefer not to say" while the save published
+          Brazil, which falsifies the Privacy Policy's "what is published is
+          whatever the dropdown says", and choosing "Prefer not to say"
+          silently did nothing, because it was already the selected option and
+          selecting it fires no `change`. Binding the options is what makes the
+          DOM the truth: it is evaluated as each option is created, and again
+          whenever the signal moves.
+
+          The label spells out what the value does, because the two things a
+          reader wants to know before answering are what is published and to
+          whom: the answer is "beside your name and score, on a board anyone
+          can read".
+        -->
+        <div class="mb-3">
+          <label
+            for="save-score-region"
+            class="block text-xs font-semibold text-emerald-900 dark:text-emerald-200 mb-1"
+          >
+            Country to rank in
+          </label>
+          <select
+            id="save-score-region"
+            data-cy="save-score-region"
+            name="region"
+            (change)="onRegionChange($any($event.target).value)"
+            aria-describedby="save-score-region-hint"
+            class="w-full rounded-xl border border-emerald-600/25 dark:border-emerald-400/25 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
+          >
+            <option value="" [selected]="selectedRegion() === ''">Prefer not to say</option>
+            @for (option of regionOptions; track option.code) {
+              <option [value]="option.code" [selected]="option.code === selectedRegion()">
+                {{ option.name }}
+              </option>
+            }
+          </select>
+          <p
+            id="save-score-region-hint"
+            class="mt-1 text-xs text-emerald-900/70 dark:text-emerald-200/70"
+          >
+            Published beside your name and score on that country's public board, as well as the
+            global one. Leave it unset and only the global board gets your score.
+          </p>
+        </div>
         <form (ngSubmit)="saveScore()" class="flex flex-col sm:flex-row gap-2">
           <input
             type="text"
@@ -246,50 +307,6 @@
             }
           </button>
         </form>
-        <!--
-          The country the entry is published under (`FEAT-028`).
-
-          A native `<select>` and no `autocomplete` token: the tokens describe
-          the *user* (`CLAUDE.md` §4.5), and `country`/`country-name` mean
-          "your address", which this is not — it is which board the player has
-          chosen to compete on. `[value]` rather than `[ngValue]` is correct
-          here for once, because the option values genuinely are strings; the
-          §4.4 trap is a numeric option written with `[value]`.
-
-          The label spells out what the value does, because the two things a
-          reader wants to know before answering are what is published and to
-          whom: the answer is "beside your name and score, on a board anyone
-          can read".
-        -->
-        <div class="mt-3">
-          <label
-            for="save-score-region"
-            class="block text-xs font-semibold text-emerald-900 dark:text-emerald-200 mb-1"
-          >
-            Country to rank in
-          </label>
-          <select
-            id="save-score-region"
-            data-cy="save-score-region"
-            name="region"
-            [value]="selectedRegion()"
-            (change)="onRegionChange($any($event.target).value)"
-            aria-describedby="save-score-region-hint"
-            class="w-full rounded-xl border border-emerald-600/25 dark:border-emerald-400/25 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
-          >
-            <option value="">Prefer not to say</option>
-            @for (option of regionOptions; track option.code) {
-              <option [value]="option.code">{{ option.name }}</option>
-            }
-          </select>
-          <p
-            id="save-score-region-hint"
-            class="mt-1 text-xs text-emerald-900/70 dark:text-emerald-200/70"
-          >
-            Published beside your name and score on that country's public board, as well as the
-            global one. Leave it unset and only the global board gets your score.
-          </p>
-        </div>
       </div>
     </div>
     @if (saveError() && !hasSaved()) {

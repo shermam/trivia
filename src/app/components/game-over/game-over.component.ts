@@ -729,6 +729,14 @@ export class GameOverComponent implements OnInit {
    * `inferredRegion()` resolves to `null` for every failure there is, which is
    * also what it resolves to locally and on a preview channel, where
    * `/api/geo` does not exist at all.
+   *
+   * **It reloads the board when one is showing**, because until it lands the
+   * regional tab has a country and no read: `leaderboardMessage` would fall
+   * through to its empty-board branch and tell the reader "no scores in Brazil
+   * yet" about a board nothing had asked for (`CLAUDE.md` §4.4 — the least
+   * alarming default is the one that has not guessed). `loadLeaderboard` sets
+   * the loading flag synchronously, before its first `await`, so the skeleton
+   * is showing by the time this returns and the empty message never appears.
    */
   private async preselectRegion(): Promise<void> {
     if (this.regionService.declaredRegion()) {
@@ -737,6 +745,9 @@ export class GameOverComponent implements OnInit {
     const inferred = await this.regionService.inferredRegion();
     if (inferred && !this.regionChosenByReader && !this.regionService.declaredRegion()) {
       this.selectedRegion.set(inferred);
+      if (this.boardScope() === 'regional') {
+        void this.loadLeaderboard();
+      }
     }
   }
 
@@ -969,8 +980,23 @@ export class GameOverComponent implements OnInit {
    * resolves to "no scores yet" would be narrating an outcome no request
    * produced (`CLAUDE.md` §4.4). `leaderboardMessage` says how to get a board
    * instead.
+   *
+   * **Every call takes a sequence number and a late one throws its answer
+   * away.** Two boards are one click apart now, so Global → Regional → Global
+   * puts two reads in flight and the network decides which returns last —
+   * which is how the world's top ten ends up rendered under "In Brazil". The
+   * counter is the whole guard: only the most recent call may still write, and
+   * a superseded one returns without touching a signal, including the loading
+   * flag its successor is relying on. An `AbortSignal` would be tidier and is
+   * not available — the read goes through `FirestoreRestClient`, whose
+   * timeout is its own — so the request still completes and is simply not
+   * read, which is a discarded response rather than the abandoned one
+   * `CLAUDE.md` §4.4 warns about paying for.
    */
+  private loadSequence = 0;
+
   private async loadLeaderboard(): Promise<void> {
+    const sequence = ++this.loadSequence;
     const region = this.selectedRegion();
     const regional = this.boardScope() === 'regional';
     if (regional && !region) {
@@ -988,12 +1014,22 @@ export class GameOverComponent implements OnInit {
           ? this.firebaseService.getRegionalTopScores(this.board(), region, 10)
           : this.firebaseService.getTopScores(this.board(), 10),
       );
+      if (sequence !== this.loadSequence) {
+        return;
+      }
       this.leaderboard.set(topScores);
     } catch {
+      if (sequence !== this.loadSequence) {
+        return;
+      }
       this.leaderboard.set([]);
       this.leaderboardError.set('Could not load the leaderboard. Please try again later.');
     } finally {
-      this.isLoadingLeaderboard.set(false);
+      // Only the live call may clear the flag: a superseded one resolving
+      // second would otherwise report its successor's read as finished.
+      if (sequence === this.loadSequence) {
+        this.isLoadingLeaderboard.set(false);
+      }
     }
   }
 }

@@ -284,6 +284,13 @@ describe('legal pages', () => {
    * yes-or-no. Moving the preference to an account, or growing it into a
    * volume setting that gets synced, falsifies one of those silently.
    */
+  it('discloses the sound-effects mute among what is kept on the device', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain("whether you have muted the game's sound effects");
+    expect(text).toContain('stays on this device and is sent nowhere');
+  });
+
   /**
    * `FEAT-028` publishes a country beside a player's name and score, and asks
    * the app's own server which country they are in on a second screen. Both
@@ -304,6 +311,10 @@ describe('legal pages', () => {
     expect(text).toContain(
       'a country we worked out is never published on a leaderboard and never written to your account',
     );
+    // The device-storage list describes the same code and so cannot scope it
+    // to one screen either: pre-selecting the picker goes through the same
+    // `GeoService`, which writes the cached country from `/game-over` too.
+    expect(text).toContain('once either of the screens described above has asked');
   });
 
   it('discloses that a leaderboard entry can publish a country you chose', async () => {
@@ -322,13 +333,6 @@ describe('legal pages', () => {
 
     expect(text).toContain('Local storage, once you have chosen a country to rank in');
     expect(text).toContain('Only a country you chose yourself is stored here');
-  });
-
-  it('discloses the sound-effects mute among what is kept on the device', async () => {
-    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
-
-    expect(text).toContain("whether you have muted the game's sound effects");
-    expect(text).toContain('stays on this device and is sent nowhere');
   });
 
   /**

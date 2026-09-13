@@ -2,7 +2,7 @@ import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { expectRadiosAreGrouped } from '../../support/a11y';
 import { signInFromGameOver } from '../../support/auth';
-import { answerQuestion, optionLabel, startGame } from '../../support/game';
+import { answerQuestion, optionLabel, startGame, startNewGame } from '../../support/game';
 import { settledHeight } from '../../support/layout';
 import { CORRECT_ANSWERS, questionsFixture } from '../../support/open-trivia';
 
@@ -116,6 +116,76 @@ test.describe('a score reaches the country board its player named', () => {
 
     await expect.poll(() => firebase.getLeaderboardEntry({ uid })).toMatchObject({ name: player });
     await expect.poll(() => firebase.getRegionalLeaderboardEntry({ uid, region: 'BR' })).toBeNull();
+  });
+
+  /**
+   * The second round, which is where the picker's binding actually bites.
+   *
+   * A stored declaration is read back at construction, so on every game after
+   * the first the signal holds a country before the control exists. A
+   * `[value]` binding on the `<select>` is applied before the `@for` has made
+   * any option to match it, and Angular does not re-apply a binding whose
+   * value has not changed — so the control read "Prefer not to say" while the
+   * save published Brazil, which is exactly the sentence the Privacy Policy
+   * makes ("what is published is whatever the dropdown says when you press
+   * Save"), and choosing "Prefer not to say" fired no `change` at all, because
+   * it was already the selected option.
+   *
+   * jsdom has no rendered `<select>`, so the unit spec pins `select.value` and
+   * this pins the round trip a reader actually takes: save under a country,
+   * play again, find the control already saying so — and be able to change its
+   * mind, which the second save proves by *not* reaching Brazil's board.
+   */
+  test('opens the picker on the stored country when the next round ends, and can still opt out', async ({
+    page,
+    firebase,
+  }) => {
+    const tag = Math.random().toString(36).slice(2, 8);
+    const email = `region-again-${Date.now()}-${tag}@example.com`;
+    const player = `Repeat Player ${tag}`;
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+
+    await startGame(page, 5);
+    await playMissingOne(page);
+    await signInFromGameOver(page, email, password);
+
+    await page.getByTestId('save-score-region').selectOption('BR');
+    await page.locator('input[name=playerName]').fill(player);
+    await page.getByRole('button', { name: 'Save Score', exact: true }).click();
+    await expect(page.getByTestId('score-saved')).toBeVisible();
+    await expect
+      .poll(() => firebase.getRegionalLeaderboardEntry({ uid, region: 'BR' }))
+      .toMatchObject({ score: expected.score, region: 'BR' });
+
+    // Replayed through the app's own reset rather than a revisit, for the
+    // reason `sign-in-save-score.spec.ts` records: navigating back to the page
+    // it is already on, right after heavy Auth/Firestore activity, was flaky.
+    await page.getByRole('button', { name: 'Play Again', exact: true }).click();
+    await startNewGame(page, 5);
+
+    // A perfect round this time, so both writes would be accepted on their
+    // merits — which is what makes the regional one's *absence* below evidence
+    // of the opt-out rather than of the improving-score rule.
+    for (const answer of CORRECT_ANSWERS) {
+      await answerQuestion(page, answer);
+    }
+    await expect(page).toHaveURL(/\/game-over$/);
+
+    // The control itself, not the signal behind it.
+    await expect(page.getByTestId('save-score-region')).toHaveValue('BR');
+
+    await page.getByTestId('save-score-region').selectOption('');
+    await page.locator('input[name=playerName]').fill(player);
+    await page.getByRole('button', { name: 'Save Score', exact: true }).click();
+    await expect(page.getByTestId('score-saved')).toBeVisible();
+
+    // Seven points for a perfect five — the streak multiplier (`FEAT-004`).
+    await expect.poll(() => firebase.getLeaderboardEntry({ uid })).toMatchObject({ score: 7 });
+    // And Brazil's board still holds the first round, so opting out really did
+    // stop the second write rather than merely appearing to.
+    await expect
+      .poll(() => firebase.getRegionalLeaderboardEntry({ uid, region: 'BR' }))
+      .toMatchObject({ score: expected.score });
   });
 
   /**

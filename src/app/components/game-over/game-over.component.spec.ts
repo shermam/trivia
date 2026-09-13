@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { ApplicationRef, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { NEVER, of, throwError } from 'rxjs';
+import { NEVER, Observable, Subject, of, throwError } from 'rxjs';
 import {
   GameConfig,
   LeaderboardEntry,
@@ -2012,6 +2012,9 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
       saveGlobal?: () => Promise<void>;
       saveRegional?: () => Promise<void>;
       regionalTop?: LeaderboardEntry[];
+      /** Replaces the whole read, for the tests that need to control when it resolves. */
+      getTopScores?: () => Observable<LeaderboardEntry[]>;
+      getRegionalTopScores?: () => Observable<LeaderboardEntry[]>;
     } = {},
   ) {
     const declaredRegion = signal<string | null>(options.declared ?? null);
@@ -2024,8 +2027,13 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
     const saveRegionalHighScore = vi.fn((_entry: RegionalLeaderboardEntry) =>
       (options.saveRegional ?? (() => Promise.resolve()))(),
     );
-    const getTopScores = vi.fn(() => of<LeaderboardEntry[]>([]));
-    const getRegionalTopScores = vi.fn(() => of(options.regionalTop ?? []));
+    const getTopScores = vi.fn(
+      options.getTopScores ?? ((): Observable<LeaderboardEntry[]> => of([])),
+    );
+    const getRegionalTopScores = vi.fn(
+      options.getRegionalTopScores ??
+        ((): Observable<LeaderboardEntry[]> => of(options.regionalTop ?? [])),
+    );
     const getLeaderboardEntry = vi.fn().mockResolvedValue(null);
     const declareRegion = vi.fn((region: string | null) => declaredRegion.set(region));
 
@@ -2093,6 +2101,8 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
       selectedRegion(): string;
       onRegionChange(region: string): void;
       onBoardScopeChange(scope: 'global' | 'regional'): void;
+      leaderboard(): LeaderboardEntry[];
+      isLoadingLeaderboard(): boolean;
     };
     component.playerName = 'Ada';
     return {
@@ -2122,10 +2132,12 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
   });
 
   it('preselects the country the app inferred', async () => {
-    const { fixture, component } = render({ inferred: 'BR' });
+    const { fixture, component, host } = render({ inferred: 'BR' });
     await fixture.whenStable();
+    fixture.detectChanges();
 
     expect(component.selectedRegion()).toBe('BR');
+    expect(select(host).value).toBe('BR');
   });
 
   // The preselection is a suggestion, not a record: it must not write itself.
@@ -2136,11 +2148,48 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
     expect(declareRegion).not.toHaveBeenCalled();
   });
 
-  it('opens on the stored declaration and does not need the guess', async () => {
-    const { fixture, component } = render({ declared: 'PT', inferred: 'BR' });
+  /*
+   * **Read off the element, not off the signal**, and that is the whole test.
+   * A `[value]` binding on the `<select>` set the signal's value onto an
+   * element whose options the `@for` had not created yet, and Angular never
+   * re-applied it — so `selectedRegion()` said `PT` and the control said
+   * "Prefer not to say" for every game after the first save. Two things
+   * followed and neither was visible from the signal: the save published a
+   * country the reader could not see, falsifying the Privacy Policy's "what is
+   * published is whatever the dropdown says"; and picking "Prefer not to say"
+   * fired no `change`, because it was already the selected option, so there
+   * was no way out. `CLAUDE.md` §4.4 — drive the real element.
+   */
+  it('opens the control itself on the stored declaration, not just the signal', async () => {
+    const { fixture, component, host } = render({ declared: 'PT', inferred: 'BR' });
     await fixture.whenStable();
+    fixture.detectChanges();
 
     expect(component.selectedRegion()).toBe('PT');
+    expect(select(host).value).toBe('PT');
+  });
+
+  it('lets a reader with a stored country opt back out', async () => {
+    const { fixture, component, declareRegion, host } = render({ declared: 'PT' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const control = select(host);
+    // **The precondition is the test.** Driving `value` from here proves
+    // nothing on its own — a spec that sets the control directly cannot see a
+    // control that was never set (`CLAUDE.md` §4.4). What made opting out
+    // impossible was the element sitting on "Prefer not to say" while the
+    // signal said Portugal: choosing it then selects the already-selected
+    // option and fires no `change` at all.
+    expect(control.value).toBe('PT');
+
+    control.value = '';
+    control.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+
+    expect(declareRegion).toHaveBeenCalledWith(null);
+    expect(component.selectedRegion()).toBe('');
+    expect(control.value).toBe('');
   });
 
   /*
@@ -2298,6 +2347,101 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
 
     expect(getRegionalTopScores).not.toHaveBeenCalled();
     expect(message(host)).toContain('Choose your country');
+  });
+
+  /**
+   * The regional tab is showing and the guess lands *after* it — a slow
+   * `/api/geo` on a reader who switched boards in the first second.
+   *
+   * Setting the country without reading its board left `leaderboard()` empty
+   * and `isLoadingLeaderboard()` false, so `leaderboardMessage` fell straight
+   * through to its empty-board branch and told the reader "No scores in Brazil
+   * yet. Be the first!" about a board nothing had asked for — the most
+   * specific of the available answers, arrived at by not knowing (`CLAUDE.md`
+   * §4.4). The read is what makes the claim honest, and the loading flag it
+   * sets synchronously is what keeps the wrong message off the screen in the
+   * meantime.
+   */
+  it('reads the board when the guess arrives with the regional tab already showing', async () => {
+    let answer!: (country: string | null) => void;
+    const pending = new Promise<string | null>((resolve) => {
+      answer = resolve;
+    });
+    // Held open so the window between "the country is set" and "the board has
+    // answered" — the window the bug lived in — can be inspected rather than
+    // stepped over.
+    const board = new Subject<LeaderboardEntry[]>();
+    const rows = [makeEntry({ uid: 'br-player', name: 'BR Player' })];
+    const { fixture, component, getRegionalTopScores, host } = render({
+      inferred: pending,
+      getRegionalTopScores: () => board,
+    });
+
+    component.onBoardScopeChange('regional');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(getRegionalTopScores).not.toHaveBeenCalled();
+    expect(message(host)).toContain('Choose your country');
+
+    answer('BR');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    // The country has landed and the read is in flight: skeletons, and no
+    // claim about a board nobody has heard back from.
+    expect(getRegionalTopScores).toHaveBeenCalledWith('15', 'BR', 10);
+    expect(component.isLoadingLeaderboard()).toBe(true);
+    expect(message(host)).toBeNull();
+
+    board.next(rows);
+    board.complete();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.leaderboard().map((entry) => entry.uid)).toEqual(['br-player']);
+    expect(message(host)).toBeNull();
+  });
+
+  /**
+   * Two boards are one click apart, so Global → Regional → Global puts two
+   * reads in flight and the network decides which lands last. Without a
+   * sequence number the loser wins: the world's top ten renders under "In
+   * Brazil", or the country's under "Worldwide", and nothing about the screen
+   * says which board the rows came from.
+   *
+   * Resolved deliberately out of order here, because in-order resolution is
+   * the case that passes either way.
+   */
+  it('discards a board read that a later one has already superseded', async () => {
+    const globalRows = [makeEntry({ uid: 'global-player', name: 'Global Player' })];
+    const regionalRows = [makeEntry({ uid: 'regional-player', name: 'Regional Player' })];
+
+    const regional = new Subject<LeaderboardEntry[]>();
+    const second = new Subject<LeaderboardEntry[]>();
+    let globalCalls = 0;
+
+    const { fixture, component } = render({
+      declared: 'BR',
+      // The first global read is the one `ngOnInit` issues and resolves at
+      // once; the second is the one this test races.
+      getTopScores: () => (globalCalls++ === 0 ? of(globalRows) : second),
+      getRegionalTopScores: () => regional,
+    });
+    await fixture.whenStable();
+
+    component.onBoardScopeChange('regional');
+    component.onBoardScopeChange('global');
+    await fixture.whenStable();
+
+    // The regional read finishes last, and is now the stale one.
+    second.next(globalRows);
+    second.complete();
+    regional.next(regionalRows);
+    regional.complete();
+    await fixture.whenStable();
+
+    expect(component.leaderboard().map((entry) => entry.uid)).toEqual(['global-player']);
+    expect(component.isLoadingLeaderboard()).toBe(false);
   });
 
   it('names the country in the board header once one is set', async () => {

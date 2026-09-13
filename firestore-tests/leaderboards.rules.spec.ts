@@ -733,6 +733,17 @@ describe('regional leaderboards: the anti-flood gate and the bounds carry over',
     await assertFails(write({ cheated: true }));
   });
 
+  /*
+   * A second key, and a plausible one. `cheated: true` is the kind of field
+   * nobody writes by accident; `regionName` is the kind somebody adds on
+   * purpose to save the reader's board heading a lookup — so it is the shape
+   * that actually tests whether the allowlist is doing anything, and the row
+   * that keeps the allowlist's mutation score above one.
+   */
+  it('rejects a plausible extra key nobody declared', async () => {
+    await assertFails(write({ regionName: 'Brazil' }));
+  });
+
   it('rejects an implausible score', async () => {
     await assertFails(write({ score: 999999, totalQuestions: 999999, percentage: 100 }));
   });
@@ -785,6 +796,19 @@ describe('regional leaderboards: improving-score is scoped per country', () => {
       setDoc(
         regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
         regionalEntry('u', '15', 'BR', { score: 5 }),
+      ),
+    );
+  });
+
+  // The other side of the same clause, and the one a reader would actually
+  // hit: a worse round must not replace a better one. Equal-only coverage
+  // leaves the improving-score rule resting on a single row.
+  it('rejects a worse score on the same regional board', async () => {
+    await seedExistingRegional('15', 'BR', 'u', 5);
+    await assertFails(
+      setDoc(
+        regionalRef(asVerifiedPassword(env, 'u'), '15', 'BR', 'u'),
+        regionalEntry('u', '15', 'BR', { score: 4 }),
       ),
     );
   });
