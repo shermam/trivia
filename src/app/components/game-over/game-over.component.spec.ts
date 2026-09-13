@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { ApplicationRef, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { NEVER, of, throwError } from 'rxjs';
+import { NEVER, Observable, Subject, of, throwError } from 'rxjs';
 import {
   GameConfig,
   LeaderboardEntry,
+  RegionalLeaderboardEntry,
   PickedAnswer,
   SKIPPED,
   TIMED_OUT,
@@ -20,6 +21,7 @@ import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { FirestoreRestError } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
+import { RegionService } from '../../services/region.service';
 import { GameOverComponent } from './game-over.component';
 
 /**
@@ -1981,5 +1983,536 @@ describe('GameOverComponent — the end-of-round cue (FEAT-003)', () => {
     const { playGameOver } = render({ correctAnswers: 0, totalQuestions: 5, score: 0 });
 
     expect(playGameOver).toHaveBeenCalledExactlyOnceWith(false);
+  });
+});
+
+/**
+ * `FEAT-028`: the region picker, the Global/Regional toggle, and the save that
+ * now writes two documents.
+ *
+ * Three properties are worth more than the rest here. The **preselection is
+ * not a declaration** — it fills the control and touches nothing durable, and
+ * an answer that arrives late must never overwrite a choice already made. The
+ * **two writes are independent** — separate documents under separate
+ * improving-score floors, so a round can publish one and be refused the other,
+ * and the refusal that gets narrated is still only the one the component can
+ * verify. And the **regional tab with no country never becomes a failure** —
+ * it explains, rather than reading an empty board or asking for a location.
+ */
+describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
+  afterEach(() => {
+    localStorage.clear();
+    TestBed.resetTestingModule();
+  });
+
+  function render(
+    options: {
+      declared?: string | null;
+      inferred?: string | null | Promise<string | null>;
+      saveGlobal?: () => Promise<void>;
+      saveRegional?: () => Promise<void>;
+      regionalTop?: LeaderboardEntry[];
+      /** Replaces the whole read, for the tests that need to control when it resolves. */
+      getTopScores?: () => Observable<LeaderboardEntry[]>;
+      getRegionalTopScores?: () => Observable<LeaderboardEntry[]>;
+    } = {},
+  ) {
+    const declaredRegion = signal<string | null>(options.declared ?? null);
+    // Typed by their parameter, not only their result: the assertions below
+    // read the payload each board was written with, and a `vi.fn()` inferred
+    // from a nullary stub records calls typed as an empty tuple.
+    const saveHighScore = vi.fn((_entry: LeaderboardEntry) =>
+      (options.saveGlobal ?? (() => Promise.resolve()))(),
+    );
+    const saveRegionalHighScore = vi.fn((_entry: RegionalLeaderboardEntry) =>
+      (options.saveRegional ?? (() => Promise.resolve()))(),
+    );
+    const getTopScores = vi.fn(
+      options.getTopScores ?? ((): Observable<LeaderboardEntry[]> => of([])),
+    );
+    const getRegionalTopScores = vi.fn(
+      options.getRegionalTopScores ??
+        ((): Observable<LeaderboardEntry[]> => of(options.regionalTop ?? [])),
+    );
+    const getLeaderboardEntry = vi.fn().mockResolvedValue(null);
+    const declareRegion = vi.fn((region: string | null) => declaredRegion.set(region));
+
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(7),
+            correctAnswers: signal(7),
+            maxStreak: signal(4),
+            totalQuestions: signal(10),
+            percentage: signal(70),
+            questions: signal([]),
+            config: signal(makeConfig(15)),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
+            gameId: signal<string | null>('game-fixture'),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isFullyAuthenticated: signal(true),
+            isAnonymous: signal(false),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        {
+          provide: AccountService,
+          useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
+        },
+        { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore,
+            saveRegionalHighScore,
+            getTopScores,
+            getRegionalTopScores,
+            getLeaderboardEntry,
+          },
+        },
+        {
+          provide: RegionService,
+          useValue: {
+            declaredRegion,
+            declareRegion,
+            inferredRegion: () => Promise.resolve(options.inferred ?? null),
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+
+    const fixture = TestBed.createComponent(GameOverComponent);
+    fixture.detectChanges();
+    const component = fixture.componentInstance as unknown as {
+      playerName: string;
+      saveScore(): Promise<void>;
+      hasSaved(): boolean;
+      saveError(): string | null;
+      selectedRegion(): string;
+      onRegionChange(region: string): void;
+      onBoardScopeChange(scope: 'global' | 'regional'): void;
+      leaderboard(): LeaderboardEntry[];
+      isLoadingLeaderboard(): boolean;
+    };
+    component.playerName = 'Ada';
+    return {
+      fixture,
+      component,
+      declareRegion,
+      saveHighScore,
+      saveRegionalHighScore,
+      getTopScores,
+      getRegionalTopScores,
+      host: fixture.nativeElement as HTMLElement,
+    };
+  }
+
+  const select = (host: HTMLElement) =>
+    host.querySelector<HTMLSelectElement>('[data-cy="save-score-region"]')!;
+  const message = (host: HTMLElement) =>
+    host.querySelector('[data-cy="leaderboard-message"]')?.textContent?.trim() ?? null;
+
+  it('opens on nothing when the app cannot tell and the player has not said', async () => {
+    const { fixture, component, host } = render();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.selectedRegion()).toBe('');
+    expect(select(host).value).toBe('');
+  });
+
+  it('preselects the country the app inferred', async () => {
+    const { fixture, component, host } = render({ inferred: 'BR' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.selectedRegion()).toBe('BR');
+    expect(select(host).value).toBe('BR');
+  });
+
+  // The preselection is a suggestion, not a record: it must not write itself.
+  it('does not declare the country it merely inferred', async () => {
+    const { fixture, declareRegion } = render({ inferred: 'BR' });
+    await fixture.whenStable();
+
+    expect(declareRegion).not.toHaveBeenCalled();
+  });
+
+  /*
+   * **Read off the element, not off the signal**, and that is the whole test.
+   * A `[value]` binding on the `<select>` set the signal's value onto an
+   * element whose options the `@for` had not created yet, and Angular never
+   * re-applied it — so `selectedRegion()` said `PT` and the control said
+   * "Prefer not to say" for every game after the first save. Two things
+   * followed and neither was visible from the signal: the save published a
+   * country the reader could not see, falsifying the Privacy Policy's "what is
+   * published is whatever the dropdown says"; and picking "Prefer not to say"
+   * fired no `change`, because it was already the selected option, so there
+   * was no way out. `CLAUDE.md` §4.4 — drive the real element.
+   */
+  it('opens the control itself on the stored declaration, not just the signal', async () => {
+    const { fixture, component, host } = render({ declared: 'PT', inferred: 'BR' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.selectedRegion()).toBe('PT');
+    expect(select(host).value).toBe('PT');
+  });
+
+  it('lets a reader with a stored country opt back out', async () => {
+    const { fixture, component, declareRegion, host } = render({ declared: 'PT' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const control = select(host);
+    // **The precondition is the test.** Driving `value` from here proves
+    // nothing on its own — a spec that sets the control directly cannot see a
+    // control that was never set (`CLAUDE.md` §4.4). What made opting out
+    // impossible was the element sitting on "Prefer not to say" while the
+    // signal said Portugal: choosing it then selects the already-selected
+    // option and fires no `change` at all.
+    expect(control.value).toBe('PT');
+
+    control.value = '';
+    control.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+
+    expect(declareRegion).toHaveBeenCalledWith(null);
+    expect(component.selectedRegion()).toBe('');
+    expect(control.value).toBe('');
+  });
+
+  /*
+   * The race the pricing switch documents, on a slower screen: `/api/geo`
+   * takes up to two seconds, and a reader who picked a country in the first
+   * one must not watch it change in the second.
+   */
+  it('leaves a choice made before the guess arrives alone', async () => {
+    let answer!: (country: string | null) => void;
+    const pending = new Promise<string | null>((resolve) => {
+      answer = resolve;
+    });
+    const { fixture, component } = render({ inferred: pending });
+
+    component.onRegionChange('JP');
+    answer('BR');
+    await fixture.whenStable();
+
+    expect(component.selectedRegion()).toBe('JP');
+  });
+
+  it('records a country the player picks', () => {
+    const { component, declareRegion } = render();
+
+    component.onRegionChange('BR');
+
+    expect(declareRegion).toHaveBeenCalledWith('BR');
+    expect(component.selectedRegion()).toBe('BR');
+  });
+
+  it('withdraws the declaration when the player prefers not to say', () => {
+    const { component, declareRegion } = render({ declared: 'BR' });
+
+    component.onRegionChange('');
+
+    expect(declareRegion).toHaveBeenCalledWith(null);
+    expect(component.selectedRegion()).toBe('');
+  });
+
+  it('publishes to both boards, with the country in the path and on the document', async () => {
+    const { fixture, component, saveHighScore, saveRegionalHighScore } = render({
+      inferred: 'BR',
+    });
+    await fixture.whenStable();
+
+    await component.saveScore();
+
+    expect(saveHighScore).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: 'player-1', timeLimit: '15' }),
+    );
+    expect(saveRegionalHighScore).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: 'player-1', timeLimit: '15', region: 'BR' }),
+    );
+    // The two documents differ in exactly one key. `firestore.rules` refuses a
+    // `region` on the global board and requires one here, so a payload shared
+    // wholesale between them would be rejected at one of the two paths.
+    expect(saveHighScore.mock.calls[0][0]).not.toHaveProperty('region');
+  });
+
+  it('publishes only the global board when no country is set', async () => {
+    const { fixture, component, saveHighScore, saveRegionalHighScore } = render();
+    await fixture.whenStable();
+
+    await component.saveScore();
+
+    expect(saveHighScore).toHaveBeenCalledTimes(1);
+    expect(saveRegionalHighScore).not.toHaveBeenCalled();
+    expect(component.hasSaved()).toBe(true);
+  });
+
+  /*
+   * The case the two independent writes exist for. A player whose global best
+   * already stands is refused there and is still first in a country they have
+   * only just declared — so the round did publish something, and telling them
+   * it failed would be false.
+   */
+  it('counts as saved when the global board refuses but the country board accepts', async () => {
+    const { fixture, component } = render({
+      declared: 'BR',
+      saveGlobal: () => Promise.reject(permissionDenied()),
+    });
+    await fixture.whenStable();
+
+    await component.saveScore();
+
+    expect(component.hasSaved()).toBe(true);
+    expect(component.saveError()).toBeNull();
+  });
+
+  it('counts as saved when the country board refuses but the global one accepts', async () => {
+    const { fixture, component } = render({
+      declared: 'BR',
+      saveRegional: () => Promise.reject(permissionDenied()),
+    });
+    await fixture.whenStable();
+
+    await component.saveScore();
+
+    expect(component.hasSaved()).toBe(true);
+    expect(component.saveError()).toBeNull();
+  });
+
+  // Only a round that published nothing gets an explanation, and it is still
+  // the one the component verified against the player's own row (B4).
+  it('explains the failure only when both boards refuse', async () => {
+    const { fixture, component } = render({
+      declared: 'BR',
+      saveGlobal: () => Promise.reject(permissionDenied()),
+      saveRegional: () => Promise.reject(permissionDenied()),
+    });
+    await fixture.whenStable();
+
+    await component.saveScore();
+
+    expect(component.hasSaved()).toBe(false);
+    expect(component.saveError()).toBe('Could not save your score. Please try again.');
+  });
+
+  it('reads the country board when the toggle is switched to it', async () => {
+    const { fixture, component, getRegionalTopScores } = render({ declared: 'BR' });
+    await fixture.whenStable();
+
+    component.onBoardScopeChange('regional');
+    await fixture.whenStable();
+
+    expect(getRegionalTopScores).toHaveBeenCalledWith('15', 'BR', 10);
+  });
+
+  it('re-reads the board when the country changes under the regional tab', async () => {
+    const { fixture, component, getRegionalTopScores } = render({ declared: 'BR' });
+    await fixture.whenStable();
+    component.onBoardScopeChange('regional');
+    await fixture.whenStable();
+
+    component.onRegionChange('PT');
+    await fixture.whenStable();
+
+    expect(getRegionalTopScores).toHaveBeenLastCalledWith('15', 'PT', 10);
+  });
+
+  /*
+   * Never blocks and never asks for a location: the tab is selectable with no
+   * country set, and what it shows is how to get one. Reading a board here
+   * would mean querying a path that does not exist and then narrating the
+   * empty result as "no scores yet", which is a claim no request supports
+   * (`CLAUDE.md` §4.4).
+   */
+  it('offers to set a country instead of reading a board that has no path', async () => {
+    const { fixture, component, getRegionalTopScores, host } = render();
+    await fixture.whenStable();
+
+    component.onBoardScopeChange('regional');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(getRegionalTopScores).not.toHaveBeenCalled();
+    expect(message(host)).toContain('Choose your country');
+  });
+
+  /**
+   * The regional tab is showing and the guess lands *after* it — a slow
+   * `/api/geo` on a reader who switched boards in the first second.
+   *
+   * Setting the country without reading its board left `leaderboard()` empty
+   * and `isLoadingLeaderboard()` false, so `leaderboardMessage` fell straight
+   * through to its empty-board branch and told the reader "No scores in Brazil
+   * yet. Be the first!" about a board nothing had asked for — the most
+   * specific of the available answers, arrived at by not knowing (`CLAUDE.md`
+   * §4.4). The read is what makes the claim honest, and the loading flag it
+   * sets synchronously is what keeps the wrong message off the screen in the
+   * meantime.
+   */
+  it('reads the board when the guess arrives with the regional tab already showing', async () => {
+    let answer!: (country: string | null) => void;
+    const pending = new Promise<string | null>((resolve) => {
+      answer = resolve;
+    });
+    // Held open so the window between "the country is set" and "the board has
+    // answered" — the window the bug lived in — can be inspected rather than
+    // stepped over.
+    const board = new Subject<LeaderboardEntry[]>();
+    const rows = [makeEntry({ uid: 'br-player', name: 'BR Player' })];
+    const { fixture, component, getRegionalTopScores, host } = render({
+      inferred: pending,
+      getRegionalTopScores: () => board,
+    });
+
+    component.onBoardScopeChange('regional');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(getRegionalTopScores).not.toHaveBeenCalled();
+    expect(message(host)).toContain('Choose your country');
+
+    answer('BR');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    // The country has landed and the read is in flight: skeletons, and no
+    // claim about a board nobody has heard back from.
+    expect(getRegionalTopScores).toHaveBeenCalledWith('15', 'BR', 10);
+    expect(component.isLoadingLeaderboard()).toBe(true);
+    expect(message(host)).toBeNull();
+
+    board.next(rows);
+    board.complete();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.leaderboard().map((entry) => entry.uid)).toEqual(['br-player']);
+    expect(message(host)).toBeNull();
+  });
+
+  /**
+   * Two boards are one click apart, so Global → Regional → Global puts two
+   * reads in flight and the network decides which lands last. Without a
+   * sequence number the loser wins: the world's top ten renders under "In
+   * Brazil", or the country's under "Worldwide", and nothing about the screen
+   * says which board the rows came from.
+   *
+   * Resolved deliberately out of order here, because in-order resolution is
+   * the case that passes either way.
+   */
+  it('discards a board read that a later one has already superseded', async () => {
+    const globalRows = [makeEntry({ uid: 'global-player', name: 'Global Player' })];
+    const regionalRows = [makeEntry({ uid: 'regional-player', name: 'Regional Player' })];
+
+    const regional = new Subject<LeaderboardEntry[]>();
+    const second = new Subject<LeaderboardEntry[]>();
+    let globalCalls = 0;
+
+    const { fixture, component } = render({
+      declared: 'BR',
+      // The first global read is the one `ngOnInit` issues and resolves at
+      // once; the second is the one this test races.
+      getTopScores: () => (globalCalls++ === 0 ? of(globalRows) : second),
+      getRegionalTopScores: () => regional,
+    });
+    await fixture.whenStable();
+
+    component.onBoardScopeChange('regional');
+    component.onBoardScopeChange('global');
+    await fixture.whenStable();
+
+    // The regional read finishes last, and is now the stale one.
+    second.next(globalRows);
+    second.complete();
+    regional.next(regionalRows);
+    regional.complete();
+    await fixture.whenStable();
+
+    expect(component.leaderboard().map((entry) => entry.uid)).toEqual(['global-player']);
+    expect(component.isLoadingLeaderboard()).toBe(false);
+  });
+
+  it('names the country in the board header once one is set', async () => {
+    const { fixture, component, host } = render({ declared: 'BR' });
+    await fixture.whenStable();
+
+    component.onBoardScopeChange('regional');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(host.querySelector('[data-cy="leaderboard-scope"]')?.textContent).toContain('Brazil');
+    // The heading itself does not move: the country is a second line rendered
+    // in both states, so the header keeps one height across the toggle (§4.4).
+    expect(host.querySelector('[data-cy="leaderboard-title"]')?.textContent).toContain(
+      'Top 10 — 15-second games',
+    );
+  });
+
+  it('says the board is worldwide before anybody switches', async () => {
+    const { fixture, host } = render({ declared: 'BR' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(host.querySelector('[data-cy="leaderboard-scope"]')?.textContent).toContain('Worldwide');
+  });
+
+  /*
+   * `CLAUDE.md` §4.5: a segmented pair conveys nothing about what it selects
+   * unless the group itself is named. Built from real radios inside a
+   * `role="radiogroup"`, the same shape as the pricing page's currency switch,
+   * so the group's keyboard behaviour is the platform's rather than ours — and
+   * so the e2e suite's existing `expectRadiosAreGrouped` sweep covers it.
+   *
+   * Both options are rendered in both states, with fixed labels, so nothing
+   * about the toggle can resize as the preselection lands (§4.4, the account
+   * chip's defect).
+   */
+  it('groups the toggle as a labelled radiogroup with both options always present', async () => {
+    const { fixture, component, host } = render();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const group = host.querySelector('[data-cy="board-scope"]')!;
+    expect(group.getAttribute('role')).toBe('radiogroup');
+    const labelledBy = group.getAttribute('aria-labelledby');
+    expect(labelledBy).toBeTruthy();
+    expect(host.querySelector(`#${labelledBy}`)?.textContent?.trim()).toBeTruthy();
+
+    const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map((radio) => radio.value)).toEqual(['global', 'regional']);
+    expect(radios.map((radio) => radio.checked)).toEqual([true, false]);
+    const labels = radios.map((radio) => radio.closest('label')?.textContent?.trim());
+
+    component.onBoardScopeChange('regional');
+    fixture.detectChanges();
+
+    expect(radios.map((radio) => radio.checked)).toEqual([false, true]);
+    expect(radios.map((radio) => radio.closest('label')?.textContent?.trim())).toEqual(labels);
+  });
+
+  // The picker is a country list, not an address field: `autocomplete` tokens
+  // describe the user, and this describes which board they compete on.
+  it('labels the picker and offers an opt-out, with no autocomplete token', async () => {
+    const { fixture, host } = render();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const control = select(host);
+    expect(host.querySelector(`label[for="${control.id}"]`)?.textContent?.trim()).toBeTruthy();
+    expect(control.getAttribute('autocomplete')).toBeNull();
+    expect(control.options[0].value).toBe('');
+    expect(control.options.length).toBeGreaterThan(200);
   });
 });

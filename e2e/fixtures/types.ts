@@ -134,6 +134,14 @@ export interface LeaderboardEntryRecord {
   percentage: number;
   createdAt: number;
   timeLimit: string;
+  /**
+   * The declared country, on a regional entry only (`FEAT-028`). Optional
+   * rather than a separate record type because the assertion worth writing is
+   * that it is **absent** on a global entry — `firestore.rules` refuses the
+   * key there — and a type that could not express the absence could not
+   * express that.
+   */
+  region?: string;
 }
 
 /** Which entry to read back. One document per account per board. */
@@ -141,6 +149,12 @@ export interface LeaderboardEntryQuery {
   uid: string;
   /** Which board to read. Defaults to the 15-second board. */
   timeLimit?: string;
+}
+
+/** The same, one path segment deeper: one document per account per country per board. */
+export interface RegionalLeaderboardEntryQuery extends LeaderboardEntryQuery {
+  /** ISO 3166-1 alpha-2, as the player declared it (`FEAT-028`). */
+  region: string;
 }
 
 /**

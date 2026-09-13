@@ -106,6 +106,18 @@
     in. There is a separate board for each time limit — 15 seconds, 30 seconds and no limit — so you
     may hold up to one entry on each, and each keeps only your best score.
   </p>
+  <p>
+    The save form also offers a <strong>country to rank in</strong>, and it is optional. Choose one
+    and your score is published a second time, on that country's board:
+    <strong
+      >the country you chose is stored on that entry and shown beside your name and score</strong
+    >, readable by anyone in the same way. It is whatever you selected — we never publish a country
+    we worked out for you, only one you picked, and the dropdown starts on the country described
+    below purely so it is usually already right. Leave it on &ldquo;Prefer not to say&rdquo; and
+    only the global board gets your score. Your choice is remembered on your device so you do not
+    have to make it every game; changing it affects future saves only, and an entry already
+    published under a country stays where it is until you delete your account.
+  </p>
 
   <h3>Your gameplay totals — these are private to you</h3>
   <p>
@@ -155,11 +167,18 @@
     your account deletes them, and &ldquo;Export my data&rdquo; returns them in full.
   </p>
 
-  <h3>Which country you are in &mdash; on the pricing page, and nowhere else</h3>
+  <h3>Which country you are in &mdash; to fill in two things you can change</h3>
   <p>
-    When you open the pricing page, the app asks <strong>its own server</strong> which country your
-    IP address maps to, so it can show you the price in a currency your card can actually be charged
-    in. Firebase Hosting works that out at its edge and passes it to us as a two-letter country
+    On two screens the app asks <strong>its own server</strong> which country your IP address maps
+    to. On the pricing page it decides which currency the price is shown in, because a card issued
+    in Brazil is declined outright if it is charged in dollars. On the game-over screen it decides
+    which country the leaderboard dropdown opens on &mdash; and only which one it opens on: what is
+    published is whatever the dropdown says when you press Save, so nothing worked out about you is
+    ever stored or shown. It happens nowhere else, and neither screen asks your device for its
+    location; the browser's location permission is switched off for this site altogether.
+  </p>
+  <p>
+    Firebase Hosting works the country out at its edge and passes it to us as a two-letter country
     code;
     <strong
       >that code is the whole of what we receive and the whole of what is sent back to your
@@ -172,12 +191,16 @@
     <strong>We keep none of it.</strong> The code is read off the request, sent to your browser and
     forgotten: not written to the database, not written to a log, not attached to your account, and
     not put in a cookie &mdash; there are none. <strong>Your browser keeps it for a day</strong>, in
-    its own local storage, so the page can open on the right currency straight away next time; it
-    stays on your device, it is never sent back to us, and clearing site data removes it. All it
-    does is decide which currency the page opens on, and you can change that with the switch beside
-    the price. No third-party geolocation service is involved, because the request goes to
-    Trivimind's own address: nobody outside the services listed further down learns that you looked
-    at the page.
+    its own local storage, so a page can open on the right answer straight away next time; it stays
+    on your device, it is never sent back to us, and clearing site data removes it. All it ever does
+    is decide what a control starts on &mdash; the currency switch beside the price, or the country
+    dropdown on the save form &mdash; and you can change either. In particular
+    <strong
+      >a country we worked out is never published on a leaderboard and never written to your
+      account</strong
+    >; only a country you selected yourself is. No third-party geolocation service is involved,
+    because the request goes to Trivimind's own address: nobody outside the services listed further
+    down learns that you looked at the page.
   </p>
 
   <h2>Why we handle it, and on what basis</h2>
@@ -202,8 +225,8 @@
         <td>Performance of a contract</td>
       </tr>
       <tr>
-        <td>Store and publish leaderboard entries</td>
-        <td>You asked us to publish that score</td>
+        <td>Store and publish leaderboard entries, including a country you chose</td>
+        <td>You asked us to publish that score, on the boards you chose</td>
         <td>Performance of a contract</td>
       </tr>
       <tr>
@@ -217,10 +240,15 @@
         <td>Performance of a contract</td>
       </tr>
       <tr>
-        <td>Work out which country you are in when you open the pricing page</td>
+        <td>
+          Work out which country you are in when you open the pricing page or finish a game, and
+          keep none of it
+        </td>
         <td>
           Quoting a price in a currency your card can be charged in &mdash; a card issued in Brazil
-          is declined outright if it is charged in dollars
+          is declined outright if it is charged in dollars &mdash; and starting the leaderboard's
+          country dropdown on the answer you are most likely to want, which you can change before
+          anything is published
         </td>
         <td>Legitimate interests</td>
       </tr>
@@ -266,13 +294,16 @@
   </table>
   <p>
     <strong>No automated decision-making and no profiling.</strong> Nothing here makes a decision
-    about you that has a legal effect or anything similarly significant. One thing is decided
-    automatically and it is not one of those: which currency the pricing page opens on, from the
-    country described above. It is a pre-selection you can change with the switch beside the price,
-    it changes only the amount you are shown, and we keep no record of it &mdash; the country your
-    browser remembers for a day stays on your device, as described above. We do keep running totals
-    of your own play, described above, and show them only to you &mdash; they are not used to
-    categorise you, to predict anything about you, or to change what the app does.
+    about you that has a legal effect or anything similarly significant. Two things are decided
+    automatically and neither is one of those: which currency the pricing page opens on, and which
+    country the leaderboard dropdown opens on, both from the country described above. Each is a
+    pre-selection you can change &mdash; the switch beside the price, the dropdown on the save form
+    &mdash; and we keep no record of either. What the pricing page decides changes only the amount
+    you are shown; what the save form decides changes nothing at all until you press Save, and what
+    is published then is the dropdown's value, not the guess. The country your browser remembers for
+    a day stays on your device, as described above. We do keep running totals of your own play,
+    described above, and show them only to you &mdash; they are not used to categorise you, to
+    predict anything about you, or to change what the app does.
   </p>
 
   <h2>Payments</h2>
@@ -301,11 +332,19 @@
     <li>
       <strong>Local storage</strong> — your light/dark theme preference; whether you have muted the
       game's sound effects, which is a single yes-or-no that stays on this device and is sent
-      nowhere; your sign-in session (managed by Firebase Authentication); and, once you have opened
-      the pricing page, what Pro costs in each currency it is sold in, together with the two-letter
-      country code described above. Those last two are kept so the page can show you a price
-      straight away on your next visit instead of asking again, and both are discarded after 24
-      hours.
+      nowhere; your sign-in session (managed by Firebase Authentication); once you have opened the
+      pricing page, what Pro costs in each currency it is sold in; and, once either of the screens
+      described above has asked, the two-letter country code it was told. Those last two are kept so
+      the next page can open on the right answer instead of asking again, and both are discarded
+      after 24 hours.
+    </li>
+    <li>
+      <strong>Local storage, once you have chosen a country to rank in</strong> — that country's
+      two-letter code, so the save form does not ask you again every game. Only a country you chose
+      yourself is stored here: if you have never touched the dropdown, or set it back to
+      &ldquo;Prefer not to say&rdquo;, nothing is kept and the guess described above is made afresh
+      next time. It stays on this device and is never sent anywhere on its own; what reaches our
+      database is the leaderboard entry you save under it.
     </li>
     <li>
       <strong
@@ -455,7 +494,9 @@
     <li>
       <strong>The country your IP address maps to</strong> is not kept for any length of time,
       because it is not kept at all &mdash; it is read from the request that asks for it and
-      discarded with the answer.
+      discarded with the answer. A country you <em>chose</em> in the save form is different: it is
+      part of the leaderboard entry you published under it, and it is kept for as long as that entry
+      is, which is until you delete your account.
     </li>
     <li>
       <strong>Anonymous accounts</strong> that are never signed in to hold no personal information,
@@ -472,14 +513,15 @@
   <ul>
     <li>
       <strong>Download my data</strong> gives you a JSON file containing your account details, your
-      leaderboard entries on every board, your gameplay totals, every question you have contributed,
-      and your billing records. It also lists what is deliberately not in it and why.
+      leaderboard entries on every board — global and country alike — your gameplay totals, every
+      question you have contributed, and your billing records. It also lists what is deliberately
+      not in it and why.
     </li>
     <li>
       <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
       record and the payment methods stored against it, deletes your leaderboard entries on every
-      board, deletes your gameplay totals, deletes your billing records, and deletes your sign-in
-      account itself.
+      board, <strong>country boards included</strong>, deletes your gameplay totals, deletes your
+      billing records, and deletes your sign-in account itself.
       <strong
         >Questions you contributed are kept, with your authorship replaced by a
         <code>[deleted-user]</code> marker.</strong
