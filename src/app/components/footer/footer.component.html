@@ -26,6 +26,28 @@
       <span class="sr-only">, build {{ build }}</span>
     </p>
     <nav aria-label="Legal" class="flex items-center gap-5">
+      <!--
+        Suppressed on `/play` and nowhere else: an active quiz round is the one
+        screen in the app that is deliberately free of anything competing with
+        the question. Removed rather than hidden, so it is out of the tab order
+        too — and the row it sits in is centred rather than sized to its
+        contents, so the legal links beside it do not move when it goes.
+      -->
+      @if (showsDonateCta()) {
+        <button
+          #donateTrigger
+          type="button"
+          data-cy="donate-cta"
+          aria-haspopup="dialog"
+          [attr.aria-expanded]="isDialogOpen()"
+          aria-controls="donation-dialog"
+          (click)="openDonationDialog()"
+          class="flex items-center gap-1.5 rounded-lg text-xs font-semibold text-slate-600 transition-colors hover:text-amber-700 dark:text-slate-400 dark:hover:text-amber-400"
+        >
+          <app-icon name="coffee" [size]="14" />
+          Buy me a coffee
+        </button>
+      }
       <a
         routerLink="/privacy"
         class="text-xs font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50"
@@ -40,4 +62,21 @@
       </a>
     </nav>
   </div>
+
+  <!--
+    Mounted here rather than in `app.html`, so there is exactly one of it and
+    it sits beside the button focus returns to when it closes. The footer's own
+    embed-mode gating (`app.html`) is what keeps it out of an embedded widget.
+
+    **Imported statically, and `@defer` was tried and measured worse.** The
+    obvious move for a dialog most readers never open is to defer it, and it
+    does take 2.06 kB of transfer off the initial bundle — but the service
+    worker precaches every emitted chunk (`ngsw-config.json`), so nothing is
+    actually saved on a first load, and the extra chunk boundary split the
+    vendor chunk in two, costing **4 kB of transfer in lost compression**.
+    Measured on `/`: 301.1 kB of total byte weight on `main`, 304.1 kB with the
+    dialog imported here, and 308.7 kB deferred. A lazy boundary is only a
+    saving where something is genuinely not fetched.
+  -->
+  <app-donation-dialog [returnFocusTo]="donateTriggerElement()" />
 </footer>

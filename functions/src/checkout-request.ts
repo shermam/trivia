@@ -1,10 +1,11 @@
 import { isDemoProject } from './environment';
 
 /**
- * Validation of the two fields a client is allowed to put in a checkout- or
- * portal-session document, plus the other decisions a session handler makes
- * that are worth testing on their own: which of the customer's stale Checkout
- * Sessions to clear out of the way, and what a refused buyer is told.
+ * Validation of the two fields a client is allowed to put in a checkout-,
+ * donation- or portal-session document, plus the other decisions a session
+ * handler makes that are worth testing on their own: which of the customer's
+ * stale Checkout Sessions to clear out of the way, and what a refused buyer is
+ * told.
  *
  * `firestore.rules` bounds the *shape* of both fields (see
  * `isValidCheckoutSession` there), but shape is all rules can do: they cannot
@@ -39,19 +40,48 @@ export class RejectedRequestError extends Error {}
  * where Stripe's own wording is a worse answer than one this code can verify,
  * which so far is the currency conflict below.
  */
-export function clientMessageFor(error: unknown, refusalMessage: string): string {
+export function clientMessageFor(
+  error: unknown,
+  refusalMessage: string,
+  purchase: PurchaseKind = 'pro',
+): string {
   if (error instanceof RejectedRequestError) {
     return refusalMessage;
   }
   return (
-    currencyConflictMessage(error) ?? (error instanceof Error ? error.message : refusalMessage)
+    currencyConflictMessage(error, purchase) ??
+    (error instanceof Error ? error.message : refusalMessage)
   );
 }
 
 /**
+ * Which of the two things this Stripe account sells a message is about.
+ *
+ * Only the currency conflict needs to know: the sentence has to name what
+ * cannot be bought in the other currency, and "Pro can only be bought in USD"
+ * is simply false when the reader was trying to tip. Everything else here is
+ * about the *request*, which is the same shape for both.
+ */
+export type PurchaseKind = 'pro' | 'donation';
+
+/**
+ * How each purchase names itself in the currency-conflict sentence — the
+ * clause after "so".
+ */
+const CURRENCY_CONFLICT_CLAUSE: Record<PurchaseKind, (currency: string) => string> = {
+  pro: (currency) => `Pro can only be bought in ${currency} from this account`,
+  donation: (currency) => `a donation can only be made in ${currency} from this account`,
+};
+
+const CURRENCY_CONFLICT_CLAUSE_UNKNOWN: Record<PurchaseKind, string> = {
+  pro: 'Pro can only be bought in that currency from this account',
+  donation: 'a donation can only be made in that currency from this account',
+};
+
+/**
  * Stripe's refusal to mix currencies on one customer, rewritten as something
- * the person who clicked Subscribe can act on — or `null` when the failure is
- * anything else.
+ * the person who clicked Subscribe — or Donate — can act on, or `null` when the
+ * failure is anything else.
  *
  * A Stripe customer is billed in **one currency**, and the first thing that
  * commits them to it wins: a live subscription, an invoice item, a completed
@@ -86,7 +116,10 @@ export function clientMessageFor(error: unknown, refusalMessage: string): string
  *   different currency" and names none: that the currencies differ is
  *   established by the refusal itself, which one is not.
  */
-export function currencyConflictMessage(error: unknown): string | null {
+export function currencyConflictMessage(
+  error: unknown,
+  purchase: PurchaseKind = 'pro',
+): string | null {
   const message = error instanceof Error ? error.message : '';
   if (!/cannot combine currencies/i.test(message)) {
     return null;
@@ -94,12 +127,12 @@ export function currencyConflictMessage(error: unknown): string | null {
   const currency = /\bwith currency ([a-z]{3})\b/i.exec(message)?.[1];
   if (!currency) {
     return (
-      'Your account is already set up to pay in a different currency, ' +
-      'so Pro can only be bought in that currency from this account.'
+      'Your account is already set up to pay in a different currency, so ' +
+      `${CURRENCY_CONFLICT_CLAUSE_UNKNOWN[purchase]}.`
     );
   }
   const code = currency.toUpperCase();
-  return `Your account is already set up to pay in ${code}, so Pro can only be bought in ${code} from this account.`;
+  return `Your account is already set up to pay in ${code}, so ${CURRENCY_CONFLICT_CLAUSE[purchase](code)}.`;
 }
 
 const MAX_ORIGIN_LENGTH = 200;
@@ -210,7 +243,56 @@ export function isSellableProPrice(
   product: Record<string, unknown> | undefined,
   price: Record<string, unknown> | undefined,
 ): boolean {
-  return product?.['active'] === true && product?.['role'] === 'pro' && price?.['active'] === true;
+  return (
+    product?.['active'] === true &&
+    product?.['role'] === 'pro' &&
+    product?.['kind'] !== DONATION_KIND &&
+    price?.['active'] === true
+  );
+}
+
+/**
+ * The metadata value that marks a Stripe Product — and each of its Prices — as
+ * something this app takes as a one-time donation.
+ *
+ * A convention rather than a Stripe concept: Stripe has no notion of "this
+ * product is a tip jar", so the catalog says so in metadata and the mirror
+ * copies it into `products/{id}.kind` and `products/{id}/prices/{id}.kind`
+ * (`functions/src/products.ts`). The Dashboard steps that create it are in
+ * `docs/stack.md` §2.4.
+ */
+export const DONATION_KIND = 'donation';
+
+/**
+ * Whether a mirrored catalog entry is something this app accepts as a
+ * donation — the same catalog lookup `isSellableProPrice` performs, for the
+ * other thing this Stripe account sells.
+ *
+ * **The two predicates are mutually exclusive by construction, and that is
+ * checked rather than assumed.** A donation price reaching the Pro path would
+ * be a one-off payment granting a subscription's claim; a Pro price reaching
+ * the donation path would charge a recurring price as a one-off. Neither is a
+ * hypothetical the Dashboard prevents — `firebaseRole` and `kind` are two free
+ * text fields on the same object — so each predicate refuses the other's
+ * marker outright, and `checkout-request.test.ts` pins both directions.
+ *
+ * `type` is checked on the price as well. Stripe would refuse a recurring
+ * price in `mode: 'payment'` itself, but the refusal arrives as an opaque
+ * Stripe error on the buyer's click; naming it here keeps the catalog's own
+ * mistakes out of the checkout path.
+ */
+export function isSellableDonationPrice(
+  product: Record<string, unknown> | undefined,
+  price: Record<string, unknown> | undefined,
+): boolean {
+  return (
+    product?.['active'] === true &&
+    product?.['kind'] === DONATION_KIND &&
+    product?.['role'] !== 'pro' &&
+    price?.['active'] === true &&
+    price?.['kind'] === DONATION_KIND &&
+    price?.['type'] === 'one_time'
+  );
 }
 
 /**

@@ -16,9 +16,11 @@ Every route renders inside a fixed shell:
 
 ```
 <app-root>
- ├─ <app-top-bar>          (hidden entirely when ?embed=1 is in the URL)
- └─ <main>
-     └─ <router-outlet>    (one of the routed screens below)
+ ├─ <app-top-bar>              (hidden entirely when ?embed=1 is in the URL)
+ ├─ <main>
+ │   └─ <router-outlet>        (one of the routed screens below)
+ └─ <app-footer>               (hidden with the top bar in embed mode)
+     └─ <app-donation-dialog>  (renders nothing until it is opened)
 ```
 
 ### 0.1 Top Bar (`TopBarComponent`)
@@ -99,9 +101,29 @@ A single panel (white card, rounded-2xl, shadowed, ~320px wide, small "x" close 
   - Not Pro: text link "Upgrade to Pro to add questions" → `/pricing`
   - Pro: text button "Manage subscription" (label becomes "Opening billing portal…" and disables itself while the Stripe Billing Portal redirect is being prepared)
 - **Button**: "Sign out" (outlined, full width)
+- **Button**: "Buy me a coffee" (coffee glyph + label, outlined amber, full width) — sits **outside** the auth-state branches, so it is offered in every state including signed out; hidden on `/play`. Opens the donation dialog (§0.3) and closes this panel on the way.
 - **Inline error banner** (red), shown only on failure, e.g.:
   - "Could not update your name. Please try again."
   - "Could not open the billing portal. Please try again." — only when `SubscriptionService` could not explain the failure; when it could, its own message shows instead: "Sign in before managing your subscription.", "Too many attempts just now. Reload the page and try again in a few minutes.", "Timed out waiting for the billing portal to open. Please try again.", or whatever `createPortalSession` wrote back
+
+### 0.3 Footer (`FooterComponent`) and the donation dialog (`DonationDialogComponent`)
+
+A hairline-bordered bar below `<main>`, hidden with the top bar in embed mode.
+
+- **Left**: "© {{year}} Trivimind" — the brand word carries the build identity as a hover `title` and again in an `sr-only` span.
+- **Right**, a `Legal` nav: **"Buy me a coffee"** (coffee glyph, amber on hover), then "Privacy Policy" → `/privacy`, then "Terms of Service" → `/terms`.
+- **The donation CTA is absent on `/play`** — removed rather than hidden, so it is out of the tab order too. It is the disclosure trigger for the dialog (`aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`), and focus returns to it when the dialog closes, whichever control opened it.
+
+**The dialog** (`role="dialog"`, `aria-modal`, focus trapped in both directions, Escape closes) is mounted once here and opened from either the CTA or the auth menu:
+
+- **Header**: coffee glyph + "Buy me a coffee", and a close "x".
+- **Blurb**: "Trivimind is free to play and always will be. A one-off tip helps pay for the servers."
+- **Currency row**: label "Currency" and, on the right, the same segmented `role="radiogroup"` control the Pro card uses (§7) when more than one currency is priced, or a plain pill naming the only one.
+- **Amount row**: three preset pills as a labelled `role="radiogroup"`, priced from the Stripe catalog and rendered in the currency's own locale ($2.00 / $5.00 / $10.00, R$ 10,00 / R$ 25,00 / R$ 50,00). The middle one is checked by default. While the catalog is still loading the same three cells render an em-dash each, so nothing below them moves when the real amounts arrive.
+- **Guest notice**, only for a visitor who is not signed in to a real account: "You're not signed in, so this donation won't be recorded against an account. Sign in first if you'd like it linked to yours." It promises no badge, because there is none.
+- **Button**: "Donate {amount}" → Stripe Checkout ("Redirecting…" while the session is created), and under it "A one-off payment through Stripe. It buys nothing and is not refundable by default — see the Terms."
+- **Empty catalog**: an amber notice, "Donations aren't available right now — no donation amounts are set up. Please try again later.", and no Donate button. This is what every environment shows before the donation product exists in Stripe.
+- **Failure**: a red banner under the button carrying whatever the service could verify, announced through a permanent `role="status"` region.
 
 ---
 
@@ -128,6 +150,15 @@ Full-screen centered card on an indigo/purple gradient background.
     - Default label: "Start Game"
     - While loading questions: "Loading Questions…" (disabled)
 - **Footer link**: "+ Create custom question" → `/add-question`, with a **PRO badge** next to it (indigo/filled if the current user is Pro, grey/muted otherwise)
+
+### States — donation return banner (from `?donation=success|cancelled` query param)
+
+Read from the route snapshot at construction, so the banner is part of the first paint and the card below it never moves. Both carry a "Dismiss" button that clears the query parameter.
+
+| Param       | Banner                                                       |
+| ----------- | ------------------------------------------------------------ |
+| `success`   | Emerald: "Thank you — your coffee is very much appreciated." |
+| `cancelled` | Slate: "Donation cancelled — nothing was charged."           |
 
 ### States
 
@@ -326,8 +357,8 @@ Full-screen centered card. **No route guard** — access is decided in-page from
 - **Title**: "Review Queue"
 - **View picker**: a labelled tab group (`sr-only` heading "Choose what to review") with **Pending / Approved / Rejected / Reports**; the active tab is filled, the others outlined
 - **Question list** (the three status tabs): one card per question in the active status — question text, its answers with the correct one marked, then `Category:` / `Difficulty:` / `Submitted:` / `Status:` / `Author:` metadata, and below that the contributor's optional **source** (an external-link glyph and a link opening in a new tab, labelled with the source name, followed in muted grey by the URL's hostname — the reviewer is shown where the link goes, not only what the contributor called it; the hostname alone is the label when no source name was given) and **Justification** (a tinted block headed "Justification" holding the contributor's prose). Neither renders when the question carries none, which is the usual case
-- **Rejection reason box** per card: a labelled two-row textarea, "Reason for rejecting (optional, shown to the author)", placeholder "What would have to change for this to be approved?". Rendered on every card rather than revealed by clicking Reject, so the row does not resize under the cursor and the reason is typed before the decision. Pre-filled with whatever reason the question already carries; over 500 characters it shows a field error and the Reject button refuses to send
-- **Action buttons** per card: **Approve** (hidden when the question is already approved) and **Reject** (hidden when it is already rejected), so the button that would be a no-op is never offered
+- **Rejection reason box** per card: a labelled two-row textarea — "Reason for rejecting (optional)", or "Reason shown to the author (optional)" once the question is rejected — placeholder "What would have to change for this to be approved?". Rendered on every card rather than revealed by clicking Reject, so the row does not resize under the cursor and the reason is typed before the decision. Pre-filled with whatever reason the question already carries; over 500 characters it shows a field error and the button refuses to send
+- **Action buttons** per card: **Approve**, hidden when the question is already approved because there the button would be a no-op; and the reject button, which is always offered because on a rejected card it is not one — it reads **"Update reason"** there and writes the edited note without deciding the question again
 - **Truncation note** when the queue is full — the query is capped, and the list says so rather than implying it is the whole queue
 - **Reports list** (the Reports tab): a one-line status block above the list, then one card per filed report — the reason in words ("The answer is wrong", "Inappropriate or offensive", "Spam or nonsense", "Something else") with "Reported {date}" opposite it, the reporter's optional detail in their own words below, and under a divider the **whole question card** described above, action buttons included. **Nothing identifies who filed the report.** A report whose question has since been deleted shows its question id and "…is no longer in the bank, so there is nothing left to act on" in place of the card
 - **"Show more reports"** below the list, present only while there is a next page to fetch — it appends that page rather than replacing what is on screen, and disappears at the end of the collection
@@ -541,8 +572,9 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
 - Every other button that opens the auth menu is hidden with it, since there is nowhere for it to open a menu into: Game Over's "Sign in" in the anonymous-player prompt (§3), and `/profile`'s "Sign in" in the signed-out state (§8). Both leave the explanatory text, at the same height.
+- The footer goes with it, and therefore the "Buy me a coffee" CTA and the donation dialog it mounts (§0.3) — an embedded widget is a game panel, not a site.
 - **No sound plays.** Both copies of the mute live in the top bar — the icon button and the drawer row — so an embedded game with audio would be a noise the reader has no way to switch off.
-- All other screens/logic behave identically; this only affects the top bar's presence, the sounds, and those auth-menu openers.
+- All other screens/logic behave identically; this only affects the top bar's and footer's presence, the sounds, and those auth-menu openers.
 
 ---
 
@@ -550,7 +582,7 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 | Path            | Component                 | Guard                                             | Purpose                                                   |
 | --------------- | ------------------------- | ------------------------------------------------- | --------------------------------------------------------- |
-| `/`             | `GameSetupComponent`      | none                                              | Configure & start a game                                  |
+| `/`             | `GameSetupComponent`      | none                                              | Configure & start a game; `?donation=` return             |
 | `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory  | Answer questions against a timer                          |
 | `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory   | Final score, save to leaderboard, view top 10             |
 | `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)   | Submit a question to the custom bank (Pro only)           |
@@ -580,11 +612,13 @@ Grouped by screen, for quick reference when building Figma text styles / content
 
 **Pricing**: Back to game · Pricing · Play free forever, or go Pro to contribute your own questions. · Subscription started! It may take a few seconds to finish activating. · Start playing · Dismiss · Checkout was cancelled — no charge was made. · Starter · Everything you need to play and compete. · Free ($0/month) · Play unlimited games · Submit scores to the global leaderboard · Your current plan · Pro · Contribute questions and shape the game. · {amount}/month · Currency · USD · BRL · Everything in Starter · Create and add custom questions to the global question bank · More features coming soon · You're subscribed · Loading… · Sign in to subscribe · Redirecting… · Subscribe · Subscribe — {amount}/mo · Verify your email first, then come back to subscribe. · Could not start checkout. Please try again. · Sign in before subscribing. · Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later. · Timed out waiting for Stripe checkout to start. Please try again. · Too many attempts just now. Reload the page and try again in a few minutes. · Could not start checkout. Please reload the page and try again. · Your account is already set up to pay in {currency}, so Pro can only be bought in {currency} from this account. · Cancel anytime. No hidden fees.
 
-**Review Queue**: Review Queue · Back to game · Choose what to review · Pending · Approved · Rejected · Reports · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Status: · Author: · Reason for rejecting (optional, shown to the author) · What would have to change for this to be approved? · A reason must be 500 characters or fewer. · A rejection reason has to be 500 characters or fewer. · Approve · Reject · This page is for question reviewers. If you think you should have access, ask the site owner. · Questions players have contributed to the shared bank, and the reports players have filed about them. Rejecting a question stops it being served in games; it is not deleted. · Nothing {{status}} right now. · Could not load the queue. Please try again. · Try again · Question marked {{status}}. · Could not save that decision. Please try again. · Showing the first {{n}}. Review these and reload for more. · Loading reports… · No reports have been filed. · Newest first. Nothing is marked handled — a report stays as the record that somebody complained. · Could not load the reports. Please try again. · The answer is wrong · Inappropriate or offensive · Spam or nonsense · Something else · Reported {{date}} · Question {{id}} is no longer in the bank, so there is nothing left to act on. · Show more reports
+**Review Queue**: Review Queue · Back to game · Choose what to review · Pending · Approved · Rejected · Reports · Checking your access… · Loading… · Correct answer: · Category: · Difficulty: · Submitted: · Status: · Author: · Reason for rejecting (optional) · Reason shown to the author (optional) · What would have to change for this to be approved? · A reason must be 500 characters or fewer. · A rejection reason has to be 500 characters or fewer. · Question marked {{status}}. · Reason updated. · Reason cleared. · Approve · Reject · Update reason · This page is for question reviewers. If you think you should have access, ask the site owner. · Questions players have contributed to the shared bank, and the reports players have filed about them. Rejecting a question stops it being served in games; it is not deleted. · Nothing {{status}} right now. · Could not load the queue. Please try again. · Try again · Could not save that decision. Please try again. · Showing the first {{n}}. Review these and reload for more. · Loading reports… · No reports have been filed. · Newest first. Nothing is marked handled — a report stays as the record that somebody complained. · Could not load the reports. Please try again. · The answer is wrong · Inappropriate or offensive · Spam or nonsense · Something else · Reported {{date}} · Question {{id}} is no longer in the bank, so there is nothing left to act on. · Show more reports
 
 **Your questions**: Back to game · Your questions · Everything you have contributed to the shared bank, and what became of it. Editing a question sends it back for review; removing one takes it out of play. · Loading your questions… · Sign in to see the questions you have contributed. Guest sessions cannot add questions, so there is nothing here for one. · Sign in · You have not contributed a question yet. · Add a question · Could not load your questions. Please try again. · Could not load more of your questions. Please try again. · Try again · Newest first. · Pending review · Approved · Rejected · Unknown · Category: · Difficulty: · Submitted: · Why it was rejected · No reason was given. · Edit · Remove · Show more · Edit your question · Saving sends it back for review, so it will not be served until a reviewer approves it again. · Cancel · Save and resubmit · Saving… · Could not save your changes. Please try again. · Remove this question from the app? · It stops being served in games straight away. It does not withdraw the licence you granted when you contributed it, and it cannot reach copies already played or saved offline. See the Terms. · Remove from the app · Removing… · Could not remove that question. Please try again. · Question updated. It is pending review again. · Question removed from the app.
 
 **Your stats**: Back to game · Your stats · Your lifetime totals across every game you have finished while signed in. Only you can see them. · Loading your lifetime totals… · Sign in and your totals start counting from the next game you finish. · Nothing banked yet — finish a game and your totals will show up here. · Could not load your stats just now. · Tracking since {{date}}. · Tracking your lifetime totals. · Games played · Questions answered · Correct answers · Accuracy · Best streak · Start a game · Sign in · Try again · Your stats are ready. · No finished games yet. · Signed out. Stats are only kept for a signed-in account. · Could not load your stats.
+
+**Donation dialog**: Buy me a coffee · Close · Trivimind is free to play and always will be. A one-off tip helps pay for the servers. · Currency · USD · BRL · Amount · You're not signed in, so this donation won't be recorded against an account. Sign in first if you'd like it linked to yours. · Donate · Donate {amount} · Redirecting… · A one-off payment through Stripe. It buys nothing and is not refundable by default — see the Terms. · Donations aren't available right now — no donation amounts are set up. Please try again later. · Could not start the donation. Please try again. · The donation could not be started. Please try again. · Timed out waiting for the donation page to open. Please try again. · Still starting up — try that again in a moment. · Could not start the donation. Please reload the page and try again. · Your account is already set up to pay in {currency}, so a donation can only be made in {currency} from this account. · Thank you — your coffee is very much appreciated. · Donation cancelled — nothing was charged. · Dismiss
 
 **Legal pages (`/privacy`, `/terms`)**: Back to Trivimind · Last updated: {{date}} · In force, but not yet reviewed by a lawyer · This document applies to your use of the service today, and everything it says about what the app does with your information was written by reading the application's own source code — so it describes real behaviour rather than what a template assumes. What it has not had is a professional legal review. If you spot something wrong, unclear, or missing, please write to {{contactEmail}} — that is genuinely useful and it will be fixed.
 

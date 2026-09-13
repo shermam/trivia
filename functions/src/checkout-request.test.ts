@@ -6,6 +6,7 @@ import {
   currencyConflictMessage,
   isAllowedRedirectOrigin,
   isPriceIdShaped,
+  isSellableDonationPrice,
   isSellableProPrice,
   openCheckoutSessionIdsToExpire,
 } from './checkout-request';
@@ -186,6 +187,84 @@ describe('isSellableProPrice', () => {
   });
 });
 
+describe('isSellableDonationPrice', () => {
+  const donationProduct = { active: true, kind: 'donation', role: null };
+  const donationPrice = { active: true, kind: 'donation', type: 'one_time' };
+
+  it('accepts an active one-time price on an active donation product', () => {
+    assert.equal(isSellableDonationPrice(donationProduct, donationPrice), true);
+  });
+
+  it('rejects an archived price or an archived product', () => {
+    assert.equal(
+      isSellableDonationPrice(donationProduct, { ...donationPrice, active: false }),
+      false,
+    );
+    assert.equal(
+      isSellableDonationPrice({ ...donationProduct, active: false }, donationPrice),
+      false,
+    );
+  });
+
+  it('rejects a price the catalog has not marked as a donation', () => {
+    // The marker is on both objects because both are read: the product's
+    // decides which products the query returns, the price's is what keeps a
+    // stray price added to the donation product out of the tip jar.
+    assert.equal(isSellableDonationPrice({ active: true, kind: null }, donationPrice), false);
+    assert.equal(isSellableDonationPrice(donationProduct, { ...donationPrice, kind: null }), false);
+  });
+
+  it('rejects a recurring price, which `mode: payment` cannot charge', () => {
+    assert.equal(
+      isSellableDonationPrice(donationProduct, { ...donationPrice, type: 'recurring' }),
+      false,
+    );
+  });
+
+  it('requires a real boolean, not a truthy value', () => {
+    assert.equal(
+      isSellableDonationPrice({ ...donationProduct, active: 'true' }, donationPrice),
+      false,
+    );
+    assert.equal(isSellableDonationPrice(donationProduct, { ...donationPrice, active: 1 }), false);
+  });
+});
+
+/**
+ * The two catalogs must not overlap in either direction. `firebaseRole` and
+ * `kind` are two free-text metadata fields on the same Stripe object, so
+ * nothing in the Dashboard prevents a product carrying both — and the
+ * consequences run opposite ways: a donation price sold as Pro is a one-off
+ * payment granting a subscription's claim, a Pro price taken as a donation is
+ * a recurring charge dressed as a tip.
+ */
+describe('the Pro and donation catalogs are mutually exclusive', () => {
+  it('refuses to sell a donation price as Pro', () => {
+    assert.equal(
+      isSellableProPrice(
+        { active: true, role: 'pro', kind: 'donation' },
+        { active: true, kind: 'donation', type: 'one_time' },
+      ),
+      false,
+    );
+  });
+
+  it('refuses to take a Pro price as a donation', () => {
+    assert.equal(
+      isSellableDonationPrice(
+        { active: true, role: 'pro', kind: 'donation' },
+        { active: true, kind: 'donation', type: 'one_time' },
+      ),
+      false,
+    );
+  });
+
+  it('still sells an ordinary Pro price, which carries no kind at all', () => {
+    assert.equal(isSellableProPrice({ active: true, role: 'pro' }, { active: true }), true);
+    assert.equal(isSellableDonationPrice({ active: true, role: 'pro' }, { active: true }), false);
+  });
+});
+
 describe('clientMessageFor', () => {
   it('collapses a refusal to the generic message', () => {
     assert.equal(
@@ -214,6 +293,15 @@ describe('clientMessageFor', () => {
     assert.equal(
       clientMessageFor(new Error(STRIPE_CURRENCY_CONFLICT), 'Try again.'),
       CURRENCY_CONFLICT_ADVICE,
+    );
+  });
+
+  // The same refusal reaches the donation path, where "Pro can only be bought
+  // in USD" is simply not what the reader was trying to do.
+  it('names the donation rather than Pro when that is what was refused', () => {
+    assert.equal(
+      clientMessageFor(new Error(STRIPE_CURRENCY_CONFLICT), 'Try again.', 'donation'),
+      'Your account is already set up to pay in USD, so a donation can only be made in USD from this account.',
     );
   });
 });

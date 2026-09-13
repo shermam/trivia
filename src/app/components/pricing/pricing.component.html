@@ -164,7 +164,10 @@
           heights match by construction rather than by happening to agree, and
           a second currency fills a control that was already on the page
           instead of materialising one. Only the pill's own width changes, and
-          nothing outside this row moves with it.
+          nothing outside this row moves with it. `app-currency-switch` *is*
+          that box — its host carries the pill's classes — so the shared
+          control and the placeholder beside it are still the same element with
+          two contents rather than two elements that have to be kept in step.
         -->
         <div class="flex items-center justify-between gap-3 mb-6">
           <span
@@ -173,35 +176,14 @@
             >Currency</span
           >
           @if (hasCurrencyChoice()) {
-            <div
-              role="radiogroup"
-              aria-labelledby="pro-currency-label"
-              data-cy="currency-choice"
-              class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
-            >
-              @for (option of currencyOptions(); track option.currency) {
-                <label
-                  class="flex items-center justify-center rounded-lg px-3 py-1 text-sm font-semibold cursor-pointer transition-colors"
-                  [class.bg-emerald-100]="selectedCurrency() === option.currency"
-                  [class.dark:bg-emerald-500/20]="selectedCurrency() === option.currency"
-                  [class.text-emerald-700]="selectedCurrency() === option.currency"
-                  [class.dark:text-emerald-400]="selectedCurrency() === option.currency"
-                  [class.text-slate-600]="selectedCurrency() !== option.currency"
-                  [class.dark:text-slate-400]="selectedCurrency() !== option.currency"
-                >
-                  <input
-                    type="radio"
-                    name="pro-currency"
-                    class="sr-only"
-                    [attr.data-cy]="'currency-' + option.currency"
-                    [attr.value]="option.currency"
-                    [checked]="selectedCurrency() === option.currency"
-                    (change)="selectCurrency(option.currency)"
-                  />
-                  {{ option.currency.toUpperCase() }}
-                </label>
-              }
-            </div>
+            <app-currency-switch
+              [currencies]="offeredCurrencies()"
+              [selected]="selectedCurrency()"
+              name="pro-currency"
+              labelledBy="pro-currency-label"
+              testIdPrefix="currency"
+              (currencySelected)="selectCurrency($event)"
+            />
           } @else {
             <div class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
               <span

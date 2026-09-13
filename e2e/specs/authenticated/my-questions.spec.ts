@@ -102,6 +102,7 @@ test.describe('my questions', () => {
     const submitted = `Which planet has the Great Red Spot? (${tag})`;
     const corrected = `Which planet has the Great Red Spot, really? (${tag})`;
     const reason = `The distractors are all gas giants too (${tag}).`;
+    const revisedReason = `The distractors are all gas giants, so it is a giveaway (${tag}).`;
 
     await createAuthor(firebase);
     await createReviewer(firebase);
@@ -136,12 +137,25 @@ test.describe('my questions', () => {
     await queueRow.getByTestId('reject-question').click();
     await expect(queueRow).toHaveCount(0);
 
+    // 3b. ...and can change their mind about the wording without deciding the
+    // question again — the write `firestore.rules` was widened for, and the one
+    // the queue had no control that could reach until the Rejected tab grew
+    // this button.
+    await reviewTab(page, 'rejected').click();
+    const rejectedRow = page.getByTestId('review-question').filter({ hasText: tag });
+    await expect(rejectedRow.getByTestId('rejection-reason')).toHaveValue(reason);
+    await rejectedRow.getByTestId('rejection-reason').fill(revisedReason);
+    await rejectedRow.getByTestId('reject-question').click();
+    // Still in the Rejected tab it was already in, rather than dropped from a
+    // list it still belongs to.
+    await expect(rejectedRow).toHaveCount(1);
+
     // 4. The author reads the reviewer's words.
     await signOut(page);
     await signIn(page, authorEmail());
     await page.goto('/my-questions');
     await expect(myRows(page).getByTestId('my-question-status')).toHaveText('Rejected');
-    await expect(myRows(page).getByTestId('my-question-rejection')).toContainText(reason);
+    await expect(myRows(page).getByTestId('my-question-rejection')).toContainText(revisedReason);
 
     // 5. Editing sends it back for review — and takes the note with it, because
     // the note was about the text that has just been replaced.
@@ -172,6 +186,12 @@ test.describe('my questions', () => {
 
     await expect(myRows(page)).toHaveCount(0);
     await expect(page.getByTestId('my-questions-empty')).toBeVisible();
+    // Focus went somewhere a keyboard user can work from. The row the Remove
+    // button lived on has just been deleted, so the restore has no opener to
+    // return to and would otherwise drop silently to `<body>`, putting them
+    // back at the top of the document (`CLAUDE.md` §4.5). jsdom cannot see
+    // this; a browser can.
+    await expect(page.getByTestId('my-questions-status')).toBeFocused();
 
     // Gone from the bank, not merely from this screen: the reviewer's queue no
     // longer has anything to decide.
@@ -252,6 +272,11 @@ test.describe('my questions', () => {
     await expect(page).toHaveURL(/\/my-questions$/);
   });
 });
+
+/** The Pending / Approved / Rejected / Reports picker, by view rather than by label. */
+function reviewTab(page: Page, view: 'pending' | 'approved' | 'rejected' | 'reports'): Locator {
+  return page.locator(`[data-cy="review-tab"][data-status="${view}"]`);
+}
 
 /**
  * Starts a **Custom** game in one category. Not `startGame`, which uses the Open
