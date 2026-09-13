@@ -8,6 +8,7 @@ import {
   inject,
   input,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { DonationDialogStateService } from '../../services/donation-dialog-state.service';
@@ -95,22 +96,29 @@ export class DonationDialogComponent {
 
   private readonly dialog = viewChild<ElementRef<HTMLElement>>('donationDialog');
   private wasOpen = false;
-  private presetsRequested = false;
 
   constructor() {
     /*
-     * The catalog is read when the dialog is first opened, not on page load.
-     * The tip jar renders nothing until somebody asks for it, and two public
-     * reads on every page load for a dialog most readers never open is the
-     * cost `/pricing` already refuses to pay for a page they are not on. Once
-     * per page load, because the presets do not change while a tab is open and
-     * `DonationService` memoises the lookup anyway — this flag only stops a
-     * second dialog open re-entering it before the first has resolved.
+     * The catalog is read when the dialog is opened, not on page load. The tip
+     * jar renders nothing until somebody asks for it, and two public reads on
+     * every page load for a dialog most readers never open is the cost
+     * `/pricing` already refuses to pay for a page they are not on.
+     *
+     * **Every open, not only the first.** A flag here would be a cache of the
+     * failure as much as of the success (`CLAUDE.md` §4.4): a read that fell
+     * over — one blocked request, one offline moment — would leave the dialog
+     * on `catalogResolved` with no presets and no way back for the life of the
+     * tab, telling every subsequent open that donations are unavailable when
+     * they are not. Re-entering costs nothing when the read worked, because
+     * `DonationService.getPresets()` stores the promise synchronously and so
+     * dedupes a second open mid-flight as well as one after the fact; it is
+     * only the failed lookup that it deliberately does not keep.
      */
     effect(() => {
-      if (this.isOpen() && !this.presetsRequested) {
-        this.presetsRequested = true;
-        void this.donationService.loadPresets();
+      if (this.isOpen()) {
+        // `untracked`, so this effect depends on the dialog being open and not
+        // on whatever the catalog read happens to touch before its first await.
+        untracked(() => void this.donationService.loadPresets());
       }
     });
 

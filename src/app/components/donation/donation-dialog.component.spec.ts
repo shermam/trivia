@@ -87,6 +87,34 @@ describe('DonationDialogComponent', () => {
     expect(service.loadPresets).toHaveBeenCalledTimes(1);
   });
 
+  /*
+   * And asks again on the next open. A flag remembering the first one would
+   * remember a *failed* read just as faithfully, which is the caching of a
+   * rejection `CLAUDE.md` §4.4 forbids: one blocked request would leave the
+   * dialog resolved with no presets, telling every later open that donations
+   * are unavailable when they are not. Re-asking costs nothing when the read
+   * worked — `DonationService` memoises a success and drops only a failure.
+   */
+  it('asks again on a later open, so one failed read is not the tab\u2019s last word', async () => {
+    const service = donationServiceStub();
+    const { fixture } = render(service, false);
+    const dialogState = TestBed.inject(DonationDialogStateService);
+
+    dialogState.open();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    dialogState.close();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    dialogState.open();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(service.loadPresets).toHaveBeenCalledTimes(2);
+  });
+
   it('quotes the catalog’s own amounts, formatted in the currency', () => {
     const { host } = render(donationServiceStub());
 
