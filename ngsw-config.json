@@ -9,6 +9,8 @@
       "resources": {
         "files": [
           "/add-question.component-*.js",
+          "/markdown-engine-*.js",
+          "/math-engine-*.js",
           "/my-questions.component-*.js",
           "/pricing.component-*.js",
           "/privacy-policy.component-*.js",
