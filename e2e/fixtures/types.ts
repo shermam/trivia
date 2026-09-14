@@ -208,6 +208,30 @@ export interface GameplayStatsSeed {
   statsSince?: number;
 }
 
+/**
+ * One question inside a `users/{uid}/plays/{gameId}` document (`FEAT-049`), as
+ * `recordGameResult` wrote it.
+ *
+ * `questionId` and `tags` are optional here because they are optional in the
+ * document: an Open Trivia DB question has no id worth keeping and an untagged
+ * bank question has no tags, so a spec asserting their **absence** is asserting
+ * the common case.
+ */
+export interface PlayAnswerRecord {
+  questionId?: string;
+  correct: boolean;
+  ms: number;
+  difficulty: 'easy' | 'medium' | 'hard';
+  tags?: string[];
+}
+
+/** One completed game, read back for assertions. The id is the `gameId`. */
+export interface PlayRecord {
+  id: string;
+  at: number;
+  answers: PlayAnswerRecord[];
+}
+
 /** Grants (or explicitly withholds) the moderation role for one account. */
 export interface ReviewerSeed {
   uid: string;
