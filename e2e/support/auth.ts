@@ -1,6 +1,83 @@
 import { expect, Locator, Page } from '@playwright/test';
 
 /**
+ * How long a visit may take to persist an anonymous Firebase session.
+ *
+ * **Derived from the application's own deadlines rather than guessed from a
+ * runner.** Nothing on `/` awaits auth, so the session arrives at the end of a
+ * chain the app schedules late on purpose (`app.md` §1.5): `App`'s constructor
+ * defers `ensureSignedIn()` to `afterNextRender` and then to an idle callback
+ * bounded at **2s**; `AuthService.getAuth()` dynamically imports
+ * `firebase/auth` (129 kB raw, plus the 31 kB shared chunk under it) and
+ * `FirebaseAppService` fetches `/__/firebase/init.json`, which it aborts after
+ * **10s**; and `signInAnonymously()` is then a round trip `AuthService` gives
+ * up on after **10s**. That is 22s of the app's own bounds plus two chunk
+ * fetches before anything has gone wrong — so the 20s `expect` timeout in
+ * `playwright.config.ts` is shorter than the window the application itself
+ * allows, which is why waiting on this under the default failed against real
+ * Firebase Auth and never once against the emulator, where the round trip is a
+ * millisecond.
+ *
+ * 60s covers those bounds with room for the fetches, and still fails in
+ * bounded time when the session genuinely never lands: `ensureSignedIn()`
+ * catches its own timeout and nothing on `/` calls it again, so a backend that
+ * does not answer leaves no session for any deadline to find.
+ */
+const ANONYMOUS_SESSION_TIMEOUT_MS = 60_000;
+
+/**
+ * Waits until this visit has signed in anonymously and persisted the session.
+ *
+ * **Observes the bootstrap rather than triggering it**, because the ambient
+ * session is the subject: every page load mints one with no gesture, that is
+ * what the preview sweep has to clean up (`ci-cd.md` §4.3), and it is what
+ * `test-isolation.spec.ts` asserts is not shared between tests. Opening the
+ * auth menu would start the same bootstrap (`AuthMenuStateService`) and prove
+ * something weaker — that a gesture signs in.
+ *
+ * Two waits rather than one, because they fail for different reasons and a
+ * single poll on the stored record cannot say which happened. `aria-busy` on
+ * the account chip is `!authService.authReady()` (`top-bar.component.html`),
+ * so it clearing is the app's own signal that the deferred import, the
+ * runtime-config fetch and the first `onAuthStateChanged` have all happened;
+ * what remains after that is the `signInAnonymously()` round trip, and the
+ * only thing that marks *that* is the `firebase:authUser:*` record
+ * `browserLocalPersistence` writes — the same channel `auth-uid-tracker.ts`
+ * listens on.
+ *
+ * The chip is anchored with a visibility check first: `not.toHaveAttribute` is
+ * satisfied by an element that is not there at all, so on its own it would
+ * pass against a page that has not rendered yet (`ci-cd.md` §4.3).
+ */
+export async function waitForAnonymousSession(page: Page): Promise<void> {
+  // One budget across both waits rather than one each, so a failure is
+  // reported by the wait that ran out of it instead of by the 120s test
+  // timeout swallowing them both. Floored rather than allowed to reach zero,
+  // because Playwright reads `timeout: 0` as *no* timeout — an exhausted
+  // budget would hang the test instead of failing it.
+  const deadline = Date.now() + ANONYMOUS_SESSION_TIMEOUT_MS;
+  const remaining = () => Math.max(1_000, deadline - Date.now());
+
+  const chip = page.getByTestId('auth-menu-trigger');
+  await expect(chip, 'the top bar is rendered').toBeVisible({ timeout: remaining() });
+  await expect(chip, 'the deferred auth bootstrap has delivered a first state').not.toHaveAttribute(
+    'aria-busy',
+    'true',
+    { timeout: remaining() },
+  );
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          Object.keys(window.localStorage).some((key) => key.startsWith('firebase:authUser:')),
+        ),
+      { message: 'Firebase has persisted an anonymous session', timeout: remaining() },
+    )
+    .toBe(true);
+}
+
+/**
  * The auth dropdown's panel.
  *
  * Addressed by `data-cy`, never by `[role="dialog"]`: that selector was unique
