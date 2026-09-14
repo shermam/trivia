@@ -401,7 +401,8 @@ service cloud.firestore {
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
                  'incorrect_answers', 'createdBy', 'createdAt', 'status',
-                 'sourceUrl', 'sourceTitle', 'explanation', 'rejectionReason']
+                 'sourceUrl', 'sourceTitle', 'explanation', 'format',
+                 'rejectionReason']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
             && data.type in ['multiple', 'boolean']
@@ -452,6 +453,20 @@ service cloud.firestore {
                 || (data.explanation is string
                     && data.explanation.size() > 0
                     && data.explanation.size() <= 1000))
+            // How the text above is meant to be read (`FEAT-019`). Optional,
+            // and **absent means plain** — which is what makes widening the
+            // allowlist for it free: no backfill, because no rule and no query
+            // dereferences it and the reader treats a missing key as `plain`.
+            // The expensive shape is a field something *reads*; this is not
+            // one.
+            //
+            // No length or content bound beyond the two values, because the
+            // value is not free text. `in` covers the type check as well: a
+            // number, a map or a list is not in the list either, so a separate
+            // `is string` clause would be unreachable — and an unreachable
+            // clause is one a mutation run cannot tell from a deleted one
+            // (`CLAUDE.md` §4.6).
+            && (!('format' in data) || data.format in ['plain', 'markdown'])
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
             // click against `correct_answer` by text, so the wrong option

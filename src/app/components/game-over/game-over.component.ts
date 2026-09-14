@@ -37,6 +37,7 @@ import { RegionService } from '../../services/region.service';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
+import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
 
 /** Derives initials for a leaderboard avatar, e.g. "Jane Doe" -> "JD". */
@@ -91,6 +92,7 @@ type BoardScope = 'global' | 'regional';
     NgTemplateOutlet,
     SourceLinkComponent,
     QuestionJustificationComponent,
+    RenderedTextComponent,
   ],
   templateUrl: './game-over.component.html',
   styleUrl: './game-over.component.css',

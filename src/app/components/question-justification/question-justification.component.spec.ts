@@ -70,14 +70,15 @@ describe('QuestionJustificationComponent', () => {
 
   /**
    * A justification is prose and is very often several paragraphs, so the
-   * line breaks are part of what was written. `pre-line` is what keeps them;
-   * without it the whole thing renders as one block.
+   * line breaks are part of what was written. `.rendered-text--plain` is what
+   * keeps them — `white-space: pre-line` in `styles.css`; without it the whole
+   * thing renders as one block.
    */
   it('keeps the line breaks the contributor typed', () => {
     const { root } = render('First reason.\nSecond reason.');
 
-    const body = root!.querySelector('p:last-of-type');
-    expect(body?.className).toContain('whitespace-pre-line');
+    const body = root!.querySelector('[data-cy="rendered-text"]');
+    expect(body?.className).toContain('rendered-text--plain');
     expect(body?.textContent).toBe('First reason.\nSecond reason.');
   });
 

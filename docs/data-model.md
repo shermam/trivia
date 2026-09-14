@@ -95,6 +95,7 @@ status: string         ('approved' | 'pending' | 'rejected'; create accepts only
 sourceUrl?: string     (optional; https:// only, 9–500 chars)
 sourceTitle?: string   (optional; 1–200 chars)
 explanation?: string   (optional; 1–1000 chars — the form's "Justification")
+format?: string        (optional; 'plain' | 'markdown'; absent means plain)
 rejectionReason?: string  (optional; 1–500 chars; written by a reviewer, only ever on a rejected question)
 ```
 
@@ -164,6 +165,14 @@ All three are validated on create and none can be added afterwards. `sourceUrl` 
 **A reviewer still cannot touch a citation or a justification.** The `affectedKeys()` allowlist admits `status` and `rejectionReason` and nothing else, so a reviewer approving a question cannot attach, alter or remove a source or a justification while doing it — all three stay the author's word, the same way `createdBy` does. Rules tests assert the refusal for each of them, because widening that allowlist is a one-line change that would look like a convenience: the `rejectionReason` widening (`FEAT-007`) was argued for on its own terms, and it is a field a reviewer writes _about_ a contribution rather than one that edits it.
 
 **Readers re-check the stored values rather than trusting them** (`SourceLinkComponent` and `QuestionJustificationComponent`, `app.md` §1.4). `CLAUDE.md` §4.4 asks the reader to be right regardless of the writer: the rule is one deploy from being widened, Firestore is a public API, a stored value that is not a usable `https:` URL degrades to plain text instead of rendering a dead anchor, and a whitespace-only `explanation` — which `size() > 0` accepts, because it counts characters rather than non-space ones — renders nothing instead of an empty labelled box.
+
+**`format` says how the text above is meant to be read** (`FEAT-019`, `app.md` §1.4): `'plain'`, `'markdown'`, or absent, which means plain. It governs `question`, `correct_answer`, `incorrect_answers` and `explanation` together, because a contributor writing a coding question needs a fence in the prompt and usually in the answers too — four separate decisions where one will do.
+
+**Two values, and the absent third is the interesting part.** A value for Open Trivia DB's entity-encoded text would make one field describe every kind of text the app renders, and it would be wrong: **no Open Trivia question is ever stored.** `TriviaService` maps them at fetch time and the decoder runs in that adapter, which is where `CLAUDE.md` §4.4 wants a per-source transformation. A stored field cannot describe a source with no stored documents — the value would be unreachable for every writer the app has — and reaching for one would move the decode away from the adapter for nothing. The rule stays: normalise at the adapter, and let the stored field describe only what a writer can actually write.
+
+It is the fourth field to be added to this collection by widening the allowlist alone, and it qualifies for the same reason the three above do: **nothing dereferences it.** No rule branches on it, no query filters on it, and the reader treats an absent field as `plain`, so every document written before it existed stays correct. The validation is `!('format' in data) || data.format in ['plain', 'markdown']` — no separate `is string` clause, because `in` over a list of strings already refuses a number or a map, which was checked against the emulator by deleting the clause and watching all four reject cases fail rather than inferred from reading it (`CLAUDE.md` §4.6). The client writes the key **only** when the contributor chose Markdown: an explicit `'plain'` would add a key to every future document saying what its absence already says, and would make "chose plain" indistinguishable from "predates the toggle".
+
+A reviewer cannot change it, for the reason in the paragraph above: re-rendering somebody else's plain question as Markdown changes what it says, and `affectedKeys().hasOnly(['status', 'rejectionReason'])` refuses it.
 
 ### `custom_question_quota` — the hourly submission cap
 

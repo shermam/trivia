@@ -123,7 +123,11 @@
             class="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
           >
             <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-              <p class="font-semibold text-slate-900 dark:text-slate-50">{{ question.question }}</p>
+              <!-- A `<div>`, not a `<p>`: a Markdown question renders block
+                   content a paragraph may not contain (`FEAT-019`). -->
+              <div class="min-w-0 font-semibold text-slate-900 dark:text-slate-50">
+                <app-rendered-text [text]="question.question" [format]="question.format" />
+              </div>
               <span
                 data-cy="my-question-status"
                 class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold tracking-wide"
@@ -343,9 +347,9 @@
         >
           Remove this question from the app?
         </h2>
-        <p data-cy="remove-question-text" class="text-sm text-slate-700 dark:text-slate-300 mb-3">
-          {{ open.question.question }}
-        </p>
+        <div data-cy="remove-question-text" class="text-sm text-slate-700 dark:text-slate-300 mb-3">
+          <app-rendered-text [text]="open.question.question" [format]="open.question.format" />
+        </div>
         <!--
           "Remove from the app", never "delete permanently" (`FEAT-007` §0). The
           licence the Terms grant is irrevocable, and this reaches neither copies

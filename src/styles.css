@@ -188,6 +188,150 @@
   }
 }
 
+/* Rendered question text — Markdown and MathML (`FEAT-019`).
+
+   Global rather than a component stylesheet, and that is forced rather than
+   chosen: the markup comes from `innerHTML`, so Angular's emulated view
+   encapsulation never stamps its `_ngcontent` attribute onto it and a scoped
+   rule would match nothing. Which is also why every selector here is under
+   `.rendered-text`: these are element selectors, and the sanitised subtree is
+   the only place in the app where a bare `<p>` or `<ul>` is written by anybody
+   but us.
+
+   Classes only, and no inline style anywhere in the pipeline — the CSP refuses
+   one and refuses it silently (`CLAUDE.md` §4.4), which is the same reason
+   KaTeX is configured for MathML output rather than its default. */
+app-rendered-text {
+  /* The host box disappears, so the element below is laid out by whatever
+     contains the component — a flex row's item, a heading's block child. A
+     host with a box of its own would need a display mode per caller. */
+  display: contents;
+}
+
+.rendered-text {
+  /* Lets a flex item shrink below its content's intrinsic width, which is what
+     makes the overflow containers below able to scroll instead of stretching
+     the card they are in (§4.4). */
+  min-width: 0;
+}
+
+/* The plain branch, and the fallback a Markdown question shows until its
+   engine arrives. `pre-line` keeps the line breaks a contributor typed and
+   collapses the runs of spaces a paste brings with it — deliberately not
+   applied to rendered Markdown, where the newlines between block tags would
+   each become a visible blank line. */
+.rendered-text--plain {
+  white-space: pre-line;
+}
+
+/* No margin above the first block or below the last, so a one-paragraph
+   Markdown question occupies exactly the box the same text as plain would.
+   That is what keeps the swap from plain to rendered — one lazily-imported
+   chunk wide — from moving anything (§4.4). */
+.rendered-text > :first-child {
+  margin-top: 0;
+}
+
+.rendered-text > :last-child {
+  margin-bottom: 0;
+}
+
+.rendered-text p {
+  margin-block: 0.5em;
+}
+
+.rendered-text ul,
+.rendered-text ol {
+  margin-block: 0.5em;
+  padding-left: 1.25rem;
+}
+
+/* Tailwind's preflight strips list markers, so a list in a contributed
+   question would render as unindented lines without these two. */
+.rendered-text ul {
+  list-style: disc;
+}
+
+.rendered-text ol {
+  list-style: decimal;
+}
+
+.rendered-text li {
+  margin-block: 0.125em;
+}
+
+.rendered-text blockquote {
+  margin-block: 0.5em;
+  border-left: 3px solid var(--color-slate-300);
+  padding-left: 0.75rem;
+  color: var(--color-slate-600);
+}
+
+.rendered-text a {
+  color: var(--color-emerald-700);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rendered-text code {
+  border-radius: 0.25rem;
+  background: var(--color-slate-100);
+  padding: 0.1em 0.3em;
+  font-size: 0.9em;
+  /* An identifier longer than the box wraps instead of pushing the card wide;
+     an inline element has no scroll container to give it. */
+  overflow-wrap: anywhere;
+}
+
+/* A fenced block scrolls inside itself. Both halves are needed: `max-width`
+   stops it setting the card's width, and `overflow-x` gives the overflow
+   somewhere to go instead of spilling (§4.4). */
+.rendered-text pre {
+  margin-block: 0.5em;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: var(--color-slate-100);
+  padding: 0.625rem 0.75rem;
+}
+
+.rendered-text pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.8125em;
+  overflow-wrap: normal;
+}
+
+/* A display formula gets the same treatment as a code fence, and for the same
+   reason: the answer buttons under it move if it widens the card. */
+.rendered-text math[display='block'] {
+  display: block;
+  margin-block: 0.5em;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.dark .rendered-text blockquote {
+  border-left-color: rgb(255 255 255 / 0.2);
+  color: var(--color-slate-400);
+}
+
+.dark .rendered-text a {
+  color: var(--color-emerald-400);
+}
+
+.dark .rendered-text code {
+  background: rgb(255 255 255 / 0.08);
+}
+
+.dark .rendered-text pre {
+  background: rgb(255 255 255 / 0.06);
+}
+
+.dark .rendered-text pre code {
+  background: none;
+}
+
 /* Tailwind's preflight resets button cursors to the browser default
    (`default`, i.e. the arrow) — restore the hand cursor app-wide. Placed in
    the base layer so any explicit disabled:cursor-* utility on a component

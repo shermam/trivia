@@ -21,6 +21,7 @@ import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionFieldsComponent } from '../question-form/question-fields.component';
+import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import {
   applyIncorrectAnswerValidators,
   createQuestionForm,
@@ -75,7 +76,13 @@ const STATUS_LABELS: Record<QuestionStatus, string> = {
 @Component({
   selector: 'app-my-questions',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink, IconComponent, QuestionFieldsComponent],
+  imports: [
+    ReactiveFormsModule,
+    RouterLink,
+    IconComponent,
+    QuestionFieldsComponent,
+    RenderedTextComponent,
+  ],
   templateUrl: './my-questions.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

@@ -3,6 +3,7 @@ import {
   CustomQuestionContent,
   CustomQuestionDoc,
   Difficulty,
+  QuestionFormat,
   QuestionType,
 } from '../../models/question.model';
 
@@ -65,6 +66,16 @@ export function createQuestionForm(fb: FormBuilder) {
     difficulty: ['medium' as Difficulty, Validators.required],
     type: ['multiple' as QuestionType, Validators.required],
     question: ['', [Validators.required, nonBlank, Validators.maxLength(500)]],
+    // How the text above, the answers and the justification are meant to be
+    // read (`FEAT-019`). Defaults to plain, so nothing about the existing flow
+    // changes for a contributor who does not want Markdown — and so the field
+    // is written only by somebody who asked for it.
+    //
+    // No validator: the control holds one of two literals and the template
+    // offers no third, so a validator would be an unreachable branch. What
+    // makes that safe is that `firestore.rules` checks it anyway, which is
+    // where the check belongs for a value the server has to be sure of.
+    format: ['plain' as QuestionFormat],
     correctAnswer: ['', [Validators.required, nonBlank, Validators.maxLength(200)]],
     // Optional on purpose. Requiring a citation would push contributors toward
     // pasting *something*, and a bad citation is worse than none because it
@@ -271,6 +282,13 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(sourceTitle ? { sourceTitle } : {}),
       ...(explanation ? { explanation } : {}),
+      // Written only when the toggle is on Markdown (`FEAT-019`). An absent
+      // field already means plain, so writing `'plain'` would add a key to
+      // every future document that says exactly what its absence says — and
+      // it would make "this contributor chose plain" indistinguishable from
+      // "this document predates the toggle", which is the distinction the
+      // absent state is for.
+      ...(raw.format === 'markdown' ? { format: raw.format } : {}),
     },
   };
 }
@@ -291,6 +309,11 @@ export function patchQuestionForm(form: QuestionForm, question: CustomQuestionDo
     difficulty: question.difficulty,
     type: question.type,
     question: question.question,
+    // The stored value or the default, so a resubmit keeps the formatting the
+    // contributor chose (`FEAT-007` keeps every other field the same way).
+    // Anything that is not `'markdown'` — including a value a widened rule let
+    // through — patches to plain, which is what the renderer does with it too.
+    format: question.format === 'markdown' ? 'markdown' : 'plain',
     correctAnswer: question.correct_answer,
     sourceUrl: question.sourceUrl ?? '',
     sourceTitle: question.sourceTitle ?? '',
