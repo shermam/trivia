@@ -106,6 +106,17 @@ export default defineConfig<object, E2EWorkerOptions>({
    */
   testIgnore: [
     /*
+     * Emulator-only because its premise is an interception, and an
+     * interception is only reliable where no service worker can re-issue what
+     * it refuses (`CLAUDE.md` §4.6). Nothing registers one on a deployed
+     * channel today either, but that is an accident of `app.config.ts`'s
+     * `navigator.webdriver` gate rather than a guarantee — the same reasoning
+     * that keeps `offline-play` out below. It would also spend a deliberately
+     * refused sign-up plus a retry against the real project's Auth on every
+     * PR, to restate a result the emulator settles for nothing.
+     */
+    '**/unauthenticated/anonymous-sign-in-retry.spec.ts',
+    /*
      * Emulator-only for two reasons. It asserts the written report through an
      * Admin-SDK read of `question_reports`, a collection only the appointed
      * reviewers may read — handing the preview suite console-level read access

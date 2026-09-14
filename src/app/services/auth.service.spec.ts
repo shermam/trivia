@@ -353,6 +353,171 @@ describe('AuthService: a failed bootstrap must not poison the session', () => {
   });
 });
 
+/**
+ * The retry behind the bootstrap's one attempt.
+ *
+ * Before this, `ensureSignedIn()` tried once and swallowed whatever came
+ * back, and on `/` and `/play` nothing called it again — so a visitor whose
+ * single round trip was dropped, refused or slower than its ten-second
+ * `giveUpAfter` had no uid for the life of the tab, and found out only when
+ * they tried to save a score. It never reproduced against the emulator, where
+ * that round trip is a millisecond; the preview suite is what caught it
+ * (`e2e/specs/unauthenticated/test-isolation.spec.ts`), which is also why
+ * there is an emulator e2e spec forcing the failure rather than waiting for
+ * one.
+ *
+ * The policy itself — how long to wait, and when to stop — is a pure function
+ * with its own spec (`src/app/utils/sign-in-retry.util.spec.ts`). What is left
+ * for this level is everything the policy cannot see: that an attempt in
+ * flight is shared rather than duplicated, that a failure is never the
+ * remembered answer, and that success takes the schedule and its listeners
+ * away with it.
+ */
+describe('AuthService: a failed anonymous sign-in is retried', () => {
+  const anonymousSignIns = () => h.state.calls.filter((call) => call === 'signInAnonymously');
+
+  it('hands two simultaneous callers one attempt, not two accounts', async () => {
+    // A scheduled retry, an `online` event and a click on the auth menu can
+    // all land together; three `signInAnonymously()` calls would be three
+    // accounts, two of them abandoned.
+    const service = setup();
+
+    await Promise.all([service.ensureSignedIn(), service.ensureSignedIn()]);
+    await settle();
+
+    expect(anonymousSignIns()).toHaveLength(1);
+    expect(service.isAnonymous()).toBe(true);
+  });
+
+  it('tries again on its own, without anybody asking', async () => {
+    vi.useFakeTimers();
+    try {
+      const service = setup();
+      h.state.anonSignInError = new Error('network request failed');
+
+      await service.ensureSignedIn();
+      expect(anonymousSignIns()).toHaveLength(1);
+      expect(service.user()).toBeNull();
+
+      h.state.anonSignInError = null;
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(anonymousSignIns()).toHaveLength(2);
+      expect(service.isAnonymous()).toBe(true);
+
+      // And the success is the end of it: no second helping of the schedule.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(anonymousSignIns()).toHaveLength(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('schedules nothing at all when the first attempt works', async () => {
+    vi.useFakeTimers();
+    try {
+      const service = setup();
+
+      await service.ensureSignedIn();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(anonymousSignIns()).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up scheduling once the run of failures is long enough to mean something', async () => {
+    // Four attempts over 52s, then stop: a dropped round trip is retried
+    // twice over, a refusal is not hammered. Gestures still work — the next
+    // test is that.
+    vi.useFakeTimers();
+    try {
+      const service = setup();
+      h.state.anonSignInError = new Error('refused');
+
+      await service.ensureSignedIn();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(anonymousSignIns()).toHaveLength(5);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never remembers the failure, so the next caller really attempts', async () => {
+    // `CLAUDE.md` §4.4 — the in-flight attempt is memoised so two callers
+    // share one, and that memo is cleared however it settles. A held
+    // rejection here would be the original bug with extra machinery: every
+    // gesture for the rest of the tab's life would be answered from it.
+    const service = setup();
+    h.state.anonSignInError = new Error('refused');
+
+    await service.ensureSignedIn();
+    expect(anonymousSignIns()).toHaveLength(1);
+
+    h.state.anonSignInError = null;
+    await service.ensureSignedIn();
+    await settle();
+
+    expect(anonymousSignIns()).toHaveLength(2);
+    expect(service.isAnonymous()).toBe(true);
+  });
+
+  it('does not wait out the schedule when the device comes back online', async () => {
+    const service = setup();
+    h.state.anonSignInError = new Error('offline');
+
+    await service.ensureSignedIn();
+    expect(anonymousSignIns()).toHaveLength(1);
+
+    h.state.anonSignInError = null;
+    window.dispatchEvent(new Event('online'));
+    await settle();
+
+    expect(anonymousSignIns()).toHaveLength(2);
+    expect(service.isAnonymous()).toBe(true);
+  });
+
+  it('does not wait it out when the reader comes back to the tab either', async () => {
+    // A backgrounded tab has its timers throttled to roughly a minute, so the
+    // schedule is effectively paused while nobody is looking and returning is
+    // the moment to catch up.
+    const service = setup();
+    h.state.anonSignInError = new Error('offline');
+
+    await service.ensureSignedIn();
+    expect(anonymousSignIns()).toHaveLength(1);
+
+    h.state.anonSignInError = null;
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+
+    expect(anonymousSignIns()).toHaveLength(2);
+  });
+
+  it('takes its listeners with it when the injector goes', async () => {
+    // The teardown half of `CLAUDE.md` §4.4. Asserted through the behaviour
+    // rather than by counting listeners, because what actually goes wrong
+    // without it is a destroyed service still minting accounts.
+    const service = setup();
+    h.state.anonSignInError = new Error('offline');
+
+    await service.ensureSignedIn();
+    expect(anonymousSignIns()).toHaveLength(1);
+
+    TestBed.resetTestingModule();
+    h.state.anonSignInError = null;
+    window.dispatchEvent(new Event('online'));
+    await settle();
+
+    expect(anonymousSignIns()).toHaveLength(1);
+  });
+});
+
 describe('AuthService email sign-up', () => {
   it('links an anonymous session in place and re-pushes the user into the signal', async () => {
     // The stale-UI bug found by e2e: linking mutates the same-uid user

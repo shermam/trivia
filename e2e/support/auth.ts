@@ -12,23 +12,25 @@ import { expect, Locator, Page } from '@playwright/test';
  * `firebase/auth` (129 kB raw, plus the 31 kB shared chunk under it) and
  * `FirebaseAppService` fetches `/__/firebase/init.json`, which it aborts after
  * **10s**; and `signInAnonymously()` is then a round trip `AuthService` gives
- * up on after **10s**. Against the emulator that round trip is a millisecond
- * and any bound passes; against real Firebase Auth those are 22s of the app's
- * own deadlines plus two chunk fetches, which is more than the 20s `expect`
- * timeout in `playwright.config.ts` allows for.
+ * up on after **10s**. A failed attempt is retried at 2s, 5s, 15s and 30s
+ * (`sign-in-retry.util.ts`). Against the emulator all of that is a
+ * millisecond and any bound passes; against real Firebase Auth the first
+ * attempt alone is 22s of deadlines plus two chunk fetches, more than the 20s
+ * `expect` timeout in `playwright.config.ts` allows for.
  *
- * **Past them there is nothing left to wait for**, and that is the half worth
- * knowing. `ensureSignedIn()` makes exactly one attempt and swallows whatever
- * it catches, and nothing on `/` calls it again — the other callers are
- * gestures (`AuthMenuStateService`, `DonationDialogStateService`) and
- * sign-out. So a session still missing at the end of this budget is *absent*
- * rather than late, no longer bound could find it, and the honest thing for a
- * test to do about it is fail.
+ * **Sixty seconds is where the two answers stop diverging**, which is the half
+ * worth knowing. It holds the first attempt and the first two retries entire —
+ * through roughly 39s — so a transient failure has recovered inside it several
+ * times over, and a session still missing at the end is not a slow one but a
+ * run of them, which no longer wait fixes. Waiting out the whole schedule
+ * instead would put a 100s wait inside a 120s test, which is a way of turning
+ * every failure into a timeout with no message.
  */
 const ANONYMOUS_SESSION_TIMEOUT_MS = 60_000;
 
 /**
- * Waits until this visit has signed in anonymously and persisted the session.
+ * Waits until this visit has signed in anonymously and persisted the session,
+ * retries included.
  *
  * **Observes the bootstrap rather than triggering it**, because the ambient
  * session is the subject: every page load mints one with no gesture, that is
