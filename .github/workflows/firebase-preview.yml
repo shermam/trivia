@@ -116,13 +116,34 @@ jobs:
       # slack that makes this workable — but a spec introducing an index in the
       # same PR should stay out of the preview slice for that one release
       # (`playwright.preview.config.ts` says which, and why).
+      #
+      # **Nothing here can delete an index, and `--force` is the only thing that
+      # could.** Read from the CLI source rather than assumed: on drift — the
+      # project holding an index this branch's file does not list — `deploy`
+      # asks `confirm({ default: false })` before deleting anything, and a CI
+      # run is non-interactive (no TTY), so the answer is the default and the
+      # deletion loop never runs. That matters here more than anywhere else,
+      # because a branch cut before another PR's index merged is exactly the
+      # drifted case, on a project every other preview is using.
+      #
+      # **`@14`, and the major is load-bearing.** `@13` — which `firebase-deploy.yml`
+      # still uses for production — has no default on that prompt and *throws*
+      # `Pass the --force flag to use this command in non-interactive mode`
+      # instead, before it creates this branch's own indexes. On a project only
+      # `main` writes to, failing closed is right (§6.3 of `INFRASTRUCTURE.md`
+      # is the incident that says so). On `trivimind-dev` it no longer is: this
+      # step writes indexes from *unmerged* branches, so an index whose PR is
+      # closed unmerged, or renamed by a later commit, is left behind — and
+      # under `@13` that one leftover would turn every subsequent preview and
+      # every dev merge deploy red, on PRs that changed no index at all.
+      # A leftover index is inert; a wedged pipeline is not.
       - name: Deploy Firestore indexes to the dev project
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-index-account.json
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npx --yes firebase-tools@13 deploy --only firestore:indexes --project trivimind-dev
+          npx --yes firebase-tools@14 deploy --only firestore:indexes --project trivimind-dev
           rm -f "$GOOGLE_APPLICATION_CREDENTIALS"
 
       - name: Clean up index-deploy credentials
