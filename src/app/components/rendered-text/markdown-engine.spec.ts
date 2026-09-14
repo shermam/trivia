@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ALLOWED_ATTR, SANITIZE_CONFIG, renderMarkdown, sanitizeHtml } from './markdown-engine';
+import {
+  ALLOWED_ATTR,
+  ALLOWED_TAGS,
+  SANITIZE_CONFIG,
+  renderMarkdown,
+  sanitizeHtml,
+} from './markdown-engine';
 import { renderMath } from './math-engine';
 
 /**
@@ -564,6 +570,84 @@ describe('markdown engine: supported formatting', () => {
   });
 });
 
+/**
+ * Inline mode is what an answer option gets, and an answer option is a
+ * `<button>`. Two things that are right in prose are wrong inside a control:
+ * a link, which is interactive content nested in interactive content and a
+ * click that both answers and navigates; and a display formula, which the
+ * stylesheet gives a block box with margins and a scroll container of its own.
+ * Both are pinned in **both** modes, because the assertion that matters is the
+ * difference between them.
+ */
+describe('markdown engine: what inline mode may not contain', () => {
+  it('renders a markdown link as its text, with no anchor', () => {
+    const out = parse(
+      renderMarkdown('[Paris](https://example.org/a)', { inline: true, renderMath }),
+    );
+    expect(tagNames(out)).not.toContain('a');
+    expect(attributeNames(out)).not.toContain('href');
+    expect(out.textContent).toBe('Paris');
+  });
+
+  it('keeps the label formatted while dropping the destination', () => {
+    const out = parse(
+      renderMarkdown('[**bold** `code`](https://example.org/a)', { inline: true, renderMath }),
+    );
+    expect(tagNames(out)).not.toContain('a');
+    expect(tagNames(out)).toEqual(expect.arrayContaining(['strong', 'code']));
+  });
+
+  /**
+   * The parser is not the boundary. `linkAsText` means nothing `marked`
+   * produces is an anchor, but the sanitiser has to refuse one arriving by any
+   * other route — the same argument the whole allowlist rests on.
+   */
+  it('strips an anchor reaching the sanitiser directly in inline mode', () => {
+    const out = parse(sanitizeHtml('<a href="https://example.org/a">Paris</a>', { inline: true }));
+    expect(tagNames(out)).not.toContain('a');
+    expect(out.textContent).toBe('Paris');
+  });
+
+  it('still renders a link in prose mode, with its target and rel', () => {
+    const link = parse(
+      renderMarkdown('[Paris](https://example.org/a)', { renderMath }),
+    ).querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.org/a');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('compiles a display formula undisplayed in inline mode', () => {
+    const math = parse(renderMarkdown('$$x^2$$', { inline: true, renderMath })).querySelector(
+      'math',
+    );
+    expect(math).not.toBeNull();
+    expect(math?.hasAttribute('display')).toBe(false);
+  });
+
+  it('still marks a display formula as display="block" in prose mode', () => {
+    expect(
+      parse(renderMarkdown('$$x^2$$', { renderMath }))
+        .querySelector('math')
+        ?.getAttribute('display'),
+    ).toBe('block');
+  });
+
+  /**
+   * The fallback echoes the delimiters the contributor typed, not the ones
+   * implied by how the formula was compiled — which in inline mode are no
+   * longer the same thing.
+   */
+  it('echoes the delimiters that were written when the math engine did not load', () => {
+    expect(
+      parse(renderMarkdown('$$x^2$$', { inline: true })).querySelector('code')?.textContent,
+    ).toBe('$$x^2$$');
+    expect(
+      parse(renderMarkdown('a $x^2$ b', { inline: true })).querySelector('code')?.textContent,
+    ).toBe('$x^2$');
+  });
+});
+
 describe('markdown engine: math', () => {
   it('compiles inline math to MathML', () => {
     expect(tagNames(parse(render('The area is $x^2$ exactly.')))).toEqual(
@@ -633,6 +717,132 @@ describe('markdown engine: math', () => {
 
   it('does not compile a formula inside an inline code span', () => {
     expect(tagNames(parse(render('Write `$x^2$` to get a formula.')))).not.toContain('math');
+  });
+});
+
+/**
+ * **An allowlist that is too narrow fails silently, and that is the half a
+ * payload suite cannot see.** Every test above asks whether something
+ * dangerous survived; none asks whether something *legitimate* was thrown
+ * away, and the answer was no for `<menclose>` — so `\boxed{x}` rendered as a
+ * bare `x` and `\cancel{y}` as `y`, correct-looking and wrong. There is no
+ * error, no console line, and no visual clue unless you already know what the
+ * formula was meant to be.
+ *
+ * So the allowlist is checked against its real source of truth: what KaTeX
+ * actually emits. The corpus is compiled twice, once displayed and once not,
+ * and the census compares the sanitised output against the raw one element by
+ * element and attribute by attribute. Anything the sanitiser removes has to be
+ * on the short list of things it removes **on purpose**.
+ */
+describe('markdown engine: the allowlist covers what KaTeX emits', () => {
+  /**
+   * Formulas chosen for the markup they produce rather than for what they
+   * mean: fractions, roots, scripts, matrices, cases, braces, enclosures,
+   * stretchy delimiters, spacing and text runs.
+   *
+   * **No colour commands.** `\textcolor` and friends emit `mathcolor`, which
+   * is a `style` attribute under another name and is stripped deliberately —
+   * it has its own named test above. A corpus entry whose removal is intended
+   * would make this test assert the opposite of what it is for.
+   */
+  const CORPUS = [
+    String.raw`\frac{a}{b}`,
+    String.raw`\sqrt[3]{x} + \sqrt{y}`,
+    String.raw`x^2_i + {}^{3}_{4}z`,
+    String.raw`\sum_{i=1}^{n} a_i`,
+    String.raw`\int_0^\infty e^{-x}\,dx`,
+    String.raw`\begin{matrix} 1 & 2 \\ 3 & 4 \end{matrix}`,
+    String.raw`\begin{cases} a & x < 0 \\ b & x \ge 0 \end{cases}`,
+    String.raw`\begin{aligned} a &= b \\ c &= d \end{aligned}`,
+    String.raw`\overbrace{a+b}^{s} \underbrace{c+d}_{t}`,
+    String.raw`\boxed{x} \cancel{y} \sout{z}`,
+    String.raw`\binom{n}{k}`,
+    String.raw`\vec{v} \hat{u} \overline{AB} \underline{CD}`,
+    String.raw`\text{a word} \verb|code|`,
+    String.raw`\mathbb{R} \mathbf{v} \mathit{s} \mathrm{d}`,
+    String.raw`\operatorname{sin}\theta`,
+    String.raw`\left( \frac{a}{b} \right] \left\{ x \right\}`,
+    String.raw`\big( \Big[ \bigg\{ \Bigg\langle x`,
+    String.raw`\phantom{x}\kern{1em}\quad a`,
+    String.raw`a \not= b \ne c \le d`,
+    String.raw`\xrightarrow{f} \xleftarrow{g}`,
+    String.raw`\substack{a \\ b}`,
+  ];
+
+  /** Every `tag` and `tag[attribute]` present, as a set of names. */
+  function census(host: HTMLElement): Set<string> {
+    const names = new Set<string>();
+    for (const element of elements(host)) {
+      const tag = element.tagName.toLowerCase();
+      names.add(tag);
+      for (const attribute of element.attributes) {
+        names.add(`${tag}[${attribute.name.toLowerCase()}]`);
+      }
+    }
+    return names;
+  }
+
+  /**
+   * KaTeX wraps its MathML in a `<span class="katex">` whatever the output
+   * mode, and that wrapper is the one thing the allowlist drops on purpose:
+   * the class is a hook into KaTeX's own stylesheet, which this app never
+   * loads, and the span has no meaning without it.
+   */
+  const STRIPPED_ON_PURPOSE = ['span', 'span[class]'];
+
+  it('keeps every element and attribute KaTeX emits across a corpus of formulas', () => {
+    const dropped = new Map<string, string>();
+
+    for (const tex of CORPUS) {
+      for (const displayMode of [true, false]) {
+        const raw = renderMath(tex, displayMode);
+        // A KaTeX error would put `span[style]` in the census and pass this
+        // test for the wrong reason, so the corpus is checked for compiling at
+        // all before it is checked for surviving.
+        expect(raw, `${tex} must compile`).not.toContain('katex-error');
+
+        const before = census(parse(raw));
+        const after = census(parse(sanitizeHtml(raw)));
+        for (const name of before) {
+          if (!after.has(name)) {
+            dropped.set(name, tex);
+          }
+        }
+      }
+    }
+
+    expect([...dropped.keys()].sort(), `dropped by: ${JSON.stringify([...dropped])}`).toEqual(
+      STRIPPED_ON_PURPOSE,
+    );
+  });
+
+  /**
+   * `\rule` is the one command whose rendering the allowlist knowingly spoils,
+   * and it is out of the corpus for that reason rather than by oversight.
+   * KaTeX draws a rule by giving an `<mspace>` a `mathbackground`, which is a
+   * `style` attribute wearing MathML's clothes: it would let a contributed
+   * question paint a fixed colour that ignores the reader's theme, and the
+   * same attribute on any other element is a filled block. A rule with no fill
+   * still occupies the space it asked for, so the formula's layout survives
+   * and only the ink is missing — a trade that is worth stating because the
+   * census would otherwise report it as a bug.
+   */
+  it('strips the fill from a rule, keeping the space it reserves', () => {
+    const out = parse(render(String.raw`$\rule{1em}{1em}$`));
+    expect(attributeNames(out)).not.toContain('mathbackground');
+    expect(tagNames(out)).toContain('mspace');
+  });
+
+  /**
+   * The other direction, and the cheaper one: the two lists are the contract,
+   * so nothing may be added to them without a reason that survives being
+   * written down. This catches a typo more than a policy change — a
+   * misspelled tag is inert and invisible.
+   */
+  it('lists no tag or attribute twice', () => {
+    expect(new Set(ALLOWED_TAGS).size).toBe(ALLOWED_TAGS.length);
+    expect(new Set(ALLOWED_ATTR).size).toBe(ALLOWED_ATTR.length);
   });
 });
 

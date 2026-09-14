@@ -76,8 +76,64 @@ async function settle(fixture: ComponentFixture<HostComponent>): Promise<void> {
   throw new Error('the markdown engine never resolved');
 }
 
+/**
+ * Waits for the box to hold exactly the source text and no markup.
+ *
+ * Not {@link settle}, and not the `data-rendered` marker: a Markdown source
+ * whose render never returns markup stays on `loading` for the life of the
+ * component, deliberately — the document did ask for Markdown. The content is
+ * the assertion.
+ */
+async function settleOnSource(
+  fixture: ComponentFixture<HostComponent>,
+  source: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    fixture.detectChanges();
+    const rendered = box(fixture);
+    if (rendered.textContent === source && rendered.children.length === 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error('the component never fell back to the source text');
+}
+
+/**
+ * A formula nested deep enough to overflow KaTeX's recursive builder.
+ *
+ * **The one input that makes the real pipeline throw**, and the reason these
+ * tests need no mock: `throwOnError: false` converts KaTeX's own `ParseError`
+ * and nothing else, so the `RangeError` a runaway recursion raises comes
+ * straight back out of `renderMarkdown`. Measured — 1,000 levels compiles in
+ * 15 ms, 2,000 overflows — and set far above the boundary because stack depth
+ * is a property of the engine rather than of this code. If some future runtime
+ * has a stack deep enough to swallow it, the tests below fail loudly on markup
+ * they did not expect rather than quietly passing.
+ *
+ * Not reachable from a real document: `firestore.rules` caps a question at 500
+ * characters, which is about 160 levels. What is being tested is the
+ * component's promise, which is not conditional on the engines behaving.
+ */
+const OVERFLOWING_FORMULA = `$${'x^{'.repeat(8000)}a${'}'.repeat(8000)}$`;
+
+/**
+ * Node's unhandled-rejection hook, reached through `globalThis` because the
+ * app's `tsconfig` carries no Node types — and it is the app's `tsconfig` that
+ * compiles this file. Vitest runs jsdom on top of Node, so a rejected promise
+ * is reported here rather than as a `window` event.
+ */
+const nodeProcess = globalThis as unknown as {
+  process: {
+    on(event: 'unhandledRejection', listener: (reason: unknown) => void): void;
+    off(event: 'unhandledRejection', listener: (reason: unknown) => void): void;
+  };
+};
+
 describe('RenderedTextComponent', () => {
-  afterEach(() => TestBed.resetTestingModule());
+  afterEach(() => {
+    TestBed.resetTestingModule();
+  });
 
   it('renders plain text as text when the document carries no format', async () => {
     const fixture = create('**not bold** and $x^2$');
@@ -138,6 +194,59 @@ describe('RenderedTextComponent', () => {
     const rendered = box(fixture);
     expect(rendered.dataset['rendered']).toBe('loading');
     expect(rendered.textContent).toBe('**bold**');
+  });
+
+  /**
+   * **The engine arriving is not the same as the engine returning**, and the
+   * assertion that matters here is the second one rather than the first.
+   *
+   * Measured: with the `catch` in `toHtml` removed, the reader sees exactly the
+   * same thing — the source text, from the branch the component had not yet
+   * left. A test that checked only the rendering would pass against the bug,
+   * which is what the first version of this did. What actually changes is that
+   * the render's promise rejects with nobody awaiting it, so the difference has
+   * to be read off the rejection rather than off the DOM.
+   */
+  it('falls back to the source text when the render itself throws, without leaking the rejection', async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    nodeProcess.process.on('unhandledRejection', record);
+
+    try {
+      const fixture = create(OVERFLOWING_FORMULA, 'markdown');
+      await settleOnSource(fixture, OVERFLOWING_FORMULA);
+
+      const rendered = box(fixture);
+      expect(rendered.querySelector('math')).toBeNull();
+      expect(rendered.children.length).toBe(0);
+
+      // Node reports an unhandled rejection a turn after it is left unhandled,
+      // so the absence of one only means something once the queue has drained.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(unhandled).toEqual([]);
+    } finally {
+      nodeProcess.process.off('unhandledRejection', record);
+    }
+  });
+
+  /**
+   * A throw must not poison the component the way a cached rejected promise
+   * would (`CLAUDE.md` §4.4). The quiz loop reuses one instance for a whole
+   * game, so one unlucky question may not cost the reader the rest of them.
+   */
+  it('renders the next question normally after a render threw', async () => {
+    const fixture = create(OVERFLOWING_FORMULA, 'markdown');
+    await settleOnSource(fixture, OVERFLOWING_FORMULA);
+
+    fixture.componentInstance.text.set('**second**');
+    fixture.detectChanges();
+
+    await expect
+      .poll(() => {
+        fixture.detectChanges();
+        return box(fixture).querySelector('strong')?.textContent;
+      })
+      .toBe('second');
   });
 
   it('renders a block container by default and an inline one when asked', async () => {

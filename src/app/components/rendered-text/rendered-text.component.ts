@@ -226,6 +226,19 @@ export class RenderedTextComponent {
     // Markdown engine for exactly that reason.
     const math = containsMath(source) ? await loadMathEngine().catch(() => undefined) : undefined;
 
-    return engine.renderMarkdown(source, { inline, renderMath: math?.renderMath });
+    try {
+      return engine.renderMarkdown(source, { inline, renderMath: math?.renderMath });
+    } catch {
+      // **The render itself, not only the fetch.** `throwOnError: false` covers
+      // KaTeX's `ParseError` and nothing else, and neither `marked` nor
+      // DOMPurify promises never to throw on input this app does not control —
+      // so "the engine arrived" is not the same as "the engine returned". An
+      // uncaught throw here would reject a promise nobody awaits: the reader
+      // would still get the source text, by accident rather than by design,
+      // and the console would carry an unhandled rejection instead. Falling
+      // back deliberately makes the component's one promise — it never renders
+      // nothing — true whatever the engines do.
+      return null;
+    }
   }
 }

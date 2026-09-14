@@ -238,7 +238,9 @@ test.describe('markdown and math rendering', () => {
         incorrect_answers: [
           `no <script>${fire}</script>`,
           `nope [x](javascript:${fire})`,
-          `nah <b onmouseover="${fire}">b</b>`,
+          // A perfectly valid https link, which prose would render as an
+          // anchor and an answer may not: the option is a `<button>`.
+          `nah [elsewhere](https://example.org/a)`,
         ],
         createdBy: 'someone-else',
         createdAt: Date.now(),
@@ -270,6 +272,14 @@ test.describe('markdown and math rendering', () => {
         activeSchemes: [],
         hrefOutsideAnchor: [],
       });
+
+    // An answer option is a `<button>`, so even a link the prose renderer would
+    // have kept is rendered as its label here — nested interactive content, and
+    // a click that would both answer the question and leave the page.
+    const options = page.getByTestId('answer-option');
+    await expect(options).toHaveCount(4);
+    await expect(options.locator('a')).toHaveCount(0);
+    await expect(options.filter({ hasText: 'elsewhere' })).toHaveCount(1);
   });
 
   /**

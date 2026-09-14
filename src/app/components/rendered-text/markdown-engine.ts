@@ -1,5 +1,5 @@
 import DOMPurify, { type Config } from 'dompurify';
-import { Marked, type Tokens } from 'marked';
+import { Marked, type Token, type Tokens } from 'marked';
 import { DISPLAY_MATH_BLOCK, DISPLAY_MATH_INLINE, INLINE_MATH } from './math-delimiters';
 
 /**
@@ -77,6 +77,13 @@ export interface RenderOptions {
  * original TeX in one, `<semantics>` renders only its first child so it is
  * never displayed, and removing the element would leave that TeX behind as
  * visible text next to the formula.
+ *
+ * **Which MathML tags KaTeX emits is measured, not guessed** — an element left
+ * off is not an error but a silent loss of meaning, which is how `\boxed{x}`
+ * came to render as a bare `x`. `markdown-engine.spec.ts`'s census renders a
+ * corpus of formulas and asserts the sanitised output keeps every element and
+ * attribute KaTeX put there, so the next omission fails a test rather than
+ * waiting to be noticed on a question.
  */
 export const ALLOWED_TAGS: readonly string[] = [
   // Markdown prose (FEAT-019 §1).
@@ -107,6 +114,7 @@ export const ALLOWED_TAGS: readonly string[] = [
   'mroot',
   'mstyle',
   'merror',
+  'menclose',
   'mpadded',
   'mphantom',
   'mfrac',
@@ -123,6 +131,19 @@ export const ALLOWED_TAGS: readonly string[] = [
   'mtr',
   'mtd',
 ];
+
+/**
+ * The same set minus `<a>`, for a run of text inside a control.
+ *
+ * **An answer option is a `<button>`, and a link inside a button is nested
+ * interactive content**: invalid HTML, announced by a screen reader as a link
+ * within a button, and a click that both answers the question and opens
+ * another site. The `link` renderer below already renders a Markdown link as
+ * its own text in this mode, so nothing the parser produces needs this — it is
+ * here because the parser is not the boundary and an `<a>` arriving by any
+ * other route is the same defect.
+ */
+export const INLINE_ALLOWED_TAGS: readonly string[] = ALLOWED_TAGS.filter((tag) => tag !== 'a');
 
 /**
  * Every attribute that may reach the DOM.
@@ -146,10 +167,14 @@ export const ALLOWED_TAGS: readonly string[] = [
  * script; they carry lengths, alignments and the `display="block"` that tells
  * the stylesheet a formula is a display formula rather than an inline one.
  * Deliberately **not** among them: `mathcolor` and `mathbackground`, which are
- * a style attribute by another name and which KaTeX emits only on the error
- * markup this allowlist is meant to strip; and `xlink:href`, `src` and
- * `background`, which carry URLs into elements that have no business
- * fetching anything.
+ * a `style` attribute wearing MathML's clothes — a contributed question could
+ * pin a colour that ignores the reader's theme, and on any element a
+ * background is a filled block. KaTeX emits them on its error markup, which
+ * this allowlist strips anyway, and on `\rule`, which is the one command whose
+ * rendering the decision knowingly spoils: the rule keeps the space it
+ * reserves and loses its ink. Also absent: `xlink:href`, `src` and
+ * `background`, which carry URLs into elements that have no business fetching
+ * anything.
  */
 export const ALLOWED_ATTR: readonly string[] = [
   'href',
@@ -168,6 +193,8 @@ export const ALLOWED_ATTR: readonly string[] = [
   'fence',
   'form',
   'largeop',
+  'minsize',
+  'maxsize',
   'lspace',
   'rspace',
   'width',
@@ -242,6 +269,19 @@ export const SANITIZE_CONFIG: Config = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
   FORBID_ATTR: ['style'],
+};
+
+/**
+ * The same configuration for a run of text inside a control — see
+ * {@link INLINE_ALLOWED_TAGS}. Spread from the one above rather than restated,
+ * so a change to the allowlist cannot reach one mode and miss the other.
+ *
+ * A dropped element keeps its text, so a refused link renders as its label:
+ * the reader loses the destination, not the answer.
+ */
+export const INLINE_SANITIZE_CONFIG: Config = {
+  ...SANITIZE_CONFIG,
+  ALLOWED_TAGS: [...INLINE_ALLOWED_TAGS],
 };
 
 /**
@@ -356,10 +396,34 @@ const noRawHtml = {
   },
 };
 
+/**
+ * A Markdown link rendered as nothing but its own text.
+ *
+ * Inline mode only, and the reason is the host element rather than the markup:
+ * an answer option is a `<button>` (see {@link INLINE_ALLOWED_TAGS}). The
+ * children are re-parsed rather than the raw text emitted, so emphasis and
+ * inline code inside a link label survive — losing the destination is the
+ * point, losing the formatting would be collateral.
+ */
+const linkAsText = {
+  renderer: {
+    link(this: { parser: { parseInline(tokens: Token[]): string } }, token: Tokens.Link) {
+      return this.parser.parseInline(token.tokens);
+    },
+  },
+};
+
 interface MathToken extends Tokens.Generic {
   type: 'math';
   text: string;
   displayMode: boolean;
+  /**
+   * The delimiter the contributor actually typed, kept separately from
+   * {@link displayMode} because inline mode compiles a `$$…$$` formula
+   * undisplayed and the no-engine fallback still has to echo the source back
+   * as it was written.
+   */
+  fence: '$' | '$$';
 }
 
 /**
@@ -375,12 +439,18 @@ interface MathToken extends Tokens.Generic {
  * back to its own source in a code span, delimiters included. A reader gets the
  * formula as the contributor wrote it, which is exactly what the same fallback
  * inside KaTeX produces for a formula that will not compile.
+ *
+ * **In inline mode nothing is ever displayed**, whichever delimiter was
+ * written. `display="block"` makes the stylesheet give a formula a block box
+ * with margins and a scroll container of its own, and inside an answer
+ * `<button>` that is a block dropped into a line of text. A `$$…$$` in an
+ * answer therefore compiles as inline math: smaller, in the run of the text,
+ * and no taller than the line.
  */
-function mathExtensions(renderMath: RenderMath | undefined) {
+function mathExtensions(renderMath: RenderMath | undefined, inline: boolean) {
   const render = (token: MathToken): string => {
     if (!renderMath) {
-      const fence = token.displayMode ? '$$' : '$';
-      return `<code>${escapeHtml(`${fence}${token.text}${fence}`)}</code>`;
+      return `<code>${escapeHtml(`${token.fence}${token.text}${token.fence}`)}</code>`;
     }
     return renderMath(token.text, token.displayMode);
   };
@@ -396,7 +466,13 @@ function mathExtensions(renderMath: RenderMath | undefined) {
         tokenizer(src: string): MathToken | undefined {
           const match = DISPLAY_MATH_BLOCK.exec(src);
           return match
-            ? { type: 'math', raw: match[0], text: match[1].trim(), displayMode: true }
+            ? {
+                type: 'math',
+                raw: match[0],
+                text: match[1].trim(),
+                displayMode: !inline,
+                fence: '$$',
+              }
             : undefined;
         },
         renderer: render,
@@ -410,11 +486,23 @@ function mathExtensions(renderMath: RenderMath | undefined) {
         tokenizer(src: string): MathToken | undefined {
           const display = DISPLAY_MATH_INLINE.exec(src);
           if (display) {
-            return { type: 'math', raw: display[0], text: display[1].trim(), displayMode: true };
+            return {
+              type: 'math',
+              raw: display[0],
+              text: display[1].trim(),
+              displayMode: !inline,
+              fence: '$$',
+            };
           }
-          const inline = INLINE_MATH.exec(src);
-          return inline
-            ? { type: 'math', raw: inline[0], text: inline[1].trim(), displayMode: false }
+          const match = INLINE_MATH.exec(src);
+          return match
+            ? {
+                type: 'math',
+                raw: match[0],
+                text: match[1].trim(),
+                displayMode: false,
+                fence: '$',
+              }
             : undefined;
         },
         renderer: render,
@@ -424,21 +512,32 @@ function mathExtensions(renderMath: RenderMath | undefined) {
 }
 
 /**
- * One `Marked` instance per math renderer, of which there are only ever two:
- * the compiled one, and `undefined` for the source-text fallback.
+ * One `Marked` instance per (math renderer, mode) pair, of which there are only
+ * ever four: the compiled math renderer or `undefined` for the source-text
+ * fallback, each in prose and inline form.
  *
  * Memoized rather than rebuilt per call because a recap screen renders one of
  * these per question and per answer, and because the alternative — one shared
- * instance whose math renderer is swapped before each parse — is mutable state
- * shared by every caller, which is a race the day anything here becomes async.
+ * instance reconfigured before each parse — is mutable state shared by every
+ * caller, which is a race the day anything here becomes async.
+ *
+ * **Keyed on the mode as well as the renderer**, because inline mode is not a
+ * parse flag the caller passes at the end: the link renderer and the math
+ * tokenizers differ, and both are baked into the instance when it is built.
  */
-const instances = new Map<RenderMath | undefined, Marked>();
+const instances = {
+  prose: new Map<RenderMath | undefined, Marked>(),
+  inline: new Map<RenderMath | undefined, Marked>(),
+};
 
-function markedFor(renderMath: RenderMath | undefined): Marked {
-  let instance = instances.get(renderMath);
+function markedFor(renderMath: RenderMath | undefined, inline: boolean): Marked {
+  const cache = inline ? instances.inline : instances.prose;
+  let instance = cache.get(renderMath);
   if (!instance) {
-    instance = new Marked({ gfm: true }, noRawHtml, mathExtensions(renderMath));
-    instances.set(renderMath, instance);
+    instance = inline
+      ? new Marked({ gfm: true }, noRawHtml, linkAsText, mathExtensions(renderMath, true))
+      : new Marked({ gfm: true }, noRawHtml, mathExtensions(renderMath, false));
+    cache.set(renderMath, instance);
   }
   return instance;
 }
@@ -454,9 +553,9 @@ function markedFor(renderMath: RenderMath | undefined): Marked {
  * or the day something other than `marked` produced input — which is already
  * the case, since KaTeX's output is raw HTML this has to police.
  */
-export function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string, options: { inline?: boolean } = {}): string {
   installHooks();
-  return DOMPurify.sanitize(html, SANITIZE_CONFIG);
+  return DOMPurify.sanitize(html, options.inline ? INLINE_SANITIZE_CONFIG : SANITIZE_CONFIG);
 }
 
 /**
@@ -469,9 +568,10 @@ export function sanitizeHtml(html: string): string {
  * over a `bypassSecurityTrustHtml` binding, which is bytes rather than safety.
  */
 export function renderMarkdown(source: string, options: RenderOptions = {}): string {
-  const marked = markedFor(options.renderMath);
-  const html = options.inline ? marked.parseInline(source) : marked.parse(source);
+  const inline = options.inline ?? false;
+  const marked = markedFor(options.renderMath, inline);
+  const html = inline ? marked.parseInline(source) : marked.parse(source);
   // `marked` is synchronous unless an async extension is registered, and none
   // is; the union in its return type is what the `async` option would produce.
-  return sanitizeHtml(html as string);
+  return sanitizeHtml(html as string, { inline });
 }
