@@ -918,6 +918,15 @@
                     }
 
                     <!--
+                      The question's topic tags (`FEAT-021`), so a player who
+                      enjoyed one knows what to ask the setup screen for next
+                      time. Absent on everything from Open Trivia DB and on
+                      every contribution written before tags existed, so the
+                      component renders nothing at all rather than an empty row.
+                    -->
+                    <app-question-tags [tags]="row.question.tags" label="Topics" />
+
+                    <!--
                       Optional source attribution (FEAT-022). Absent on the
                       overwhelming majority of questions — everything from Open
                       Trivia DB, and every contribution written before the

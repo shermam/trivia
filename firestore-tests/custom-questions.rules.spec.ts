@@ -537,6 +537,285 @@ describe('custom_questions: text format (FEAT-019)', () => {
   });
 });
 
+/**
+ * `FEAT-021`. Free-form topic tags, normalised by the client and shape-checked
+ * here — the two halves of "free-form does not mean unbounded".
+ *
+ * **Both directions, and the accept cases carry the block.** A rule that
+ * refused every tag would look exactly like a rule that worked, because every
+ * question in the bank today has none — and the symptom in production would be
+ * every tagged submission failing with a bare `permission-denied`.
+ *
+ * **Mutation-verified** (`CLAUDE.md` §4.6), by breaking the rule on purpose
+ * rather than by reading it:
+ *
+ * - Deleting `'tags'` from `isValidQuestionShape()`'s `hasOnly()` key list
+ *   fails every accept case that carries tags, and no reject case.
+ * - Deleting the whole `!('tags' in data) || areValidTags(data.tags)` clause
+ *   fails every reject case and no accept case.
+ * - Deleting any one of the eight indexed `isValidTag(tags[n])` clauses fails
+ *   the reject case that puts the bad tag at that position — which is why the
+ *   over-long tag is placed **last** in a full list of eight rather than first:
+ *   a bad tag at index 0 is refused by seven surviving clauses out of eight,
+ *   and would have hidden a deleted one.
+ * - Removing the `tags.size() <= maxTags()` clause fails the nine-tag case.
+ * - Removing the `toSet()` comparison fails the duplicate case.
+ *
+ * **One mutation was caught by nothing, and that is the finding worth keeping.**
+ * Unanchoring the pattern — `'[a-z0-9]+(-[a-z0-9]+)*'` with no `^` or `$` —
+ * fails not one of these tests, because the rules language's `matches()` is a
+ * whole-string match rather than a search. So the anchors carry no meaning
+ * here, whatever they would mean in the JavaScript regular expression this
+ * pattern is otherwise identical to. They are kept for the reader and must not
+ * be relied on; `firestore.rules` says the same beside the clause.
+ */
+describe('custom_questions: topic tags (FEAT-021)', () => {
+  it('accepts a question with no tags at all — every question in the bank today', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: validQuestion('pro') }),
+    );
+  });
+
+  /**
+   * An explicit empty list is a different shape from an absent key and both are
+   * legal. The client writes the absent form, but a document is a document —
+   * and a rule that accepted only one of the two would refuse a shape nothing
+   * in the app forbids.
+   */
+  it('accepts an explicitly empty tag list', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: [] }),
+      }),
+    );
+  });
+
+  it('accepts a normal handful of tags', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['chemistry', 'water', 'periodic-table'] }),
+      }),
+    );
+  });
+
+  /** Two characters is the floor, thirty-two the ceiling, digits are fine. */
+  it('accepts the boundary shapes: two characters, the length cap, and digits', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['ai', 'a'.repeat(32), 'world-war-2', '1990s'] }),
+      }),
+    );
+  });
+
+  it('accepts exactly eight tags, the maximum', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', {
+          tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8'],
+        }),
+      }),
+    );
+  });
+
+  it('refuses nine tags', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', {
+          tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9'],
+        }),
+      }),
+    );
+  });
+
+  /**
+   * Placed at index 7 on purpose — see the mutation note above. A bad tag in
+   * the first position is refused by seven clauses that are not the one under
+   * test.
+   */
+  it('refuses a tag one character over the cap, in the last permitted position', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', {
+          tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 'a'.repeat(33)],
+        }),
+      }),
+    );
+  });
+
+  it('refuses a one-character tag', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['a'] }),
+      }),
+    );
+  });
+
+  it('refuses an upper-case tag', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['World-War-2'] }),
+      }),
+    );
+  });
+
+  it('refuses a tag with a space in it', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['world war 2'] }),
+      }),
+    );
+  });
+
+  /**
+   * The three shapes the pattern's *structure* refuses — a hyphen has to sit
+   * between two alphanumeric runs. Not the anchors, which turn out to do
+   * nothing here (see the block comment).
+   */
+  it('refuses a leading, trailing or doubled hyphen', async () => {
+    for (const tag of ['-world', 'world-', 'world--war']) {
+      await assertFails(
+        submitQuestion(asPro(env, 'pro'), {
+          uid: 'pro',
+          payload: validQuestion('pro', { tags: [tag] }),
+        }),
+      );
+    }
+  });
+
+  it('refuses a tag carrying punctuation, a slash or a newline', async () => {
+    for (const tag of ['world_war', 'a/b', 'https://example.org', 'two\nlines']) {
+      await assertFails(
+        submitQuestion(asPro(env, 'pro'), {
+          uid: 'pro',
+          payload: validQuestion('pro', { tags: [tag] }),
+        }),
+      );
+    }
+  });
+
+  it('refuses a non-string element', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['chemistry', 42] }),
+      }),
+    );
+  });
+
+  it('refuses a tags value that is not a list at all', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: 'chemistry' }),
+      }),
+    );
+  });
+
+  it('refuses a duplicate pair', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['chemistry', 'chemistry'] }),
+      }),
+    );
+  });
+
+  /**
+   * Tags do not rescue a document that is wrong elsewhere. Worth its own row
+   * because `isValidQuestionShape()` is one long `&&` chain: a clause inserted
+   * in the wrong place — inside a parenthesised group, say — could make the
+   * rest of the chain conditional on it.
+   */
+  it('refuses valid tags on a document whose other fields are invalid', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: ['chemistry'], category: '' }),
+      }),
+    );
+  });
+
+  /** The author's own edit re-applies the create bounds — `FEAT-007`'s rule. */
+  it('lets the author retag their own question', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { tags: ['chemistry'] }),
+      );
+    });
+
+    await assertSucceeds(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), {
+        tags: ['chemistry', 'water'],
+        status: 'pending',
+      }),
+    );
+  });
+
+  it('lets the author remove every tag from their own question', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { tags: ['chemistry'] }),
+      );
+    });
+
+    await assertSucceeds(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), { tags: deleteField(), status: 'pending' }),
+    );
+  });
+
+  it('refuses an author editing their tags into an invalid shape', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'q1'),
+        validQuestion('pro', { tags: ['chemistry'] }),
+      );
+    });
+
+    await assertFails(
+      updateDoc(question(asPro(env, 'pro'), 'q1'), {
+        tags: ['Chemistry', 'chemistry'],
+        status: 'pending',
+      }),
+    );
+  });
+
+  /**
+   * The same regression the attribution and format blocks each have a row for:
+   * widening the create allowlist must not widen what a reviewer may rewrite on
+   * somebody else's question. Retagging changes which games a question is drawn
+   * into, which is the author's decision about their own contribution, and
+   * `affectedKeys().hasOnly(['status', 'rejectionReason'])` is the only thing
+   * standing between the two.
+   */
+  it('does not let a reviewer add or change tags', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'q1'), validQuestion('author'));
+    });
+    await grantReviewer(env, 'mod');
+
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), { tags: ['injected'] }),
+    );
+    await assertFails(
+      updateDoc(question(asVerifiedPassword(env, 'mod'), 'q1'), {
+        status: 'approved',
+        tags: ['injected'],
+      }),
+    );
+  });
+});
+
 describe('custom_questions: create — who may write', () => {
   it('rejects a signed-out caller', async () => {
     await assertFails(

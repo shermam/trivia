@@ -1022,3 +1022,181 @@ describe('TriviaService deduplication (FEAT-034)', () => {
     httpMock.verify();
   });
 });
+
+/**
+ * `FEAT-021`. Where the player's topic selection goes — and, more importantly,
+ * where it does not.
+ */
+describe('TriviaService topic tags (FEAT-021)', () => {
+  function taggedDoc(id: string, tags?: unknown) {
+    return {
+      id,
+      category: 'Science',
+      type: 'multiple',
+      difficulty: 'easy',
+      question: `Question ${id}?`,
+      correct_answer: 'A',
+      incorrect_answers: ['B', 'C', 'D'],
+      ...(tags === undefined ? {} : { tags }),
+    };
+  }
+
+  function configure(bank: unknown[] = []) {
+    const getCustomQuestions = vi.fn(() => of(bank));
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions } },
+        {
+          provide: OfflineQuestionsService,
+          useValue: {
+            getMatchingQuestions: () => Promise.resolve([]),
+            getOfflineQuestions: () => Promise.resolve([]),
+          },
+        },
+        {
+          provide: SeenQuestionsService,
+          useValue: { readSeenSet: () => Promise.resolve(null), markSeen: () => Promise.resolve() },
+        },
+      ],
+    });
+    return {
+      service: TestBed.inject(TriviaService),
+      httpMock: TestBed.inject(HttpTestingController),
+      getCustomQuestions,
+    };
+  }
+
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('passes the selection to the bank query', async () => {
+    const { service, getCustomQuestions } = configure();
+
+    await service.getQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+      tags: ['world-war-2'],
+    });
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({
+      category: '',
+      difficulty: '',
+      limit: 5,
+      tags: ['world-war-2'],
+    });
+  });
+
+  /**
+   * The additive promise, asserted on the **shape of the options object**: no
+   * selection means no `tags` key at all, not an empty one. A clause that
+   * leaked into the default draw would not narrow the game — the bank is almost
+   * entirely untagged, so it would empty it.
+   */
+  it('sends no tags key at all when nothing is selected', async () => {
+    const { service, getCustomQuestions } = configure();
+
+    await service.getQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+    await service.getQuestions({
+      amount: 5,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+      tags: [],
+    });
+
+    expect(getCustomQuestions).toHaveBeenNthCalledWith(1, {
+      category: '',
+      difficulty: '',
+      limit: 5,
+    });
+    expect(getCustomQuestions).toHaveBeenNthCalledWith(2, {
+      category: '',
+      difficulty: '',
+      limit: 5,
+    });
+  });
+
+  /**
+   * Only the bank carries tags, so a mixed game narrows its community half and
+   * leaves the Open Trivia DB half exactly as it was — which is what the setup
+   * screen's hint tells the player.
+   */
+  it('narrows only the community half of a mixed game', async () => {
+    const { service, getCustomQuestions, httpMock } = configure();
+
+    const promise = service.getQuestions({
+      amount: 10,
+      category: '',
+      difficulty: '',
+      source: 'mixed',
+      timeLimit: 15,
+      tags: ['calculus'],
+    });
+
+    const request = httpMock.expectOne((r) => r.url === 'https://opentdb.com/api.php');
+    // No tag parameter reaches Open Trivia DB — there is none to send.
+    expect(request.request.params.keys()).toEqual(['amount']);
+    request.flush({ response_code: 0, results: [] });
+    await promise;
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({
+      category: '',
+      difficulty: '',
+      limit: 5,
+      tags: ['calculus'],
+    });
+    httpMock.verify();
+  });
+
+  it('reads the stored tags onto the question it maps', async () => {
+    const { service } = configure([taggedDoc('c1', ['world-war-2', 'treaties'])]);
+
+    const [question] = await service.getQuestions({
+      amount: 1,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+
+    expect(question.tags).toEqual(['world-war-2', 'treaties']);
+  });
+
+  /**
+   * `custom_questions` is a public API a console can write to directly, so the
+   * mapper checks what it was handed rather than trusting it (`CLAUDE.md`
+   * §4.4). The `tags` key is left **off** entirely when nothing survives, so an
+   * untagged question does not serialise an empty array into the saved-game
+   * snapshot and the offline pool.
+   */
+  it('drops a stored value that is not a usable tag list, key and all', async () => {
+    const { service } = configure([
+      taggedDoc('c1', ['Shouty', 42, 'a']),
+      taggedDoc('c2', 'not-a-list'),
+      taggedDoc('c3'),
+    ]);
+
+    const questions = await service.getQuestions({
+      amount: 3,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+    });
+
+    for (const question of questions) {
+      expect('tags' in question).toBe(false);
+    }
+  });
+});

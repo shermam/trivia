@@ -191,13 +191,25 @@ jobs:
       # The secret reaches the shell through `env`, never `${{ }}` inside
       # `run:` — template expansion pastes the value into the script text
       # itself, where its characters are parsed as shell (A11).
+      #
+      # `@14` here where production uses `@13`, and the asymmetry is deliberate.
+      # `firebase-preview.yml` deploys indexes to this project from *unmerged*
+      # branches, so `trivimind-dev` can legitimately hold an index `main`'s
+      # `firestore.indexes.json` does not list — a PR closed unmerged, or an
+      # index renamed by a later commit. `@13` treats that as unanswerable in
+      # non-interactive mode and throws (`INFRASTRUCTURE.md` §6.3); `@14`
+      # answers its own prompt with the safe default, logs the leftovers and
+      # carries on deploying. Neither deletes anything without `--force`, which
+      # is exactly why neither is given it. Production has one writer and no
+      # preview traffic, so an index it does not declare means somebody edited
+      # the console, and there failing closed is still the right answer.
       - name: Deploy Firestore rules and indexes
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npx firebase-tools@13 deploy --only firestore:rules,firestore:indexes --project trivimind-dev
+          npx firebase-tools@14 deploy --only firestore:rules,firestore:indexes --project trivimind-dev
 
       - name: Install Cloud Functions dependencies
         run: npm ci --prefix functions
