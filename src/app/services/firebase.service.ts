@@ -354,10 +354,12 @@ export class FirebaseService {
 
     // The player's topic selection, clamped (`FEAT-021`). Empty is the case
     // that matters: it has to produce **no clause**, so an unfiltered game
-    // sends byte-for-byte the query it sent before tags existed and needs no
-    // index that did not already exist. That is the whole of "the filter is
-    // additive", and `firebase.service.spec.ts` pins it by comparing the two
-    // request bodies rather than by reading this line.
+    // sends the query it sent before tags existed and needs no index that did
+    // not already exist. That is the whole of "the filter is additive", and
+    // `firebase.service.spec.ts` pins it on the wire rather than by reading
+    // this line — it decodes the request the fake transport received and
+    // asserts both that no `array-contains-any` is in it and that the `where`
+    // list is exactly the one equality an unfiltered draw has always sent.
     const tags = (options.tags ?? []).slice(0, MAX_TAG_FILTER_VALUES);
 
     const filters: RestFieldFilter[] = [
