@@ -29,8 +29,17 @@ class HostComponent {
   readonly disabledReason = signal<string | null>(null);
 }
 
-function render() {
+/**
+ * `disabledReason` is settable **before the first render** as well as after,
+ * because the two are different states rather than the same one reached twice:
+ * the shortcut row is not rendered at all until the control has been available
+ * once, which is what keeps forty buttons out of the home route's first paint.
+ */
+function render(initial: { disabledReason?: string | null } = {}) {
   const fixture = TestBed.createComponent(HostComponent);
+  if (initial.disabledReason !== undefined) {
+    fixture.componentInstance.disabledReason.set(initial.disabledReason);
+  }
   fixture.detectChanges();
   const el: HTMLElement = fixture.nativeElement;
   const host = fixture.componentInstance;
@@ -266,19 +275,92 @@ describe('TagSelectorComponent — unavailable', () => {
   });
 
   /**
-   * The shortcuts are **absent** rather than present-and-disabled while the
-   * control is unavailable, which is a performance decision as much as a tidy
-   * one: the home route renders this filter on first paint with the source
-   * defaulting to Open Trivia — a state that disables it — so forty buttons
-   * nobody can press would sit inside the card Lighthouse measures as the
-   * largest contentful paint.
+   * The shortcuts are **not rendered at all** until the control is first
+   * available, which is a performance decision as much as a tidy one: the home
+   * route renders this filter on first paint with the source defaulting to Open
+   * Trivia — a state that disables it — so forty buttons nobody can press would
+   * sit inside the card Lighthouse measures as the largest contentful paint.
    */
-  it('offers no shortcuts at all while it is unavailable', () => {
+  it('renders no shortcuts at all until it is first available', () => {
+    // Unavailable from the first render, which is the state the home route
+    // paints — not "available, then disabled", which is a different state.
+    const { el } = render({ disabledReason: 'Not here.' });
+
+    expect(el.querySelector('[data-cy="tag-suggestions"]')).toBeNull();
+  });
+
+  /**
+   * Once they have been rendered they **stay** rendered, collapsed and `inert`.
+   * The row's height is what animates on the way out (`CLAUDE.md` §4.4), and
+   * content removed in the same frame as the collapse leaves an empty box with
+   * nothing to collapse — so the Start button would snap back up the screen
+   * instead of gliding. `inert` is what keeps a row nobody can see out of the
+   * tab order and out of the accessibility tree; nothing in jsdom enforces it,
+   * so this asserts the attribute rather than the behaviour.
+   */
+  it('keeps the shortcuts mounted but out of reach once it becomes unavailable', () => {
     const { host, fixture, el } = render();
+
+    expect(el.querySelector('[data-cy="tag-suggestions"]')).not.toBeNull();
+
     host.disabledReason.set('Not here.');
     fixture.detectChanges();
 
-    expect(el.querySelector('[data-cy="tag-suggestions"]')).toBeNull();
+    const reveal = el.querySelector<HTMLElement>('[data-cy="tag-suggestions-reveal"]')!;
+    expect(el.querySelector('[data-cy="tag-suggestions"]')).not.toBeNull();
+    expect(reveal.getAttribute('inert')).toBe('');
+    expect(reveal.className).toContain('grid-rows-[0fr]');
+  });
+
+  /**
+   * The gate the whole animation hangs on. `npm run motion:verify` fails on an
+   * ungated layout transition, but nothing checks that the transition is there
+   * at all — and an un-animated reveal drops the Start button 108px in one
+   * frame, which is invisible to jsdom, to Lighthouse and to a green e2e run
+   * that never measures it. `tag-filter.spec.ts` measures the real thing in a
+   * real browser; this pins the classes it depends on.
+   */
+  it('animates the reveal, gated on the reader not having asked for less motion', () => {
+    const { host, fixture, el } = render({ disabledReason: 'Not here.' });
+    const reveal = () => el.querySelector<HTMLElement>('[data-cy="tag-suggestions-reveal"]')!;
+
+    expect(reveal().className).toContain('motion-safe:transition-[grid-template-rows]');
+    expect(reveal().className).toContain('motion-safe:duration-');
+    expect(reveal().className).toContain('grid-rows-[0fr]');
+
+    host.disabledReason.set(null);
+    fixture.detectChanges();
+
+    expect(reveal().className).toContain('grid-rows-[1fr]');
+    expect(reveal().getAttribute('inert')).toBeNull();
+  });
+
+  /**
+   * The feedback line keeps the height of the *longest* message it can carry,
+   * not of the current one — otherwise it loses a line at the same instant the
+   * shortcut row expands, and the Start button hops upwards before gliding
+   * down. jsdom has no layout, so what is asserted is the twin that reserves
+   * the space; `tag-filter.spec.ts` measures the result.
+   */
+  it('keeps reserving the unavailability reason after it stops applying', () => {
+    const reason = 'Only community questions carry topics.';
+    const { host, fixture, el } = render({ disabledReason: reason });
+    const twin = () => el.querySelector<HTMLElement>('[data-cy="tag-feedback-reserve"]');
+
+    expect(twin()?.textContent?.trim()).toBe(reason);
+    expect(twin()?.getAttribute('aria-hidden')).toBe('true');
+
+    host.disabledReason.set(null);
+    fixture.detectChanges();
+
+    expect(twin()?.textContent?.trim()).toBe(reason);
+  });
+
+  /** …and costs nothing at all where no reason is ever given, which is both question forms. */
+  it('reserves nothing extra where the control is never unavailable', () => {
+    const { el } = render();
+
+    expect(el.querySelector('[data-cy="tag-feedback-reserve"]')?.textContent?.trim()).toBe('');
   });
 
   it('accepts nothing typed while it is unavailable', () => {

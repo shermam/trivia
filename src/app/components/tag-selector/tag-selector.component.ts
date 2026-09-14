@@ -4,6 +4,7 @@ import {
   computed,
   forwardRef,
   input,
+  linkedSignal,
   signal,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
@@ -81,7 +82,15 @@ const SUGGESTION_BASE_CLASS =
  * lines on a phone, and on the setup screen that would push the Start button
  * down the screen as the reader picks topics — which is the exact shape §4.4
  * exists for. The box is two chip-rows tall, which is the common case, and the
- * rest scrolls.
+ * rest scrolls. The feedback line is reserved the same way, at the height of
+ * the longest message it can carry rather than of the current one.
+ *
+ * One change genuinely cannot keep the box the same size: becoming available
+ * adds the shortcut row, and reserving 108 pixels of empty space on the home
+ * route for the majority who never switch question source would cost every
+ * player to spare a few a movement. §4.4's third technique applies instead —
+ * the row's height is **animated**, so what is below it glides rather than
+ * jumps, and a reader who asked for less motion gets the change at once.
  */
 @Component({
   selector: 'app-tag-selector',
@@ -146,6 +155,51 @@ export class TagSelectorComponent implements ControlValueAccessor {
   protected readonly isDisabled = computed(() => this.formDisabled() || !!this.disabledReason());
 
   protected readonly isFull = computed(() => this.tags().length >= this.max());
+
+  /** Whether the shortcut row is on offer: shortcuts to show, and a control able to take one. */
+  protected readonly showSuggestions = computed(
+    () => this.suggestions().length > 0 && !this.isDisabled(),
+  );
+
+  /**
+   * Whether the shortcut row is in the DOM at all — which is **not** the same
+   * question as whether it is on offer, and both halves of the difference are
+   * load-bearing.
+   *
+   * It stays out of the first render because the home route paints this filter
+   * disabled: forty buttons nobody can press would sit inside the card
+   * Lighthouse measures as the largest contentful paint, and the measurement is
+   * in the template beside the row. It stays in from then on because the row's
+   * height is what animates on the way *out*: content removed in the same frame
+   * as the collapse leaves an empty box with nothing to collapse, and the Start
+   * button snaps back up the screen instead of gliding (`CLAUDE.md` §4.4).
+   * Collapsed, the whole region is `inert`, so nothing in it is tabbable or
+   * announced while it is out of reach.
+   */
+  protected readonly suggestionsMounted = linkedSignal<boolean, boolean>({
+    source: this.showSuggestions,
+    computation: (shown, previous) => shown || previous?.value === true,
+  });
+
+  /**
+   * The last reason this control was unavailable, kept after it stops applying.
+   *
+   * Nothing reads it — it **reserves the feedback line's height**. The reason is
+   * the longest thing that line ever carries (two lines in the card's width
+   * against one for every other message), so a line sized to whichever message
+   * is current shrinks by one line at the exact instant the shortcut row below
+   * it expands: the reader watches the Start button hop sixteen pixels up
+   * before gliding ninety-two down, which is most of what animating the reveal
+   * was for. Stacked in one grid cell with the visible message, so the reserved
+   * height is the taller of the two and follows the copy rather than a
+   * hard-coded `min-h` somebody has to re-measure (`CLAUDE.md` §4.4). Empty —
+   * and therefore free — wherever the control is never unavailable, which is
+   * both question forms.
+   */
+  protected readonly reservedReason = linkedSignal<string | null, string>({
+    source: this.disabledReason,
+    computation: (reason, previous) => reason ?? previous?.value ?? '',
+  });
 
   /**
    * What the current draft would be stored as, or `null` while there is nothing

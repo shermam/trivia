@@ -142,6 +142,32 @@ async function playAndCollect(page: Page, seed: Seed, count: number): Promise<st
   return served;
 }
 
+/**
+ * Resolves once the shortcut row's reveal has finished moving.
+ *
+ * The predicate is derived from the content rather than from a pixel count or a
+ * wall-clock wait: the shortcut group is the last thing inside the animating
+ * container, so the two share a bottom edge exactly when the container has
+ * reached the group's full height. Mid-transition the container is shorter and
+ * the group is clipped, which reads as a negative number. Nothing here needs
+ * re-measuring when the row's contents change.
+ */
+async function waitForShortcutRowRevealed(page: Page): Promise<void> {
+  await expect(page.getByTestId('filter-tag-suggestions')).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const box = (selector: string) =>
+          document.querySelector(selector)!.getBoundingClientRect().bottom;
+        return Math.round(
+          box('[data-cy="filter-tag-suggestions-reveal"]') -
+            box('[data-cy="filter-tag-suggestions"]'),
+        );
+      }),
+    )
+    .toBe(0);
+}
+
 test.describe('the setup screen topic filter', () => {
   test('plays only the questions carrying the chosen topic', async ({ page, firebase }) => {
     const seed = seedFor();
@@ -251,6 +277,13 @@ test.describe('the setup screen topic filter', () => {
     await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
 
     const selector = page.getByTestId('filter-tag-selector');
+    // Switching source animates the shortcut row in (see below), and that is
+    // this test's *setup* rather than its subject: a "before" taken while the
+    // reveal is still running is a height the control is only passing through,
+    // and every later comparison is then against a number that never existed at
+    // rest. Waiting for the row to land is what makes the measurement mean
+    // "the control, ready to be used".
+    await waitForShortcutRowRevealed(page);
     const before = await selector.boundingBox();
 
     const input = page.getByTestId('filter-tag-input');
@@ -266,5 +299,138 @@ test.describe('the setup screen topic filter', () => {
     await expect
       .poll(async () => Math.round((await selector.boundingBox())!.height))
       .toBe(Math.round(before!.height));
+  });
+
+  /**
+   * The one state change the filter cannot make at a constant size, and
+   * therefore the one that animates (`CLAUDE.md` §4.4).
+   *
+   * Switching to a source that has topics reveals the shortcut row, which is
+   * 108px the control did not have before — and reserving that from first paint
+   * would put an empty box on the home route for the majority who never leave
+   * Open Trivia, at a measured cost to the largest contentful paint (the
+   * numbers are on the selector's template). So the row's *height* is what
+   * appears, over 300ms, and everything below it glides.
+   *
+   * **What is asserted is the mechanism, not a distance.** The Start button's
+   * displacement has to equal the height the container gained — which says the
+   * animated box accounts for *all* of the movement, and would fail on a second
+   * un-animated resize elsewhere in the control however the copy or the layout
+   * changes later. Measured at the time of writing: 216px of control before,
+   * 324px after, the Start button 108px lower.
+   *
+   * **A tall viewport on purpose.** Below a certain height the centred card
+   * already overflows its container and is pinned to the top, and §4.4 records
+   * a shift measuring exactly 0px at 390×700 while it was 43px at 390×1000. A
+   * check at a convenient window size calls this fixed while it is broken.
+   */
+  test.describe('revealing the shortcut row', () => {
+    test.use({ viewport: { width: 390, height: 1000 } });
+
+    /** How far the Start button has moved, less the height the reveal gained. */
+    const overshoot = async (page: Page, from: number) => {
+      const [button, revealed] = await Promise.all([
+        page.getByRole('button', { name: 'Start Game', exact: true }).boundingBox(),
+        page
+          .getByTestId('filter-tag-suggestions-reveal')
+          .evaluate((el) => el.getBoundingClientRect().height),
+      ]);
+      return Math.round(button!.y - from - revealed);
+    };
+
+    test('animates it, so nothing below it jumps', async ({ page }) => {
+      await stubOpenTrivia(page);
+      await page.goto('/');
+
+      const reveal = page.getByTestId('filter-tag-suggestions-reveal');
+      const start = page.getByRole('button', { name: 'Start Game', exact: true });
+      const rows = () => reveal.evaluate((el) => getComputedStyle(el).gridTemplateRows);
+
+      // Collapsed to nothing before the switch. Asserting that first is also
+      // what settles the layout the "before" measurement is taken against.
+      await expect(page.getByTestId('filter-tag-input')).toBeDisabled();
+      await expect.poll(rows).toBe('0px');
+
+      // Declared on the container itself, which is what makes the row's own
+      // height the thing that animates — no pixel count is written down
+      // anywhere, so the copy can grow without anybody re-measuring it.
+      expect(await reveal.evaluate((el) => getComputedStyle(el).transitionProperty)).toBe(
+        'grid-template-rows',
+      );
+      expect(await reveal.evaluate((el) => getComputedStyle(el).transitionDuration)).not.toBe('0s');
+
+      const before = (await start.boundingBox())!.y;
+
+      await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
+      await waitForShortcutRowRevealed(page);
+
+      // The two boxes are read together in one poll rather than one at a time:
+      // measurements a frame apart during a 300ms transition disagree for
+      // reasons that have nothing to do with the invariant (§4.6). The height
+      // is asserted as well, so "nothing grew and nothing moved" cannot pass.
+      await expect.poll(() => overshoot(page, before)).toBe(0);
+      await expect
+        .poll(() => reveal.evaluate((el) => Math.round(el.getBoundingClientRect().height)))
+        .toBeGreaterThan(100);
+
+      // ...and back again. The row stays in the DOM so the collapse has a
+      // height to collapse — removed in the same frame it would leave an empty
+      // box and the Start button would snap back up — with the whole region
+      // `inert`, so a row nobody can see is a row nobody can Tab into.
+      await optionLabel(
+        page,
+        page.getByRole('radio', { name: 'Open Trivia', exact: true }),
+      ).click();
+      await expect(page.getByTestId('filter-tag-suggestions')).toBeAttached();
+      await expect(reveal).toHaveAttribute('inert', '');
+      await expect.poll(rows).toBe('0px');
+      await expect
+        .poll(async () => Math.round((await start.boundingBox())!.y))
+        .toBe(Math.round(before));
+    });
+
+    /**
+     * Motion is opt-out by default (`CLAUDE.md` §4.5), so the whole thing is
+     * behind `motion-safe:` — which emits no declaration at all under the
+     * preference rather than a faster one. The reader gets the change in the
+     * frame they asked for it, at the same destination.
+     *
+     * **The preference is set with `page.emulateMedia`, and the obvious way of
+     * writing it does not work here.** `test.use({ reducedMotion: 'reduce' })`
+     * is silently ignored in this setup — measured at file level, at describe
+     * level, and against a plain `@playwright/test` `test` as well as this
+     * suite's extended one: `matchMedia('(prefers-reduced-motion: reduce)')`
+     * stayed `false` in every one, while `emulateMedia` flipped it and took the
+     * transition's computed duration from `0.3s` to `0s`. A test written the
+     * ignored way passes against an *ungated* animation, which is the whole of
+     * what it exists to catch.
+     */
+    test.describe('for a reader who asked for less of it', () => {
+      test('changes at once instead', async ({ page }) => {
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await stubOpenTrivia(page);
+        await page.goto('/');
+
+        const reveal = page.getByTestId('filter-tag-suggestions-reveal');
+        const start = page.getByRole('button', { name: 'Start Game', exact: true });
+
+        await expect(page.getByTestId('filter-tag-input')).toBeDisabled();
+        // Not "a short transition": there is none to run. `motion-safe:` emits
+        // nothing under the preference, so the duration is back to its initial
+        // `0s` and the property to its initial `all`.
+        expect(await reveal.evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
+
+        const before = (await start.boundingBox())!.y;
+
+        await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
+        await waitForShortcutRowRevealed(page);
+
+        // The same destination as the animated path, reached without one.
+        await expect.poll(() => overshoot(page, before)).toBe(0);
+        await expect
+          .poll(() => reveal.evaluate((el) => Math.round(el.getBoundingClientRect().height)))
+          .toBeGreaterThan(100);
+      });
+    });
   });
 });
