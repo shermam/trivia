@@ -288,9 +288,12 @@
         only questions somebody has tagged — correct rather than lossy, because
         an untagged question is not known to be about the topic asked for.
 
-        The control keeps the same height in every state (`CLAUDE.md` §4.4): the
-        chip box and the suggestion box are both fixed and scroll, so picking
-        eight topics never moves the Start button.
+        The control keeps the same height while it is being *used* (`CLAUDE.md`
+        §4.4): the chip box and the suggestion box are both fixed and scroll, so
+        picking ten topics never moves the Start button. The one thing that does
+        resize it is switching Question Source, which adds or removes the
+        shortcut row — the reader's own action rather than a state arriving
+        under them, and the reason for it is on the selector's own template.
       -->
       <app-tag-selector
         formControlName="tags"
