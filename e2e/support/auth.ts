@@ -1,27 +1,29 @@
 import { expect, Locator, Page } from '@playwright/test';
 
 /**
- * How long a visit may take to persist an anonymous Firebase session.
+ * How long a visit is given to persist an anonymous Firebase session.
  *
  * **Derived from the application's own deadlines rather than guessed from a
- * runner.** Nothing on `/` awaits auth, so the session arrives at the end of a
- * chain the app schedules late on purpose (`app.md` §1.5): `App`'s constructor
- * defers `ensureSignedIn()` to `afterNextRender` and then to an idle callback
- * bounded at **2s**; `AuthService.getAuth()` dynamically imports
+ * runner**, which is what makes this budget expiring a finding rather than
+ * impatience. Nothing on `/` awaits auth, so the session arrives at the end of
+ * a chain the app schedules late on purpose (`app.md` §1.5): `App`'s
+ * constructor defers `ensureSignedIn()` to `afterNextRender` and then to an
+ * idle callback bounded at **2s**; `AuthService.getAuth()` dynamically imports
  * `firebase/auth` (129 kB raw, plus the 31 kB shared chunk under it) and
  * `FirebaseAppService` fetches `/__/firebase/init.json`, which it aborts after
  * **10s**; and `signInAnonymously()` is then a round trip `AuthService` gives
- * up on after **10s**. That is 22s of the app's own bounds plus two chunk
- * fetches before anything has gone wrong — so the 20s `expect` timeout in
- * `playwright.config.ts` is shorter than the window the application itself
- * allows, which is why waiting on this under the default failed against real
- * Firebase Auth and never once against the emulator, where the round trip is a
- * millisecond.
+ * up on after **10s**. Against the emulator that round trip is a millisecond
+ * and any bound passes; against real Firebase Auth those are 22s of the app's
+ * own deadlines plus two chunk fetches, which is more than the 20s `expect`
+ * timeout in `playwright.config.ts` allows for.
  *
- * 60s covers those bounds with room for the fetches, and still fails in
- * bounded time when the session genuinely never lands: `ensureSignedIn()`
- * catches its own timeout and nothing on `/` calls it again, so a backend that
- * does not answer leaves no session for any deadline to find.
+ * **Past them there is nothing left to wait for**, and that is the half worth
+ * knowing. `ensureSignedIn()` makes exactly one attempt and swallows whatever
+ * it catches, and nothing on `/` calls it again — the other callers are
+ * gestures (`AuthMenuStateService`, `DonationDialogStateService`) and
+ * sign-out. So a session still missing at the end of this budget is *absent*
+ * rather than late, no longer bound could find it, and the honest thing for a
+ * test to do about it is fail.
  */
 const ANONYMOUS_SESSION_TIMEOUT_MS = 60_000;
 
