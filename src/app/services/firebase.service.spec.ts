@@ -3,7 +3,12 @@ import { firstValueFrom } from 'rxjs';
 import { CustomQuestionDoc, NewQuestionReportDoc } from '../models/question.model';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
-import { FirebaseService, QuestionReportRejectedError, REVIEW_PAGE_SIZE } from './firebase.service';
+import {
+  FirebaseService,
+  MAX_TAG_FILTER_VALUES,
+  QuestionReportRejectedError,
+  REVIEW_PAGE_SIZE,
+} from './firebase.service';
 
 /**
  * Finding C1. `getCustomQuestions()` was `getDocs(collection(...))` — no
@@ -76,6 +81,15 @@ interface RecordedQuery {
    * against a document's ID rather than against anything in its data.
    */
   documentIds?: string[];
+  /**
+   * An `ARRAY_CONTAINS_ANY` clause and the values it carried (`FEAT-021`),
+   * recorded apart from `wheres` for the same reason `documentIds` is: it is
+   * not a field comparison. It matches a document whose array field holds any
+   * of these, and recording it separately is also what lets the additive
+   * assertion be literal — an unfiltered draw records **no** entry here at all,
+   * rather than one that happens to be empty.
+   */
+  arrayContainsAny?: { field: string; values: string[] };
   orderBy: { field: string; direction: string }[];
   startAt?: string;
   endBefore?: string;
@@ -167,24 +181,37 @@ function fakeServer(
           (filter) =>
             filter['fieldFilter'] as {
               field: { fieldPath: string };
+              op: string;
               value: {
                 stringValue?: string;
-                arrayValue?: { values?: { referenceValue?: string }[] };
+                arrayValue?: { values?: { referenceValue?: string; stringValue?: string }[] };
               };
             },
         );
         const wheres = fieldFilters
-          .filter((filter) => filter.field.fieldPath !== '__name__')
+          .filter(
+            (filter) => filter.field.fieldPath !== '__name__' && filter.op !== 'ARRAY_CONTAINS_ANY',
+          )
           .map((filter) => ({ field: filter.field.fieldPath, value: filter.value.stringValue }));
         const documentIds = fieldFilters
           .filter((filter) => filter.field.fieldPath === '__name__')
           .flatMap((filter) => (filter.value.arrayValue?.values ?? []).map(referenceId))
           .filter((id): id is string => id !== undefined);
+        const anyFilter = fieldFilters.find((filter) => filter.op === 'ARRAY_CONTAINS_ANY');
+        const arrayContainsAny = anyFilter
+          ? {
+              field: anyFilter.field.fieldPath,
+              values: (anyFilter.value.arrayValue?.values ?? [])
+                .map((value) => value.stringValue)
+                .filter((value): value is string => value !== undefined),
+            }
+          : undefined;
 
         const recorded: RecordedQuery = {
           collectionPath,
           wheres,
           ...(documentIds.length ? { documentIds } : {}),
+          ...(arrayContainsAny ? { arrayContainsAny } : {}),
           orderBy: (query['orderBy'] ?? []) as { field: string; direction: string }[],
           startAt: cursorId(query['startAt']),
           endBefore: cursorId(query['endAt']),
@@ -209,6 +236,13 @@ function fakeServer(
         }
         if (recorded.documentIds) {
           rows = rows.filter((row) => recorded.documentIds!.includes(row.id));
+        }
+        if (recorded.arrayContainsAny) {
+          const { field, values } = recorded.arrayContainsAny;
+          rows = rows.filter((row) => {
+            const held = row.data[field];
+            return Array.isArray(held) && held.some((entry) => values.includes(entry as string));
+          });
         }
         if (recorded.startAt !== undefined) {
           rows = rows.filter((row) => row.id >= recorded.startAt!);
@@ -445,6 +479,96 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
     // Only `status`, which is never optional — the two the caller declined are
     // absent. An empty category must not become `category == ''`.
     expect(queries[0].wheres).toEqual([{ field: 'status', value: 'approved' }]);
+  });
+
+  /**
+   * `FEAT-021`'s load-bearing assertion, and the one the whole feature rests
+   * on: **an unfiltered draw sends the query it has always sent.** The bank is
+   * almost entirely untagged, and a question with no `tags` array matches no
+   * `array-contains-any` clause — so a clause that leaked into the default draw
+   * would not narrow the game, it would empty it, for every player and every
+   * question in the bank at once.
+   *
+   * Asserted on the absence of the recorded clause rather than on an empty one,
+   * because the fake records `arrayContainsAny` only when the wire payload
+   * actually carried a filter.
+   */
+  it('sends no tag clause at all when no topic was selected', async () => {
+    pinCursor(LOW_CURSOR);
+    const { service, queries } = setup(bank);
+
+    await firstValueFrom(service.getCustomQuestions({ limit: 3 }));
+    await firstValueFrom(service.getCustomQuestions({ tags: [], limit: 3 }));
+
+    expect(queries.every((q) => q.arrayContainsAny === undefined)).toBe(true);
+  });
+
+  it('adds one array-contains-any clause for the selected topics', async () => {
+    pinCursor(LOW_CURSOR);
+    const tagged: SeedDoc[] = [
+      { id: 'qa', data: makeQuestion({ tags: ['world-war-2'] }) as never },
+      { id: 'qb', data: makeQuestion({ tags: ['calculus'] }) as never },
+      { id: 'qc', data: makeQuestion() as never },
+    ];
+    const { service, queries } = setup(tagged);
+
+    const result = await firstValueFrom(
+      service.getCustomQuestions({ tags: ['world-war-2', 'cold-war'], limit: 10 }),
+    );
+
+    // The untagged question is absent, which is the behaviour rather than a
+    // gap: a tag filter is a request for questions *about* a topic, and an
+    // untagged question is not known to be about it.
+    expect(result.map((q) => q.id)).toEqual(['qa']);
+    expect(queries[0].arrayContainsAny).toEqual({
+      field: 'tags',
+      values: ['world-war-2', 'cold-war'],
+    });
+    // ...alongside the status filter, never instead of it.
+    expect(queries[0].wheres).toEqual([{ field: 'status', value: 'approved' }]);
+  });
+
+  it('keeps the category and difficulty equalities beside the tag clause', async () => {
+    pinCursor(LOW_CURSOR);
+    const { service, queries } = setup(bank);
+
+    await firstValueFrom(
+      service.getCustomQuestions({
+        category: 'Science',
+        difficulty: 'easy',
+        tags: ['chemistry'],
+        limit: 5,
+      }),
+    );
+
+    // This is the four-field query shape, and therefore the composite index
+    // `firestore.indexes.json` has to declare: status + category + difficulty +
+    // tags. `firestore-tests/indexes.spec.ts` pins the other half.
+    expect(queries[0].wheres).toEqual([
+      { field: 'status', value: 'approved' },
+      { field: 'category', value: 'Science' },
+      { field: 'difficulty', value: 'easy' },
+    ]);
+    expect(queries[0].arrayContainsAny?.field).toBe('tags');
+    expect(queries[0].limit).toBe(5);
+  });
+
+  /**
+   * Firestore refuses an `array-contains-any` carrying more than 30 values
+   * outright — not a wider result, a failed query — and the picker stops
+   * offering at ten. The clamp is here as well because a bound does not live at
+   * the call site (`CLAUDE.md` §4.1), and because the failure it prevents looks
+   * from the outside exactly like an empty bank.
+   */
+  it('clamps the selection to the ten values the query builder will send', async () => {
+    pinCursor(LOW_CURSOR);
+    const { service, queries } = setup(bank);
+    const many = Array.from({ length: 14 }, (_, i) => `topic-${i}`);
+
+    await firstValueFrom(service.getCustomQuestions({ tags: many, limit: 3 }));
+
+    expect(queries[0].arrayContainsAny?.values).toEqual(many.slice(0, MAX_TAG_FILTER_VALUES));
+    expect(queries[0].arrayContainsAny?.values).toHaveLength(10);
   });
 
   // Without the wrap, a cursor landing past the last document returns nothing,
@@ -1145,6 +1269,35 @@ describe('FirebaseService.updateUserQuestion / deleteUserQuestion (FEAT-007)', (
     // Still cleared: the one the author left blank, and the reviewer's note.
     expect(Object.keys(writes[0].fields)).not.toContain('sourceTitle');
     expect(writes[0].mask).toEqual(expect.arrayContaining(['sourceTitle', 'rejectionReason']));
+  });
+
+  it('writes the tags the author kept on their own question', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.updateUserQuestion('mine', { ...content, tags: ['world-war-2', 'treaties'] });
+
+    expect(writes[0].fields['tags']).toEqual({
+      arrayValue: {
+        values: [{ stringValue: 'world-war-2' }, { stringValue: 'treaties' }],
+      },
+    });
+  });
+
+  /**
+   * `[]` is truthy, which is the trap this row exists for: the optional fields
+   * beside it are strings, so "did the author leave it blank" used to be a
+   * plain truthiness check — and an empty array would have sailed through it
+   * and written `tags: []` onto every question whose author removed them all.
+   * The rules accept that, which is what would have made it invisible: a field
+   * on every untagged question saying it has no tags.
+   */
+  it('removes the key rather than writing an empty array when the author clears every tag', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.updateUserQuestion('mine', { ...content, tags: [] });
+
+    expect(Object.keys(writes[0].fields)).not.toContain('tags');
+    expect(writes[0].mask).toContain('tags');
   });
 
   it('deletes the document when the author withdraws it', async () => {

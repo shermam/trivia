@@ -23,6 +23,9 @@ function setup(
   allowance: { isUnlimited?: boolean; hasGamesLeft?: boolean; remaining?: number } = {},
 ) {
   const startGame = vi.fn<(config: GameConfig) => Promise<void>>(() => Promise.resolve());
+  // Returned so a test can take the browser offline, which is one of the two
+  // states that puts the topic filter out of reach (`FEAT-021`).
+  const isOnline = signal(true);
   const dailyLimit = {
     isUnlimited: signal(allowance.isUnlimited ?? false),
     hasGamesLeft: signal(allowance.hasGamesLeft ?? true),
@@ -44,6 +47,7 @@ function setup(
           currentIndex: signal(0),
           totalQuestions: signal(0),
           limitReached: signal(false),
+          shortDraw: signal<{ found: number; asked: number } | null>(null),
         },
       },
       // Stubbed rather than left real: the real service would open IndexedDB
@@ -52,7 +56,7 @@ function setup(
       { provide: DailyGameLimitService, useValue: dailyLimit },
       { provide: TriviaService, useValue: { getCategories: () => Promise.resolve([]) } },
       { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
-      { provide: ConnectivityService, useValue: { isOnline: signal(true) } },
+      { provide: ConnectivityService, useValue: { isOnline } },
       { provide: OfflineQuestionsService, useValue: { cachedCount: signal(0) } },
       // The real router, not a stub: this template has a `routerLink`, and
       // RouterLink needs an `ActivatedRoute` and a `Router` that can actually
@@ -63,7 +67,7 @@ function setup(
 
   const fixture = TestBed.createComponent(GameSetupComponent);
   fixture.detectChanges();
-  return { fixture, startGame, dailyLimit };
+  return { fixture, startGame, dailyLimit, isOnline };
 }
 
 /** Picks an option the way a player does — through the DOM, not through `setValue`. */
@@ -179,6 +183,110 @@ describe('GameSetupComponent — the daily allowance', () => {
 
     expect(card(fixture)).not.toBeNull();
     expect(startButton(fixture)).toBeNull();
+    fixture.destroy();
+  });
+});
+
+/**
+ * The topic filter (`FEAT-021`).
+ *
+ * What the picker does with a keystroke is `tag-selector.component.spec.ts`'
+ * subject. What this screen has to get right is narrower and easier to get
+ * wrong: **what reaches `GameConfig`**, and when the filter is offered at all.
+ */
+describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
+  /** Picks a suggestion the way a player does, through the real button. */
+  function chooseTopic(fixture: ReturnType<typeof setup>['fixture'], tag: string): void {
+    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      `[data-cy="suggest-tag-${tag}"]`,
+    );
+    if (!button) {
+      throw new Error(`no "${tag}" suggestion — the test is asserting against markup that changed`);
+    }
+    button.click();
+    fixture.detectChanges();
+  }
+
+  function chooseSource(fixture: ReturnType<typeof setup>['fixture'], value: string): void {
+    const radio = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>(
+      `input[type="radio"][value="${value}"]`,
+    )!;
+    radio.click();
+    fixture.detectChanges();
+  }
+
+  function feedback(fixture: ReturnType<typeof setup>['fixture']): string {
+    return (
+      (fixture.nativeElement as HTMLElement)
+        .querySelector<HTMLElement>('[data-cy="filter-tag-feedback"]')
+        ?.textContent?.trim() ?? ''
+    );
+  }
+
+  /**
+   * The additive promise at the screen's own boundary: a player who never
+   * touches the filter emits a config with **no** `tags` key, so nothing
+   * downstream can add a clause. An empty array here would be harmless today
+   * and one `length` check away from emptying every game tomorrow.
+   */
+  it('emits no tags key when the player chooses no topic', () => {
+    const { fixture, startGame } = setup();
+
+    submit(fixture);
+
+    expect('tags' in startGame.mock.calls[0][0]).toBe(false);
+    fixture.destroy();
+  });
+
+  it('emits the topics the player chose', () => {
+    const { fixture, startGame } = setup();
+
+    chooseSource(fixture, 'custom');
+    chooseTopic(fixture, 'world-war-2');
+    submit(fixture);
+
+    expect(startGame.mock.calls[0][0].tags).toEqual(['world-war-2']);
+    fixture.destroy();
+  });
+
+  /**
+   * Only the community bank carries tags, so the filter is put out of reach for
+   * an Open Trivia DB game rather than accepted and quietly ignored — and it
+   * says which, because switching source is the fix.
+   */
+  it('is unavailable for an Open Trivia game, and says why', () => {
+    const { fixture } = setup();
+
+    expect(feedback(fixture)).toContain('Only community questions carry topics');
+    fixture.destroy();
+  });
+
+  it('is unavailable offline, and says why', () => {
+    const { fixture, isOnline } = setup();
+
+    chooseSource(fixture, 'custom');
+    isOnline.set(false);
+    fixture.detectChanges();
+
+    expect(feedback(fixture)).toContain('Offline games');
+    fixture.destroy();
+  });
+
+  /**
+   * The state that would otherwise be silent: a player picks topics on a Custom
+   * game, then switches back to Open Trivia. The selection is still in the
+   * control, and sending it would describe a game that was never filtered —
+   * including in the snapshot a resume reads back.
+   */
+  it('drops a selection the source can no longer use', () => {
+    const { fixture, startGame } = setup();
+
+    chooseSource(fixture, 'custom');
+    chooseTopic(fixture, 'world-war-2');
+    chooseSource(fixture, 'open_trivia');
+    submit(fixture);
+
+    expect('tags' in startGame.mock.calls[0][0]).toBe(false);
     fixture.destroy();
   });
 });

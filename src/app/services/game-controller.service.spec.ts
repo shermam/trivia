@@ -1217,3 +1217,149 @@ describe('GameControllerService seen-set (FEAT-034)', () => {
     expect(await readSeenKeys()).toEqual([]);
   });
 });
+
+/**
+ * `FEAT-021`. A topic-filtered draw that comes back with fewer questions than
+ * were asked for says so and waits, rather than starting a shorter round
+ * without mentioning it.
+ *
+ * **The scoping is what these rows are really about.** A short draw has always
+ * been possible — a rare category, a narrow difficulty, a small bank — and
+ * interrupting those would change behaviour this feature has no business
+ * changing. The bank being mostly untagged is what makes a tag filter
+ * different in kind: coming back short is the *expected* result there rather
+ * than an unlucky one, and a player has no way to know that unless told.
+ */
+describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () => {
+  function config(overrides: Partial<GameConfig> = {}): GameConfig {
+    return {
+      amount: 10,
+      category: '',
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 15,
+      ...overrides,
+    };
+  }
+
+  function setupDraw(found: number) {
+    const questions = Array.from({ length: found }, (_, i) => makeQuestion(`t${i}`));
+    const getQuestions = vi.fn(() => Promise.resolve(questions));
+    const navigateByUrl = vi.fn(() => Promise.resolve(true));
+    const consumeGame = vi.fn(() => Promise.resolve(true));
+
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TriviaService, useValue: { getQuestions } },
+        { provide: Router, useValue: { navigateByUrl } },
+        {
+          provide: DailyGameLimitService,
+          useValue: {
+            isUnlimited: () => true,
+            remaining: () => Number.POSITIVE_INFINITY,
+            hasGamesLeft: () => true,
+            refresh: () => Promise.resolve(),
+            consumeGame,
+          },
+        },
+      ],
+    });
+
+    return {
+      service: TestBed.inject(GameControllerService),
+      getQuestions,
+      navigateByUrl,
+      consumeGame,
+    };
+  }
+
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(async () => {
+    TestBed.resetTestingModule();
+    await clearSavedGame();
+  });
+
+  it('reports how many were found and does not start the game', async () => {
+    const { service, navigateByUrl, consumeGame } = setupDraw(3);
+
+    await service.startGame(config({ tags: ['world-war-2'] }));
+
+    expect(service.shortDraw()).toEqual({ found: 3, asked: 10 });
+    expect(navigateByUrl).not.toHaveBeenCalled();
+    // ...and the day's allowance is untouched, so being told costs nothing.
+    expect(consumeGame).not.toHaveBeenCalled();
+  });
+
+  it('plays the questions it already found when Start is pressed again', async () => {
+    const { service, getQuestions, navigateByUrl } = setupDraw(3);
+    const selection = config({ tags: ['world-war-2'] });
+
+    await service.startGame(selection);
+    await service.startGame(selection);
+
+    expect(service.shortDraw()).toBeNull();
+    expect(service.questions()).toHaveLength(3);
+    expect(navigateByUrl).toHaveBeenCalledWith('/play');
+    // Nothing was drawn twice: saying how many were found costs no extra read,
+    // and a second draw could come back a different size and make the message
+    // that prompted the confirmation false.
+    expect(getQuestions).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws again when the player changes the selection instead of confirming', async () => {
+    const { service, getQuestions } = setupDraw(3);
+
+    await service.startGame(config({ tags: ['world-war-2'] }));
+    await service.startGame(config({ tags: ['world-war-2', 'treaties'] }));
+
+    expect(getQuestions).toHaveBeenCalledTimes(2);
+    // Short again, so it asks again rather than applying a confirmation the
+    // player gave about a different selection.
+    expect(service.shortDraw()).toEqual({ found: 3, asked: 10 });
+  });
+
+  it('says nothing when the filtered draw is full', async () => {
+    const { service, navigateByUrl } = setupDraw(10);
+
+    await service.startGame(config({ tags: ['world-war-2'] }));
+
+    expect(service.shortDraw()).toBeNull();
+    expect(navigateByUrl).toHaveBeenCalledWith('/play');
+  });
+
+  /**
+   * The additive half. A short draw with no filter is behaviour the app has
+   * always had — a rare category simply plays short — and this feature must not
+   * have put a confirmation in front of it.
+   */
+  it('never interrupts an unfiltered draw, however short it comes back', async () => {
+    const { service, navigateByUrl } = setupDraw(2);
+
+    await service.startGame(config());
+
+    expect(service.shortDraw()).toBeNull();
+    expect(service.questions()).toHaveLength(2);
+    expect(navigateByUrl).toHaveBeenCalledWith('/play');
+  });
+
+  it('reports an empty filtered draw as no questions rather than as a short one', async () => {
+    const { service } = setupDraw(0);
+
+    await service.startGame(config({ tags: ['world-war-2'] }));
+
+    expect(service.shortDraw()).toBeNull();
+    expect(service.loadError()).toContain('No questions were found');
+  });
+
+  it('clears a stale notice when the next draw is fine', async () => {
+    const { service } = setupDraw(3);
+    await service.startGame(config({ tags: ['world-war-2'] }));
+    expect(service.shortDraw()).not.toBeNull();
+
+    await service.startGame(config({ amount: 3, tags: ['world-war-2'] }));
+
+    expect(service.shortDraw()).toBeNull();
+  });
+});

@@ -20,6 +20,11 @@ name: Deploy Preview Channel
 # validates is unchanged; what changed is whose data it writes to.
 # `npm run env:verify` fails if this file names the production project again.
 #
+# The deploy job also ships the PR's **Firestore indexes** to that project
+# before the channel goes up, which is the one piece of backend configuration a
+# preview can validate: the emulator enforces none of it, so an index mistake is
+# otherwise green until it is merged (see the step for the full reasoning).
+#
 # The `E2E (preview)` job is meant to be a required status check on `main`
 # (branch protection), so a PR can't be merged — and therefore can't trigger
 # firebase-deploy.yml — unless the real preview build actually passed e2e.
@@ -86,6 +91,43 @@ jobs:
 
       - name: Build production app
         run: npm run build:prod
+
+      # Indexes, and only indexes, before the channel goes up.
+      #
+      # A preview channel is Hosting-only, so a PR's Firestore *configuration*
+      # never reached `trivimind-dev` until it merged — which meant a PR adding
+      # a query shape deployed a client that could not run it, and the emulator
+      # could not have told anyone, because it enforces no index configuration
+      # at all (`AUDIT_REMEDIATION.md` D3). That is the failure mode that took
+      # the production deploy pipeline down across four merges: an index
+      # mistake is green everywhere until it is deployed.
+      #
+      # **Indexes and not rules.** Adding an index is additive and affects no
+      # existing query, so a PR that declares a bad one fails its own check
+      # rather than anybody else's. Rules are a security boundary that every
+      # client of the shared dev project is already running against, and
+      # deploying an unmerged PR's version of them from a preview job is a
+      # different and much larger decision — `firebase-deploy.yml` keeps it.
+      #
+      # An index **build** is asynchronous: this step returns once the creation
+      # is accepted, and a query needing a brand-new index can still be refused
+      # for the seconds or minutes it takes to build. The e2e job's own
+      # checkout, install and browser download sit in between, which is the
+      # slack that makes this workable — but a spec introducing an index in the
+      # same PR should stay out of the preview slice for that one release
+      # (`playwright.preview.config.ts` says which, and why).
+      - name: Deploy Firestore indexes to the dev project
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRIVIMIND_DEV }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-index-account.json
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          npx --yes firebase-tools@13 deploy --only firestore:indexes --project trivimind-dev
+          rm -f "$GOOGLE_APPLICATION_CREDENTIALS"
+
+      - name: Clean up index-deploy credentials
+        if: always()
+        run: rm -f "${{ runner.temp }}/firebase-index-account.json"
 
       - name: Deploy preview channel
         id: deploy

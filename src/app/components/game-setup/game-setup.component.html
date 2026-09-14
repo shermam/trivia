@@ -277,6 +277,31 @@
         </div>
       </div>
 
+      <!--
+        The topic filter (`FEAT-021`), beside the category picker because it is
+        the same kind of choice one level finer: "History" is a category,
+        "#world-war-2" is a topic.
+
+        **Strictly additive.** No selection sends exactly the query the app has
+        always sent, and the draw is unchanged for everyone who never touches
+        this. A selection adds one `array-contains-any` clause, which reaches
+        only questions somebody has tagged — correct rather than lossy, because
+        an untagged question is not known to be about the topic asked for.
+
+        The control keeps the same height in every state (`CLAUDE.md` §4.4): the
+        chip box and the suggestion box are both fixed and scroll, so picking
+        eight topics never moves the Start button.
+      -->
+      <app-tag-selector
+        formControlName="tags"
+        idPrefix="filter-"
+        label="Topics"
+        [max]="maxFilterTags"
+        [suggestions]="tagSuggestions"
+        [hint]="tagFilterHint()"
+        [disabledReason]="tagFilterDisabledReason()"
+      />
+
       <div>
         <span
           id="time-limit-label"
@@ -353,6 +378,29 @@
         }
       </p>
 
+      <!--
+        A topic-filtered draw that came back short (`FEAT-021`). The bank is
+        mostly untagged, so this is the expected result rather than an unlucky
+        one — and a player who asked for twenty questions about one topic and
+        silently got three has been misled by omission. Pressing Start again
+        plays the questions that were already found; nothing is drawn twice.
+
+        `role="status"` because it replaces the answer to the button the player
+        just pressed, and a screen reader would otherwise be told nothing at all
+        (`CLAUDE.md` §4.5).
+      -->
+      @if (gameController.shortDraw(); as short) {
+        <p
+          role="status"
+          data-cy="short-draw-notice"
+          class="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-3 py-2"
+        >
+          <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+          Only {{ short.found }} of the {{ short.asked }} questions you asked for match those
+          topics. Start again to play the {{ short.found }} we found.
+        </p>
+      }
+
       @if (gameController.limitReached() || !dailyLimit.hasGamesLeft()) {
         <!--
           In place rather than a modal, deliberately. A dialog would owe the
@@ -392,6 +440,9 @@
         >
           @if (gameController.isLoading()) {
             Loading Questions&hellip;
+          } @else if (gameController.shortDraw(); as short) {
+            <app-icon name="sparkles" [size]="16" />
+            Play {{ short.found }} Questions
           } @else {
             <app-icon name="sparkles" [size]="16" />
             Start Game

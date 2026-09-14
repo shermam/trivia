@@ -212,12 +212,32 @@ function asCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
+/**
+ * The most tags one draw may filter on (`FEAT-021`).
+ *
+ * **Firestore's own ceiling for `array-contains-any` is 30**, and exceeding it
+ * is not a narrower result — the query is refused outright. Ten is well inside
+ * that, and it is a product bound rather than a technical one: a request for
+ * eleven topics at once is not a narrowing, and every value added widens the
+ * index scan. The filter UI stops offering more at the same number, so the
+ * clamp below should be unreachable from the app — which is exactly why it is
+ * here as well, since a caller is not the place a bound lives.
+ */
+export const MAX_TAG_FILTER_VALUES = 10;
+
 /** What to draw from the shared question bank. `limit` is mandatory on purpose — see `getCustomQuestions`. */
 export interface CustomQuestionsQuery {
   /** Exact category match; empty/omitted means any. */
   category?: string;
   /** Exact difficulty match; empty/omitted means any. */
   difficulty?: Difficulty | '';
+  /**
+   * Topic tags to narrow the draw to (`FEAT-021`). A question carrying **any**
+   * of them matches; an empty or omitted list adds no clause at all, which is
+   * what makes the filter strictly additive. Clamped to
+   * {@link MAX_TAG_FILTER_VALUES}.
+   */
+  tags?: readonly string[];
   /** Hard ceiling on documents read. */
   limit: number;
 }
@@ -332,6 +352,14 @@ export class FirebaseService {
       return [];
     }
 
+    // The player's topic selection, clamped (`FEAT-021`). Empty is the case
+    // that matters: it has to produce **no clause**, so an unfiltered game
+    // sends byte-for-byte the query it sent before tags existed and needs no
+    // index that did not already exist. That is the whole of "the filter is
+    // additive", and `firebase.service.spec.ts` pins it by comparing the two
+    // request bodies rather than by reading this line.
+    const tags = (options.tags ?? []).slice(0, MAX_TAG_FILTER_VALUES);
+
     const filters: RestFieldFilter[] = [
       // Players are served approved questions and nothing else. This is the
       // client half of review-before-publish; the *rule* stays open for one
@@ -343,6 +371,18 @@ export class FirebaseService {
       { field: 'status', op: 'EQUAL' as const, value: STATUS_APPROVED },
       ...(category ? [{ field: 'category', op: 'EQUAL' as const, value: category }] : []),
       ...(difficulty ? [{ field: 'difficulty', op: 'EQUAL' as const, value: difficulty }] : []),
+      // A question carrying **any** of the selected tags. `ANY` rather than
+      // `ALL` because that is what a player picking two topics means, and
+      // because `ALL` would need either a second query intersected in the
+      // browser or a composite-key field — for a request nobody has made.
+      //
+      // A question with no `tags` array matches no such clause, so a tag
+      // filter reaches only what somebody has tagged. That is correct rather
+      // than a gap: a tag filter is a request for questions *about* a topic,
+      // and an untagged question is not known to be about it.
+      ...(tags.length > 0
+        ? [{ field: 'tags', op: 'ARRAY_CONTAINS_ANY' as const, value: tags }]
+        : []),
     ];
     const cursor = randomDocumentId();
 
@@ -537,11 +577,18 @@ export class FirebaseService {
    * leaves it standing.
    */
   async updateUserQuestion(questionId: string, content: CustomQuestionContent): Promise<void> {
-    const optional = ['sourceUrl', 'sourceTitle', 'explanation', 'format'] as const;
-    const present = Object.fromEntries(
-      optional.filter((key) => content[key]).map((key) => [key, content[key]]),
-    );
-    const cleared = optional.filter((key) => !content[key]);
+    const optional = ['sourceUrl', 'sourceTitle', 'explanation', 'format', 'tags'] as const;
+    // `hasValue`, not truthiness: `tags` is an array, and `[]` is truthy while
+    // meaning exactly what an empty string means for the four fields beside it
+    // — nothing given. Written as `[]` it would put an empty array on every
+    // untagged question, which the rules accept and which says nothing an
+    // absent key does not.
+    const hasValue = (key: (typeof optional)[number]): boolean => {
+      const value = content[key];
+      return Array.isArray(value) ? value.length > 0 : Boolean(value);
+    };
+    const present = Object.fromEntries(optional.filter(hasValue).map((key) => [key, content[key]]));
+    const cleared = optional.filter((key) => !hasValue(key));
 
     await this.rest.setDocument(
       `${CUSTOM_QUESTIONS_COLLECTION}/${questionId}`,
