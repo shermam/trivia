@@ -189,19 +189,24 @@ test.describe('markdown and math rendering', () => {
    * question it cannot answer: **what a browser does with the string.**
    *
    * jsdom parses markup and runs nothing — no `onerror`, no `<script>`, no
-   * navigation, no CSP. So a `not.toContain('onerror')` there is an assertion
-   * about a DOM tree, while the thing anybody actually cares about is whether
-   * a contributed question can execute in a player's tab. That needs a real
-   * engine, a real service-worker-free page under the app's real headers, and
-   * a sentinel every payload tries to set.
+   * navigation. So a `not.toContain('onerror')` there is an assertion about a
+   * DOM tree, while the thing anybody actually cares about is whether a
+   * contributed question can execute in a player's tab. That needs a real
+   * engine and a sentinel every payload tries to set.
+   *
+   * **Not a CSP test**, and worth saying so: the dev server this runs against
+   * serves no `Content-Security-Policy` at all, so nothing here is standing on
+   * one. That is the point — the sanitiser has to hold with the CSP removed,
+   * because the CSP is the second line and `firebase.json` is the only place
+   * the first one could be tested against.
    */
   test('cannot execute anything, on a question that is nothing but payloads', async ({
     page,
     firebase,
   }) => {
-    // Every payload below writes here. It stays `undefined` if the pipeline
-    // holds — and unlike a dialog handler, it also catches the payloads that
-    // would run without opening one.
+    // Every payload below writes here. It stays `false` if the pipeline holds
+    // — and unlike a dialog handler, it also catches the payloads that would
+    // run without opening one.
     await page.addInitScript(() => {
       (window as unknown as Record<string, unknown>)['__xssFired'] = false;
     });
