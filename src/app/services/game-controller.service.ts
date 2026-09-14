@@ -14,6 +14,7 @@ import {
 } from '../models/question.model';
 import { displayScore, multiplierForStreak, pointsForStreak } from '../models/scoring';
 import { giveUpAfter } from '../utils/give-up-after.util';
+import { MAX_ANSWER_MS } from '../utils/play-history.util';
 import { shuffleArray } from '../utils/shuffle.util';
 import { DailyGameLimitService } from './daily-game-limit.service';
 import { GamePersistenceService } from './game-persistence.service';
@@ -133,6 +134,24 @@ export class GameControllerService {
   readonly answerHistory = signal<readonly PickedAnswer[]>([]);
 
   /**
+   * How long each answered question took, in milliseconds, positionally beside
+   * {@link answerHistory} — entry `i` is how long question `i` was on screen
+   * before the player resolved it (`FEAT-049`).
+   *
+   * **A second array rather than a field on `PickedAnswer`**, because the two
+   * have different shelf lives. `PickedAnswer` is restored from a save written
+   * by an older build and validated against the questions it belongs to; a
+   * duration has nothing to validate against and no meaning to an older build.
+   * Keeping them apart means a save that predates this field restores its recap
+   * intact and simply records no history for that game.
+   *
+   * Persisted for the reason the history is: refreshing mid-game is supported,
+   * and a round whose durations were lost would be banked without any play
+   * history at all (`buildPlayAnswers` requires one per question).
+   */
+  readonly answerDurations = signal<readonly number[]>([]);
+
+  /**
    * Which lifelines this round still has (`FEAT-002`). Single-use each, so a
    * `true` becomes `false` and never comes back until the next game.
    *
@@ -173,6 +192,22 @@ export class GameControllerService {
    * alternative of minting an id lazily and inflating them on every refresh.
    */
   readonly gameId = signal<string | null>(null);
+
+  /**
+   * When the question on screen appeared, as the wall clock reads it.
+   *
+   * `null` until `markQuestionShown()` is called, which is the quiz screen's
+   * job — it is the only thing that knows when a question is actually in front
+   * of the player, and a timestamp taken in `advanceQuestion()` instead would
+   * start counting during the answer-reveal delay and, for the first question,
+   * during a route transition. While it is `null` a resolved question records a
+   * duration of zero rather than a guess (`CLAUDE.md` §4.4: a value that is not
+   * known defaults to the least alarming answer, not the most specific one).
+   *
+   * Not persisted: a reload restarts the countdown for the question on screen,
+   * so restarting its clock is the same answer given consistently.
+   */
+  private questionShownAt: number | null = null;
 
   /** The single in-flight restore, so bootstrap and the guards await the same read. */
   private restorePromise: Promise<void> | null = null;
@@ -270,6 +305,7 @@ export class GameControllerService {
         isComplete: this.isComplete(),
         flaggedQuestionIds: [...this.flaggedQuestionIds()],
         answerHistory: [...this.answerHistory()],
+        answerDurations: [...this.answerDurations()],
         lifelines: { ...this.lifelines() },
         eliminatedAnswerIds: [...this.eliminatedAnswerIds()],
         gameId: this.gameId(),
@@ -349,6 +385,7 @@ export class GameControllerService {
     this.isComplete.set(saved.isComplete);
     this.flaggedQuestionIds.set(new Set(saved.flaggedQuestionIds));
     this.answerHistory.set(saved.answerHistory);
+    this.answerDurations.set(saved.answerDurations);
     this.lifelines.set(saved.lifelines);
     this.eliminatedAnswerIds.set(saved.eliminatedAnswerIds);
     this.gameId.set(saved.gameId);
@@ -512,6 +549,7 @@ export class GameControllerService {
       // than a leaked flag, because the recap would show the previous game's
       // answers underneath this game's score.
       this.answerHistory.set([]);
+      this.answerDurations.set([]);
       // ...and the same for lifelines, which leak in the most rewarding
       // direction: a player who abandoned a game having spent all three would
       // start the next one with none.
@@ -635,6 +673,43 @@ export class GameControllerService {
       void this.seenQuestions.markSeen(question);
     }
     this.answerHistory.update((history) => [...history, outcome]);
+    this.answerDurations.update((durations) => [...durations, this.elapsedOnThisQuestion()]);
+  }
+
+  /**
+   * Notes that the question on screen has just appeared, which starts its clock
+   * (`FEAT-049`).
+   *
+   * Called by `QuizLoopComponent` at the two moments a question is rendered —
+   * arriving at `/play`, and moving on after the answer-reveal delay — because
+   * that component is the only thing that knows when either happens. The
+   * controller cannot: `advanceQuestion()` runs while the previous question's
+   * result is still on screen, and `startGame()` runs before the route has even
+   * changed.
+   */
+  markQuestionShown(): void {
+    this.questionShownAt = Date.now();
+  }
+
+  /**
+   * How long the question on screen has been there, bounded.
+   *
+   * The wall clock rather than an accumulated tick count, for the reason the
+   * countdown reads it (`CLAUDE.md` §4.4): a backgrounded tab throttles timers,
+   * and an `unlimited` game has no timer at all. The bound is what makes the
+   * number storable — a game left open overnight is not evidence of how long a
+   * question took, and `recordGameResult` refuses anything past it outright, so
+   * clamping here is the difference between a capped duration and a rejected
+   * game.
+   */
+  private elapsedOnThisQuestion(): number {
+    if (this.questionShownAt === null) {
+      return 0;
+    }
+    const elapsed = Date.now() - this.questionShownAt;
+    // A clock that has gone backwards yields a negative elapsed time, which is
+    // the one value below the floor.
+    return Math.min(Math.max(0, Math.round(elapsed)), MAX_ANSWER_MS);
   }
 
   /**
@@ -726,6 +801,8 @@ export class GameControllerService {
     this.loadError.set(null);
     this.flaggedQuestionIds.set(new Set());
     this.answerHistory.set([]);
+    this.answerDurations.set([]);
+    this.questionShownAt = null;
     this.lifelines.set(ALL_LIFELINES_AVAILABLE);
     this.eliminatedAnswerIds.set([]);
     this.gameId.set(null);

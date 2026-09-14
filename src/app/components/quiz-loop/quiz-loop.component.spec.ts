@@ -101,6 +101,11 @@ function setup(
     toggleQuestionFlag: vi.fn(),
     registerAnswer,
     advanceQuestion,
+    // `FEAT-049`. The component is the only thing that knows when a question is
+    // actually on screen, so it tells the controller — at both of the two
+    // moments one appears, which is what `beginQuestion()` exists to keep as
+    // one call site.
+    markQuestionShown: vi.fn(),
     lifelines: signal<LifelineState>(options.lifelines ?? ALL_LIFELINES_AVAILABLE),
     eliminatedAnswerIds: signal<readonly string[]>([]),
     registerSkippedQuestion,

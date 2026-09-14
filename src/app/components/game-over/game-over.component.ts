@@ -35,6 +35,7 @@ import { isFirestorePermissionDenied } from '../../services/firestore-rest/fires
 import { GameControllerService } from '../../services/game-controller.service';
 import { RegionService } from '../../services/region.service';
 import { keepTabInside } from '../../utils/focus-trap.util';
+import { buildPlayAnswers } from '../../utils/play-history.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
@@ -640,11 +641,30 @@ export class GameOverComponent implements OnInit {
     if (!gameId) {
       return;
     }
+    // The round itself (`FEAT-049`), or nothing when the two positional arrays
+    // behind it do not cover the whole game — a save written before they
+    // existed, or one whose recap was discarded on restore. Those games still
+    // bank their totals, which is why the key is **omitted** rather than sent
+    // as `undefined`: the callable SDK encodes `undefined` as `null`, and a
+    // `null` there is not "no history", it is a malformed one, which
+    // `isValidSubmission` refuses whole — losing the totals with it.
+    //
+    // Sent for every account, including an anonymous one. The gate is the
+    // callable's provider allowlist and nothing here duplicates it, for the
+    // reason the doc comment gives: a client mirror of a server gate is a thing
+    // that drifts (H6). An anonymous submission is refused before any write, so
+    // nothing is stored for a guest.
+    const answers = buildPlayAnswers(
+      this.gameController.questions(),
+      this.gameController.answerHistory(),
+      this.gameController.answerDurations(),
+    );
     void this.accountService.recordGameResult({
       gameId,
       totalQuestions: this.gameController.totalQuestions(),
       correctAnswers: this.gameController.correctAnswers(),
       bestStreak: this.gameController.maxStreak(),
+      ...(answers ? { answers } : {}),
     });
   }
 

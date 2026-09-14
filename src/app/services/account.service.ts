@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { environment } from '../../environments/environment';
+import { PlayAnswerRecord } from '../utils/play-history.util';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 
@@ -204,6 +205,13 @@ export class AccountService {
     totalQuestions: number;
     correctAnswers: number;
     bestStreak: number;
+    /**
+     * The round itself (`FEAT-049`) — one record per question, in order.
+     * Omitted for a game whose per-answer arrays could not be lined up with its
+     * questions, in which case the totals are still banked and no history is
+     * written.
+     */
+    answers?: PlayAnswerRecord[];
   }): Promise<void> {
     try {
       // **Before the call, not after.** The Functions SDK attaches whatever ID
