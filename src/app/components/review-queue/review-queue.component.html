@@ -331,6 +331,17 @@
     sees the destination; the player, who meets the link only after a reviewer
     has vouched for the question, does not need it.
   -->
+  <!--
+    The contributor's topic tags (`FEAT-021`), so a reviewer can see whether a
+    question is tagged sensibly before approving it into the shared bank — a
+    wrongly-tagged question is drawn into games about a subject it is not about,
+    which is a quality problem only this screen can catch. Renders nothing when
+    there are none, which is most questions. Plain text always: a tag is a key
+    the filter compares, never prose, so it never goes near the Markdown
+    renderer whatever `format` says.
+  -->
+  <app-question-tags [tags]="question.tags" label="Topics" testId="review-question-tags" />
+
   <app-source-link [url]="question.sourceUrl" [title]="question.sourceTitle" [showHost]="true" />
 
   <!--

@@ -401,6 +401,80 @@ describe('MyQuestionsComponent editing', () => {
   });
 
   /**
+   * `FEAT-021`, and exactly the same trap as `format` above: a resubmit
+   * rewrites the whole document, so a field the edit form does not carry is a
+   * field the edit silently deletes. An author correcting a typo would have
+   * come back untagged — and therefore invisible to every tag-filtered game —
+   * with nothing on screen to say so. The round trip is what this pins: the
+   * chips arrive, and the values go back out.
+   */
+  it('keeps the tags when the author edits a tagged question', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [myQuestion('q1', { tags: ['world-war-2', 'treaties'] })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    expect(component.form.getRawValue().tags).toEqual(['world-war-2', 'treaties']);
+
+    component.form.controls.question.setValue('Corrected?');
+    await component.saveEdit();
+    await settle();
+
+    expect(updateUserQuestion).toHaveBeenCalledWith(
+      'q1',
+      expect.objectContaining({ tags: ['world-war-2', 'treaties'] }),
+    );
+  });
+
+  it('lets the author retag their own question', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [myQuestion('q1', { tags: ['world-war-2'] })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    component.form.controls.tags.setValue(['cold-war']);
+    await component.saveEdit();
+    await settle();
+
+    expect(updateUserQuestion).toHaveBeenCalledWith(
+      'q1',
+      expect.objectContaining({ tags: ['cold-war'] }),
+    );
+  });
+
+  /**
+   * Removing every tag hands over content with **no** `tags` key rather than an
+   * empty array — the same asymmetry `format` has, and for the same reason:
+   * absent is what "none" means everywhere else in this collection.
+   * `FirebaseService.updateUserQuestion` turns that into a field deletion.
+   */
+  it('drops the key when the author removes every tag', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [myQuestion('q1', { tags: ['world-war-2'] })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    component.form.controls.tags.setValue([]);
+    await component.saveEdit();
+    await settle();
+
+    const [, content] = updateUserQuestion.mock.calls[0];
+    expect('tags' in content).toBe(false);
+  });
+
+  it('opens an untagged question with no chips rather than with undefined', async () => {
+    const { component } = setup({ questions: [myQuestion('q1')] });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+
+    expect(component.form.getRawValue().tags).toEqual([]);
+  });
+
+  /**
    * The overwhelmingly common row: no `format` at all. The form has to open on
    * plain rather than on `undefined`, or the segmented control renders with
    * neither segment selected.

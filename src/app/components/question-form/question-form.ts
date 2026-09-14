@@ -6,6 +6,7 @@ import {
   QuestionFormat,
   QuestionType,
 } from '../../models/question.model';
+import { normalizeTags, readTags } from '../../utils/normalize-tag.util';
 
 /**
  * The one question form, shared by `/add-question` and by `/my-questions`'
@@ -98,6 +99,14 @@ export function createQuestionForm(fb: FormBuilder) {
     // question's own cap, because it has to explain the question, the right
     // answer and the wrong ones.
     explanation: ['', [Validators.maxLength(1000)]],
+    // Topic tags (`FEAT-021`). No validator, and that is not an oversight: the
+    // selector cannot put an invalid tag in here — every route in goes through
+    // `normalizeTag`, which returns the stored shape or nothing — and it stops
+    // at `MAX_TAGS_PER_QUESTION`. A validator would be an unreachable branch,
+    // like `format`'s. What makes that safe is the same thing: `firestore.rules`
+    // checks the whole list anyway, which is where a check belongs for a value
+    // the server has to be sure of.
+    tags: fb.nonNullable.control<string[]>([]),
     // Required only for a "multiple" question — for a boolean one these three
     // are irrelevant and hidden, and the opposite value is derived instead.
     // The validators are therefore applied and cleared as `type` changes
@@ -270,6 +279,12 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
   const sourceUrl = raw.sourceUrl.trim();
   const sourceTitle = raw.sourceTitle.trim();
   const explanation = raw.explanation.trim();
+  // Normalised again on the way out, even though the selector already did it.
+  // The control is a plain `string[]` that anything could have written — a
+  // `patchValue` from a stored document, a future caller — and the cheap
+  // re-run is what keeps "what the form submits is normalised" a property of
+  // the submit rather than of every writer remembering.
+  const tags = normalizeTags(raw.tags);
 
   return {
     content: {
@@ -282,6 +297,11 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(sourceTitle ? { sourceTitle } : {}),
       ...(explanation ? { explanation } : {}),
+      // Omitted when empty, like every optional field beside it. An empty array
+      // is accepted by the rules and says exactly what an absent key says, so
+      // writing one would put a field on every untagged question to report that
+      // it has no tags.
+      ...(tags.length > 0 ? { tags } : {}),
       // Written only when the toggle is on Markdown (`FEAT-019`). An absent
       // field already means plain, so writing `'plain'` would add a key to
       // every future document that says exactly what its absence says — and
@@ -318,6 +338,13 @@ export function patchQuestionForm(form: QuestionForm, question: CustomQuestionDo
     sourceUrl: question.sourceUrl ?? '',
     sourceTitle: question.sourceTitle ?? '',
     explanation: question.explanation ?? '',
+    // Through `readTags` rather than straight across, so the dialog opens on
+    // what the app would render and what the rules would accept — and so an
+    // author resubmitting a question **keeps** its tags instead of dropping
+    // them, which an owner update would otherwise do silently: the update rule
+    // re-validates the whole payload, so a field the form never loaded is a
+    // field the write deletes.
+    tags: [...(readTags(question.tags) ?? [])],
     incorrectAnswers: [0, 1, 2].map((index) => incorrect[index] ?? ''),
   });
   applyIncorrectAnswerValidators(form, question.type);
