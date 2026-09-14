@@ -771,6 +771,35 @@ service cloud.firestore {
       // allowlist, type-and-range check per field, ownership check) plus a
       // re-argument of everything above, in the same PR.
       allow create, update, delete: if false;
+
+      // One document per completed game — which questions the player was shown,
+      // whether each was answered correctly, how long it took, and the
+      // question's difficulty and tags at the time (`FEAT-049`). Written only
+      // by `recordGameResult`, in the same transaction and under the same game
+      // id as the totals above, so the duplicate check that protects them
+      // protects this too. Deleted by `deleteAccount` — which has to enumerate
+      // it, because deleting `users/{uid}` does not take its subcollections —
+      // and expired after twelve months by the `sweepPlayHistory` scheduled
+      // function.
+      //
+      // **`read` rather than `get` + `list: if false`, unlike the parent**, and
+      // the difference is the path rather than a softer stance. `users` is one
+      // flat collection, so a list of it is a roster of every account that has
+      // ever finished a game; `plays` is already scoped to a single uid by its
+      // own path, so the only thing a list can return is the caller's own
+      // history — which is what the recommender and the export are for. The
+      // ownership clause is what Firestore proves a query against, so an
+      // unfiltered `getDocs` on somebody else's path is refused rather than
+      // filtered.
+      //
+      // Nothing here is client-writable either, and for a stronger reason than
+      // the totals: these records are the input to what the app will choose to
+      // show the player, and the bounds that keep them plausible live in the
+      // callable (`functions/src/play-history.ts`), where a rule cannot reach.
+      match /plays/{gameId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow create, update, delete: if false;
+      }
     }
 
     // Question bank: readable by anyone playing the game. Creating a new
