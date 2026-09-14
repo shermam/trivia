@@ -5,7 +5,7 @@ import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { PlayRecord } from '../../fixtures/types';
 import { openAuthMenu, signInViaUi } from '../../support/auth';
 import { answerQuestion, optionLabel, startNewGame, waitForPlayRoute } from '../../support/game';
-import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { CORRECT_ANSWERS, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
 
 const password = 'Str0ngPassw0rd!';
 
@@ -131,13 +131,25 @@ test.describe('per-player play history', () => {
         type: 'multiple' as const,
         difficulty: 'hard' as const,
         question: `Play-history question ${index} (${runId})?`,
-        correct_answer: `Right ${index}`,
+        // **The same correct answer on every question, deliberately.** The draw
+        // is randomly ordered, so a loop answering `Right 0`, `Right 1`, … in
+        // seed order fails on whichever question happens to come first — which
+        // is how the first version of this test failed. One label the loop can
+        // click five times removes the order from the test's premise, and the
+        // assertions below are about the ids and the tags rather than about
+        // which question came when.
+        correct_answer: 'Right',
         incorrect_answers: [`Wrong ${index}a`, `Wrong ${index}b`, `Wrong ${index}c`],
         tags: ['play-history', `run-${index}`],
       })),
     );
 
     await stubOpenTrivia(page);
+    // The setup screen's category list comes from Open Trivia DB, not from the
+    // bank, so a seeded custom category is not in the dropdown until the stub
+    // puts it there — which is also what keeps this draw to questions this test
+    // owns, against an emulator every worker is writing to.
+    await stubExtraCategory(page, category);
     await page.goto('/');
     await signInViaUi(page, email, password);
 
@@ -153,8 +165,11 @@ test.describe('per-player play history', () => {
     await page.getByRole('button', { name: 'Start Game', exact: true }).click();
     await waitForPlayRoute(page);
 
+    // Five clicks on the same label. Answering disables every option until the
+    // next question renders, and a Playwright click waits for an enabled
+    // element — so the app's own disabled state is the wait between questions.
     for (let index = 0; index < 5; index += 1) {
-      await answerQuestion(page, `Right ${index}`);
+      await answerQuestion(page, 'Right');
     }
     await expect(page).toHaveURL(/\/game-over$/);
 
