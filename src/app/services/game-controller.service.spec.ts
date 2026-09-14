@@ -1362,4 +1362,24 @@ describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () =>
 
     expect(service.shortDraw()).toBeNull();
   });
+
+  /**
+   * Withdrawing the notice does not throw the draw away. The setup screen calls
+   * this on every edit, and reverting an edit is a thing readers do — so the
+   * held questions have to survive it, or a reader who added a topic and
+   * removed it again would pay for a second draw of the same selection.
+   */
+  it('withdraws the notice without discarding the draw it described', async () => {
+    const { service, getQuestions, navigateByUrl } = setupDraw(3);
+    await service.startGame(config({ tags: ['world-war-2'] }));
+
+    service.clearShortDrawNotice();
+    expect(service.shortDraw()).toBeNull();
+
+    await service.startGame(config({ tags: ['world-war-2'] }));
+
+    expect(getQuestions).toHaveBeenCalledTimes(1);
+    expect(service.questions()).toHaveLength(3);
+    expect(navigateByUrl).toHaveBeenCalledWith('/play');
+  });
 });

@@ -23,6 +23,9 @@ function setup(
   allowance: { isUnlimited?: boolean; hasGamesLeft?: boolean; remaining?: number } = {},
 ) {
   const startGame = vi.fn<(config: GameConfig) => Promise<void>>(() => Promise.resolve());
+  // Held out of the stub below so a test can seed a short draw and then watch
+  // the screen withdraw it (`FEAT-021`).
+  const shortDraw = signal<{ found: number; asked: number } | null>(null);
   // Returned so a test can take the browser offline, which is one of the two
   // states that puts the topic filter out of reach (`FEAT-021`).
   const isOnline = signal(true);
@@ -47,7 +50,8 @@ function setup(
           currentIndex: signal(0),
           totalQuestions: signal(0),
           limitReached: signal(false),
-          shortDraw: signal<{ found: number; asked: number } | null>(null),
+          shortDraw,
+          clearShortDrawNotice: () => shortDraw.set(null),
         },
       },
       // Stubbed rather than left real: the real service would open IndexedDB
@@ -67,7 +71,7 @@ function setup(
 
   const fixture = TestBed.createComponent(GameSetupComponent);
   fixture.detectChanges();
-  return { fixture, startGame, dailyLimit, isOnline };
+  return { fixture, startGame, dailyLimit, isOnline, shortDraw };
 }
 
 /** Picks an option the way a player does — through the DOM, not through `setValue`. */
@@ -215,6 +219,15 @@ describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
     fixture.detectChanges();
   }
 
+  /** What the submit button currently offers to do. */
+  function startButtonLabel(fixture: ReturnType<typeof setup>['fixture']): string {
+    return (
+      (fixture.nativeElement as HTMLElement)
+        .querySelector<HTMLElement>('button[type="submit"]')
+        ?.textContent?.trim() ?? ''
+    );
+  }
+
   function feedback(fixture: ReturnType<typeof setup>['fixture']): string {
     return (
       (fixture.nativeElement as HTMLElement)
@@ -287,6 +300,34 @@ describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
     submit(fixture);
 
     expect('tags' in startGame.mock.calls[0][0]).toBe(false);
+    fixture.destroy();
+  });
+
+  /**
+   * The short-draw notice and the Start button's "Play {n} Questions" label are
+   * both an answer to the press that produced them. `startGame` already refuses
+   * to apply a held draw to a selection that has since changed, so the button
+   * would draw twenty while still offering three — a control describing an
+   * outcome it will not produce (`CLAUDE.md` §4.4). Any edit withdraws it.
+   */
+  it('withdraws the short-draw notice as soon as the selection changes', () => {
+    const { fixture, shortDraw } = setup();
+
+    chooseSource(fixture, 'custom');
+    chooseTopic(fixture, 'world-war-2');
+    shortDraw.set({ found: 3, asked: 20 });
+    fixture.detectChanges();
+
+    const notice = () =>
+      (fixture.nativeElement as HTMLElement).querySelector('[data-cy="short-draw-notice"]');
+    expect(notice()).not.toBeNull();
+    expect(startButtonLabel(fixture)).toContain('Play 3 Questions');
+
+    chooseTopic(fixture, 'cold-war');
+
+    expect(shortDraw()).toBeNull();
+    expect(notice()).toBeNull();
+    expect(startButtonLabel(fixture)).toContain('Start Game');
     fixture.destroy();
   });
 });

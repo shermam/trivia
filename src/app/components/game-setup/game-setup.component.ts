@@ -187,6 +187,16 @@ export class GameSetupComponent implements OnInit {
     this.form.controls.source.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.source.set(value));
+    // Any edit at all withdraws the short-draw message, because it and the
+    // Start button's "Play {n} Questions" label describe the draw made for the
+    // *previous* selection. `startGame` would already redraw rather than apply
+    // a held draw to a changed selection — this is so the button stops
+    // promising the old number in the meantime. `valueChanges` and not the
+    // individual controls: the count, the category, the difficulty and the
+    // topics all change what a draw would return.
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.gameController.clearShortDrawNotice());
   }
 
   /**

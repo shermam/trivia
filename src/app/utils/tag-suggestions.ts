@@ -21,9 +21,10 @@
  * private to the selector component.
  *
  * Every entry is already normalised, so the picker never surprises anybody with
- * a chip that differs from the label they clicked. `tag-suggestions.spec.ts`
- * asserts exactly that, which is what keeps a hand-edited entry from becoming a
- * suggestion that cannot be selected.
+ * a chip that differs from the label they clicked. `normalize-tag.util.spec.ts`
+ * asserts exactly that — beside the normaliser, so the two cannot be checked
+ * against different rules — which is what keeps a hand-edited entry from
+ * becoming a suggestion that cannot be selected.
  *
  * The categories are the ones Open Trivia DB's category list actually offers,
  * since those are what the setup screen's picker shows and therefore what a

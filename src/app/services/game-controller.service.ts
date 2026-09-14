@@ -432,6 +432,22 @@ export class GameControllerService {
    */
   private pendingDraw: { config: GameConfig; questions: TriviaQuestion[] } | null = null;
 
+  /**
+   * Withdraws the short-draw message because the reader has changed the
+   * selection it described.
+   *
+   * The notice and the Start button's "Play 3 Questions" label are both an
+   * answer to the *previous* press, and {@link takeAcceptedDraw} already
+   * refuses to apply a held draw to a selection that has moved — so without
+   * this the button would go on offering three questions right up until the
+   * press that draws twenty (`CLAUDE.md` §4.4: a control must not describe an
+   * outcome it will not produce). The held draw itself is kept: reverting the
+   * form to what it was makes it valid again, and re-checking it is free.
+   */
+  clearShortDrawNotice(): void {
+    this.shortDraw.set(null);
+  }
+
   async startGame(config: GameConfig): Promise<void> {
     this.isLoading.set(true);
     this.loadError.set(null);
