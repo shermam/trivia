@@ -7,10 +7,37 @@
     <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
   </label>
 
+  <!--
+    One line saying what the control is for — reserved at the height of the
+    tallest hint this instance can be given rather than of whichever is current
+    (`CLAUDE.md` §4.4), by stacking an `aria-hidden` copy of each in the same
+    grid cell. A caller whose hint never changes passes no variants and gets
+    exactly the line it has always had.
+
+    It matters here because the wrapping is what changes, not the presence: the
+    setup screen's two hints are both one line on a phone and one line against
+    two at desktop width, so swapping Custom for Mixed moved the Start button
+    sixteen pixels with no animation — and a check at the narrow viewport, where
+    the animated reveal below is measured, calls it fixed.
+  -->
   @if (hint()) {
-    <p [id]="id('tag-hint')" class="mb-1.5 text-xs text-slate-500 dark:text-slate-400">
-      {{ hint() }}
-    </p>
+    <div class="mb-1.5 grid">
+      <p
+        [id]="id('tag-hint')"
+        [attr.data-cy]="id('tag-hint')"
+        class="col-start-1 row-start-1 text-xs text-slate-500 dark:text-slate-400"
+      >
+        {{ hint() }}
+      </p>
+      @for (variant of hintVariants(); track variant) {
+        <span
+          aria-hidden="true"
+          [attr.data-cy]="id('tag-hint-reserve')"
+          class="col-start-1 row-start-1 invisible text-xs"
+          >{{ variant }}</span
+        >
+      }
+    </div>
   }
 
   <!--

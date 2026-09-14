@@ -146,7 +146,7 @@ Full-screen centered card on an indigo/purple gradient background.
     - "Custom"
     - "Mixed"
     - Selected segment is visually distinguished (indigo border + light indigo fill)
-  - **Field: "Topics" (optional)** — the shared tag picker (`FEAT-021`), beside the category picker and above the time limit. Helper line: "Pick topics to play questions about exactly those subjects." — or, on a Mixed game, "Narrows the community half of the game; Open Trivia questions carry no topics."
+  - **Field: "Topics" (optional)** — the shared tag picker (`FEAT-021`), beside the category picker and above the time limit. Helper line: "Pick topics to play questions about exactly those subjects." — or, on a Mixed game, "Narrows the community half of the game; Open Trivia questions carry no topics." The line is reserved at the height of the taller of the two, so switching between those two sources swaps the words without rewrapping the line and moving everything below it
     - A fixed-height box of chosen chips, reading "No tags yet." until one is added; each chip is `#tag` with an × button named "Remove tag {tag}"
     - A text input, placeholder "Type a topic and press Enter" ("Maximum reached" at ten), and an "Add" button
     - One reserved feedback line under it, carrying whichever is true: the reason the picker is unavailable, "Will be saved as #{normalised}" while typing, "Too long — a tag is at most 32 characters." / "A tag needs at least 2 letters or digits." on a refusal, or "{n} of 10 chosen." Reserved at the height of the longest of those, so it does not shrink when the picker becomes available

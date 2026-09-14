@@ -82,8 +82,10 @@ const SUGGESTION_BASE_CLASS =
  * lines on a phone, and on the setup screen that would push the Start button
  * down the screen as the reader picks topics — which is the exact shape §4.4
  * exists for. The box is two chip-rows tall, which is the common case, and the
- * rest scrolls. The feedback line is reserved the same way, at the height of
- * the longest message it can carry rather than of the current one.
+ * rest scrolls. The hint line and the feedback line are reserved the same way,
+ * each at the height of the tallest thing it can carry rather than of the one
+ * it is carrying — for the hint that means every string the caller may pass it,
+ * because a hint that changes changes how many lines it wraps to.
  *
  * One change genuinely cannot keep the box the same size: becoming available
  * adds the shortcut row, and reserving 108 pixels of empty space on the home
@@ -115,6 +117,21 @@ export class TagSelectorComponent implements ControlValueAccessor {
 
   /** One line under the label saying what the control is for. */
   readonly hint = input('');
+
+  /**
+   * Every hint this instance can be given, including the current one.
+   *
+   * Nothing reads them — they **reserve the hint line's height**, stacked
+   * invisibly in one grid cell so the line is as tall as the tallest of them
+   * rather than as whichever is showing (`CLAUDE.md` §4.4). A hint that changes
+   * changes the line's *wrapping*, not its presence, which is the shape that
+   * moves everything below it at one viewport and nothing at another: the setup
+   * screen's two both wrap to two lines on a phone, and to two against one at
+   * desktop width.
+   *
+   * Left empty by a caller whose hint never changes, which costs it nothing.
+   */
+  readonly hintVariants = input<readonly string[]>([]);
 
   /**
    * How many tags may be selected. Eight on a question, because that is what
