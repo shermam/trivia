@@ -84,6 +84,7 @@ function setup(
         sourceUrl: { setValue: (v: string) => void };
         sourceTitle: { setValue: (v: string) => void };
         explanation: { setValue: (v: string) => void };
+        tags: { setValue: (v: string[]) => void };
         incorrectAnswers: { controls: { setValue: (v: string) => void }[] };
       };
     };
@@ -394,6 +395,66 @@ describe('AddQuestionComponent justification', () => {
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
     expect(component.validationSummary()).toMatch(/justification/i);
+  });
+});
+
+/**
+ * Topic tags (`FEAT-021`). What the *selector* does with a keystroke is
+ * `tag-selector.component.spec.ts`' subject; what the **submit** writes is
+ * this one's, because that is the boundary `firestore.rules` sees.
+ */
+describe('AddQuestionComponent topic tags', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('writes no key at all when no topic was chosen', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+
+    await component.onSubmit();
+
+    // An empty array is accepted by the rules and says exactly what an absent
+    // key says, so writing one would put a field on every untagged question to
+    // report that it has none.
+    expect('tags' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+  });
+
+  it('writes the chosen topics', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.tags.setValue(['chemistry', 'periodic-table']);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0]).toMatchObject({
+      tags: ['chemistry', 'periodic-table'],
+    });
+  });
+
+  /**
+   * Normalised again on the way out even though the selector already did it.
+   * The control is a plain `string[]` that anything could have written, and a
+   * value the rules refuse comes back as a bare `permission-denied` naming no
+   * field — so the cheap re-run is what keeps "what the form submits is
+   * normalised" a property of the submit rather than of every writer.
+   */
+  it('normalises and de-duplicates whatever is in the control', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.tags.setValue(['World War 2', 'world_war_2', '!!', 'Treaties']);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].tags).toEqual(['world-war-2', 'treaties']);
+  });
+
+  it('never writes more than the eight tags the rules accept', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.tags.setValue(Array.from({ length: 12 }, (_, i) => `topic-${i}`));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].tags).toHaveLength(8);
   });
 });
 

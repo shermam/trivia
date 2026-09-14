@@ -106,6 +106,17 @@ export default defineConfig<object, E2EWorkerOptions>({
    */
   testIgnore: [
     /*
+     * Emulator-only because its premise is an interception, and an
+     * interception is only reliable where no service worker can re-issue what
+     * it refuses (`CLAUDE.md` §4.6). Nothing registers one on a deployed
+     * channel today either, but that is an accident of `app.config.ts`'s
+     * `navigator.webdriver` gate rather than a guarantee — the same reasoning
+     * that keeps `offline-play` out below. It would also spend a deliberately
+     * refused sign-up plus a retry against the real project's Auth on every
+     * PR, to restate a result the emulator settles for nothing.
+     */
+    '**/unauthenticated/anonymous-sign-in-retry.spec.ts',
+    /*
      * Emulator-only for two reasons. It asserts the written report through an
      * Admin-SDK read of `question_reports`, a collection only the appointed
      * reviewers may read — handing the preview suite console-level read access
@@ -153,6 +164,24 @@ export default defineConfig<object, E2EWorkerOptions>({
      * `service-worker-precache.spec.ts`, which belongs here and only here.
      */
     '**/unauthenticated/offline-play.spec.ts',
+    /*
+     * Excluded for one release, on the PR that introduces the index it needs
+     * (`FEAT-021`). Three of its tests draw with an `array-contains-any` clause
+     * on `custom_questions.tags`, which the real project serves only once the
+     * composite index exists — and `deploy-preview` now creates that index from
+     * the PR's own `firestore.indexes.json`, but an index **build** is
+     * asynchronous, so the very first run after a new index is declared races
+     * it. A `FAILED_PRECONDITION` there presents as an empty bank on a required
+     * check, which is a poor way to learn that the index is two seconds from
+     * ready.
+     *
+     * Once `trivimind-dev` holds the index — the merge deploy does that — the
+     * race is gone and this line should come out. The emulator suite covers the
+     * behaviour meanwhile, and `firestore-tests/indexes.spec.ts` covers the
+     * declaration; what the exclusion costs is the one thing neither can do,
+     * which is running the filtered query against a real query engine.
+     */
+    '**/unauthenticated/tag-filter.spec.ts',
   ],
 
   use: {

@@ -79,7 +79,16 @@ export interface RestDocument {
   data: Record<string, unknown>;
 }
 
-export type RestFilterOp = 'EQUAL' | 'IN';
+/**
+ * The comparison operators this client emits.
+ *
+ * `ARRAY_CONTAINS_ANY` is the tag filter's (`FEAT-021`): it matches a document
+ * whose array field holds **any** of the given values, which is what a player
+ * selecting two topics means. Firestore caps it at 30 values and refuses the
+ * query outright past that, so the one call site that builds it caps the
+ * selection well below — see `FirebaseService.getCustomQuestions`.
+ */
+export type RestFilterOp = 'EQUAL' | 'IN' | 'ARRAY_CONTAINS_ANY';
 
 export interface RestFieldFilter {
   field: string;
@@ -90,6 +99,10 @@ export interface RestFieldFilter {
    * cursors below: `__name__` compares against a `referenceValue` holding the
    * full resource path, which only this client knows how to build, so the call
    * site passes the ID and cannot get the path wrong.
+   *
+   * `IN` and `ARRAY_CONTAINS_ANY` take an array, which the wire format carries
+   * as a single `arrayValue` rather than as several values — the encoder does
+   * that on its own, so no call site has to know it.
    */
   value: unknown;
 }

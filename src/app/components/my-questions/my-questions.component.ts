@@ -21,6 +21,7 @@ import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionFieldsComponent } from '../question-form/question-fields.component';
+import { QuestionTagsComponent } from '../question-tags/question-tags.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import {
   applyIncorrectAnswerValidators,
@@ -81,6 +82,7 @@ const STATUS_LABELS: Record<QuestionStatus, string> = {
     RouterLink,
     IconComponent,
     QuestionFieldsComponent,
+    QuestionTagsComponent,
     RenderedTextComponent,
   ],
   templateUrl: './my-questions.component.html',

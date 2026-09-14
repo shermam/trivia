@@ -405,18 +405,73 @@ export class GameControllerService {
    */
   readonly limitReached = signal(false);
 
+  /**
+   * A tag-filtered draw that came back with fewer questions than were asked for
+   * (`FEAT-021`), or `null`.
+   *
+   * The setup screen says how many were found and waits, rather than starting a
+   * shorter round without mentioning it — a player who asked for twenty
+   * questions about one topic and silently got three has been misled by
+   * omission, which is the same failure the time-limit note exists for. The
+   * second press plays what was found; nothing is drawn again, so saying so
+   * costs no extra read.
+   *
+   * **Scoped to a tag-filtered draw on purpose.** A short draw has always been
+   * possible — a rare category, a narrow difficulty, a small bank — and
+   * interrupting those would change behaviour this feature has no business
+   * changing. A tag filter is different in kind: the bank is mostly untagged,
+   * so "fewer than you asked for" is the *expected* result rather than an
+   * unlucky one, and a player has no way to know that unless they are told.
+   */
+  readonly shortDraw = signal<{ found: number; asked: number } | null>(null);
+
+  /**
+   * The questions behind {@link shortDraw}, held so confirming plays the very
+   * draw that was described rather than a fresh one — which could come back a
+   * different size and make the message that prompted the confirmation false.
+   */
+  private pendingDraw: { config: GameConfig; questions: TriviaQuestion[] } | null = null;
+
+  /**
+   * Withdraws the short-draw message because the reader has changed the
+   * selection it described.
+   *
+   * The notice and the Start button's "Play 3 Questions" label are both an
+   * answer to the *previous* press, and {@link takeAcceptedDraw} already
+   * refuses to apply a held draw to a selection that has moved — so without
+   * this the button would go on offering three questions right up until the
+   * press that draws twenty (`CLAUDE.md` §4.4: a control must not describe an
+   * outcome it will not produce). The held draw itself is kept: reverting the
+   * form to what it was makes it valid again, and re-checking it is free.
+   */
+  clearShortDrawNotice(): void {
+    this.shortDraw.set(null);
+  }
+
   async startGame(config: GameConfig): Promise<void> {
     this.isLoading.set(true);
     this.loadError.set(null);
     this.limitReached.set(false);
 
     try {
-      const questions = await this.triviaService.getQuestions(config);
+      // Pressing Start again on an unchanged selection accepts the short draw
+      // that was just described. Any edit to the form — one tag more, a
+      // different category, a different count — makes this comparison fail and
+      // draws again, so a stale confirmation cannot be applied to a selection
+      // the player has since changed.
+      const accepted = this.takeAcceptedDraw(config);
+      const questions = accepted ?? (await this.triviaService.getQuestions(config));
 
       if (questions.length === 0) {
         this.loadError.set(
           'No questions were found for the selected options. Try a different category, difficulty, or source.',
         );
+        return;
+      }
+
+      if (!accepted && this.isShortFilteredDraw(config, questions.length)) {
+        this.pendingDraw = { config, questions };
+        this.shortDraw.set({ found: questions.length, asked: config.amount });
         return;
       }
 
@@ -468,6 +523,42 @@ export class GameControllerService {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  /**
+   * Whether this draw is the one the player has to be told about: they filtered
+   * by topic, and the bank had less of it than they asked for.
+   */
+  private isShortFilteredDraw(config: GameConfig, found: number): boolean {
+    return (config.tags?.length ?? 0) > 0 && found < config.amount;
+  }
+
+  /**
+   * The held draw when `config` is the selection it was made for, consuming it;
+   * `null` otherwise, which also discards whatever was held.
+   *
+   * Compared field by field rather than by reference, because the setup screen
+   * builds a fresh `GameConfig` object on every submit — a reference check would
+   * never match and the confirmation would loop forever.
+   */
+  private takeAcceptedDraw(config: GameConfig): TriviaQuestion[] | null {
+    const pending = this.pendingDraw;
+    this.pendingDraw = null;
+    this.shortDraw.set(null);
+
+    if (!pending) {
+      return null;
+    }
+    const before = pending.config;
+    const same =
+      before.amount === config.amount &&
+      before.category === config.category &&
+      before.difficulty === config.difficulty &&
+      before.source === config.source &&
+      before.timeLimit === config.timeLimit &&
+      (before.tags ?? []).join(' ') === (config.tags ?? []).join(' ');
+
+    return same ? pending.questions : null;
   }
 
   /**

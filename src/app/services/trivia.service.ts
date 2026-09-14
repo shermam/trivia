@@ -13,6 +13,7 @@ import {
   TriviaQuestion,
 } from '../models/question.model';
 import { decodeHtmlEntities } from '../utils/html-entities.util';
+import { readTags } from '../utils/normalize-tag.util';
 import { seenKeyFor } from '../utils/seen-key.util';
 import { shuffleArray } from '../utils/shuffle.util';
 import { FirebaseService } from './firebase.service';
@@ -324,13 +325,19 @@ export class TriviaService {
     seen: Promise<SeenSet | null>,
   ): Promise<TriviaQuestion[]> {
     const { amount, category, difficulty, source } = config;
+    // Only the bank carries tags (`FEAT-021`), so the selection reaches the
+    // custom draw and no further. An Open Trivia DB question has no such field
+    // and the API has no equivalent parameter, so there is nothing here to
+    // narrow — which is why the setup screen does not offer the filter for that
+    // source at all rather than accepting a selection and quietly ignoring it.
+    const tags = config.tags ?? [];
 
     if (source === 'open_trivia') {
       return this.drawOpenTriviaQuestions(amount, category, difficulty, seen);
     }
 
     if (source === 'custom') {
-      return this.drawCustomQuestions(amount, category, difficulty, seen);
+      return this.drawCustomQuestions(amount, category, difficulty, tags, seen);
     }
 
     const openTriviaAmount = Math.ceil(amount / 2);
@@ -338,7 +345,7 @@ export class TriviaService {
 
     const [openTriviaQuestions, customQuestions] = await Promise.all([
       this.drawOpenTriviaQuestions(openTriviaAmount, category, difficulty, seen).catch(() => []),
-      this.drawCustomQuestions(customAmount, category, difficulty, seen),
+      this.drawCustomQuestions(customAmount, category, difficulty, tags, seen),
     ]);
 
     return shuffleArray([...openTriviaQuestions, ...customQuestions]).slice(0, amount);
@@ -413,6 +420,7 @@ export class TriviaService {
     amount: number,
     category: string,
     difficulty: Difficulty | '',
+    tags: readonly string[],
     seen: Promise<SeenSet | null>,
   ): Promise<TriviaQuestion[]> {
     if (amount <= 0) {
@@ -420,13 +428,14 @@ export class TriviaService {
     }
     const seenSet = await seen;
     if (!seenSet) {
-      return this.fetchCustomQuestions(amount, category, difficulty);
+      return this.fetchCustomQuestions(amount, category, difficulty, tags);
     }
 
     const fetched = await this.fetchCustomQuestions(
       Math.min(amount * DEDUPE_DRAW_MULTIPLIER, MAX_DEDUPE_DRAW),
       category,
       difficulty,
+      tags,
     );
     return preferUnseen(fetched, Math.min(amount, fetched.length), seenSet);
   }
@@ -478,6 +487,7 @@ export class TriviaService {
     limit: number,
     category: string,
     difficulty: Difficulty | '',
+    tags: readonly string[],
   ): Promise<TriviaQuestion[]> {
     if (limit <= 0) {
       return [];
@@ -486,8 +496,19 @@ export class TriviaService {
     // Filtering and the ceiling are both the query's job now. This used to pull
     // the whole collection and filter here, which billed for every document
     // anyone had ever contributed on every custom or mixed game (finding C1).
+    // Tags join the same query for the same reason: narrowing in the browser
+    // would still read — and bill for — every question the filter rejects.
+    // The key is **omitted** rather than sent empty when nothing is selected,
+    // so an unfiltered draw asks for exactly what it always asked for. That is
+    // the additive promise stated where it can be seen rather than left to a
+    // downstream `length > 0`, and `trivia.service.spec.ts` asserts the shape.
     const docs = await firstValueFrom(
-      this.firebaseService.getCustomQuestions({ category, difficulty, limit }),
+      this.firebaseService.getCustomQuestions({
+        category,
+        difficulty,
+        limit,
+        ...(tags.length > 0 ? { tags } : {}),
+      }),
     );
 
     // Still shuffled: the query returns document-ID order, which is stable
@@ -512,6 +533,7 @@ export class TriviaService {
     id: string,
   ): TriviaQuestion {
     const { question, correct_answer, incorrect_answers } = raw;
+    const tags = readTags((raw as { tags?: unknown }).tags);
 
     return {
       id,
@@ -549,6 +571,12 @@ export class TriviaService {
       // `decodeOpenTriviaText` above, which is where a per-source
       // transformation belongs, and nothing stores it for a field to describe.
       ...('format' in raw && raw.format ? { format: raw.format } : {}),
+      // The topic tags (`FEAT-021`), read through `readTags` rather than
+      // spread straight across. `custom_questions` is a public API that a
+      // console can write to directly, so the stored value is a writer's word
+      // and the chips are rendered from what survives checking it — the same
+      // stance `SourceLinkComponent` takes to a stored URL (`CLAUDE.md` §4.4).
+      ...(tags ? { tags } : {}),
     };
   }
 }

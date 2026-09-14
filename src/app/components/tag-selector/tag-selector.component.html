@@ -1,0 +1,220 @@
+<div [attr.data-cy]="id('tag-selector')">
+  <label
+    [attr.for]="id('tag-input')"
+    class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+  >
+    {{ label() }}
+    <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+  </label>
+
+  @if (hint()) {
+    <p [id]="id('tag-hint')" class="mb-1.5 text-xs text-slate-500 dark:text-slate-400">
+      {{ hint() }}
+    </p>
+  }
+
+  <!--
+    The chosen tags. Rendered always — an empty box from first paint rather than
+    a row that appears with the first chip — and scrolling inside a fixed height
+    rather than growing, because eight chips wrap to three lines on a phone and
+    on the setup screen that would push Start down the screen while the reader
+    is choosing (`CLAUDE.md` §4.4).
+
+    `track tag` is the tag itself, which is user-controlled text — the one shape
+    §4.4 warns about. It is safe here and only here because the value is unique
+    by construction: `add()` refuses a repeat, the normaliser collapses two
+    spellings into one, and `firestore.rules` refuses a duplicate outright. The
+    text is not doubling as a truth test either; nothing about correctness is
+    derived from it.
+  -->
+  <div
+    class="h-[4.25rem] overflow-y-auto rounded-xl border-[1.5px] border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-900 px-2 py-2"
+    [class.opacity-60]="isDisabled()"
+  >
+    @if (tags().length > 0) {
+      <ul class="flex flex-wrap gap-1.5" [attr.aria-label]="label() + ' chosen'">
+        @for (tag of tags(); track tag) {
+          <li
+            class="flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-500/20 pl-2.5 pr-1 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300"
+            data-cy="selected-tag"
+          >
+            #{{ tag }}
+            <button
+              type="button"
+              [disabled]="isDisabled()"
+              (click)="remove(tag)"
+              [attr.aria-label]="'Remove tag ' + tag"
+              [attr.data-cy]="'remove-tag-' + tag"
+              class="rounded-full p-0.5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-500/30 disabled:cursor-not-allowed transition-colors"
+            >
+              <app-icon name="x" [size]="12" />
+            </button>
+          </li>
+        }
+      </ul>
+    } @else {
+      <p class="text-xs text-slate-400 dark:text-slate-500" [attr.data-cy]="id('no-tags')">
+        No tags yet.
+      </p>
+    }
+  </div>
+
+  <div class="mt-2 flex gap-2">
+    <input
+      [id]="id('tag-input')"
+      type="text"
+      [value]="draft()"
+      (input)="onDraftInput($event)"
+      (keydown)="onKeydown($event)"
+      (blur)="onBlur()"
+      [disabled]="isDisabled() || isFull()"
+      [attr.data-cy]="id('tag-input')"
+      [attr.maxlength]="maxTagLength + 20"
+      [attr.aria-describedby]="id('tag-feedback')"
+      [attr.placeholder]="isFull() ? 'Maximum reached' : 'Type a topic and press Enter'"
+      class="min-w-0 flex-1 rounded-xl border-[1.5px] border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-900 px-3.5 py-2 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-emerald-600 focus:outline-none disabled:cursor-not-allowed transition-colors"
+    />
+    <button
+      type="button"
+      (click)="commitDraft()"
+      [disabled]="isDisabled() || isFull() || !draftPreview()"
+      [attr.data-cy]="id('add-tag')"
+      class="flex items-center gap-1 rounded-xl border-[1.5px] border-emerald-700/25 dark:border-emerald-400/25 px-3 py-2 text-sm font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+    >
+      <app-icon name="plus-circle" [size]="14" />
+      Add
+    </button>
+  </div>
+
+  <!--
+    One reserved line under the input, carrying whichever of four things is
+    currently true: why the control is unavailable, what the draft will be
+    stored as, why it cannot be, or how many tags are left. Reserved rather than
+    conditional, so the row below never moves (§4.4).
+
+    Reserved at the height of the **longest** message rather than the current
+    one, by stacking an invisible copy of the unavailability reason in the same
+    grid cell. That reason is the only message that ever runs to two lines, so
+    without the twin the line shrinks by one at the instant the shortcut row
+    below expands, and the Start button hops upwards before gliding down — most
+    of what animating the reveal is for. The twin is `aria-hidden` and empty
+    wherever no reason was ever given, which is both question forms.
+  -->
+  <div class="mt-1.5 grid">
+    <p
+      [id]="id('tag-feedback')"
+      [attr.data-cy]="id('tag-feedback')"
+      class="col-start-1 row-start-1 min-h-4 text-xs"
+      [class.text-amber-700]="draftRejected()"
+      [class.dark:text-amber-300]="draftRejected()"
+      [class.text-slate-500]="!draftRejected()"
+      [class.dark:text-slate-400]="!draftRejected()"
+    >
+      @if (disabledReason()) {
+        {{ disabledReason() }}
+      } @else if (draftRejected()) {
+        @if (draft().trim().length > maxTagLength) {
+          Too long — a tag is at most {{ maxTagLength }} characters.
+        } @else {
+          A tag needs at least {{ minTagLength }} letters or digits.
+        }
+      } @else if (draftPreview(); as preview) {
+        Will be saved as #{{ preview }}
+      } @else {
+        {{ tags().length }} of {{ max() }} chosen.
+      }
+    </p>
+    <span
+      aria-hidden="true"
+      [attr.data-cy]="id('tag-feedback-reserve')"
+      class="col-start-1 row-start-1 invisible text-xs"
+      >{{ reservedReason() }}</span
+    >
+  </div>
+
+  <!--
+    Rendered always, text swapped in — a live region inserted while already
+    carrying its message is routinely missed (finding G3). This is what tells a
+    screen-reader user that a chip appeared, disappeared, or was refused; the
+    visible line above says the same thing to everybody else.
+  -->
+  <p role="status" [attr.data-cy]="id('tag-status')" class="sr-only">{{ announcement() }}</p>
+
+  <!--
+    Grouped controls carry a role and a label or the group's purpose is never
+    conveyed (`CLAUDE.md` §4.5, finding G4). Toggle buttons rather than a
+    listbox: a listbox owes a roving tabindex and typeahead, which is a lot of
+    machinery for a row of optional shortcuts that Tab, Enter and Space
+    already reach.
+
+    **A chosen suggestion stays in the list, pressed**, rather than leaving
+    it. Removing it would reflow every chip after it at the moment the reader
+    clicked one (§4.4), and it would take away the obvious way to undo the
+    click they just made. `aria-pressed` is what carries the state, and it is
+    the reason these are toggles rather than "Add" buttons.
+
+    **The whole group is out of reach while the control is unavailable**, and
+    the reason is cost rather than tidiness. The home route renders this filter
+    on first paint with the source defaulting to Open Trivia, which is one of
+    the two states that disable it — so forty shortcut buttons nobody can press
+    would sit inside the very card Lighthouse measures as the largest
+    contentful paint. Measured on a four-core box, three Lighthouse runs each:
+    rendering them put the median LCP at 4.0 s against the same build's 3.7 s
+    without this feature at all; deferring them brought it back to 3.5 s. So
+    they are not rendered until the reader first switches source — see
+    `suggestionsMounted`, which then keeps them, because content removed in the
+    same frame as the collapse leaves nothing to collapse.
+
+    **The row's height is what appears and disappears, over 300ms.** It is the
+    one state change this control cannot make without resizing: reserving the
+    space from first paint would put 108 pixels of nothing on the home route
+    for the majority who never leave Open Trivia, and the measurement above is
+    what that would cost. So §4.4's third technique applies — everything below,
+    the Start button included, glides rather than jumps. `grid-template-rows`
+    between `0fr` and `1fr` because it animates to the row's *own* height with
+    no number written down anywhere; `overflow-hidden` on the inner box is what
+    clips the content mid-transition and, by giving the grid item an automatic
+    minimum size of zero, what lets the track reach `0fr` at all. `motion-safe:`
+    on both halves, so a reader who asked for less motion gets the change at
+    once (`npm run motion:verify` fails on a layout transition without it), and
+    `inert` while collapsed, so a row nobody can see is a row nobody can Tab
+    into.
+  -->
+  <div
+    [attr.data-cy]="id('tag-suggestions-reveal')"
+    [attr.inert]="showSuggestions() ? null : ''"
+    class="grid motion-safe:transition-[grid-template-rows] motion-safe:duration-300 ease-out"
+    [ngClass]="showSuggestions() ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+  >
+    <div class="overflow-hidden">
+      @if (suggestionsMounted()) {
+        <div class="mt-2">
+          <span
+            [id]="id('tag-suggestions-label')"
+            class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1"
+            >Suggestions</span
+          >
+          <div
+            role="group"
+            [attr.aria-labelledby]="id('tag-suggestions-label')"
+            [attr.data-cy]="id('tag-suggestions')"
+            class="h-20 overflow-y-auto flex flex-wrap content-start gap-1.5"
+          >
+            @for (suggestion of suggestions(); track suggestion) {
+              <button
+                type="button"
+                [disabled]="isFull() && !isSelected(suggestion)"
+                [attr.aria-pressed]="isSelected(suggestion)"
+                (click)="toggle(suggestion)"
+                [attr.data-cy]="'suggest-tag-' + suggestion"
+                [ngClass]="suggestionClass(suggestion)"
+              >
+                #{{ suggestion }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+</div>

@@ -3,6 +3,7 @@ import { AbstractControl, ReactiveFormsModule } from '@angular/forms';
 import { TriviaCategory } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
+import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
 import { QuestionForm, fieldErrorFor, showsFieldError } from './question-form';
 
 /**
@@ -25,7 +26,7 @@ import { QuestionForm, fieldErrorFor, showsFieldError } from './question-form';
 @Component({
   selector: 'app-question-fields',
   standalone: true,
-  imports: [ReactiveFormsModule, IconComponent, RenderedTextComponent],
+  imports: [ReactiveFormsModule, IconComponent, RenderedTextComponent, TagSelectorComponent],
   templateUrl: './question-fields.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

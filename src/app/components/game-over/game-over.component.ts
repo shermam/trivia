@@ -37,6 +37,7 @@ import { RegionService } from '../../services/region.service';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
+import { QuestionTagsComponent } from '../question-tags/question-tags.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
 
@@ -92,6 +93,7 @@ type BoardScope = 'global' | 'regional';
     NgTemplateOutlet,
     SourceLinkComponent,
     QuestionJustificationComponent,
+    QuestionTagsComponent,
     RenderedTextComponent,
   ],
   templateUrl: './game-over.component.html',

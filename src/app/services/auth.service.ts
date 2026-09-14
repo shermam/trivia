@@ -1,8 +1,9 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import type { Auth, User } from 'firebase/auth';
 import { environment } from '../../environments/environment';
 import { isAliasEmail } from '../utils/email-alias.util';
 import { giveUpAfter } from '../utils/give-up-after.util';
+import { nextAnonymousRetryDelayMs } from '../utils/sign-in-retry.util';
 import { FirebaseAppService } from './firebase-app.service';
 
 const ANONYMOUS_SIGN_IN_TIMEOUT_MS = 10_000;
@@ -208,6 +209,24 @@ export class AuthService {
     this.resolveProStatusReady = resolve;
   });
 
+  /**
+   * The anonymous sign-in currently in flight, so two callers share one.
+   *
+   * Cleared however it settles, which is the half that matters: a memoised
+   * **failure** is the thing `CLAUDE.md` §4.4 is about, and this promise is
+   * reached by every retry below as well as by every gesture, so holding a
+   * settled one would turn a single bad round trip into a permanent answer.
+   * It exists only to stop a timer firing beside a click from asking Firebase
+   * for two accounts at once.
+   */
+  private signInAttempt: Promise<void> | null = null;
+
+  /** Attempts that have failed since the last success — the retry's position in the schedule. */
+  private failedSignInAttempts = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Removes the `online`/`visibilitychange` listeners; null when none are attached. */
+  private detachRetryListeners: (() => void) | null = null;
+
   // `signOut()` immediately re-anonymizes (see below), but Firebase always
   // fires `onAuthStateChanged(null)` for the sign-out itself before the
   // follow-up anonymous sign-in's callback lands. Without suppressing that
@@ -228,6 +247,15 @@ export class AuthService {
   );
 
   readonly isEmailVerified = computed(() => this.user()?.emailVerified ?? false);
+
+  constructor() {
+    // A root service is destroyed only when the whole injector is — the page
+    // going away, or a unit test tearing its `TestBed` down — so this is the
+    // one moment a pending retry and the two listeners behind it have an
+    // owner that no longer exists (`CLAUDE.md` §4.4: every timer and listener
+    // has a teardown).
+    inject(DestroyRef).onDestroy(() => this.stopRetryingSignIn());
+  }
 
   /** Mirrors the Firestore rules' anti-cheat gate: signed in, not anonymous,
    * and (not a password account, or verified). Used to gate leaderboard UI. */
@@ -308,12 +336,6 @@ export class AuthService {
   }
 
   /**
-   * Called once at app bootstrap, without the caller awaiting or catching
-   * (see `App`'s constructor) — so every failure mode here, including the
-   * runtime-config fetch inside `getAuth()`, must be swallowed internally
-   * rather than left to reject as an unhandled promise.
-   */
-  /**
    * Resolves once Firebase Auth has finished restoring a persisted session.
    *
    * **The token is not attached until this settles**, which is what makes it
@@ -341,7 +363,49 @@ export class AuthService {
     }
   }
 
+  /**
+   * Makes sure this visitor has a session, anonymous if nothing else, and
+   * keeps trying when the attempt fails.
+   *
+   * **Called once at app bootstrap, without the caller awaiting or catching**
+   * (see `App`'s constructor) — so every failure mode here, including the
+   * runtime-config fetch inside `getAuth()`, is swallowed internally rather
+   * than left to reject as an unhandled promise. A visitor who cannot reach
+   * Firebase still gets a fully playable game; that part is deliberate and
+   * unchanged.
+   *
+   * **What was missing is that nothing came after the swallow.** The one
+   * attempt bootstrap makes is deferred to the first idle moment after paint
+   * (`docs/app.md` §1.5), and on `/` and `/play` there is no second caller —
+   * the others are gestures (`AuthMenuStateService`,
+   * `DonationDialogStateService`) and `signOut()`. So a single dropped round
+   * trip, or one that ran past the ten seconds `giveUpAfter` allows it, left
+   * the tab with **no uid for the rest of its life**: every later game was
+   * unsaveable, and the reader was told only at the moment they tried to save
+   * a score. It is invisible against the emulator, where the round trip is a
+   * millisecond, and the preview suite is where it surfaced — twice in two
+   * runs, on whichever test happened to be holding it
+   * (`e2e/specs/unauthenticated/test-isolation.spec.ts`).
+   *
+   * So a failed attempt now schedules the next one
+   * (`nextAnonymousRetryDelayMs`) and listens for the two events that mean
+   * "the thing that was wrong may have stopped being wrong" — coming back
+   * online, and the tab becoming visible again after the browser has had it
+   * in the background. A give-up counts as a failure, because from here it is
+   * indistinguishable from one.
+   */
   async ensureSignedIn(): Promise<void> {
+    // `??=` rather than a fresh attempt per call: a scheduled retry, an
+    // `online` event and a click on the auth menu can land together, and
+    // three concurrent `signInAnonymously()` calls would mint three accounts.
+    this.signInAttempt ??= this.attemptSignIn().finally(() => {
+      this.signInAttempt = null;
+    });
+    await this.signInAttempt;
+  }
+
+  /** One attempt, with every outcome funnelled into "stop" or "try again". */
+  private async attemptSignIn(): Promise<void> {
     try {
       const { auth, authModule } = await this.getAuth();
       // `auth.currentUser` can still read `null` right after `getAuth()`
@@ -350,15 +414,83 @@ export class AuthService {
       // race and this method mints a throwaway anonymous session on top of
       // (or instead of) the one being restored.
       await auth.authStateReady();
-      if (auth.currentUser) {
-        return;
+      if (!auth.currentUser) {
+        await giveUpAfter(authModule.signInAnonymously(auth), ANONYMOUS_SIGN_IN_TIMEOUT_MS);
       }
-      await giveUpAfter(authModule.signInAnonymously(auth), ANONYMOUS_SIGN_IN_TIMEOUT_MS);
+      // A restored session counts as success as much as a minted one: either
+      // way there is a uid, which is the whole question.
+      this.failedSignInAttempts = 0;
+      this.stopRetryingSignIn();
     } catch {
-      // Offline or otherwise unreachable — the game stays fully playable,
-      // just without the ability to save to the leaderboard until this
-      // resolves (retried automatically next time ensureSignedIn runs).
+      this.scheduleSignInRetry();
     }
+  }
+
+  /**
+   * Arms the next attempt, or stops once the schedule is spent.
+   *
+   * Note what is *not* reset when it stops: `failedSignInAttempts` keeps
+   * counting, so a gesture that fails afterwards attempts and fails without
+   * re-arming a schedule that has already been judged hopeless. Gestures
+   * themselves never stop working — they call `ensureSignedIn()` directly.
+   */
+  private scheduleSignInRetry(): void {
+    this.failedSignInAttempts += 1;
+    const delay = nextAnonymousRetryDelayMs(this.failedSignInAttempts);
+    if (delay === null) {
+      this.stopRetryingSignIn();
+      return;
+    }
+    this.listenForSignInRecovery();
+    clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      void this.ensureSignedIn();
+    }, delay);
+  }
+
+  /**
+   * The two events worth interrupting the schedule for.
+   *
+   * Both are "the reason it failed may be over": a device that has just
+   * reconnected, and a tab the reader has come back to — which matters
+   * because a backgrounded tab has its timers throttled to roughly once a
+   * minute, so the schedule above effectively pauses while nobody is looking
+   * and the return is the moment to catch up.
+   *
+   * Attached only while a retry is pending and removed the moment one is not,
+   * so the listeners cannot outlive the thing they exist to hurry along.
+   */
+  private listenForSignInRecovery(): void {
+    if (this.detachRetryListeners) {
+      return;
+    }
+    const retryNow = () => {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+      // Safe beside an attempt already in flight: `ensureSignedIn()` hands
+      // back the in-flight one rather than starting a second.
+      void this.ensureSignedIn();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        retryNow();
+      }
+    };
+    window.addEventListener('online', retryNow);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    this.detachRetryListeners = () => {
+      window.removeEventListener('online', retryNow);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      this.detachRetryListeners = null;
+    };
+  }
+
+  /** Cancels a pending attempt and everything holding the page open for it. */
+  private stopRetryingSignIn(): void {
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.detachRetryListeners?.();
   }
 
   async signUpWithEmail(email: string, password: string): Promise<void> {

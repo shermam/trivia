@@ -32,8 +32,15 @@ import { describe, expect, it } from 'vitest';
  * index configuration at all.
  */
 
+interface IndexField {
+  fieldPath: string;
+  order?: 'ASCENDING' | 'DESCENDING';
+  /** An array field is indexed by containment rather than by order. */
+  arrayConfig?: 'CONTAINS';
+}
+
 interface IndexSpec {
-  indexes: { collectionGroup: string; fields: { fieldPath: string }[] }[];
+  indexes: { collectionGroup: string; fields: IndexField[] }[];
   fieldOverrides: { collectionGroup: string; fieldPath: string; ttl?: boolean }[];
 }
 
@@ -54,6 +61,57 @@ describe('firestore.indexes.json', () => {
     // rejected as redundant.
     for (const index of spec.indexes) {
       expect(index.fields.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('gives every field either an order or an arrayConfig, and never both', () => {
+    // The two are alternatives in Firestore's index spec: an ordinary field
+    // carries `order`, an array field indexed for `array-contains`/
+    // `array-contains-any` carries `arrayConfig: CONTAINS`. A field with
+    // neither, or with both, is rejected by the deploy — which, per the block
+    // comment above, is a failure that lands on somebody else's PR.
+    for (const index of spec.indexes) {
+      for (const field of index.fields) {
+        expect(Boolean(field.order) !== Boolean(field.arrayConfig)).toBe(true);
+      }
+    }
+  });
+
+  /**
+   * The tag filter's four query shapes (`FEAT-021`). `getCustomQuestions` sends
+   * `status` plus an optional `category` and `difficulty`, and adds an
+   * `array-contains-any` on `tags` when the player has selected some — so every
+   * combination of the two optional equalities needs its own composite, with
+   * the array field last because Firestore requires equalities before it.
+   *
+   * Asserted here rather than left to the deploy, because the emulator cannot
+   * enforce index configuration at all: a missing one is green in every local
+   * suite and fails only in production, as a filtered draw that returns nothing
+   * and looks like an empty bank.
+   */
+  it('declares a tags index beside each shape the filtered draw runs', () => {
+    const shapes = spec.indexes
+      .filter(
+        (index) =>
+          index.collectionGroup === 'custom_questions' &&
+          index.fields.some((field) => field.fieldPath === 'tags'),
+      )
+      .map((index) => index.fields.map((field) => field.fieldPath).join('+'))
+      .sort();
+
+    expect(shapes).toEqual([
+      'status+category+difficulty+tags',
+      'status+category+tags',
+      'status+difficulty+tags',
+      'status+tags',
+    ]);
+
+    for (const index of spec.indexes) {
+      const tags = index.fields.find((field) => field.fieldPath === 'tags');
+      if (tags) {
+        expect(tags.arrayConfig).toBe('CONTAINS');
+        expect(index.fields.at(-1)?.fieldPath).toBe('tags');
+      }
     }
   });
 

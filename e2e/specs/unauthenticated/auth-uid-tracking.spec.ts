@@ -1,5 +1,5 @@
-import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
+import { waitForAnonymousSession } from '../../support/auth';
 
 /**
  * Finding C6. The preview target deletes the Auth accounts its tests create in
@@ -19,29 +19,17 @@ import { expect, test } from '../../fixtures/test';
  * The tracker itself is an automatic fixture (`e2e/fixtures/test.ts`), so each
  * test starts from an empty buffer by construction rather than by draining one
  * in a hook — a test-scoped fixture is built fresh for every test.
+ *
+ * Every test here waits on `waitForAnonymousSession` before reading the
+ * tracker, because a page renders long before the deferred bootstrap has
+ * signed in: asserting straight after a navigation reads an empty buffer and
+ * fails for a reason that has nothing to do with tracking.
  */
-
-/**
- * Anonymous sign-in is a round trip: the page renders well before Firebase has
- * persisted a session, so asserting straight after a navigation reads an empty
- * store and fails for a reason that has nothing to do with tracking.
- */
-async function waitForPersistedSession(page: Page): Promise<void> {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() =>
-          Object.keys(window.localStorage).some((key) => key.startsWith('firebase:authUser:')),
-        ),
-      { message: 'Firebase has persisted a session' },
-    )
-    .toBe(true);
-}
 
 test.describe('auth uid tracking (C6)', () => {
   test('captures the ambient anonymous uid a plain visit creates', async ({ page, authUids }) => {
     await page.goto('/');
-    await waitForPersistedSession(page);
+    await waitForAnonymousSession(page);
 
     expect(authUids.uids().length, 'uid from the first visit').toBeGreaterThanOrEqual(1);
   });
@@ -54,7 +42,7 @@ test.describe('auth uid tracking (C6)', () => {
     authUids,
   }) => {
     await page.goto('/');
-    await waitForPersistedSession(page);
+    await waitForAnonymousSession(page);
 
     const firstSession = authUids.uids();
     expect(firstSession.length, 'first session').toBeGreaterThanOrEqual(1);
@@ -64,7 +52,7 @@ test.describe('auth uid tracking (C6)', () => {
     // again and gets a different uid, exactly as a sign-out does.
     await page.evaluate(() => window.localStorage.clear());
     await page.goto('/');
-    await waitForPersistedSession(page);
+    await waitForAnonymousSession(page);
 
     const uids = authUids.uids();
     expect(uids.length, 'both sessions are known').toBeGreaterThanOrEqual(2);
@@ -74,7 +62,7 @@ test.describe('auth uid tracking (C6)', () => {
 
   test('hands each uid to the cleanup exactly once', async ({ page, authUids, firebase }) => {
     await page.goto('/');
-    await waitForPersistedSession(page);
+    await waitForAnonymousSession(page);
 
     const first = authUids.take();
     expect(first.length).toBeGreaterThanOrEqual(1);
