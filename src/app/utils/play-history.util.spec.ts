@@ -5,7 +5,7 @@ import {
   TriviaQuestion,
   answeredWith,
 } from '../models/question.model';
-import { MAX_ANSWER_MS, buildPlayAnswers } from './play-history.util';
+import { MAX_ANSWER_MS, MAX_QUESTION_ID_LENGTH, buildPlayAnswers } from './play-history.util';
 
 /**
  * `FEAT-049` — what a finished game submits about the round itself.
@@ -114,6 +114,33 @@ describe('buildPlayAnswers', () => {
     const answers = buildPlayAnswers([bankQuestion('abc123')], [TIMED_OUT], [1_000]);
 
     expect(answers?.[0].questionId).toBe('abc123');
+  });
+
+  it('records an id at exactly the length the server accepts', () => {
+    const id = 'x'.repeat(MAX_QUESTION_ID_LENGTH);
+    const answers = buildPlayAnswers([bankQuestion(id)], [TIMED_OUT], [1_000]);
+
+    expect(answers?.[0].questionId).toBe(id);
+  });
+
+  /**
+   * Reachable only by writing a `custom_questions` document straight into the
+   * console under a very long id — and `recordGameResult` refuses the **whole**
+   * submission over one bad field, so sending it would cost whoever drew that
+   * question their lifetime totals as well as their history. Dropping the id
+   * keeps the entry, which is the smaller loss by a long way.
+   */
+  it('drops an id longer than the server will accept, and keeps the entry', () => {
+    const [entry] =
+      buildPlayAnswers(
+        [bankQuestion('x'.repeat(MAX_QUESTION_ID_LENGTH + 1))],
+        [answeredWith(`${'x'.repeat(MAX_QUESTION_ID_LENGTH + 1)}:correct`)],
+        [1_000],
+      ) ?? [];
+
+    expect('questionId' in entry).toBe(false);
+    expect(entry.correct).toBe(true);
+    expect(entry.ms).toBe(1_000);
   });
 
   it('snapshots the tags a bank question carried at play time', () => {

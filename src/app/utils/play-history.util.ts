@@ -30,6 +30,21 @@ import { readTags } from './normalize-tag.util';
  */
 export const MAX_ANSWER_MS = 120_000;
 
+/**
+ * The longest `questionId` the server will accept — comfortably above a
+ * Firestore auto-id (20 characters) and far below what a document id may be.
+ *
+ * Checked here as well as there, and not because a client enforces anything:
+ * `recordGameResult` refuses the **whole** submission over one bad field, so a
+ * `custom_questions` document written straight into the console under a
+ * 200-character id would cost whoever drew it their lifetime totals as well as
+ * their history. Dropping the id keeps the entry — the answer is still recorded,
+ * just not which question it was — which is the smaller loss by a long way. Same
+ * reasoning as reading the tags through `readTags`: be right regardless of the
+ * writer (`CLAUDE.md` §4.4).
+ */
+export const MAX_QUESTION_ID_LENGTH = 64;
+
 /** One question as the player met it, as `recordGameResult` accepts it. */
 export interface PlayAnswerRecord {
   /** The bank question's id. **Absent** for an Open Trivia DB question. */
@@ -95,7 +110,7 @@ export function buildPlayAnswers(
       ms: boundedMs(durations[index]),
       difficulty: question.difficulty,
     };
-    if (question.source === 'custom') {
+    if (question.source === 'custom' && question.id.length <= MAX_QUESTION_ID_LENGTH) {
       record.questionId = question.id;
     }
     // Read through the same predicate the chips render with, so a tag the rules
