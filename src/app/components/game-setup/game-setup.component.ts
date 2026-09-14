@@ -42,6 +42,18 @@ function donationStatusFrom(value: string | null): DonationQueryStatus {
   return value === 'success' || value === 'cancelled' ? value : null;
 }
 
+/**
+ * What the topic filter says it will narrow, for each source that has topics.
+ *
+ * Constants rather than two literals in a ternary because both strings are
+ * needed twice over: once as the hint that is showing, and once in the set the
+ * picker reserves the line's height against.
+ */
+const TAG_FILTER_HINTS = {
+  single: 'Pick topics to play questions about exactly those subjects.',
+  mixed: 'Narrows the community half of the game; Open Trivia questions carry no topics.',
+} as const;
+
 @Component({
   selector: 'app-game-setup',
   standalone: true,
@@ -172,10 +184,17 @@ export class GameSetupComponent implements OnInit {
 
   /** Says what a topic filter will and will not narrow, for the source in play. */
   protected readonly tagFilterHint = computed(() =>
-    this.source() === 'mixed'
-      ? 'Narrows the community half of the game; Open Trivia questions carry no topics.'
-      : 'Pick topics to play questions about exactly those subjects.',
+    this.source() === 'mixed' ? TAG_FILTER_HINTS.mixed : TAG_FILTER_HINTS.single,
   );
+
+  /**
+   * Both of them, so the picker reserves its hint line at the height of the
+   * taller (`CLAUDE.md` §4.4). Read from the same constants the hint above is
+   * chosen from: a copy edit that reached one and not the other would restore
+   * the jump this exists to remove, and nothing below a real browser would say
+   * so.
+   */
+  protected readonly tagFilterHints = Object.values(TAG_FILTER_HINTS);
 
   // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
   ngOnInit(): void {

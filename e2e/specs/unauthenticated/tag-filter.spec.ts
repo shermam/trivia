@@ -15,19 +15,25 @@ import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
  * reaches Firestore in a shape the real query engine refuses would all pass
  * every unit test in the repo and serve nobody a question.
  *
- * **Isolation on a shared emulator is the invented tag**, exactly as
+ * **Isolation in a bank this spec does not own is the invented tag**, exactly as
  * `question-dedup.spec.ts` uses an invented category. Every worker in the run
- * writes to one bank, so an assertion about *which* questions a filter served
- * only means something if this test owns every question that can match it. A
- * tag carrying the run id does that on its own — and it is a stronger fence
- * than the category, because a tag filter also has to exclude the untagged
- * questions this spec seeds beside the tagged ones.
+ * writes to one bank — and on `trivimind-dev` so does everyone else, for good —
+ * so an assertion about *which* questions a filter served only means something
+ * if this test owns every question that can match it. A tag carrying the run id
+ * does that on its own, and it is a stronger fence than the category, because a
+ * tag filter also has to exclude the untagged questions this spec seeds beside
+ * the tagged ones. Every document it writes is seeded through the fixture under
+ * an id of its own, which is what puts them all on the preview sweep's list.
  *
- * **The index is not exercised here, and cannot be.** The Firestore emulator
- * serves any query without a composite index, so a green run says nothing about
- * `firestore.indexes.json` — see `docs/ci-cd.md` §4.3 and `AUDIT_REMEDIATION.md`
- * `D3`. `firestore-tests/indexes.spec.ts` pins the declaration; the deploy
- * builds it.
+ * **Which run exercises the composite index is the whole reason this file is in
+ * both configs.** The Firestore emulator serves any query without one, so a
+ * green emulator run says nothing about `firestore.indexes.json` — see
+ * `docs/ci-cd.md` §4.3 and `AUDIT_REMEDIATION.md` `D3`. The preview slice runs
+ * the same three filtered draws against `trivimind-dev`'s real query engine,
+ * which refuses a missing index outright, and that is the only place in the
+ * repo where the declaration is checked against a Firestore rather than against
+ * itself; `firestore-tests/indexes.spec.ts` pins what is declared, and the
+ * deploy builds it.
  */
 
 const GAME_SIZE = 5;
@@ -299,6 +305,68 @@ test.describe('the setup screen topic filter', () => {
     await expect
       .poll(async () => Math.round((await selector.boundingBox())!.height))
       .toBe(Math.round(before!.height));
+  });
+
+  /**
+   * Switching between the two sources that *have* topics swaps the hint under
+   * the label — and the two hints do not wrap to the same number of lines at
+   * every width, so the line was growing by one under the reader at the exact
+   * moment they changed a setting, moving the Start button with no animation
+   * (`CLAUDE.md` §4.4). The picker is handed both hints and reserves the taller.
+   *
+   * **Wide on purpose, which is the mirror image of the trap in the sibling
+   * describe below.** That one needs a *tall* window, because a short one pins
+   * the card to the top and measures 0px of a real shift. This one needs a
+   * *wide* one: at 390 the card is narrow enough that both hints wrap to two
+   * lines regardless, so the identical test passes there against an unreserved
+   * line and proves nothing. Measured before the reserve: the hint 16px against
+   * 32px and the Start button at y=1129 against y=1145 at 1280×1000, and not
+   * one pixel of either at 390×1000.
+   */
+  test.describe('switching between the two sources that carry topics', () => {
+    test.use({ viewport: { width: 1280, height: 1000 } });
+
+    test('swaps the hint without moving the Start button', async ({ page }) => {
+      await stubOpenTrivia(page);
+      await page.goto('/');
+
+      const hint = page.getByTestId('filter-tag-hint');
+      const selector = page.getByTestId('filter-tag-selector');
+      const start = page.getByRole('button', { name: 'Start Game', exact: true });
+
+      /**
+       * The Start button's top and the whole control's height, read together in
+       * one call: two measurements taken a frame apart disagree for reasons that
+       * have nothing to do with the invariant, and a lone `boundingBox()` is a
+       * race rather than an assertion (`CLAUDE.md` §4.6). The height is in there
+       * so "the button did not move because nothing rendered" cannot pass.
+       */
+      const geometry = async () => {
+        const [button, control] = await Promise.all([start.boundingBox(), selector.boundingBox()]);
+        return { startY: Math.round(button!.y), controlHeight: Math.round(control!.height) };
+      };
+
+      await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
+      // Reaching Custom reveals the shortcut row, which animates for 300ms —
+      // this test's setup rather than its subject, so the baseline waits for it
+      // to land (the describe below is where that reveal is the subject).
+      await waitForShortcutRowRevealed(page);
+      const atRest = await geometry();
+
+      await optionLabel(page, page.getByRole('radio', { name: 'Mixed', exact: true })).click();
+
+      // The hint really did change. Without this the test would pass against a
+      // control that ignores the source altogether, which is the vacuous
+      // version of it.
+      await expect(hint).toHaveText(
+        'Narrows the community half of the game; Open Trivia questions carry no topics.',
+      );
+      await expect.poll(geometry).toEqual(atRest);
+
+      await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
+      await expect(hint).toHaveText('Pick topics to play questions about exactly those subjects.');
+      await expect.poll(geometry).toEqual(atRest);
+    });
   });
 
   /**

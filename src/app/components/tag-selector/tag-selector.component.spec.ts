@@ -20,6 +20,8 @@ import { TagSelectorComponent } from './tag-selector.component';
     [max]="max()"
     [suggestions]="suggestions()"
     [disabledReason]="disabledReason()"
+    [hint]="hint()"
+    [hintVariants]="hintVariants()"
   />`,
 })
 class HostComponent {
@@ -27,6 +29,8 @@ class HostComponent {
   readonly max = signal(8);
   readonly suggestions = signal<readonly string[]>(['world-war-2', 'calculus']);
   readonly disabledReason = signal<string | null>(null);
+  readonly hint = signal('');
+  readonly hintVariants = signal<readonly string[]>([]);
 }
 
 /**
@@ -361,6 +365,49 @@ describe('TagSelectorComponent — unavailable', () => {
     const { el } = render();
 
     expect(el.querySelector('[data-cy="tag-feedback-reserve"]')?.textContent?.trim()).toBe('');
+  });
+
+  /**
+   * The hint line is reserved at the tallest hint the caller can pass rather
+   * than at the one showing. A hint that *changes* changes how many lines it
+   * wraps to, which is a resize the reader sees as everything below the control
+   * jumping — and unlike the feedback line, the previous value is no use here,
+   * because the taller of the two can be the one that has not been shown yet.
+   * jsdom has no layout, so this pins the twins; `tag-filter.spec.ts` measures
+   * what they are worth.
+   */
+  it('stacks an invisible copy of every hint it may be given', () => {
+    const variants = ['The short one.', 'The considerably longer one, which wraps.'];
+    const { host, fixture, el } = render();
+    host.hint.set(variants[0]);
+    host.hintVariants.set(variants);
+    fixture.detectChanges();
+
+    const twins = [...el.querySelectorAll<HTMLElement>('[data-cy="tag-hint-reserve"]')];
+
+    expect(twins.map((twin) => twin.textContent?.trim())).toEqual(variants);
+    expect(twins.every((twin) => twin.getAttribute('aria-hidden') === 'true')).toBe(true);
+    // Same grid cell as the visible line, which is what makes the cell as tall
+    // as the tallest of them rather than as tall as all of them stacked.
+    expect(twins.every((twin) => twin.className.includes('row-start-1'))).toBe(true);
+    expect(el.querySelector('[data-cy="tag-hint"]')?.className).toContain('row-start-1');
+
+    // The hint the reader sees still follows the input it was given.
+    host.hint.set(variants[1]);
+    fixture.detectChanges();
+    expect(el.querySelector('[data-cy="tag-hint"]')?.textContent?.trim()).toBe(variants[1]);
+  });
+
+  /** …and a caller whose hint never changes reserves nothing extra for it. */
+  it('stacks no copies for a hint that cannot change', () => {
+    const { host, fixture, el } = render();
+    host.hint.set('A few words for what this question is about.');
+    fixture.detectChanges();
+
+    expect(el.querySelectorAll('[data-cy="tag-hint-reserve"]')).toHaveLength(0);
+    expect(el.querySelector('[data-cy="tag-hint"]')?.textContent?.trim()).toBe(
+      'A few words for what this question is about.',
+    );
   });
 
   it('accepts nothing typed while it is unavailable', () => {

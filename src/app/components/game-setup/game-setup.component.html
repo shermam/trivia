@@ -289,14 +289,19 @@
         an untagged question is not known to be about the topic asked for.
 
         The control keeps the same height while it is being *used* (`CLAUDE.md`
-        §4.4): the chip box, the suggestion box and the feedback line are all
-        reserved, so picking ten topics never moves the Start button. The one
-        thing that does resize it is switching Question Source, which reveals or
-        hides the shortcut row — and because reserving that space from first
-        paint would cost the majority who never switch it, the row's height is
-        **animated** instead: the Start button glides its 108 pixels rather than
-        jumping them, unless the reader asked for less motion. The mechanism,
-        and what it cost to measure, are on the selector's own template.
+        §4.4): the chip box, the suggestion box, the hint and the feedback line
+        are all reserved, so picking ten topics never moves the Start button.
+        Both hints go to the picker for the same reason the reasons do — the one
+        that is showing sets what the line *says*, and the pair sets how tall it
+        is, so swapping Custom for Mixed does not rewrap it under the reader.
+
+        The one thing that does resize the control is switching **into** a
+        source that has topics, which reveals the shortcut row — and because
+        reserving that space from first paint would cost the majority who never
+        switch it, the row's height is **animated** instead: the Start button
+        glides its 108 pixels rather than jumping them, unless the reader asked
+        for less motion. The mechanism, and what it cost to measure, are on the
+        selector's own template.
       -->
       <app-tag-selector
         formControlName="tags"
@@ -305,6 +310,7 @@
         [max]="maxFilterTags"
         [suggestions]="tagSuggestions"
         [hint]="tagFilterHint()"
+        [hintVariants]="tagFilterHints"
         [disabledReason]="tagFilterDisabledReason()"
       />
 

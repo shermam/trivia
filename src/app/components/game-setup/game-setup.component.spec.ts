@@ -274,6 +274,39 @@ describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
     fixture.destroy();
   });
 
+  /**
+   * The hint that is showing has to be one of the strings the picker was given
+   * to reserve the line's height against, or the line is sized for a message it
+   * will never carry and rewraps under the reader when the other one arrives.
+   * Both sources with topics are walked, because the reserve is only as good as
+   * its *worst* member.
+   *
+   * jsdom has no layout, so what this can assert is the pairing; the sixteen
+   * pixels it is worth are measured in `tag-filter.spec.ts` at a viewport wide
+   * enough for the two hints to wrap differently.
+   */
+  it('shows only hints it also reserves space for', () => {
+    const { fixture } = setup();
+    const el = fixture.nativeElement as HTMLElement;
+    const reserved = () =>
+      [...el.querySelectorAll('[data-cy="filter-tag-hint-reserve"]')].map((twin) =>
+        twin.textContent?.trim(),
+      );
+
+    for (const source of ['custom', 'mixed']) {
+      chooseSource(fixture, source);
+      const showing = el.querySelector('[data-cy="filter-tag-hint"]')?.textContent?.trim();
+
+      expect(showing).toBeTruthy();
+      expect(reserved()).toContain(showing);
+    }
+
+    // Two distinct hints rather than one repeated, which is what makes the
+    // reserve necessary in the first place.
+    expect(new Set(reserved()).size).toBe(2);
+    fixture.destroy();
+  });
+
   it('is unavailable offline, and says why', () => {
     const { fixture, isOnline } = setup();
 
