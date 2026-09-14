@@ -376,27 +376,6 @@ service cloud.firestore {
       return 500;
     }
 
-    // Everything a `custom_questions` document must *be*, independent of who is
-    // writing it and when. Shared by `create` and by the author's own `update`
-    // (`FEAT-007`), which is the entire reason it is factored out: an
-    // ownership-only update rule would let an author rewrite their document
-    // into any shape at all — new keys outside this allowlist, a 4 MB question
-    // string, a `createdBy` pointing at somebody else — because the validator
-    // used to guard creates and nothing else.
-    //
-    // Attribution, freshness and the submission status are *not* here. They are
-    // conditions on the act of creating, not on the document, and the owner's
-    // update has its own versions of them: `createdBy`/`createdAt` must be
-    // unchanged rather than fresh.
-    // `rejectionReason` is in the key list because a document may legitimately
-    // *hold* one — a reviewer writes it — and this list is a description of the
-    // document's shape. It carries no bound here on purpose: the only writer
-    // who may put a value there is the reviewer, so the bound lives on the
-    // reviewer's own rule below, where it is reachable and where the rules
-    // tests can see it. Both callers of this function refuse the key outright
-    // in a clause of their own, so a bound here would be unreachable — and an
-    // unreachable clause is one a mutation run cannot tell from a deleted one
-    // (`CLAUDE.md` §4.6).
     // The most tags one question may carry (`FEAT-021`). Named rather than
     // inlined because `areValidTags()` below has to check every element by
     // index, and the two numbers agreeing is what makes the ninth tag refused
@@ -415,7 +394,7 @@ service cloud.firestore {
     // **The `^` and `$` are redundant and are written anyway.** `matches()`
     // matches the *whole* string — it is RE2's full match, not a search — so
     // dropping the anchors changes nothing. Measured rather than assumed:
-    // unanchoring the pattern fails not one of the twenty-one tag tests. They
+    // unanchoring the pattern fails not one of the twenty tag tests. They
     // stay because every reader arriving here reads this as a JavaScript
     // regular expression first, where the difference is the entire meaning of
     // the pattern; what must not happen is somebody *relying* on them, so the
@@ -432,7 +411,7 @@ service cloud.firestore {
     // choice: `List` exposes `hasAll`, `hasAny`, `hasOnly`, `join`, `size` and
     // `toSet` and nothing that applies a predicate to each element. Indexing is
     // the only mechanism that can, and it costs one clause per permitted
-    // position — which is a second reason {@link maxTags} is small.
+    // position — which is a second reason `maxTags()` is small.
     //
     // Each clause is guarded by the size rather than by a `try`: reading past
     // the end of a list raises, and an erroring rule denies, so an unguarded
@@ -458,6 +437,27 @@ service cloud.firestore {
              && (tags.size() < 8 || isValidTag(tags[7]));
     }
 
+    // Everything a `custom_questions` document must *be*, independent of who is
+    // writing it and when. Shared by `create` and by the author's own `update`
+    // (`FEAT-007`), which is the entire reason it is factored out: an
+    // ownership-only update rule would let an author rewrite their document
+    // into any shape at all — new keys outside this allowlist, a 4 MB question
+    // string, a `createdBy` pointing at somebody else — because the validator
+    // used to guard creates and nothing else.
+    //
+    // Attribution, freshness and the submission status are *not* here. They are
+    // conditions on the act of creating, not on the document, and the owner's
+    // update has its own versions of them: `createdBy`/`createdAt` must be
+    // unchanged rather than fresh.
+    // `rejectionReason` is in the key list because a document may legitimately
+    // *hold* one — a reviewer writes it — and this list is a description of the
+    // document's shape. It carries no bound here on purpose: the only writer
+    // who may put a value there is the reviewer, so the bound lives on the
+    // reviewer's own rule below, where it is reachable and where the rules
+    // tests can see it. Both callers of this function refuse the key outright
+    // in a clause of their own, so a bound here would be unreachable — and an
+    // unreachable clause is one a mutation run cannot tell from a deleted one
+    // (`CLAUDE.md` §4.6).
     function isValidQuestionShape(data) {
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
