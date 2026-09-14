@@ -162,6 +162,7 @@ test.describe('account management: export and deletion', () => {
         explanation?: string;
       }[];
       gameplayStats: Record<string, number> | null;
+      playHistory: unknown[];
       notHeldHere: string[];
     };
 
@@ -187,6 +188,11 @@ test.describe('account management: export and deletion', () => {
     // `notHeldHere` exists to make everywhere else.
     expect(exported).toHaveProperty('gameplayStats');
     expect(exported.gameplayStats).toBeNull();
+    // Empty rather than null, and the asymmetry with the line above is the
+    // point: the totals are one document that either exists or does not, the
+    // play history is a collection that is either empty or not (`FEAT-049`).
+    // The populated case is `play-history.spec.ts`, which plays a game first.
+    expect(exported.playHistory).toEqual([]);
     // The export has to say what it deliberately does not contain, otherwise a
     // missing card number reads as concealment.
     expect(exported.notHeldHere.join(' ')).toMatch(/stripe/i);

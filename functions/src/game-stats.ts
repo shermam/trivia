@@ -1,6 +1,6 @@
 /**
  * The decision behind `users/{uid}` — what a completed game does to a
- * player's lifetime totals.
+ * player's lifetime totals, and what it leaves in their play history.
  *
  * Kept as a pure function, separate from the callable, for the reason
  * `role.ts` and `account-policy.ts` are: `CLAUDE.md` §4.6 requires a Cloud
@@ -8,6 +8,12 @@
  * decision, and that stays cheap only while the decision does not need Auth
  * and Firestore standing up behind it.
  */
+import {
+  type PlayAnswer,
+  type PlayRecord,
+  isValidPlayAnswers,
+  playRecordFrom,
+} from './play-history';
 
 /** The most questions a single game can hold — the setup form's own maximum. */
 export const MAX_QUESTIONS_PER_GAME = 25;
@@ -59,15 +65,55 @@ export interface GameResultSubmission {
   totalQuestions: number;
   correctAnswers: number;
   bestStreak: number;
+  /**
+   * One record per question, in the order they were asked (`FEAT-049`).
+   *
+   * **Optional, and "no history" is a first-class case rather than an error.**
+   * A browser still running a bundle from before this field existed sends
+   * nothing, and so does a game restored from a save whose per-answer history
+   * could not be trusted to line up with its questions — both are games worth
+   * banking into the totals, and rejecting them to protect a history that is
+   * not the point of the call would cost more than it buys.
+   *
+   * `null` means the same as absent, and has to: the callable SDK encodes a
+   * present-but-`undefined` key as `null`, so which of the two arrives is
+   * decided by how the caller spelled its object literal rather than by
+   * anything about the game (`playRecordFrom`).
+   */
+  answers?: PlayAnswer[] | null;
 }
 
 export type RejectionReason = 'invalid' | 'duplicate' | 'rate-limited';
 
 export type StatsDecision =
-  { accepted: true; stats: UserStats } | { accepted: false; reason: RejectionReason };
+  | {
+      accepted: true;
+      stats: UserStats;
+      /**
+       * The play-history document to write beside the totals, or `null` when
+       * the submission carried no per-answer records. Decided here so the
+       * transaction writes what the decision says rather than re-deriving it.
+       */
+      play: PlayRecord | null;
+    }
+  | { accepted: false; reason: RejectionReason };
 
 function isNonNegativeInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Whether a game id is safe to use as a Firestore document id, which it now has
+ * to be: `FEAT-049` keys `users/{uid}/plays/{gameId}` on it.
+ *
+ * Every id the app mints is a `crypto.randomUUID()`, so nothing real is
+ * affected — but the value arrives on the wire, and `collection.doc()` on a
+ * path-shaped string either throws or resolves somewhere nobody intended.
+ * Refusing it here means one rejected submission rather than an `internal`
+ * error from inside a transaction.
+ */
+function isSafeDocumentId(value: string): boolean {
+  return !value.includes('/') && value !== '.' && value !== '..' && !/^__.*__$/.test(value);
 }
 
 /**
@@ -83,12 +129,15 @@ export function isValidSubmission(submission: unknown): submission is GameResult
   if (typeof submission !== 'object' || submission === null) {
     return false;
   }
-  const { gameId, totalQuestions, correctAnswers, bestStreak } = submission as Record<
+  const { gameId, totalQuestions, correctAnswers, bestStreak, answers } = submission as Record<
     string,
     unknown
   >;
 
   if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > 128) {
+    return false;
+  }
+  if (!isSafeDocumentId(gameId)) {
     return false;
   }
   if (!isNonNegativeInt(totalQuestions) || totalQuestions < 1) {
@@ -104,6 +153,14 @@ export function isValidSubmission(submission: unknown): submission is GameResult
   // there were. Checked against `correctAnswers` rather than `totalQuestions`
   // because the looser bound would admit a 25-streak on a game with 3 right.
   if (!isNonNegativeInt(bestStreak) || bestStreak > correctAnswers) {
+    return false;
+  }
+  // The per-answer history, when there is one. Bounded against this same
+  // submission's own question count, so an array cannot describe a different
+  // game from the one being banked (`play-history.ts`). `null` is let through
+  // beside `undefined` because the SDK turns one into the other in transit —
+  // refusing it would drop the totals of a game that simply had no history.
+  if (answers != null && !isValidPlayAnswers(answers, totalQuestions)) {
     return false;
   }
   return true;
@@ -160,5 +217,9 @@ export function nextUserStats(
       rateWindowStart: windowRolled ? nowMs : current.rateWindowStart,
       gamesInWindow: gamesInWindow + 1,
     },
+    // Written in the same transaction as the totals and keyed by the same game
+    // id, so the duplicate check above governs both: a retried call rewrites
+    // nothing rather than appending a second copy of the round.
+    play: playRecordFrom(submission.answers, nowMs),
   };
 }

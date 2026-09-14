@@ -101,6 +101,11 @@ function setup(
     toggleQuestionFlag: vi.fn(),
     registerAnswer,
     advanceQuestion,
+    // `FEAT-049`. The component is the only thing that knows when a question is
+    // actually on screen, so it tells the controller — at both of the two
+    // moments one appears, which is what `beginQuestion()` exists to keep as
+    // one call site.
+    markQuestionShown: vi.fn(),
     lifelines: signal<LifelineState>(options.lifelines ?? ALL_LIFELINES_AVAILABLE),
     eliminatedAnswerIds: signal<readonly string[]>([]),
     registerSkippedQuestion,
@@ -1076,6 +1081,61 @@ describe('QuizLoopComponent — lifelines (FEAT-002)', () => {
     query('[data-cy="lifeline-skip"]')?.click();
 
     expect(history).toEqual([SKIPPED]);
+  });
+});
+
+/*
+ * `FEAT-049` — when the answer clock starts.
+ *
+ * This component is the only thing that knows when a question is actually in
+ * front of the player, so it is what tells the controller. That makes the call
+ * sites the whole contract, and getting them wrong is **silent**: a
+ * `markQuestionShown()` that fired only on entry would time every question from
+ * the start of the game, which produces durations that rise plausibly and are
+ * entirely wrong — nothing on screen changes, nothing throws, and the number
+ * ends up in a per-player profile a recommender will read. Hence a row on each
+ * of the two moments a question appears, and one on the moment none does.
+ */
+describe('QuizLoopComponent — the answer clock (FEAT-049)', () => {
+  it('starts the clock for the question already on screen when the route opens', () => {
+    const { gameController } = setup({ question: makeQuestion() });
+
+    expect(gameController.markQuestionShown).toHaveBeenCalledOnce();
+  });
+
+  it('restarts it for the next question, after the answer-reveal delay', () => {
+    const { query, gameController } = setup({ question: makeQuestion() });
+
+    query('[data-cy="answer-option"]')?.click();
+    // Mid-delay the answered question is still on screen, so the clock that is
+    // running is still its own — restarting here would time the reveal.
+    vi.advanceTimersByTime(1_000);
+    expect(gameController.markQuestionShown).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(1_000);
+    expect(gameController.markQuestionShown).toHaveBeenCalledTimes(2);
+  });
+
+  it('restarts it immediately on a skip, which has no reveal to wait out', () => {
+    const { query, gameController } = setup({ question: makeQuestion() });
+
+    query('[data-cy="lifeline-skip"]')?.click();
+
+    expect(gameController.markQuestionShown).toHaveBeenCalledTimes(2);
+  });
+
+  /*
+   * Nothing is rendered after the last answer — the component navigates away —
+   * so a clock started here would belong to no question at all.
+   */
+  it('does not restart it after the last question', () => {
+    const { query, gameController } = setup({ question: makeQuestion() });
+    gameController.isLastQuestion.set(true);
+
+    query('[data-cy="answer-option"]')?.click();
+    vi.advanceTimersByTime(2_000);
+
+    expect(gameController.markQuestionShown).toHaveBeenCalledOnce();
   });
 });
 

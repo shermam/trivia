@@ -96,6 +96,7 @@ function setup(options: {
           config: signal(makeConfig(options.timeLimit)),
           flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
           answerHistory: signal<readonly PickedAnswer[]>([]),
+          answerDurations: signal<readonly number[]>([]),
           gameId: signal<string | null>('game-fixture'),
           resetGame: () => undefined,
         },
@@ -288,6 +289,7 @@ function configureReporting(options: {
             new Set(options.flaggedIds ?? options.questions.map((q) => q.id)),
           ),
           answerHistory: signal<readonly PickedAnswer[]>([]),
+          answerDurations: signal<readonly number[]>([]),
           gameId: signal<string | null>('game-fixture'),
           resetGame: () => undefined,
         },
@@ -818,6 +820,7 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
             config: signal(makeConfig(15)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -974,6 +977,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             config: signal(makeConfig(timeLimit)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1064,6 +1068,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             config: signal(null),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1124,6 +1129,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1342,6 +1348,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -1726,6 +1733,7 @@ describe('GameOverComponent lifetime stats recording', () => {
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>(options.gameId === undefined ? 'game-1' : options.gameId),
             resetGame: () => undefined,
           },
@@ -1906,6 +1914,7 @@ describe('GameOverComponent — the end-of-round cue (FEAT-003)', () => {
             config: signal(makeConfig()),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -2051,6 +2060,7 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
             config: signal(makeConfig(15)),
             flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
             answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
             resetGame: () => undefined,
           },
@@ -2514,5 +2524,149 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
     expect(control.getAttribute('autocomplete')).toBeNull();
     expect(control.options[0].value).toBe('');
     expect(control.options.length).toBeGreaterThan(200);
+  });
+});
+
+/**
+ * `FEAT-049` — what the screen submits about the round it just showed.
+ *
+ * The shaping is `buildPlayAnswers`' and is tested directly in
+ * `play-history.util.spec.ts`; what is pinned here is the wiring, which is the
+ * half that can be silently wrong: the payload reaching the callable at all,
+ * and the key being **omitted** rather than sent short when the game has no
+ * usable history — a short array is a submission `recordGameResult` refuses
+ * whole, taking the lifetime totals with it.
+ */
+describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  function question(id: string): TriviaQuestion {
+    return {
+      id,
+      category: 'Science',
+      type: 'multiple',
+      difficulty: 'easy',
+      question: `Question ${id}?`,
+      correct_answer: 'A',
+      incorrect_answers: ['B'],
+      all_answers: [
+        { id: `${id}:right`, text: 'A', isCorrect: true },
+        { id: `${id}:wrong`, text: 'B', isCorrect: false },
+      ],
+      source: 'custom',
+    };
+  }
+
+  function render(options: {
+    questions: TriviaQuestion[];
+    answerHistory: PickedAnswer[];
+    answerDurations: number[];
+    gameId?: string | null;
+  }) {
+    const recordGameResult = vi.fn().mockResolvedValue(undefined);
+
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(1),
+            correctAnswers: signal(1),
+            maxStreak: signal(1),
+            totalQuestions: signal(options.questions.length),
+            percentage: signal(50),
+            questions: signal(options.questions),
+            config: signal(makeConfig()),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
+            answerDurations: signal<readonly number[]>(options.answerDurations),
+            gameId: signal<string | null>('gameId' in options ? options.gameId! : 'game-fixture'),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal({ uid: 'player-1', displayName: 'Ada' }),
+            isAnonymous: signal(false),
+            isFullyAuthenticated: signal(true),
+            resendVerificationEmail: () => Promise.resolve(),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: AccountService, useValue: { recordGameResult } },
+        { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore: vi.fn(),
+            getLeaderboardEntry: () => Promise.resolve(null),
+            getTopScores: () => of([]),
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+
+    TestBed.createComponent(GameOverComponent).detectChanges();
+    return { recordGameResult };
+  }
+
+  it('submits one record per question beside the totals', () => {
+    const { recordGameResult } = render({
+      questions: [question('q0'), question('q1')],
+      answerHistory: [answeredWith('q0:right'), TIMED_OUT],
+      answerDurations: [2_500, 15_000],
+    });
+
+    expect(recordGameResult).toHaveBeenCalledWith({
+      gameId: 'game-fixture',
+      totalQuestions: 2,
+      correctAnswers: 1,
+      bestStreak: 1,
+      answers: [
+        { questionId: 'q0', correct: true, ms: 2_500, difficulty: 'easy' },
+        { questionId: 'q1', correct: false, ms: 15_000, difficulty: 'easy' },
+      ],
+    });
+  });
+
+  /**
+   * **The key is absent, not `undefined` and not empty.** The callable SDK's
+   * own encoder maps `undefined` to `null` (`@firebase/functions`, `encode()`),
+   * so a payload carrying the key with nothing in it puts `answers: null` on
+   * the wire for a field that has no value. `recordGameResult` reads that as
+   * the absence it is — the totals of a real game must not turn on how the
+   * object literal was spelled, which `game-stats.test.ts` pins from the other
+   * side — so what this row holds is the near half of that: the payload saying
+   * what is true rather than relying on the server to forgive what is not.
+   * Asserted on the key rather than on its value, because the two forms are
+   * indistinguishable in a `toHaveBeenCalledWith`.
+   */
+  it('omits the key entirely when the round has no usable history', () => {
+    const { recordGameResult } = render({
+      questions: [question('q0'), question('q1')],
+      answerHistory: [], // what a save written before the recap existed restores as
+      answerDurations: [],
+    });
+
+    expect(recordGameResult).toHaveBeenCalledTimes(1);
+    const [payload] = recordGameResult.mock.calls[0] as [Record<string, unknown>];
+    expect('answers' in payload).toBe(false);
+    expect(payload['totalQuestions']).toBe(2);
+  });
+
+  // Unchanged by this feature, and pinned here because the history made the
+  // payload bigger: a game with no id is still never banked at all, because an
+  // id minted on this screen would be fresh on every reload.
+  it('submits nothing at all for a game that has no id', () => {
+    const { recordGameResult } = render({
+      questions: [question('q0')],
+      answerHistory: [answeredWith('q0:right')],
+      answerDurations: [1_000],
+      gameId: null,
+    });
+
+    expect(recordGameResult).not.toHaveBeenCalled();
   });
 });

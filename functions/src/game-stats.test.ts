@@ -8,6 +8,7 @@ import {
   isValidSubmission,
   nextUserStats,
 } from './game-stats';
+import type { PlayAnswer } from './play-history';
 
 const NOW = 1_756_300_000_000;
 const HOUR = 60 * 60 * 1000;
@@ -290,4 +291,120 @@ test('refuses a payload that is not an object', () => {
 
 test('isValidSubmission accepts a well-formed payload', () => {
   assert.equal(isValidSubmission(submission()), true);
+});
+
+// ---------------------------------------------------------------------------
+// The play history (`FEAT-049`). The bounds on an individual entry live in
+// `play-history.test.ts`; what is pinned here is how the array reaches the
+// decision and what the decision does with it.
+// ---------------------------------------------------------------------------
+
+const playAnswer = (overrides: Partial<PlayAnswer> = {}): PlayAnswer => ({
+  questionId: 'bank-question-1',
+  correct: true,
+  ms: 3_000,
+  difficulty: 'easy',
+  ...overrides,
+});
+
+/** A two-question game, so the totals stay self-consistent beside a pair of answers. */
+const twoQuestionGame = (answers: PlayAnswer[]) =>
+  submission({ totalQuestions: 2, correctAnswers: 1, bestStreak: 1, answers });
+
+test('a submission with no answers banks its totals and writes no history', () => {
+  const decision = nextUserStats(null, submission(), NOW);
+
+  assert.ok(decision.accepted);
+  assert.equal(decision.play, null);
+  assert.equal(decision.stats.gamesPlayed, 1);
+});
+
+/**
+ * **The same case arriving the other way, and the totals must survive it.** The
+ * callable SDK encodes a present-but-`undefined` key as `null`, so a caller
+ * writing `{ answers: buildPlayAnswers(...) }` — the obvious spelling — sends
+ * `null` for a game with no history, where omitting the key sends nothing.
+ * Refusing one and accepting the other would let an invisible detail of the
+ * caller's object literal decide whether a real game is banked at all.
+ */
+test('a submission whose answers field arrived as null still banks its totals', () => {
+  const decision = nextUserStats(
+    null,
+    { ...submission(), answers: null } as GameResultSubmission,
+    NOW,
+  );
+
+  assert.ok(decision.accepted);
+  assert.equal(decision.play, null);
+  assert.equal(decision.stats.gamesPlayed, 1);
+});
+
+test('a submission with answers carries the document to write beside the totals', () => {
+  const answers = [playAnswer(), playAnswer({ correct: false, questionId: undefined })];
+  const decision = nextUserStats(null, twoQuestionGame(answers), NOW);
+
+  assert.ok(decision.accepted);
+  assert.equal(decision.play?.at, NOW);
+  assert.equal(decision.play?.answers.length, 2);
+  assert.equal(decision.play?.answers[0].questionId, 'bank-question-1');
+  assert.equal('questionId' in (decision.play?.answers[1] ?? {}), false);
+});
+
+// The array describes the game it arrived with, so a count that disagrees with
+// `totalQuestions` is not a smaller history — it is a history that has lost
+// track of which question each entry belongs to.
+test('refuses an answer array that does not cover the whole game', () => {
+  // Accepted without the array, so the rejection below is about the array.
+  assert.equal(
+    accept(
+      nextUserStats(null, submission({ totalQuestions: 2, correctAnswers: 1, bestStreak: 1 }), NOW),
+    ).gamesPlayed,
+    1,
+  );
+  assert.deepEqual(nextUserStats(null, twoQuestionGame([playAnswer()]), NOW), {
+    accepted: false,
+    reason: 'invalid',
+  });
+});
+
+test('refuses the whole submission when one answer is out of bounds', () => {
+  const answers = [playAnswer(), playAnswer({ ms: -1 })];
+
+  assert.deepEqual(nextUserStats(null, twoQuestionGame(answers), NOW), {
+    accepted: false,
+    reason: 'invalid',
+  });
+});
+
+test('refuses an answers field that is not an array', () => {
+  assert.deepEqual(
+    nextUserStats(
+      null,
+      { ...submission(), answers: 'all of them' } as unknown as GameResultSubmission,
+      NOW,
+    ),
+    { accepted: false, reason: 'invalid' },
+  );
+});
+
+/**
+ * **`gameId` is now a document id** — `users/{uid}/plays/{gameId}` — so a value
+ * Firestore cannot address is refused here rather than throwing from inside the
+ * transaction. Nothing real is affected: every id the app mints is a
+ * `crypto.randomUUID()`.
+ */
+test('refuses a game id that is not usable as a document id', () => {
+  for (const bad of ['a/b', '.', '..', '__name__', '__anything__']) {
+    assert.deepEqual(
+      nextUserStats(null, submission({ gameId: bad }), NOW),
+      { accepted: false, reason: 'invalid' },
+      bad,
+    );
+  }
+});
+
+test('accepts a game id that merely looks unusual', () => {
+  for (const good of ['a.b', '_leading-underscore', '__only-leading', 'trailing__']) {
+    assert.equal(accept(nextUserStats(null, submission({ gameId: good }), NOW)).lastGameId, good);
+  }
 });

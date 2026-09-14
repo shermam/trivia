@@ -256,6 +256,7 @@ domain, which dev does not have.
       roles/artifactregistry.admin \
       roles/cloudbuild.builds.builder \
       roles/secretmanager.admin \
+      roles/cloudscheduler.admin \
       roles/iam.serviceAccountUser
     do
       gcloud projects add-iam-policy-binding "$PROJECT" \
@@ -269,7 +270,15 @@ domain, which dev does not have.
     deploy touches, and the list is longer than it looks like it should be
     because Gen 2 functions are Cloud Run services built by Cloud Build into
     Artifact Registry and triggered through Eventarc — four products, four
-    grants, none of them named "functions".
+    grants, none of them named "functions". `roles/cloudscheduler.admin` is the
+    fifth, and it is there for the same reason: a **scheduled** function
+    (`sweepPlayHistory`, `stack.md` §2.4) is deployed by creating a Cloud
+    Scheduler job that invokes it, so without the grant the deploy fails on that
+    one function while every other succeeds. `cloudscheduler.googleapis.com`
+    must also be enabled on the project — the CLI enables it itself where the
+    account holds `roles/serviceusage.serviceUsageAdmin`, and otherwise
+    `gcloud services enable cloudscheduler.googleapis.com --project "$PROJECT"`
+    does it once. One job is inside the free tier.
 
     **`roles/secretmanager.secretAccessor` is not the one you want, and the
     reason is worth knowing.** It grants `secretmanager.versions.access` and
