@@ -319,6 +319,26 @@ test('a submission with no answers banks its totals and writes no history', () =
   assert.equal(decision.stats.gamesPlayed, 1);
 });
 
+/**
+ * **The same case arriving the other way, and the totals must survive it.** The
+ * callable SDK encodes a present-but-`undefined` key as `null`, so a caller
+ * writing `{ answers: buildPlayAnswers(...) }` — the obvious spelling — sends
+ * `null` for a game with no history, where omitting the key sends nothing.
+ * Refusing one and accepting the other would let an invisible detail of the
+ * caller's object literal decide whether a real game is banked at all.
+ */
+test('a submission whose answers field arrived as null still banks its totals', () => {
+  const decision = nextUserStats(
+    null,
+    { ...submission(), answers: null } as GameResultSubmission,
+    NOW,
+  );
+
+  assert.ok(decision.accepted);
+  assert.equal(decision.play, null);
+  assert.equal(decision.stats.gamesPlayed, 1);
+});
+
 test('a submission with answers carries the document to write beside the totals', () => {
   const answers = [playAnswer(), playAnswer({ correct: false, questionId: undefined })];
   const decision = nextUserStats(null, twoQuestionGame(answers), NOW);

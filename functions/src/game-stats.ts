@@ -68,14 +68,19 @@ export interface GameResultSubmission {
   /**
    * One record per question, in the order they were asked (`FEAT-049`).
    *
-   * **Optional, and absent is a first-class case rather than an error.** A
-   * browser still running a bundle from before this field existed sends
+   * **Optional, and "no history" is a first-class case rather than an error.**
+   * A browser still running a bundle from before this field existed sends
    * nothing, and so does a game restored from a save whose per-answer history
    * could not be trusted to line up with its questions — both are games worth
    * banking into the totals, and rejecting them to protect a history that is
    * not the point of the call would cost more than it buys.
+   *
+   * `null` means the same as absent, and has to: the callable SDK encodes a
+   * present-but-`undefined` key as `null`, so which of the two arrives is
+   * decided by how the caller spelled its object literal rather than by
+   * anything about the game (`playRecordFrom`).
    */
-  answers?: PlayAnswer[];
+  answers?: PlayAnswer[] | null;
 }
 
 export type RejectionReason = 'invalid' | 'duplicate' | 'rate-limited';
@@ -152,8 +157,10 @@ export function isValidSubmission(submission: unknown): submission is GameResult
   }
   // The per-answer history, when there is one. Bounded against this same
   // submission's own question count, so an array cannot describe a different
-  // game from the one being banked (`play-history.ts`).
-  if (answers !== undefined && !isValidPlayAnswers(answers, totalQuestions)) {
+  // game from the one being banked (`play-history.ts`). `null` is let through
+  // beside `undefined` because the SDK turns one into the other in transit —
+  // refusing it would drop the totals of a game that simply had no history.
+  if (answers != null && !isValidPlayAnswers(answers, totalQuestions)) {
     return false;
   }
   return true;

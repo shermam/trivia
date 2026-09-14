@@ -171,6 +171,14 @@ export function isValidPlayAnswers(value: unknown, totalQuestions: number): valu
  * The document to store for this game, or `null` when the submission carried no
  * per-answer records at all.
  *
+ * **Absent and `null` are the same case**, because the callable SDK cannot tell
+ * a caller which one it sent: `encode()` in `@firebase/functions` maps
+ * `undefined` to `null` for any key that is *present*, so `{ answers:
+ * buildPlayAnswers(...) }` — the obvious way to write the call — arrives here
+ * as `null` while omitting the key arrives as `undefined`. Treating the two
+ * differently would make an invisible detail of the caller's object literal
+ * decide whether the player keeps their lifetime totals.
+ *
  * **Rebuilt key by key rather than passed through, and that is this function's
  * whole reason for existing.** The answers come off the wire, and `tx.set` of a
  * client-supplied object stores whatever else was in it — the server-side
@@ -185,10 +193,10 @@ export function isValidPlayAnswers(value: unknown, totalQuestions: number): valu
  * and turn an Open Trivia game into an `internal` error.
  */
 export function playRecordFrom(
-  answers: PlayAnswer[] | undefined,
+  answers: PlayAnswer[] | null | undefined,
   nowMs: number,
 ): PlayRecord | null {
-  if (answers === undefined) {
+  if (answers == null) {
     return null;
   }
   return {

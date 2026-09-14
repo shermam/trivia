@@ -94,6 +94,33 @@ describe('buildPlayAnswers', () => {
     ).toEqual(['easy', 'hard']);
   });
 
+  /**
+   * **The one bound whose failure costs the game rather than the field.**
+   * `difficulty` is a required key of the stored record, so unlike an over-long
+   * id or an unusable tag there is nothing to drop — and `recordGameResult`
+   * refuses the whole submission over one bad field, taking the lifetime totals
+   * with it. Reachable from both sources: `mapToTriviaQuestion` passes
+   * `raw.difficulty` straight through, Open Trivia DB is not ours to constrain,
+   * and a `custom_questions` document written through the Firebase console
+   * never meets `firestore.rules` at all.
+   */
+  it('sends no history at all when a question carries a difficulty the server refuses', () => {
+    const questions = [
+      question('q0'),
+      question('q1', { difficulty: 'Easy' as unknown as TriviaQuestion['difficulty'] }),
+    ];
+
+    expect(buildPlayAnswers(questions, [TIMED_OUT, TIMED_OUT], [1, 2])).toBeUndefined();
+  });
+
+  it('sends no history when a question has no difficulty at all', () => {
+    const questions = [
+      question('q0', { difficulty: undefined as unknown as TriviaQuestion['difficulty'] }),
+    ];
+
+    expect(buildPlayAnswers(questions, [TIMED_OUT], [1])).toBeUndefined();
+  });
+
   // ---------------------------------------------------------------------------
   // Which questions are identified, and which are not
   // ---------------------------------------------------------------------------
@@ -140,6 +167,14 @@ describe('buildPlayAnswers', () => {
 
     expect('questionId' in entry).toBe(false);
     expect(entry.correct).toBe(true);
+    expect(entry.ms).toBe(1_000);
+  });
+
+  /** The same bound at the other end — the server refuses an empty id too. */
+  it('drops an empty id rather than sending one the server refuses', () => {
+    const [entry] = buildPlayAnswers([bankQuestion('')], [TIMED_OUT], [1_000]) ?? [];
+
+    expect('questionId' in entry).toBe(false);
     expect(entry.ms).toBe(1_000);
   });
 

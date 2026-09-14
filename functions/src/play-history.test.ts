@@ -229,6 +229,17 @@ test('stores nothing when the submission carried no answers', () => {
   assert.equal(playRecordFrom(undefined, NOW), null);
 });
 
+/**
+ * `null` is the *same* case, and the reason is on the wire rather than in the
+ * game: `encode()` in `@firebase/functions` maps a present-but-`undefined` key
+ * to `null`, so `{ answers: buildPlayAnswers(...) }` arrives as `null` and
+ * omitting the key arrives as `undefined`. Whether the player keeps their
+ * lifetime totals must not turn on which way the caller spelled its object.
+ */
+test('stores nothing when the answers field arrived as null', () => {
+  assert.equal(playRecordFrom(null, NOW), null);
+});
+
 test('stamps the document with the instant the game was banked', () => {
   assert.equal(playRecordFrom([answer()], NOW)?.at, NOW);
 });

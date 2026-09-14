@@ -45,6 +45,21 @@ export const MAX_ANSWER_MS = 120_000;
  */
 export const MAX_QUESTION_ID_LENGTH = 64;
 
+/**
+ * The three difficulties the server will store, spelled here because nothing
+ * between the wire and this function checks them.
+ *
+ * `TriviaService.mapToTriviaQuestion` assigns `raw.difficulty` straight through
+ * from whichever source produced the question, and neither source is bound by
+ * the type: Open Trivia DB is not ours to constrain, and a `custom_questions`
+ * document written through the Firebase console never meets `firestore.rules`
+ * at all. A `TriviaQuestion` can therefore carry a difficulty TypeScript
+ * believes is one of three values and that is in fact anything — which the
+ * server refuses, taking the whole submission with it (`CLAUDE.md` §4.4: be
+ * right regardless of the writer).
+ */
+const STORABLE_DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'];
+
 /** One question as the player met it, as `recordGameResult` accepts it. */
 export interface PlayAnswerRecord {
   /** The bank question's id. **Absent** for an Open Trivia DB question. */
@@ -99,7 +114,15 @@ export function buildPlayAnswers(
   if (
     questions.length === 0 ||
     history.length !== questions.length ||
-    durations.length !== questions.length
+    durations.length !== questions.length ||
+    // A difficulty outside the three costs the **game**, not just the entry,
+    // and that asymmetry is why it is checked here rather than dropped like an
+    // over-long id or an unusable tag: `difficulty` is a required field of the
+    // stored record, so there is nothing to omit. Losing one round's history is
+    // the smaller failure by a long way — the alternative is the server
+    // refusing the submission whole and the player losing their lifetime
+    // totals for a game they actually played.
+    !questions.every((question) => STORABLE_DIFFICULTIES.includes(question.difficulty))
   ) {
     return undefined;
   }
@@ -110,7 +133,13 @@ export function buildPlayAnswers(
       ms: boundedMs(durations[index]),
       difficulty: question.difficulty,
     };
-    if (question.source === 'custom' && question.id.length <= MAX_QUESTION_ID_LENGTH) {
+    // The length bound at both ends: the server refuses an empty `questionId`
+    // as firmly as an over-long one, and both are cheaper to drop than to send.
+    if (
+      question.source === 'custom' &&
+      question.id.length > 0 &&
+      question.id.length <= MAX_QUESTION_ID_LENGTH
+    ) {
       record.questionId = question.id;
     }
     // Read through the same predicate the chips render with, so a tag the rules

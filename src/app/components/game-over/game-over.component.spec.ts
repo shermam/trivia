@@ -2634,12 +2634,14 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
   /**
    * **The key is absent, not `undefined` and not empty.** The callable SDK's
    * own encoder maps `undefined` to `null` (`@firebase/functions`, `encode()`),
-   * so a payload carrying the key with nothing in it arrives at the server as
-   * `answers: null` — which is a malformed array rather than an absent one, and
-   * `isValidSubmission` refuses the whole submission for it, costing this
-   * player their lifetime totals as well as a history they were never going to
-   * get. Asserted on the key rather than on its value, because the two forms
-   * are indistinguishable in a `toHaveBeenCalledWith`.
+   * so a payload carrying the key with nothing in it puts `answers: null` on
+   * the wire for a field that has no value. `recordGameResult` reads that as
+   * the absence it is — the totals of a real game must not turn on how the
+   * object literal was spelled, which `game-stats.test.ts` pins from the other
+   * side — so what this row holds is the near half of that: the payload saying
+   * what is true rather than relying on the server to forgive what is not.
+   * Asserted on the key rather than on its value, because the two forms are
+   * indistinguishable in a `toHaveBeenCalledWith`.
    */
   it('omits the key entirely when the round has no usable history', () => {
     const { recordGameResult } = render({
