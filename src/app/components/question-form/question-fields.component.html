@@ -474,4 +474,21 @@
       the right answer is right. Reviewers see it, and so do players after they answer.
     </p>
   </div>
+
+  <!--
+    Topic tags (`FEAT-021`). A `formControlName`, so the value lives on the form
+    with everything else: the edit dialog's `reset()` reaches it, and an author
+    resubmitting a question keeps the tags they chose rather than having them
+    cleared by an owner update that re-validates the whole payload.
+
+    Difficulty is deliberately **not** offered as a tag, here or in the
+    suggestion list: it is an existing validated enum two fields up, and a
+    `#hard` beside it would be a second place for the same fact to be wrong.
+  -->
+  <app-tag-selector
+    formControlName="tags"
+    [idPrefix]="idPrefix()"
+    label="Topics"
+    hint="A few words for what this question is about, so players can ask for exactly this subject. Reviewers see them too."
+  />
 </div>

@@ -37,6 +37,13 @@ export interface CustomQuestionSeed {
    * formatting is seeding the shape the whole bank has today.
    */
   format?: 'plain' | 'markdown';
+  /**
+   * Normalised topic tags (`FEAT-021`). Absent on every other seed in the
+   * suite, which is the shape the whole bank has today — and what makes a
+   * tag-filtered draw provable against a shared emulator: a spec that invents
+   * its own tag owns every question that can match it.
+   */
+  tags?: string[];
 }
 
 export interface VerifiedUserSeed {

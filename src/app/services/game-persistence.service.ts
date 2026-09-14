@@ -199,7 +199,15 @@ function isConfig(value: unknown): value is GameConfig {
     typeof value['category'] === 'string' &&
     (value['difficulty'] === '' || DIFFICULTIES.includes(value['difficulty'] as Difficulty)) &&
     SOURCES.includes(value['source'] as QuestionSource) &&
-    (value['timeLimit'] === undefined || isTimeLimitOption(value['timeLimit']))
+    (value['timeLimit'] === undefined || isTimeLimitOption(value['timeLimit'])) &&
+    // The tag selection this game was drawn under (`FEAT-021`), absent on every
+    // save written before the filter existed and on every unfiltered game
+    // since. Checked rather than trusted for the reason the whole function
+    // exists: the store outlives deploys, so a present value still has to be a
+    // list of strings — the game is already drawn, so nothing reads it back,
+    // but a shape nobody checks is a shape that goes wrong quietly.
+    (value['tags'] === undefined ||
+      (Array.isArray(value['tags']) && value['tags'].every((tag) => typeof tag === 'string')))
   );
 }
 

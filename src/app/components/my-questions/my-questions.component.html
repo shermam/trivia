@@ -170,6 +170,14 @@
             </dl>
 
             <!--
+              The topics the author chose (`FEAT-021`). Here as well as on the
+              reviewer's card because this is the screen where they decide
+              whether to edit: an author who cannot see the tags on their own
+              question cannot tell whether the edit dialog will open with them.
+            -->
+            <app-question-tags [tags]="question.tags" label="Topics" testId="my-question-tags" />
+
+            <!--
               The reviewer's note, on a rejected question only. Absent is the
               *normal* case rather than an error: a reviewer may reject without
               writing one, and every question rejected before this field existed

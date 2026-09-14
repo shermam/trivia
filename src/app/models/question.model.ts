@@ -137,6 +137,16 @@ export interface TriviaQuestion {
    * and absent means plain.
    */
   format?: QuestionFormat;
+  /**
+   * Normalised topic tags (`FEAT-021`), for a question that came from the bank.
+   *
+   * Absent on every Open Trivia DB question — the API exposes nothing like it,
+   * and nothing here invents one, for the same reason `format` describes no
+   * source with no stored documents. Rendered as plain-text chips and **never**
+   * through the Markdown renderer: a tag is a key the filter compares, not
+   * prose.
+   */
+  tags?: string[];
 }
 
 /**
@@ -175,6 +185,16 @@ export interface GameConfig {
   difficulty: Difficulty | '';
   source: QuestionSource;
   timeLimit: TimeLimitOption;
+  /**
+   * Topic tags the player asked for (`FEAT-021`). Empty or absent means no tag
+   * clause at all, which is the query the app has always run — the filter is
+   * additive, and this optional field is where that starts.
+   *
+   * Only the **bank** carries tags, so this narrows a `custom` draw and the
+   * custom half of a `mixed` one, and is not offered for an `open_trivia`
+   * game at all rather than being accepted and silently ignored.
+   */
+  tags?: string[];
 }
 
 export interface LeaderboardEntry {
@@ -274,6 +294,20 @@ export interface CustomQuestionContent {
    * `firestore.rules` accepts either value or none, and refuses anything else.
    */
   format?: QuestionFormat;
+  /**
+   * Free-form topic tags, normalised by `normalizeTag()` before they are
+   * stored (`FEAT-021`).
+   *
+   * Optional, and **zero tags is the normal case** — every question in the bank
+   * predates the field, and an untagged question is still drawn by every
+   * unfiltered game. Written only when there is at least one: an empty array
+   * would say what an absent key already says.
+   *
+   * `firestore.rules` bounds it at eight entries, each a distinct lower-case
+   * kebab-case string of 2–32 characters. The rule cannot call the normaliser,
+   * so it enforces the *shape* the normaliser produces.
+   */
+  tags?: string[];
 }
 
 /**

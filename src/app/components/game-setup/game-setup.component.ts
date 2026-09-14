@@ -16,12 +16,15 @@ import {
   DAILY_FREE_GAME_LIMIT,
   DailyGameLimitService,
 } from '../../services/daily-game-limit.service';
+import { MAX_TAG_FILTER_VALUES } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { TriviaCategory, TriviaService } from '../../services/trivia.service';
+import { TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
+import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
 
 /** What `createDonationSession` sends the browser back to `/` carrying. */
 type DonationQueryStatus = 'success' | 'cancelled' | null;
@@ -42,7 +45,7 @@ function donationStatusFrom(value: string | null): DonationQueryStatus {
 @Component({
   selector: 'app-game-setup',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink, IconComponent, LogoComponent],
+  imports: [ReactiveFormsModule, RouterLink, IconComponent, LogoComponent, TagSelectorComponent],
   templateUrl: './game-setup.component.html',
   styleUrl: './game-setup.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -90,7 +93,23 @@ export class GameSetupComponent implements OnInit {
     difficulty: [''],
     source: ['open_trivia' as GameConfig['source'], Validators.required],
     timeLimit: [DEFAULT_TIME_LIMIT as TimeLimitOption, Validators.required],
+    // The topic filter (`FEAT-021`). A form control like every other setting,
+    // so `form.getRawValue()` is still the whole of what the player chose.
+    tags: this.fb.nonNullable.control<string[]>([]),
   });
+
+  /**
+   * How many topics one game may filter on.
+   *
+   * Firestore refuses an `array-contains-any` past 30 values outright, and the
+   * query builder clamps at ten — so this number and
+   * `MAX_TAG_FILTER_VALUES` have to agree, or the picker would offer a
+   * selection the draw silently trims. The service is the authority; this is
+   * the picker being told.
+   */
+  protected readonly maxFilterTags = MAX_TAG_FILTER_VALUES;
+
+  protected readonly tagSuggestions = TAG_SUGGESTIONS;
 
   /**
    * The picker's options. Labelled in words rather than as raw values —
@@ -126,6 +145,38 @@ export class GameSetupComponent implements OnInit {
   /** Mirrors the form control into a signal so `timeLimitNote` recomputes. */
   private readonly timeLimit = signal<TimeLimitOption>(DEFAULT_TIME_LIMIT);
 
+  /** Mirrors the source control, for the two computed values below. */
+  private readonly source = signal<GameConfig['source']>('open_trivia');
+
+  /**
+   * Why the topic filter is unavailable right now, or `null`.
+   *
+   * Two states, and both are the reader's to change, which is why each says so
+   * rather than leaving a greyed-out box to be interpreted:
+   *
+   * - **Offline.** The offline pool is whatever was cached; it stores no tags
+   *   and cannot be queried by one, so a selection would be silently ignored.
+   * - **Open Trivia DB.** Only the community bank carries tags. Accepting a
+   *   selection here and drawing an unfiltered game anyway is the worse
+   *   failure, because nothing on screen would contradict it.
+   */
+  protected readonly tagFilterDisabledReason = computed(() => {
+    if (!this.connectivity.isOnline()) {
+      return 'Offline games play from the saved pool, which cannot be filtered by topic.';
+    }
+    if (this.source() === 'open_trivia') {
+      return 'Only community questions carry topics. Switch to Custom or Mixed to filter by one.';
+    }
+    return null;
+  });
+
+  /** Says what a topic filter will and will not narrow, for the source in play. */
+  protected readonly tagFilterHint = computed(() =>
+    this.source() === 'mixed'
+      ? 'Narrows the community half of the game; Open Trivia questions carry no topics.'
+      : 'Pick topics to play questions about exactly those subjects.',
+  );
+
   // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
   ngOnInit(): void {
     void this.loadCategories();
@@ -133,6 +184,19 @@ export class GameSetupComponent implements OnInit {
     this.form.controls.timeLimit.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.timeLimit.set(value));
+    this.form.controls.source.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => this.source.set(value));
+    // Any edit at all withdraws the short-draw message, because it and the
+    // Start button's "Play {n} Questions" label describe the draw made for the
+    // *previous* selection. `startGame` would already redraw rather than apply
+    // a held draw to a changed selection — this is so the button stops
+    // promising the old number in the meantime. `valueChanges` and not the
+    // individual controls: the count, the category, the difficulty and the
+    // topics all change what a draw would return.
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.gameController.clearShortDrawNotice());
   }
 
   /**
@@ -172,6 +236,12 @@ export class GameSetupComponent implements OnInit {
       difficulty: raw.difficulty as GameConfig['difficulty'],
       source: raw.source,
       timeLimit: raw.timeLimit,
+      // Dropped entirely when the filter is unavailable, rather than sent and
+      // ignored: an offline draw and an Open Trivia draw both have nothing to
+      // match it against, and a config carrying a filter that did not apply is
+      // a config that says something untrue about the game it produced —
+      // including in the saved snapshot a resume reads back.
+      ...(this.tagFilterDisabledReason() || raw.tags.length === 0 ? {} : { tags: raw.tags }),
     };
 
     void this.gameController.startGame(config);
