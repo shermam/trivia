@@ -1,4 +1,5 @@
 import { expect, test } from '../../fixtures/test';
+import { waitForAnonymousSession } from '../../support/auth';
 import { startGame } from '../../support/game';
 import { readSavedGame } from '../../support/offline-storage';
 import { stubOpenTrivia } from '../../support/open-trivia';
@@ -64,11 +65,16 @@ test.describe('browser state does not leak between tests', () => {
       })
       .not.toBeNull();
 
-    // Polled, like its counterpart in the next test, because anonymous sign-in
-    // is a round trip and nothing here waits on it: the questions are stubbed,
-    // so the game can be on screen before Auth has answered. Against the
-    // emulator that gap is a millisecond and a one-shot read never lost the
-    // race; against the real project behind a preview channel it does.
+    // Nothing on this screen waits for auth — the questions are stubbed, so
+    // the game is on screen well before the deferred bootstrap has finished
+    // signing in — so the wait is the app's own two signals rather than a
+    // number picked to be big enough (`e2e/support/auth.ts`).
+    await waitForAnonymousSession(page);
+
+    // The tracker is the thing the sweep reads, and it lives in Node: the
+    // page's `setItem` is wrapped, but the uid crosses to the test process
+    // over a binding. That hop is all this poll is waiting for now, which is
+    // why it keeps the config's default timeout rather than the minute above.
     await expect
       .poll(() => authUids.uids().length, { message: 'an anonymous session was persisted' })
       .toBeGreaterThanOrEqual(1);
@@ -115,6 +121,12 @@ test.describe('browser state does not leak between tests', () => {
     // shared its Firebase session would restore the same account rather than
     // signing in afresh, and every backend assertion in the suite that assumes
     // "this test's uid" would be about the previous test's player.
+    //
+    // This visit does nothing but load `/`, so the session arrives entirely on
+    // the app's own schedule, which is what the helper waits out — and the
+    // poll below has to reach a uid for the *negative* assertion after it to
+    // mean anything, an empty list trivially containing no previous uid.
+    await waitForAnonymousSession(page);
     await expect
       .poll(() => authUids.uids().length, { message: 'this test signed in anonymously' })
       .toBeGreaterThanOrEqual(1);
