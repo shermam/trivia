@@ -397,11 +397,72 @@ service cloud.firestore {
     // in a clause of their own, so a bound here would be unreachable — and an
     // unreachable clause is one a mutation run cannot tell from a deleted one
     // (`CLAUDE.md` §4.6).
+    // The most tags one question may carry (`FEAT-021`). Named rather than
+    // inlined because `areValidTags()` below has to check every element by
+    // index, and the two numbers agreeing is what makes the ninth tag refused
+    // rather than merely unchecked.
+    function maxTags() {
+      return 8;
+    }
+
+    // One tag: a lower-case kebab-case string of 2–32 characters
+    // (`FEAT-021`, `src/app/utils/normalize-tag.util.ts`).
+    //
+    // The character class is the whole reason a free-form field is safe to
+    // have: a tag cannot carry a sentence, a URL or a script, and the length
+    // cap means nobody can use it as storage.
+    //
+    // **The `^` and `$` are redundant and are written anyway.** `matches()`
+    // matches the *whole* string — it is RE2's full match, not a search — so
+    // dropping the anchors changes nothing. Measured rather than assumed:
+    // unanchoring the pattern fails not one of the twenty-one tag tests. They
+    // stay because every reader arriving here reads this as a JavaScript
+    // regular expression first, where the difference is the entire meaning of
+    // the pattern; what must not happen is somebody *relying* on them, so the
+    // same note is in the rules tests.
+    function isValidTag(tag) {
+      return tag is string
+             && tag.size() >= 2 && tag.size() <= 32
+             && tag.matches('^[a-z0-9]+(-[a-z0-9]+)*$');
+    }
+
+    // Every element of a `tags` list, checked one index at a time.
+    //
+    // **The rules language has no way to iterate**, so this is not a style
+    // choice: `List` exposes `hasAll`, `hasAny`, `hasOnly`, `join`, `size` and
+    // `toSet` and nothing that applies a predicate to each element. Indexing is
+    // the only mechanism that can, and it costs one clause per permitted
+    // position — which is a second reason {@link maxTags} is small.
+    //
+    // Each clause is guarded by the size rather than by a `try`: reading past
+    // the end of a list raises, and an erroring rule denies, so an unguarded
+    // `tags[7]` would refuse every question carrying fewer than eight tags.
+    // `||` short-circuits, so the index is only ever evaluated for a position
+    // that exists.
+    //
+    // The `toSet()` comparison is the duplicate check `incorrect_answers`
+    // already uses. Two entries that normalise to the same tag are collapsed
+    // client-side, so a duplicate arriving here is a client that did not
+    // normalise — which is exactly what a rule is for.
+    function areValidTags(tags) {
+      return tags is list
+             && tags.size() <= maxTags()
+             && tags.toSet().size() == tags.size()
+             && (tags.size() < 1 || isValidTag(tags[0]))
+             && (tags.size() < 2 || isValidTag(tags[1]))
+             && (tags.size() < 3 || isValidTag(tags[2]))
+             && (tags.size() < 4 || isValidTag(tags[3]))
+             && (tags.size() < 5 || isValidTag(tags[4]))
+             && (tags.size() < 6 || isValidTag(tags[5]))
+             && (tags.size() < 7 || isValidTag(tags[6]))
+             && (tags.size() < 8 || isValidTag(tags[7]));
+    }
+
     function isValidQuestionShape(data) {
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
                  'incorrect_answers', 'createdBy', 'createdAt', 'status',
-                 'sourceUrl', 'sourceTitle', 'explanation', 'format',
+                 'sourceUrl', 'sourceTitle', 'explanation', 'format', 'tags',
                  'rejectionReason']
               )
             && data.category is string && data.category.size() > 0 && data.category.size() <= 100
@@ -467,6 +528,23 @@ service cloud.firestore {
             // clause is one a mutation run cannot tell from a deleted one
             // (`CLAUDE.md` §4.6).
             && (!('format' in data) || data.format in ['plain', 'markdown'])
+            // Free-form topic tags (`FEAT-021`). Optional, and zero tags is the
+            // normal case: every question in the bank predates the field, and
+            // an untagged question is still drawn by every unfiltered game.
+            //
+            // Unlike the four optional fields above, something *does*
+            // dereference this one — the setup screen's filter adds an
+            // `array-contains-any` clause on it. That is what makes the filter
+            // strictly additive rather than a migration: a question with no
+            // `tags` array matches no such clause, so an untagged bank is
+            // invisible to tag-filtered play and perfectly visible to every
+            // other game. There is no backfill and no ordering hazard, because
+            // no existing query changes.
+            //
+            // The bounds are `areValidTags()` above; they are stated there
+            // rather than here because the per-element check needs eight
+            // clauses of its own.
+            && (!('tags' in data) || areValidTags(data.tags))
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
             // click against `correct_answer` by text, so the wrong option
