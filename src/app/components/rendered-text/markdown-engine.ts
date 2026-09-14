@@ -462,9 +462,11 @@ export function sanitizeHtml(html: string): string {
 /**
  * Markdown in, HTML that is safe to insert in, with no state left behind.
  *
- * The return value still has to go through `bypassSecurityTrustHtml`: it has
- * been sanitised by the allowlist above, and Angular's own sanitiser — which
- * knows nothing of MathML — would otherwise throw the formulas away.
+ * The return value is written to an element directly rather than bound, and
+ * either way it must not meet Angular's own sanitiser: that one knows nothing
+ * of MathML and would throw every formula away. The allowlist above is the
+ * boundary — see `rendered-text.component.ts` for what the direct write buys
+ * over a `bypassSecurityTrustHtml` binding, which is bytes rather than safety.
  */
 export function renderMarkdown(source: string, options: RenderOptions = {}): string {
   const marked = markedFor(options.renderMath);
