@@ -107,9 +107,19 @@ async function configureGame(
   }
 }
 
-/** The text of every question a game served, in the order it served them. */
-async function playAndCollect(page: Page, count: number): Promise<string[]> {
+/**
+ * The text of every question a game served, in the order it served them.
+ *
+ * The right answer comes from the **seed**, looked up by the question on
+ * screen, rather than from reading the options: an answer button renders its
+ * A/B/C/D badge inside itself, so its `textContent` is the label glued to the
+ * answer and matching on the answer's own text finds nothing. Looking it up
+ * also fails loudly on a question this spec did not seed, which is the failure
+ * worth having on a shared emulator.
+ */
+async function playAndCollect(page: Page, seed: Seed, count: number): Promise<string[]> {
   const served: string[] = [];
+  const all = [...seed.tagged, ...seed.untagged];
   const heading = page.getByTestId('question-text');
 
   for (let index = 0; index < count; index++) {
@@ -120,14 +130,12 @@ async function playAndCollect(page: Page, count: number): Promise<string[]> {
       .toBe(false);
 
     const text = (await heading.textContent())?.trim() ?? '';
+    const question = all.find((candidate) => candidate.question === text);
+    if (!question) {
+      throw new Error(`Served question "${text}" is not one of the seeded ones`);
+    }
     served.push(text);
-    // The seeded answers all start "Right ", and the option carrying it is the
-    // correct one — read off the screen rather than from the seed, because the
-    // point here is which *question* was served, not which answer was right.
-    const correct = (await page.getByTestId('answer-option').allTextContents())
-      .map((label) => label.trim())
-      .find((label) => label.startsWith('Right '))!;
-    await answerQuestion(page, correct);
+    await answerQuestion(page, question.correct_answer);
   }
 
   await expect(page).toHaveURL(/\/game-over$/);
@@ -146,7 +154,7 @@ test.describe('the setup screen topic filter', () => {
     await page.getByRole('button', { name: 'Start Game', exact: true }).click();
     await waitForPlayRoute(page);
 
-    const served = await playAndCollect(page, GAME_SIZE);
+    const served = await playAndCollect(page, seed, GAME_SIZE);
 
     // Every one tagged, and none of the five untagged questions sitting in the
     // same category — which is what an `array-contains-any` clause buys and a
@@ -172,7 +180,7 @@ test.describe('the setup screen topic filter', () => {
     await page.getByRole('button', { name: 'Start Game', exact: true }).click();
     await waitForPlayRoute(page);
 
-    const served = await playAndCollect(page, 2 * GAME_SIZE);
+    const served = await playAndCollect(page, seed, 2 * GAME_SIZE);
 
     expect(served.some((text) => text.startsWith('Untagged question'))).toBe(true);
     expect(served).toHaveLength(2 * GAME_SIZE);
@@ -206,7 +214,7 @@ test.describe('the setup screen topic filter', () => {
     await page.getByRole('button', { name: `Play ${GAME_SIZE} Questions`, exact: true }).click();
     await waitForPlayRoute(page);
 
-    const served = await playAndCollect(page, GAME_SIZE);
+    const served = await playAndCollect(page, seed, GAME_SIZE);
     expect(served.every((text) => text.startsWith('Tagged question'))).toBe(true);
   });
 

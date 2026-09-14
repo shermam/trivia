@@ -6,6 +6,7 @@ import {
   input,
   signal,
 } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import {
   MAX_TAGS_PER_QUESTION,
@@ -15,6 +16,11 @@ import {
 } from '../../utils/normalize-tag.util';
 import { TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
 import { IconComponent } from '../icon/icon.component';
+
+/** Everything a suggestion chip wears in both states — see `suggestionClass()`. */
+const SUGGESTION_BASE_CLASS =
+  'rounded-full border px-2.5 py-0.5 text-xs font-medium ' +
+  'disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 
 /**
  * The tag picker (`FEAT-021`), shared by everything that chooses tags: the
@@ -80,7 +86,7 @@ import { IconComponent } from '../icon/icon.component';
 @Component({
   selector: 'app-tag-selector',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, NgClass],
   templateUrl: './tag-selector.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [
@@ -158,6 +164,21 @@ export class TagSelectorComponent implements ControlValueAccessor {
 
   protected isSelected(tag: string): boolean {
     return this.tags().includes(tag);
+  }
+
+  /**
+   * One class string per suggestion rather than a dozen `[class.x]` bindings.
+   *
+   * The setup screen renders this control on first paint with the whole starter
+   * list in it, so the difference is roughly forty binding slots against five
+   * hundred — a measurable share of the home route's Lighthouse performance
+   * budget, on a control most visitors never touch. Same shape as the quiz
+   * loop's `answerClass()`, and for the same reason.
+   */
+  protected suggestionClass(tag: string): string {
+    return this.isSelected(tag)
+      ? `${SUGGESTION_BASE_CLASS} border-emerald-600 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300`
+      : `${SUGGESTION_BASE_CLASS} border-slate-900/10 dark:border-white/10 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300`;
   }
 
   /** What a suggestion button does: it is a toggle, so it removes as well as adds. */

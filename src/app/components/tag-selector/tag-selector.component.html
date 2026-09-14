@@ -157,18 +157,7 @@
             [attr.aria-pressed]="isSelected(suggestion)"
             (click)="toggle(suggestion)"
             [attr.data-cy]="'suggest-tag-' + suggestion"
-            class="rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-            [class.border-emerald-600]="isSelected(suggestion)"
-            [class.bg-emerald-100]="isSelected(suggestion)"
-            [class.dark:bg-emerald-500/20]="isSelected(suggestion)"
-            [class.text-emerald-800]="isSelected(suggestion)"
-            [class.dark:text-emerald-300]="isSelected(suggestion)"
-            [class.border-slate-900/10]="!isSelected(suggestion)"
-            [class.dark:border-white/10]="!isSelected(suggestion)"
-            [class.bg-slate-50]="!isSelected(suggestion)"
-            [class.dark:bg-slate-800]="!isSelected(suggestion)"
-            [class.text-slate-600]="!isSelected(suggestion)"
-            [class.dark:text-slate-300]="!isSelected(suggestion)"
+            [ngClass]="suggestionClass(suggestion)"
           >
             #{{ suggestion }}
           </button>
