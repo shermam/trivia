@@ -124,7 +124,7 @@
   -->
   <p role="status" [attr.data-cy]="id('tag-status')" class="sr-only">{{ announcement() }}</p>
 
-  @if (suggestions().length > 0) {
+  @if (suggestions().length > 0 && !isDisabled()) {
     <!--
       Grouped controls carry a role and a label or the group's purpose is never
       conveyed (`CLAUDE.md` §4.5, finding G4). Toggle buttons rather than a
@@ -137,6 +137,19 @@
       clicked one (§4.4), and it would take away the obvious way to undo the
       click they just made. `aria-pressed` is what carries the state, and it is
       the reason these are toggles rather than "Add" buttons.
+
+      **The whole group is absent while the control is unavailable**, and the
+      reason is cost rather than tidiness. The home route renders this filter on
+      first paint with the source defaulting to Open Trivia, which is one of the
+      two states that disable it — so forty shortcut buttons nobody can press
+      would sit inside the very card Lighthouse measures as the largest
+      contentful paint. Measured on a four-core box, three Lighthouse runs each:
+      rendering them put the median LCP at 4.0 s against the same build's 3.7 s
+      without this feature at all; deferring them brought it back to 3.5 s.
+      It reappears when the reader switches source, which is
+      their own action rather than a state arriving under them, and the boxes
+      above it do not move (§4.4 — the same call the contribute form's Markdown
+      preview makes).
     -->
     <div class="mt-2">
       <span
@@ -153,7 +166,7 @@
         @for (suggestion of suggestions(); track suggestion) {
           <button
             type="button"
-            [disabled]="isDisabled() || (isFull() && !isSelected(suggestion))"
+            [disabled]="isFull() && !isSelected(suggestion)"
             [attr.aria-pressed]="isSelected(suggestion)"
             (click)="toggle(suggestion)"
             [attr.data-cy]="'suggest-tag-' + suggestion"

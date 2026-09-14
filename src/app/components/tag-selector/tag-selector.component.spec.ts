@@ -265,13 +265,28 @@ describe('TagSelectorComponent — unavailable', () => {
     expect(feedback()).toBe('Offline games cannot be filtered by topic.');
   });
 
-  it('accepts nothing while it is unavailable', () => {
-    const { host, fixture, suggestion } = render();
+  /**
+   * The shortcuts are **absent** rather than present-and-disabled while the
+   * control is unavailable, which is a performance decision as much as a tidy
+   * one: the home route renders this filter on first paint with the source
+   * defaulting to Open Trivia — a state that disables it — so forty buttons
+   * nobody can press would sit inside the card Lighthouse measures as the
+   * largest contentful paint.
+   */
+  it('offers no shortcuts at all while it is unavailable', () => {
+    const { host, fixture, el } = render();
     host.disabledReason.set('Not here.');
     fixture.detectChanges();
 
-    suggestion('calculus').click();
+    expect(el.querySelector('[data-cy="tag-suggestions"]')).toBeNull();
+  });
+
+  it('accepts nothing typed while it is unavailable', () => {
+    const { host, fixture, enter } = render();
+    host.disabledReason.set('Not here.');
     fixture.detectChanges();
+
+    enter('calculus');
 
     expect(host.control.value).toEqual([]);
   });
