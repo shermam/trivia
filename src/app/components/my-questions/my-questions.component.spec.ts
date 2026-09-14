@@ -351,6 +351,69 @@ describe('MyQuestionsComponent editing', () => {
     expect(component.actionResult()).toMatch(/pending review again/);
   });
 
+  /**
+   * `FEAT-019`. A resubmit rewrites the whole document, so a field the edit
+   * form does not carry is a field the edit silently deletes — which is how an
+   * author's Markdown question would come back rendering its own asterisks
+   * after a one-word correction. The pair below is the round trip: the toggle
+   * arrives set, and the value goes back out.
+   */
+  it('keeps the format when the author edits a markdown question', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [myQuestion('q1', { question: '**Original?**', format: 'markdown' })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    expect(component.form.getRawValue().format).toBe('markdown');
+
+    component.form.controls.question.setValue('**Corrected?**');
+    await component.saveEdit();
+    await settle();
+
+    expect(updateUserQuestion).toHaveBeenCalledWith(
+      'q1',
+      expect.objectContaining({ format: 'markdown' }),
+    );
+  });
+
+  /**
+   * And the other direction, which is the one an exact-key allowlist makes
+   * awkward: switching back to plain has to *remove* the key rather than write
+   * `'plain'`, because an absent field is what plain means everywhere else
+   * (`data-model.md` §3). `FirebaseService.updateUserQuestion` does the
+   * removal; what this pins is that the content it is handed has no `format`
+   * at all, rather than one it has to interpret.
+   */
+  it('drops the format when the author switches a markdown question back to plain', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [myQuestion('q1', { question: '**Original?**', format: 'markdown' })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    component.form.controls.format.setValue('plain');
+    await component.saveEdit();
+    await settle();
+
+    const [, content] = updateUserQuestion.mock.calls[0];
+    expect('format' in content).toBe(false);
+  });
+
+  /**
+   * The overwhelmingly common row: no `format` at all. The form has to open on
+   * plain rather than on `undefined`, or the segmented control renders with
+   * neither segment selected.
+   */
+  it('opens a question with no format on the plain segment', async () => {
+    const { component } = setup({ questions: [myQuestion('q1')] });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+
+    expect(component.form.getRawValue().format).toBe('plain');
+  });
+
   it('refuses to save an invalid form and says which field is wrong', async () => {
     const { component, updateUserQuestion } = setup();
     await settle();

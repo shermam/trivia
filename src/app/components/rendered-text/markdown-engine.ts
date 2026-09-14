@@ -134,9 +134,22 @@ export const ALLOWED_TAGS: readonly string[] = [
  * well, for the reason `SourceLinkComponent` re-checks its own: the reader has
  * to be right regardless of the writer.
  *
+ * **A list is per document, never per element**, which is the thing about
+ * DOMPurify's configuration most likely to be misread: an entry here is legal
+ * on *every* allowed tag, not only on the one it was added for. `href` and
+ * `title` were added for `<a>` and the hook below is what confines them to it.
+ * That matters because MathML has an `href` of its own — Firefox turns any
+ * MathML element carrying one into a link — so `<mi href>` would be a live
+ * link that never passed the `https:` parse or collected a `rel`.
+ *
  * The rest are MathML presentation attributes. None of them carries a URL or a
  * script; they carry lengths, alignments and the `display="block"` that tells
  * the stylesheet a formula is a display formula rather than an inline one.
+ * Deliberately **not** among them: `mathcolor` and `mathbackground`, which are
+ * a style attribute by another name and which KaTeX emits only on the error
+ * markup this allowlist is meant to strip; and `xlink:href`, `src` and
+ * `background`, which carry URLs into elements that have no business
+ * fetching anything.
  */
 export const ALLOWED_ATTR: readonly string[] = [
   'href',
@@ -249,7 +262,7 @@ function isHttpsUrl(value: string): boolean {
 let hooksInstalled = false;
 
 /**
- * The two things the allowlist alone cannot express, both applied after
+ * The three things the allowlist alone cannot express, all applied after
  * DOMPurify has finished with an element's attributes.
  *
  * **Classes are narrowed to the fence language.** `class` has to be allowed for
@@ -258,6 +271,18 @@ let hooksInstalled = false;
  * at all here — raw HTML is escaped upstream — but "only our own code can put
  * one there" is a property of today's pipeline rather than of the sanitiser,
  * and this is the sanitiser.
+ *
+ * **`href` and `title` are confined to `<a>`**, because `ALLOWED_ATTR` cannot
+ * confine them itself: DOMPurify's allowlist is per document, so an entry added
+ * for links is legal on every other allowed tag too. `href` is the one that
+ * bites. MathML defines its own `href` and Firefox honours it on any MathML
+ * element, so `<mi href="//evil.example">` was a real, clickable link — one
+ * that never reached the `https:` parse below, never collected a `rel`, and
+ * passed `ALLOWED_URI_REGEXP` because a protocol-relative URL is not
+ * scheme-shaped. Nothing in today's pipeline can emit one — `marked` escapes
+ * raw HTML and KaTeX runs untrusted, so `\href` compiles to an error — but
+ * this file is the boundary, and a boundary that holds only because of what is
+ * upstream of it is not one.
  *
  * **`target="_blank"` is added here, with its `rel`, and never trusted from the
  * source.** A contributed link leaves the app, so it opens in a new tab; a new
@@ -286,7 +311,12 @@ function installHooks(): void {
       }
     }
 
+    // An HTML `<a>`, and only that: DOMPurify refuses an `a` in the MathML
+    // namespace outright, so anything reaching the branch below is a real
+    // anchor rather than a MathML element wearing the name.
     if (node.tagName.toLowerCase() !== 'a') {
+      node.removeAttribute('href');
+      node.removeAttribute('title');
       return;
     }
     const href = node.getAttribute('href');

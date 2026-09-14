@@ -184,6 +184,144 @@ test.describe('markdown and math rendering', () => {
     await expect(prompt.locator('math')).toHaveCount(0);
   });
 
+  /**
+   * The payload suite lives in `markdown-engine.spec.ts`, and this is the one
+   * question it cannot answer: **what a browser does with the string.**
+   *
+   * jsdom parses markup and runs nothing — no `onerror`, no `<script>`, no
+   * navigation, no CSP. So a `not.toContain('onerror')` there is an assertion
+   * about a DOM tree, while the thing anybody actually cares about is whether
+   * a contributed question can execute in a player's tab. That needs a real
+   * engine, a real service-worker-free page under the app's real headers, and
+   * a sentinel every payload tries to set.
+   */
+  test('cannot execute anything, on a question that is nothing but payloads', async ({
+    page,
+    firebase,
+  }) => {
+    // Every payload below writes here. It stays `undefined` if the pipeline
+    // holds — and unlike a dialog handler, it also catches the payloads that
+    // would run without opening one.
+    await page.addInitScript(() => {
+      (window as unknown as Record<string, unknown>)['__xssFired'] = false;
+    });
+
+    const category = `Injection ${tag}`;
+    const marker = `payload-${tag}`;
+    const fire = 'window.__xssFired = true';
+
+    await stubExtraCategory(page, category);
+    await firebase.seedCustomQuestions([
+      {
+        id: `injection-${tag}`,
+        category,
+        type: 'multiple',
+        difficulty: 'easy',
+        question:
+          `${marker}\n\n` +
+          `<script>${fire}</script>\n` +
+          `<img src=x onerror="${fire}">\n` +
+          `<svg onload="${fire}"></svg>\n` +
+          `<iframe src="data:text/html,<script>${fire}</script>"></iframe>\n` +
+          `<form action="https://evil.example"><input name="p"><button>go</button></form>\n` +
+          `<p style="position:fixed;inset:0;z-index:99">covering everything</p>\n` +
+          `<math><mi href="//evil.example">m</mi><annotation-xml encoding="text/html"><img src=x onerror="${fire}"></annotation-xml></math>\n` +
+          `<a href="javascript:${fire}">raw anchor</a>\n` +
+          `[markdown link](javascript:${fire})\n\n` +
+          `$\\href{javascript:${fire}}{x}$ and $\\htmlStyle{position:fixed}{y}$`,
+        correct_answer: `ok <img src=x onerror="${fire}">`,
+        incorrect_answers: [
+          `no <script>${fire}</script>`,
+          `nope [x](javascript:${fire})`,
+          `nah <b onmouseover="${fire}">b</b>`,
+        ],
+        createdBy: 'someone-else',
+        createdAt: Date.now(),
+        format: 'markdown',
+      },
+    ]);
+
+    await startCustomGame(page, category);
+
+    const card = page.getByTestId('question-card');
+    await expect(page.getByTestId('question-text').getByTestId('rendered-text')).toHaveAttribute(
+      'data-rendered',
+      'markdown',
+    );
+    // The prose around the payloads survived, so this is a rendered question
+    // rather than an empty box that would pass every assertion below.
+    await expect(card).toContainText(marker);
+
+    // One poll over the whole census rather than an assertion per property:
+    // these are several reads of one DOM state, and reading them separately is
+    // how a group of measurements becomes a race (`CLAUDE.md` §4.6).
+    await expect
+      .poll(async () => census(card), { message: 'nothing executable survived sanitisation' })
+      .toEqual({
+        executed: false,
+        forbiddenTags: [],
+        eventHandlers: [],
+        styleAttributes: 0,
+        activeSchemes: [],
+        hrefOutsideAnchor: [],
+      });
+  });
+
+  /**
+   * The engine is a dynamic `import()`, so "the chunk did not arrive" is a
+   * state a real reader reaches — a deploy mid-session, a dropped connection —
+   * and the component's answer to it is the source text rather than a blank.
+   *
+   * Only here, because the unit suite imports both engines statically: mocking
+   * the import would test the mock. `page.route` reaches this fetch because the
+   * emulator run installs no service worker; with one in front of it the
+   * request would be re-issued from the worker's own context and never
+   * intercepted at all (`CLAUDE.md` §4.6).
+   */
+  test('shows the source text, still playable, when the markdown chunk never arrives', async ({
+    page,
+    firebase,
+  }) => {
+    await page.route(
+      (url) => url.pathname.includes('markdown-engine'),
+      (route) => route.abort(),
+    );
+
+    const category = `Chunkless ${tag}`;
+    const source = `**Bold** and $x^2$ (${tag})`;
+
+    await stubExtraCategory(page, category);
+    await firebase.seedCustomQuestions([
+      {
+        id: `chunkless-${tag}`,
+        category,
+        type: 'boolean',
+        difficulty: 'easy',
+        question: source,
+        correct_answer: 'True',
+        incorrect_answers: ['False'],
+        createdBy: 'someone-else',
+        createdAt: Date.now(),
+        format: 'markdown',
+      },
+    ]);
+
+    await startCustomGame(page, category);
+
+    const prompt = page.getByTestId('question-text').getByTestId('rendered-text');
+    // `loading` rather than `plain`: the document did ask for Markdown, and the
+    // two markers exist so a test can tell "this is final" from "this is what
+    // is left when the engine never came" (`rendered-text.component.ts`).
+    await expect(prompt).toHaveAttribute('data-rendered', 'loading');
+    await expect(prompt).toHaveText(source);
+    await expect(prompt.locator('strong')).toHaveCount(0);
+
+    // And the round still plays, which is the whole reason the fallback is text
+    // rather than an error.
+    await page.getByTestId('answer-option').first().click();
+    await expect(page.getByTestId('result-status')).not.toBeEmpty();
+  });
+
   test('writes the format field through the real rules, and shows the reviewer the rendered question', async ({
     page,
     firebase,
@@ -291,6 +429,89 @@ async function settledWidth(box: Locator, what: string): Promise<number> {
     .toBe(true);
 
   return settled;
+}
+
+interface Census {
+  executed: boolean;
+  forbiddenTags: string[];
+  eventHandlers: string[];
+  styleAttributes: number;
+  activeSchemes: string[];
+  hrefOutsideAnchor: string[];
+}
+
+/**
+ * Everything dangerous a payload could have left behind, read from the live
+ * DOM of one card in a single pass.
+ *
+ * **One object rather than six assertions**, because they are six reads of the
+ * same state and `expect.poll` can only retry them together — separately, each
+ * would sample a different instant and the group would be a race
+ * (`CLAUDE.md` §4.6). It also names *what* got through when it fails, which a
+ * chain of `toHaveCount(0)` does not.
+ *
+ * `hrefOutsideAnchor` is the entry worth explaining. DOMPurify's `ALLOWED_ATTR`
+ * is a per-document list, so `href` added for `<a>` is legal on every other
+ * allowed tag — and MathML has an `href` of its own that Firefox turns into a
+ * link. An assertion that merely counts `href`s cannot see that; the element it
+ * sits on is the whole question.
+ */
+async function census(card: Locator): Promise<Census> {
+  return card.evaluate((root): Census => {
+    const forbidden = new Set([
+      'script',
+      'iframe',
+      'object',
+      'embed',
+      'form',
+      'input',
+      'button',
+      'img',
+      'svg',
+      'style',
+      'link',
+      'annotation-xml',
+      'base',
+      'meta',
+    ]);
+    const census: Census = {
+      executed: (window as unknown as Record<string, unknown>)['__xssFired'] === true,
+      forbiddenTags: [],
+      eventHandlers: [],
+      styleAttributes: 0,
+      activeSchemes: [],
+      hrefOutsideAnchor: [],
+    };
+
+    for (const rendered of root.querySelectorAll('[data-cy="rendered-text"]')) {
+      for (const element of [rendered, ...rendered.querySelectorAll('*')]) {
+        const tag = element.tagName.toLowerCase();
+        if (forbidden.has(tag)) {
+          census.forbiddenTags.push(tag);
+        }
+        for (const attribute of element.attributes) {
+          const name = attribute.name.toLowerCase();
+          // `getAttribute` rather than the property, because a CSP-refused
+          // `style` stays in the DOM with its declarations dropped — the
+          // attribute is the evidence, the computed style is not
+          // (`CLAUDE.md` §4.4).
+          if (name.startsWith('on')) {
+            census.eventHandlers.push(`${tag}[${name}]`);
+          }
+          if (name === 'style') {
+            census.styleAttributes += 1;
+          }
+          if (/^\s*(?:javascript|data|vbscript)\s*:/i.test(attribute.value)) {
+            census.activeSchemes.push(`${tag}[${name}]`);
+          }
+          if ((name === 'href' || name === 'xlink:href') && tag !== 'a') {
+            census.hrefOutsideAnchor.push(`${tag}[${name}]=${attribute.value}`);
+          }
+        }
+      }
+    }
+    return census;
+  });
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown, sanitizeHtml } from './markdown-engine';
+import { ALLOWED_ATTR, SANITIZE_CONFIG, renderMarkdown, sanitizeHtml } from './markdown-engine';
 import { renderMath } from './math-engine';
 
 /**
@@ -51,6 +51,22 @@ function tagNames(host: HTMLElement): string[] {
 function attributeNames(host: HTMLElement): string[] {
   return elements(host).flatMap((element) =>
     [...element.attributes].map((attribute) => attribute.name.toLowerCase()),
+  );
+}
+
+/**
+ * Every `tag[attribute]` pair in the output.
+ *
+ * `attributeNames` alone cannot see the bug this exists for: DOMPurify's
+ * allowlist is per *document*, so an attribute added for one element is legal
+ * on every other, and a payload putting `href` on an `<mi>` produces exactly
+ * the same attribute names as a legitimate link. The pair is the assertion.
+ */
+function attributePairs(host: HTMLElement): string[] {
+  return elements(host).flatMap((element) =>
+    [...element.attributes].map(
+      (attribute) => `${element.tagName.toLowerCase()}[${attribute.name.toLowerCase()}]`,
+    ),
   );
 }
 
@@ -265,6 +281,254 @@ describe('markdown engine: injection payloads', () => {
   });
 });
 
+/**
+ * The allowlist is a *document-wide* list, so "this attribute is safe" is never
+ * the whole question — "safe on which element" is. Every test here puts an
+ * attribute on an element it was not added for.
+ */
+describe('markdown engine: the allowlist is per document, not per element', () => {
+  /**
+   * MathML has an `href` of its own and **Firefox honours it on any MathML
+   * element**, so an `<mi href>` is a live link. This one shipped: `href` was on
+   * the allowlist for `<a>`, the hook that parses it for `https:` and attaches
+   * `rel` returned early on anything else, and `ALLOWED_URI_REGEXP` passes a
+   * protocol-relative URL because it is not scheme-shaped. The result was a
+   * clickable off-site link inside a question, with no `rel` and no scheme
+   * check. Unreachable through today's parser — but this file is the boundary,
+   * and a boundary that holds because of what is upstream is not one.
+   */
+  it('strips href from a MathML element, which Firefox would otherwise make a link', () => {
+    for (const payload of [
+      '<math><mi href="javascript:alert(1)">x</mi></math>',
+      '<math><mi href="https://evil.example">x</mi></math>',
+      '<math><mi href="//evil.example">x</mi></math>',
+      '<math><mtext href="/account">x</mtext></math>',
+    ]) {
+      for (const out of bothLayers(payload)) {
+        expect(attributeNames(out)).not.toContain('href');
+      }
+    }
+  });
+
+  it('strips href from a prose element that is not a link', () => {
+    for (const payload of ['<p href="https://evil.example">x</p>', '<code href="/x">y</code>']) {
+      for (const out of bothLayers(payload)) {
+        expect(attributeNames(out)).not.toContain('href');
+      }
+    }
+  });
+
+  /** A tooltip on arbitrary elements is a channel `marked` never opens. */
+  it('strips title from anything that is not a link', () => {
+    for (const out of bothLayers('<p title="not a tooltip"><code title="nor this">x</code></p>')) {
+      expect(attributeNames(out)).not.toContain('title');
+    }
+    // …and keeps the one place it means something: a Markdown link title.
+    const link = parse(render('[docs](https://example.org/a "Reference")')).querySelector('a');
+    expect(link?.getAttribute('title')).toBe('Reference');
+  });
+
+  /**
+   * The pair, rather than the name: a suite asserting only that `href` exists
+   * somewhere passes just as happily when it is on an `<mi>`.
+   */
+  it('leaves href and title only on anchors, across a payload carrying both', () => {
+    const out = parse(
+      sanitizeHtml(
+        '<a href="https://example.org/a" title="ok">link</a>' +
+          '<math><mi href="https://evil.example" title="tip">x</mi></math>' +
+          '<p href="https://evil.example" title="tip">y</p>',
+      ),
+    );
+    expect(attributePairs(out).filter((pair) => pair.endsWith('[href]'))).toEqual(['a[href]']);
+    expect(attributePairs(out).filter((pair) => pair.endsWith('[title]'))).toEqual(['a[title]']);
+  });
+
+  it('strips xlink:href wherever it appears', () => {
+    for (const payload of [
+      '<a xlink:href="javascript:alert(1)">x</a>',
+      '<math><mi xlink:href="javascript:alert(1)">x</mi></math>',
+    ]) {
+      for (const out of bothLayers(payload)) {
+        expect(attributeNames(out)).not.toContain('xlink:href');
+      }
+    }
+  });
+
+  /**
+   * `mathcolor` and `mathbackground` are `style` under another name — they
+   * would survive `FORBID_ATTR: ['style']` untouched. KaTeX emits `mathcolor`
+   * on exactly one thing, the error markup, which this allowlist strips anyway.
+   */
+  it('strips mathcolor and mathbackground, which are a style attribute renamed', () => {
+    const payload =
+      '<math><mstyle mathcolor="red" mathbackground="url(https://evil.example/x)"><mi>x</mi></mstyle></math>';
+    for (const out of bothLayers(payload)) {
+      expect(attributeNames(out)).not.toContain('mathcolor');
+      expect(attributeNames(out)).not.toContain('mathbackground');
+    }
+  });
+
+  it('strips a URL-bearing MathML length attribute', () => {
+    for (const out of bothLayers('<math><mspace width="javascript:alert(1)"></mspace></math>')) {
+      expect(attributeNames(out)).not.toContain('width');
+    }
+  });
+
+  /**
+   * `<annotation>` has to be allowed — KaTeX puts the source TeX in one — and
+   * `annotation-xml`, the HTML integration point, does not. The pair is the
+   * distinction worth pinning: `annotation` with an HTML `encoding` is inert
+   * because the parser only re-enters HTML for `annotation-xml`.
+   */
+  it('cannot smuggle markup through <annotation encoding="text/html">', () => {
+    const payload =
+      '<math><semantics><annotation encoding="text/html"><img src=x onerror=alert(1)></annotation></semantics></math>';
+    for (const out of bothLayers(payload)) {
+      expect(tagNames(out)).not.toContain('img');
+      expect(attributeNames(out)).not.toContain('onerror');
+    }
+  });
+
+  it('strips <annotation-xml> with the XHTML encoding as well as the HTML one', () => {
+    const payload =
+      '<math><annotation-xml encoding="application/xhtml+xml"><img src=x onerror=alert(1)></annotation-xml></math>';
+    for (const out of bothLayers(payload)) {
+      expect(tagNames(out)).not.toContain('annotation-xml');
+      expect(tagNames(out)).not.toContain('img');
+    }
+  });
+
+  /**
+   * `<mglyph>` and `<malignmark>` inside a text integration point are the
+   * mutation-XSS family that turns a MathML subtree back into HTML parsing
+   * mid-stream. Neither is on the allowlist; the `<table>` form is the one
+   * that historically escaped sanitisers that re-serialised their output.
+   */
+  it('strips <mglyph> and the <mtext><table><mglyph> mutation form', () => {
+    for (const payload of [
+      '<math><mtext><mglyph></mglyph></mtext></math>',
+      '<math><mtext><malignmark></malignmark></mtext></math>',
+      '<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>',
+    ]) {
+      for (const out of bothLayers(payload)) {
+        expect(tagNames(out)).not.toContain('mglyph');
+        expect(tagNames(out)).not.toContain('malignmark');
+        expect(tagNames(out)).not.toContain('img');
+        expect(attributeNames(out)).not.toContain('onerror');
+      }
+    }
+  });
+
+  /**
+   * The output is a *string* that the component re-parses into an element, so
+   * anything the serialiser writes ambiguously gets a second chance to become
+   * markup. Sanitising the output again has to be a no-op, on every payload
+   * whose quoting could be misread.
+   */
+  it('is stable under a second pass, which is what the re-parse amounts to', () => {
+    for (const payload of [
+      '<a href="https://x.example" title="</a><img src=x onerror=alert(1)>">t</a>',
+      '<code title="</code><img src=x onerror=alert(1)>">t</code>',
+      '<math><mtext><a title="</mtext><img src=x onerror=alert(1)>">t</a></mtext></math>',
+      '<math><mi>&lt;/math&gt;&lt;img src=x onerror=alert(1)&gt;</mi></math>',
+    ]) {
+      const once = sanitizeHtml(payload);
+      expect(sanitizeHtml(once)).toBe(once);
+      const out = parse(once);
+      expect(tagNames(out)).not.toContain('img');
+      expect(attributeNames(out)).not.toContain('onerror');
+    }
+  });
+
+  /**
+   * A scheme split by a control character is the oldest filter bypass there is,
+   * and DOMPurify strips `ATTR_WHITESPACE` before testing the URI — but only
+   * for attributes it treats as URLs, which is why the anchor hook re-parses
+   * rather than pattern-matching.
+   */
+  it('strips a scheme split by a tab, a newline or a numeric entity', () => {
+    for (const payload of [
+      '<a href="java\tscript:alert(1)">click</a>',
+      '<a href="java\nscript:alert(1)">click</a>',
+      '<a href="&#106;avascript:alert(1)">click</a>',
+      '<a href="JaVaScRiPt:alert(1)">click</a>',
+      '<a href="//evil.example">click</a>',
+    ]) {
+      for (const out of bothLayers(payload)) {
+        expect(attributeNames(out)).not.toContain('href');
+      }
+    }
+    expect(attributeNames(parse(render('[x](&#106;avascript:alert&lpar;1&rpar;)')))).not.toContain(
+      'href',
+    );
+    // A reference-style link is a second syntax reaching the same renderer.
+    expect(attributeNames(parse(render('[x][r]\n\n[r]: javascript:alert(1)')))).not.toContain(
+      'href',
+    );
+  });
+
+  /**
+   * `target` is set by the hook, never taken from the source: a `_top` or a
+   * named frame would let a contributed link replace the whole app rather than
+   * open beside it.
+   */
+  it('overwrites a target the source asked for, and always pairs it with rel', () => {
+    const link = parse(
+      sanitizeHtml('<a href="https://x.example" target="_top" rel="opener">click</a>'),
+    ).querySelector('a');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('strips a class from a link, where no fence language can legitimately be', () => {
+    const link = parse(
+      sanitizeHtml('<a href="https://x.example" class="fixed inset-0">click</a>'),
+    ).querySelector('a');
+    expect(link?.hasAttribute('class')).toBe(false);
+  });
+
+  it('keeps only the language class when a fence carries a second one', () => {
+    for (const out of bothLayers('<pre><code class="language-js x-evil">x</code></pre>')) {
+      const code = out.querySelector('code');
+      if (code) {
+        expect(code.getAttribute('class')).toBe('language-js');
+      }
+    }
+    expect(parse(render('```js x-evil\nconst a = 1;\n```')).querySelector('code')?.className).toBe(
+      'language-js',
+    );
+  });
+
+  /**
+   * The configuration itself, read from the object the renderer uses rather
+   * than restated here — a copy would keep passing after the real one changed.
+   * Each of the three does something `ALLOWED_ATTR` alone cannot: `data-*` and
+   * `aria-*` are admitted wholesale unless switched off, and `FORBID_ATTR` is
+   * checked *before* the allowlist, so it is what still refuses `style` on the
+   * day somebody widens the list.
+   */
+  it('is configured the way the payloads above assume', () => {
+    expect(SANITIZE_CONFIG.ALLOW_DATA_ATTR).toBe(false);
+    expect(SANITIZE_CONFIG.ALLOW_ARIA_ATTR).toBe(false);
+    expect(SANITIZE_CONFIG.FORBID_ATTR).toEqual(['style']);
+    expect(SANITIZE_CONFIG.USE_PROFILES).toBeUndefined();
+    expect(SANITIZE_CONFIG.ALLOWED_TAGS).not.toContain('annotation-xml');
+    // Nothing on the list may carry a URL, a script or a style effect anywhere
+    // but on an anchor, which the hook enforces. This is the list to re-argue
+    // if an entry is ever added.
+    expect(
+      ALLOWED_ATTR.filter((name) =>
+        ['src', 'background', 'mathcolor', 'mathbackground', 'style', 'dir', 'target'].includes(
+          name,
+        ),
+      ),
+    ).toEqual([]);
+    expect(ALLOWED_ATTR.filter((name) => name.startsWith('xlink:'))).toEqual([]);
+    expect(ALLOWED_ATTR.filter((name) => name.startsWith('on'))).toEqual([]);
+  });
+});
+
 describe('markdown engine: supported formatting', () => {
   it('renders the supported inline marks', () => {
     expect(tagNames(parse(render('**b** *i* ~~s~~ `c`')))).toEqual(
@@ -369,5 +633,132 @@ describe('markdown engine: math', () => {
 
   it('does not compile a formula inside an inline code span', () => {
     expect(tagNames(parse(render('Write `$x^2$` to get a formula.')))).not.toContain('math');
+  });
+});
+
+/**
+ * KaTeX has an escape hatch out of maths and into HTML — `\href`, `\url`,
+ * `\includegraphics` and the `\html*` family — governed by a single `trust`
+ * option that defaults to `false`. **Asserted rather than assumed**, because
+ * the default is the only thing switching it off: nothing in `math-engine.ts`
+ * names it, so a future `trust: true` added for one convenience would open all
+ * of them at once and no other test in this file would notice.
+ *
+ * Behaviour rather than configuration on purpose. Reading the options object
+ * back would prove what was passed; these prove what the compiler *did* with
+ * it, which is the thing a KaTeX upgrade could change without the option
+ * moving.
+ */
+describe('markdown engine: KaTeX runs untrusted', () => {
+  it.each([
+    ['\\href with a javascript: URL', String.raw`$\href{javascript:alert(1)}{x}$`, '\\href'],
+    ['\\href with an https: URL', String.raw`$\href{https://evil.example}{x}$`, '\\href'],
+    ['\\url', String.raw`$\url{javascript:alert(1)}$`, '\\url'],
+    [
+      '\\includegraphics',
+      String.raw`$\includegraphics[height=1em]{https://evil.example/x.png}$`,
+      '\\includegraphics',
+    ],
+    ['\\htmlStyle', String.raw`$\htmlStyle{position:fixed;inset:0}{x}$`, '\\htmlStyle'],
+    ['\\htmlClass', String.raw`$\htmlClass{fixed inset-0}{x}$`, '\\htmlClass'],
+    ['\\htmlId', String.raw`$\htmlId{body}{x}$`, '\\htmlId'],
+    ['\\htmlData', String.raw`$\htmlData{cy=answer-option}{x}$`, '\\htmlData'],
+  ])(
+    'refuses %s, so no link, image, class or style comes out of a formula',
+    (_name, source, command) => {
+      const out = parse(render(source));
+      expect(tagNames(out)).not.toContain('a');
+      expect(tagNames(out)).not.toContain('img');
+      expect(attributeNames(out)).not.toContain('href');
+      expect(attributeNames(out)).not.toContain('style');
+      expect(attributeNames(out)).not.toContain('class');
+      // It degrades the way every other unsupported command does — the command
+      // name as text, not a blank space where a formula was.
+      expect(out.textContent).toContain(command);
+    },
+  );
+
+  /**
+   * `\def` is real TeX and KaTeX supports it, so a contributor can write a
+   * macro that expands into another that expands into another. `maxExpand`
+   * (1000 by default) is what stops the classic billion-laughs; a formula that
+   * hits it raises a `ParseError`, which `throwOnError: false` turns into the
+   * same source-text fallback a typo produces.
+   */
+  it('stops a macro expansion bomb instead of hanging on it', () => {
+    const bomb = String.raw`\def\a{\b\b\b\b\b\b\b\b\b\b}\def\b{\c\c\c\c\c\c\c\c\c\c}\def\c{\d\d\d\d\d\d\d\d\d\d}\def\d{\e\e\e\e\e\e\e\e\e\e}\def\e{x}\a`;
+    const started = Date.now();
+    const out = parse(render(`$${bomb}$`));
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(tagNames(out)).not.toContain('math');
+    expect(out.textContent).toContain('\\def');
+  });
+
+  it('stops a self-recursive macro', () => {
+    const started = Date.now();
+    const out = parse(render(String.raw`$\def\x{\x}\x$`));
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(out.textContent).toContain('\\def');
+  });
+
+  /**
+   * A macro defined in one formula must not exist in the next. KaTeX builds a
+   * fresh namespace per `renderToString` unless a `macros` object is shared
+   * between calls — and `markdown-engine.ts` memoizes a `Marked` instance per
+   * renderer, which is exactly the shape that would share one by accident.
+   */
+  it('does not carry a macro from one formula into the next', () => {
+    render(String.raw`$\gdef\evil{HACKED}$`);
+    expect(parse(render(String.raw`$\evil$`)).textContent).toContain('\\evil');
+  });
+
+  /**
+   * A 500-character question is the largest a contributor can write
+   * (`firestore.rules`, `data-model.md` §3), so the input is bounded before it
+   * reaches KaTeX. This checks the bound is enough — that the worst formula
+   * that fits does not lock the tab up.
+   */
+  it('compiles the deepest formula a 500-character question can hold, quickly', () => {
+    const depth = 160;
+    const started = Date.now();
+    const out = parse(render(`$${'x^{'.repeat(depth)}a${'}'.repeat(depth)}$`));
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(tagNames(out)).toContain('math');
+  });
+});
+
+/**
+ * A `$` is an ordinary character in a trivia question, and the tokenizer has to
+ * be able to say where a formula stops. These are the boundaries where a
+ * payload would be smuggled out of a maths token and back into markup.
+ */
+describe('markdown engine: math delimiter boundaries', () => {
+  it.each([
+    ['$$\n<script>alert(1)</script>\n$$'],
+    ['$<script>alert(1)</script>$'],
+    ['$$a$$<script>alert(1)</script>$$b$$'],
+    ['$x$ and <script>alert(1)</script>'],
+    ['`$<script>alert(1)</script>$`'],
+    ['```\n$<script>alert(1)</script>$\n```'],
+    ['**$<img src=x onerror=alert(1)>$**'],
+    ['> $$<script>alert(1)</script>$$'],
+    ['[$x^2$](https://example.org/a)'],
+  ])('keeps %j inside the token it belongs to', (source) => {
+    const out = parse(render(source));
+    expect(tagNames(out)).not.toContain('script');
+    expect(tagNames(out)).not.toContain('img');
+    expect(attributeNames(out)).not.toContain('onerror');
+  });
+
+  /**
+   * The fallback path is a second renderer with a second escaping decision in
+   * it — the source goes into a `<code>` span rather than to KaTeX — so it gets
+   * its own payload rather than being assumed safe because the compiled path
+   * is.
+   */
+  it('escapes a payload in the no-math fallback, where the source is echoed back', () => {
+    const out = parse(renderMarkdown('$<script>alert(1)</script>$'));
+    expect(tagNames(out)).not.toContain('script');
+    expect(out.querySelector('code')?.textContent).toBe('$<script>alert(1)</script>$');
   });
 });
