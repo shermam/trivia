@@ -77,7 +77,7 @@ CI runs the suite on every pull request targeting `main`, split across two runne
 npm run lighthouse
 ```
 
-This builds the app with the `lighthouse` configuration (same optimizations as `build:prod`, but pointed at the Firebase Emulator Suite instead of the live project — see `useEmulators` in `src/environments/environment.e2e.ts`), serves it from the real Firebase Hosting emulator, and runs Lighthouse 3 times, asserting each category's median score against `lighthouserc.json`'s thresholds. Requires a JRE (Firestore emulator) and Google Chrome on your `PATH` (or set `CHROME_PATH`) — both already present on GitHub-hosted runners, so no extra setup is needed there.
+This builds the app with the `lighthouse` configuration (same optimizations as `build:prod`, but pointed at the Firebase Emulator Suite instead of the live project — see `useEmulators` in `src/environments/environment.e2e.ts`), serves it from the real Firebase Hosting emulator, and runs Lighthouse 3 times, asserting each category's median score against `lighthouserc.json`'s thresholds — and the `color-contrast` audit on its own, since one contrast failure is not enough to pull accessibility under its floor. Requires a JRE (Firestore emulator) and Google Chrome on your `PATH` (or set `CHROME_PATH`) — both already present on GitHub-hosted runners, so no extra setup is needed there.
 
 Serving from the real Hosting emulator (not a bare static server) matters: it's what makes `/__/firebase/init.json` resolve, so Auth/Firestore actually initialize and run for real instead of every audit eating a guaranteed console error that would otherwise mask genuine best-practices regressions.
 

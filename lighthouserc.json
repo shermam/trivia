@@ -33,6 +33,12 @@
           {
             "minScore": 0.95
           }
+        ],
+        "color-contrast": [
+          "error",
+          {
+            "minScore": 1
+          }
         ]
       }
     },
