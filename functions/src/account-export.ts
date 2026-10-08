@@ -39,6 +39,15 @@ export interface AccountExport {
    */
   gameplayStats: Record<string, unknown> | null;
   contributedQuestions: Record<string, unknown>[];
+  /**
+   * Every like or dislike the account has given a community question
+   * (`FEAT-027`), each document whole: `questionId`, `value` (`1` a like, `-1`
+   * a dislike) and `createdAt`, the epoch milliseconds of the first vote on
+   * that question. An empty list for an account that never voted — the same
+   * "there is nothing" rather than "we are not telling you" as every other
+   * collection here.
+   */
+  questionVotes: Record<string, unknown>[];
   billing: {
     stripeCustomerId: string | null;
     /** ISO 8601, or `null` for an account that has never donated. */
@@ -85,6 +94,7 @@ export function buildAccountExport(input: {
   >;
   leaderboardEntries: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
+  questionVotes?: Record<string, unknown>[];
   gameplayStats: Record<string, unknown> | null;
   stripeCustomerId: string | null;
   supporterSince?: string | null;
@@ -108,6 +118,7 @@ export function buildAccountExport(input: {
     leaderboardEntries: input.leaderboardEntries,
     gameplayStats: input.gameplayStats,
     contributedQuestions: input.contributedQuestions,
+    questionVotes: input.questionVotes ?? [],
     billing: {
       stripeCustomerId: input.stripeCustomerId,
       supporterSince: input.supporterSince ?? null,

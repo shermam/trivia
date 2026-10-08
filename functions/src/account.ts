@@ -7,6 +7,7 @@ import { getStripeClient, isMockMode, stripeSecretKey } from './stripe-client';
 import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
 import { buildAccountExport, timestampToIso } from './account-export';
 import { LEADERBOARD_BOARDS, allLeaderboardPathsFor, regionalEntryRefsFor } from './leaderboards';
+import { deleteQuestionVotes, questionVotesFor } from './question-votes';
 
 /**
  * Deletes the caller's account and everything attached to it.
@@ -54,6 +55,11 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // no-op, which is the normal case for an account that never finished a
     // game — the document is created lazily by `recordGameResult`.
     await firestore.collection('users').doc(uid).delete();
+    // The private likes and dislikes (`FEAT-027`). Not under `users/{uid}`, so
+    // the delete above does not reach them: they are found as the range of
+    // `question_votes` ids that begin with this uid, which is the reason those
+    // ids put the uid first (`question-votes.ts`).
+    await deleteQuestionVotes(firestore, uid);
     await deleteCustomerRecord(uid);
     await getAuth().deleteUser(uid);
   } catch (error) {
@@ -100,6 +106,7 @@ export const exportAccountData = onCall(async (request) => {
       regional,
       stats,
       questions,
+      votes,
       customer,
       subscriptions,
       checkouts,
@@ -122,6 +129,10 @@ export const exportAccountData = onCall(async (request) => {
       Promise.all(regionalRefs.map((entry) => firestore.doc(entry.path).get())),
       firestore.collection('users').doc(uid).get(),
       firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
+      // Every like and dislike, by the same id range deletion sweeps
+      // (`FEAT-027`) — so the two cannot disagree about what a player's votes
+      // are.
+      questionVotesFor(firestore, uid),
       customerRef.get(),
       customerRef.collection('subscriptions').get(),
       customerRef.collection('checkout_sessions').get(),
@@ -155,6 +166,7 @@ export const exportAccountData = onCall(async (request) => {
       // finished a game — see `AccountExport.gameplayStats`.
       gameplayStats: stats.exists ? (stats.data() as Record<string, unknown>) : null,
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      questionVotes: votes,
       stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
       // Serialised rather than passed through: `supporterSince` is a Firestore
       // `Timestamp`, and an export is JSON handed straight to the person who
