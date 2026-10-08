@@ -10,9 +10,14 @@ import {
   TimeLimitOption,
   TriviaQuestion,
 } from '../../models/question.model';
+import { LIKE, VoteValue } from '../../models/question-vote';
 import { multiplierForStreak } from '../../models/scoring';
 import { AudioService } from '../../services/audio.service';
+import { AuthMenuStateService } from '../../services/auth-menu-state.service';
+import { AuthService } from '../../services/auth.service';
+import { EmbedModeService } from '../../services/embed-mode.service';
 import { GameControllerService } from '../../services/game-controller.service';
+import { QuestionVoteService, VoteOutcome } from '../../services/question-vote.service';
 import { TriviaService } from '../../services/trivia.service';
 import { QuizLoopComponent } from './quiz-loop.component';
 
@@ -39,9 +44,15 @@ function setup(
   options: {
     playingOffline?: boolean;
     question?: TriviaQuestion;
+    /** Every question of the game; defaults to the one on screen. */
+    questions?: TriviaQuestion[];
     timeLimit?: TimeLimitOption;
     lifelines?: LifelineState;
     currentStreak?: number;
+    /** Signed in with a real account unless told otherwise (`FEAT-027`). */
+    user?: { uid: string; isAnonymous: boolean } | null;
+    canVote?: boolean;
+    embedded?: boolean;
   } = {},
 ) {
   // Mirrors the real service's streak bookkeeping rather than stubbing it
@@ -81,6 +92,7 @@ function setup(
     return true;
   });
   const currentStreak = signal(options.currentStreak ?? 0);
+  const onScreen = options.question ?? makeQuestion();
   const gameController = {
     config: signal<GameConfig | null>({
       amount: 1,
@@ -89,7 +101,8 @@ function setup(
       source: 'open_trivia',
       timeLimit: options.timeLimit ?? 15,
     }),
-    currentQuestion: signal<TriviaQuestion | null>(options.question ?? makeQuestion()),
+    questions: signal<TriviaQuestion[]>(options.questions ?? [onScreen]),
+    currentQuestion: signal<TriviaQuestion | null>(onScreen),
     currentIndex: signal(0),
     totalQuestions: signal(1),
     score: signal(0),
@@ -122,6 +135,23 @@ function setup(
     playGameOver: vi.fn(),
   };
 
+  // `FEAT-027`. The vote's state and writes are `QuestionVoteService`'s and
+  // have their own spec; here the fake answers `valueFor` from a signal the
+  // test controls, and records what the component asked of it.
+  const votes = signal<Record<string, VoteValue>>({});
+  const questionVotes = {
+    valueFor: (questionId: string) => votes()[questionId] ?? null,
+    load: vi.fn((_ids: readonly string[]) => Promise.resolve()),
+    toggle: vi.fn((_id: string, value: VoteValue): Promise<VoteOutcome> =>
+      Promise.resolve({ kind: 'saved', value }),
+    ),
+  };
+  const auth = {
+    user: signal(options.user === undefined ? { uid: 'u1', isAnonymous: false } : options.user),
+    isFullyAuthenticated: signal(options.canVote ?? true),
+  };
+  const authMenuState = { isOpen: signal(false), open: vi.fn() };
+
   TestBed.configureTestingModule({
     providers: [
       {
@@ -134,6 +164,10 @@ function setup(
       },
       { provide: AudioService, useValue: audio },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      { provide: QuestionVoteService, useValue: questionVotes },
+      { provide: AuthService, useValue: auth },
+      { provide: AuthMenuStateService, useValue: authMenuState },
+      { provide: EmbedModeService, useValue: { isEmbedded: () => options.embedded ?? false } },
     ],
   });
 
@@ -147,6 +181,10 @@ function setup(
     registerSkippedQuestion,
     consumeLifeline,
     audio,
+    votes,
+    questionVotes,
+    auth,
+    authMenuState,
     host: fixture.nativeElement as HTMLElement,
     query: (selector: string) =>
       (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(selector),
@@ -1335,5 +1373,191 @@ describe('QuizLoopComponent — audio cues (FEAT-003)', () => {
     vi.advanceTimersByTime(1_000);
 
     expect(audio.playTimerTick).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * `FEAT-027`. The private like or dislike, offered after the reveal on a
+ * community question. What is pinned here is the component's half: where the
+ * row is (and is not), that it is reserved before the reveal rather than
+ * inserted by it, that a tap goes through the service and is announced, that
+ * a guest's tap opens the account menu instead, and that the round waits while
+ * that menu is open. The buttons' own contract is `question-vote.component.spec.ts`,
+ * the state machine behind them `question-vote.service.spec.ts`, and the pixels
+ * `question-votes.spec.ts` in the e2e suite.
+ */
+describe('QuizLoopComponent — likes and dislikes (FEAT-027)', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+  });
+
+  /** Lets a resolved write's continuation run, so its announcement lands. */
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) {
+      await Promise.resolve();
+    }
+  };
+
+  const community = (id = 'q1') => makeQuestion({ id, source: 'custom' });
+
+  it('reserves the row on a community question before the reveal, and shows it after', () => {
+    const { fixture, query } = setup({ question: community() });
+
+    // In the DOM from the start — never inserted by the reveal, which would
+    // move the vertically-centred card (`CLAUDE.md` §4.4) — but invisible, so
+    // nothing can be pressed before the answer is in.
+    expect(query('[data-cy="quiz-vote"]')).not.toBeNull();
+    expect(query('[data-cy="quiz-vote"]')?.classList.contains('invisible')).toBe(true);
+
+    clickAnswer(fixture, 'Paris');
+
+    expect(query('[data-cy="quiz-vote"]')?.classList.contains('invisible')).toBe(false);
+    expect(query('[data-cy="vote-like"]')).not.toBeNull();
+  });
+
+  /**
+   * The stable-id constraint. An Open Trivia DB question's id is minted per
+   * fetch, so a vote on one would be stored against an id that never comes
+   * back. This row fails the moment the source gate is removed.
+   */
+  it('offers no vote on an Open Trivia DB question, before or after the reveal', () => {
+    const { fixture, query } = setup({ question: makeQuestion({ source: 'open_trivia' }) });
+
+    expect(query('[data-cy="quiz-vote"]')).toBeNull();
+    clickAnswer(fixture, 'Paris');
+    expect(query('[data-cy="quiz-vote"]')).toBeNull();
+  });
+
+  // An embed has no top bar, so the sign-in a guest's tap leads to has
+  // nowhere to open.
+  it('offers no vote in an embed', () => {
+    const { query } = setup({ question: community(), embedded: true });
+
+    expect(query('[data-cy="quiz-vote"]')).toBeNull();
+  });
+
+  it('reads the player’s own votes for the game’s community questions, and only those', () => {
+    const questions = [community('q1'), makeQuestion({ id: 'ot1' }), community('q3')];
+    const { questionVotes } = setup({ question: questions[0], questions });
+
+    expect(questionVotes.load).toHaveBeenCalledWith(['q1', 'q3']);
+  });
+
+  // A guest cannot have a vote, so there is nothing to read — until they sign
+  // in from the prompt, which is exactly when the buttons can first show one.
+  it('reads nothing for a guest, and reads once they sign in', () => {
+    const { fixture, questionVotes, auth } = setup({
+      question: community(),
+      user: { uid: 'anon', isAnonymous: true },
+      canVote: false,
+    });
+    expect(questionVotes.load).not.toHaveBeenCalled();
+
+    auth.user.set({ uid: 'u1', isAnonymous: false });
+    auth.isFullyAuthenticated.set(true);
+    fixture.detectChanges();
+
+    expect(questionVotes.load).toHaveBeenCalledWith(['q1']);
+  });
+
+  it('shows the stored vote on the buttons', () => {
+    const { fixture, votes, query } = setup({ question: community() });
+
+    votes.set({ q1: LIKE });
+    fixture.detectChanges();
+
+    expect(query('[data-cy="vote-like"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(query('[data-cy="vote-dislike"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('writes a tap through the service and announces what came of it', async () => {
+    const { fixture, questionVotes, query } = setup({ question: community() });
+    clickAnswer(fixture, 'Paris');
+
+    query('[data-cy="vote-like"]')?.click();
+    await settle();
+    fixture.detectChanges();
+
+    expect(questionVotes.toggle).toHaveBeenCalledWith('q1', LIKE);
+    expect(query('[data-cy="vote-status"]')?.textContent?.trim()).toBe(
+      'Question 1: you liked this question.',
+    );
+  });
+
+  it('announces a vote that could not be saved', async () => {
+    const { fixture, questionVotes, query } = setup({ question: community() });
+    questionVotes.toggle.mockResolvedValueOnce({ kind: 'failed', attempted: LIKE, value: null });
+    clickAnswer(fixture, 'Paris');
+
+    query('[data-cy="vote-like"]')?.click();
+    await settle();
+    fixture.detectChanges();
+
+    expect(query('[data-cy="vote-status"]')?.textContent?.trim()).toBe(
+      'Question 1: your vote could not be saved. Please try again.',
+    );
+  });
+
+  // The region is permanent and outside the row: a write can settle after the
+  // quiz has moved on to a question with no row at all.
+  it('keeps the announcement region in the DOM on a question with no vote', () => {
+    const { query } = setup({ question: makeQuestion({ source: 'open_trivia' }) });
+
+    expect(query('[data-cy="vote-status"]')?.getAttribute('role')).toBe('status');
+  });
+
+  /**
+   * Decision 1. The buttons are there for a guest too, and a tap opens the
+   * account menu rather than writing — the service says so by returning
+   * `needs-account` without a write.
+   */
+  it('opens the account menu for a guest’s tap and says why', async () => {
+    const { fixture, questionVotes, authMenuState, query } = setup({
+      question: community(),
+      user: { uid: 'anon', isAnonymous: true },
+      canVote: false,
+    });
+    questionVotes.toggle.mockResolvedValueOnce({ kind: 'needs-account', reason: 'sign-in' });
+    clickAnswer(fixture, 'Paris');
+
+    query('[data-cy="vote-like"]')?.click();
+    await settle();
+    fixture.detectChanges();
+
+    expect(authMenuState.open).toHaveBeenCalledOnce();
+    expect(query('[data-cy="vote-status"]')?.textContent?.trim()).toBe(
+      'Question 1: sign in to like or dislike questions.',
+    );
+  });
+
+  /**
+   * Moving on behind an open account menu would start the next question's
+   * clock while the player read a sign-in form — a question lost for trying
+   * to rate the last one. So the pause after an answer waits for the menu, and
+   * a fresh one starts when it closes.
+   */
+  it('waits for the account menu to close before moving on, then pauses afresh', () => {
+    const { fixture, advanceQuestion, authMenuState } = setup({ question: community() });
+    clickAnswer(fixture, 'Paris');
+
+    authMenuState.isOpen.set(true);
+    vi.advanceTimersByTime(10_000);
+    expect(advanceQuestion).not.toHaveBeenCalled();
+
+    authMenuState.isOpen.set(false);
+    fixture.detectChanges();
+    vi.advanceTimersByTime(1_999);
+    expect(advanceQuestion).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(advanceQuestion).toHaveBeenCalledOnce();
+  });
+
+  it('moves on after the usual pause when the menu is not open', () => {
+    const { fixture, advanceQuestion } = setup({ question: community() });
+    clickAnswer(fixture, 'Paris');
+
+    vi.advanceTimersByTime(2_000);
+
+    expect(advanceQuestion).toHaveBeenCalledOnce();
   });
 });

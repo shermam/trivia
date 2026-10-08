@@ -21,8 +21,30 @@ import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { FirestoreRestError } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
+import { QuestionVoteService, VoteOutcome } from '../../services/question-vote.service';
 import { RegionService } from '../../services/region.service';
+import { LIKE, VoteValue } from '../../models/question-vote';
 import { GameOverComponent } from './game-over.component';
+
+/**
+ * `FEAT-027`'s service, faked for the setups whose recap holds community
+ * questions. The vote's own behaviour is `question-vote.service.spec.ts`'s;
+ * here `valueFor` answers from a signal the test controls, and `load` and
+ * `toggle` record what the component asked of it.
+ */
+function fakeQuestionVotes() {
+  const votes = signal<Record<string, VoteValue>>({});
+  return {
+    votes,
+    service: {
+      valueFor: (questionId: string) => votes()[questionId] ?? null,
+      load: vi.fn((_ids: readonly string[]) => Promise.resolve()),
+      toggle: vi.fn((_id: string, value: VoteValue): Promise<VoteOutcome> =>
+        Promise.resolve({ kind: 'saved', value }),
+      ),
+    },
+  };
+}
 
 /**
  * Finding B4. A rejected score save was reported as "your best score is
@@ -1327,7 +1349,15 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     });
   }
 
-  function render(options: { questions: TriviaQuestion[]; answerHistory: PickedAnswer[] }) {
+  function render(options: {
+    questions: TriviaQuestion[];
+    answerHistory: PickedAnswer[];
+    /** A guest rather than the default verified account (`FEAT-027`). */
+    guest?: boolean;
+    embedded?: boolean;
+  }) {
+    const questionVotes = fakeQuestionVotes();
+    const openAuthMenu = vi.fn();
     TestBed.configureTestingModule({
       providers: [
         {
@@ -1349,18 +1379,22 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
         {
           provide: AuthService,
           useValue: {
-            user: signal({ uid: 'player-1', displayName: 'Ada' }),
-            isAnonymous: signal(false),
-            isFullyAuthenticated: signal(true),
+            user: signal(
+              options.guest
+                ? { uid: 'anon-1', displayName: null, isAnonymous: true }
+                : { uid: 'player-1', displayName: 'Ada' },
+            ),
+            isAnonymous: signal(options.guest ?? false),
+            isFullyAuthenticated: signal(!options.guest),
             resendVerificationEmail: () => Promise.resolve(),
           },
         },
-        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: AuthMenuStateService, useValue: { open: openAuthMenu } },
         {
           provide: AccountService,
           useValue: { recordGameResult: vi.fn().mockResolvedValue(undefined) },
         },
-        { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
+        { provide: EmbedModeService, useValue: { isEmbedded: () => options.embedded ?? false } },
         {
           provide: FirebaseService,
           useValue: {
@@ -1369,6 +1403,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
             getTopScores: () => of([]),
           },
         },
+        { provide: QuestionVoteService, useValue: questionVotes.service },
         { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
       ],
     });
@@ -1382,6 +1417,8 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
       host,
       query,
       queryAll,
+      questionVotes,
+      openAuthMenu,
       open() {
         query('[data-cy="recap-toggle"]')?.click();
         fixture.detectChanges();
@@ -1681,6 +1718,107 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
 
     expect(query('[data-cy="recap-card"]')).toBeNull();
   });
+
+  /**
+   * `FEAT-027`. The recap is where the vote has no clock: during the round the
+   * buttons last the two seconds the result is shown, and a player who needs
+   * longer — a screen-reader user above all — rates the question here instead
+   * (WCAG 2.2.1). The stable-id constraint holds here exactly as in the quiz.
+   */
+  describe('voting from the recap (FEAT-027)', () => {
+    const openTrivia = recapQuestion('ot1', { source: 'open_trivia' });
+
+    /** Lets a resolved write's continuation run, so its announcement lands. */
+    const settle = async () => {
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+    };
+
+    it('offers the vote on a community question’s row, and none on an Open Trivia row', () => {
+      const { open, queryAll } = render({
+        questions: [q0, openTrivia],
+        answerHistory: [answeredWith('q0:right'), answeredWith('ot1:wrong')],
+      });
+      open();
+
+      const rows = queryAll('[data-cy="recap-row"]');
+      expect(rows[0].querySelector('[data-cy="recap-vote"]')).not.toBeNull();
+      expect(rows[1].querySelector('[data-cy="recap-vote"]')).toBeNull();
+    });
+
+    it('reads the player’s votes for the round’s community questions only', () => {
+      const { questionVotes } = render({
+        questions: [q0, openTrivia, q2],
+        answerHistory: [answeredWith('q0:right'), answeredWith('ot1:wrong'), SKIPPED],
+      });
+
+      expect(questionVotes.service.load).toHaveBeenCalledWith(['q0', 'q2']);
+    });
+
+    it('writes a tap and announces it with the row’s own number', async () => {
+      const { fixture, open, queryAll, query, questionVotes } = render({
+        questions: [q0, q1],
+        answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+      });
+      open();
+
+      queryAll('[data-cy="recap-row"]')[1]
+        .querySelector<HTMLButtonElement>('[data-cy="vote-like"]')
+        ?.click();
+      await settle();
+      fixture.detectChanges();
+
+      expect(questionVotes.service.toggle).toHaveBeenCalledWith('q1', LIKE);
+      expect(query('[data-cy="recap-vote-status"]')?.textContent?.trim()).toBe(
+        'Question 2: you liked this question.',
+      );
+    });
+
+    it('opens the account menu for a guest’s tap', async () => {
+      const { fixture, open, query, questionVotes, openAuthMenu } = render({
+        questions: [q0],
+        answerHistory: [answeredWith('q0:right')],
+        guest: true,
+      });
+      questionVotes.service.toggle.mockResolvedValueOnce({
+        kind: 'needs-account',
+        reason: 'sign-in',
+      });
+      open();
+
+      query('[data-cy="vote-dislike"]')?.click();
+      await settle();
+      fixture.detectChanges();
+
+      expect(openAuthMenu).toHaveBeenCalledOnce();
+      expect(query('[data-cy="recap-vote-status"]')?.textContent?.trim()).toBe(
+        'Question 1: sign in to like or dislike questions.',
+      );
+    });
+
+    it('offers no vote in an embed, which has no account menu to sign in from', () => {
+      const { open, query } = render({
+        questions: [q0],
+        answerHistory: [answeredWith('q0:right')],
+        embedded: true,
+      });
+      open();
+
+      expect(query('[data-cy="recap-vote"]')).toBeNull();
+    });
+
+    // Permanent and outside the card: a write can settle after the card has
+    // been collapsed, which removes its rows.
+    it('keeps the announcement region on the page with the recap collapsed', () => {
+      const { query } = render({
+        questions: [q0],
+        answerHistory: [answeredWith('q0:right')],
+      });
+
+      expect(query('[data-cy="recap-vote-status"]')?.getAttribute('role')).toBe('status');
+    });
+  });
 });
 
 /**
@@ -1741,6 +1879,10 @@ describe('GameOverComponent lifetime stats recording', () => {
         },
         { provide: AuthMenuStateService, useValue: { open: () => undefined } },
         { provide: AccountService, useValue: { recordGameResult } },
+        // These rounds are community questions played by a signed-in account,
+        // so the recap reads their votes (`FEAT-027`) — faked, so this suite
+        // is about the stats and nothing else.
+        { provide: QuestionVoteService, useValue: fakeQuestionVotes().service },
         { provide: EmbedModeService, useValue: { isEmbedded: () => false } },
         {
           provide: FirebaseService,

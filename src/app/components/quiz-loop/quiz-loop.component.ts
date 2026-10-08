@@ -4,16 +4,29 @@ import {
   OnDestroy,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { Answer, DEFAULT_TIME_LIMIT, LifelineId } from '../../models/question.model';
+import {
+  Answer,
+  DEFAULT_TIME_LIMIT,
+  LifelineId,
+  TriviaQuestion,
+} from '../../models/question.model';
+import { VoteValue } from '../../models/question-vote';
 import { STREAK_INDICATOR_THRESHOLD, multiplierLabel } from '../../models/scoring';
 import { AudioService } from '../../services/audio.service';
+import { AuthMenuStateService } from '../../services/auth-menu-state.service';
+import { AuthService } from '../../services/auth.service';
+import { EmbedModeService } from '../../services/embed-mode.service';
 import { GameControllerService } from '../../services/game-controller.service';
+import { QuestionVoteService, describeVoteOutcome } from '../../services/question-vote.service';
 import { TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
+import { QuestionVoteComponent } from '../question-vote/question-vote.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 
 /**
@@ -67,7 +80,7 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 @Component({
   selector: 'app-quiz-loop',
   standalone: true,
-  imports: [NgClass, IconComponent, RenderedTextComponent],
+  imports: [NgClass, IconComponent, QuestionVoteComponent, RenderedTextComponent],
   templateUrl: './quiz-loop.component.html',
   styleUrl: './quiz-loop.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -75,6 +88,10 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly gameController = inject(GameControllerService);
   private readonly audio = inject(AudioService);
+  private readonly auth = inject(AuthService);
+  private readonly authMenuState = inject(AuthMenuStateService);
+  private readonly embedMode = inject(EmbedModeService);
+  private readonly questionVotes = inject(QuestionVoteService);
 
   /**
    * True when this game's questions came from the offline pool instead of the
@@ -331,6 +348,99 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
   protected toggleFlag(questionId: string): void {
     this.gameController.toggleQuestionFlag(questionId);
+  }
+
+  /**
+   * Whether a question offers the like and dislike buttons (`FEAT-027`).
+   *
+   * **Community questions only.** An Open Trivia DB question's id is minted
+   * per fetch, so a vote on one would be stored against an id that never comes
+   * back — recorded into a void. And **not in an embed**: `?embed=1` renders no
+   * top bar, so the sign-in a guest's tap leads to has nowhere to open, the
+   * same reason game-over's sign-in prompt is hidden there.
+   *
+   * The row is rendered from the moment such a question appears and only made
+   * visible by the reveal — see the template — because the card is vertically
+   * centred and a row arriving on answering would move the whole card.
+   */
+  protected showsVote(question: TriviaQuestion): boolean {
+    return question.source === 'custom' && !this.embedMode.isEmbedded();
+  }
+
+  /**
+   * What a screen reader is told about a vote (`FEAT-027`).
+   *
+   * Owned here rather than by the buttons, because the write behind a tap can
+   * settle after the quiz has moved on: two seconds after the reveal the next
+   * question replaces the row, and a region inside it would be gone before it
+   * had anything to say. This one is permanent, like the result region beside
+   * it (G3).
+   */
+  protected readonly voteAnnouncement = signal('');
+
+  /** The game's community questions — the only ones a vote can be about. */
+  private readonly voteableQuestionIds = computed(() =>
+    this.gameController
+      .questions()
+      .filter((question) => question.source === 'custom')
+      .map((question) => question.id),
+  );
+
+  /**
+   * A press of like or dislike. The buttons move at once and the write
+   * follows (`QuestionVoteService`); this says what came of it.
+   *
+   * A tap without a real account writes nothing and opens the account menu
+   * instead (`FEAT-027` Decision 1) — and the round then waits for the menu
+   * to close rather than moving on behind it (see `scheduleAdvance`).
+   */
+  protected async vote(questionId: string, value: VoteValue): Promise<void> {
+    // Captured now: the write can settle after the quiz has moved to another
+    // question, and the announcement is about this one.
+    const position = this.gameController.currentIndex() + 1;
+    const outcome = await this.questionVotes.toggle(questionId, value);
+    if (outcome.kind === 'needs-account') {
+      this.authMenuState.open();
+    }
+    const message = describeVoteOutcome(outcome, position);
+    if (message !== null) {
+      this.voteAnnouncement.set(message);
+    }
+  }
+
+  /**
+   * Set when the pause after an answer ran out while the account menu was
+   * open, so the next question is waiting for the menu to close.
+   */
+  private advanceHeld = false;
+
+  constructor() {
+    // Reads the player's own votes for this game's community questions, once
+    // — and again if the account changes mid-game, which is exactly what a
+    // guest's tap leads to: signing in from the prompt is the moment the
+    // buttons can first show something.
+    effect(() => {
+      const user = this.auth.user();
+      const canVote = this.auth.isFullyAuthenticated();
+      const questionIds = this.voteableQuestionIds();
+      if (!user || !canVote || questionIds.length === 0 || this.embedMode.isEmbedded()) {
+        return;
+      }
+      untracked(() => void this.questionVotes.load(questionIds));
+    });
+
+    // Releases a held advance once the account menu closes, with a fresh pause
+    // — the player who has just signed in from a vote is still looking at the
+    // question they wanted to rate.
+    effect(() => {
+      const menuOpen = this.authMenuState.isOpen();
+      untracked(() => {
+        if (!menuOpen && this.advanceHeld) {
+          this.advanceHeld = false;
+          this.scheduleAdvance();
+        }
+      });
+    });
   }
 
   private timerHandle: ReturnType<typeof setInterval> | null = null;
@@ -598,7 +708,31 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     this.gameController.registerAnswer(answer);
     this.announceStreakChange(multiplierBefore);
 
-    this.advanceTimeoutHandle = setTimeout(() => this.goToNextQuestion(), ANSWER_DELAY_MS);
+    this.scheduleAdvance();
+  }
+
+  /**
+   * Moves on to the next question after the pause that shows the result —
+   * unless the account menu is open when the pause runs out, in which case the
+   * round waits for it to close.
+   *
+   * **Only the pause after an answer waits, never a live question's
+   * countdown.** The menu can be opened from the reveal by a guest's tap on a
+   * vote (`FEAT-027` Decision 1), and from the account chip at any time, and
+   * moving on behind it would start the next question's clock while the
+   * player was reading a sign-in form — a question lost for trying to rate
+   * the last one. The effect in the constructor schedules a fresh pause when
+   * the menu closes.
+   */
+  private scheduleAdvance(): void {
+    this.advanceTimeoutHandle = setTimeout(() => {
+      this.advanceTimeoutHandle = null;
+      if (this.authMenuState.isOpen()) {
+        this.advanceHeld = true;
+        return;
+      }
+      this.goToNextQuestion();
+    }, ANSWER_DELAY_MS);
   }
 
   private announceStreakChange(multiplierBefore: number): void {
