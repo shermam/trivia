@@ -113,6 +113,13 @@ export async function configureTopicGame(page: Page, options: TopicGameOptions):
     page,
     page.getByRole('radio', { name: options.source ?? 'Custom', exact: true }),
   ).click();
+  // The picker takes its rules from the source — up to ten topics of any kind
+  // here, one seed tag for Open Trivia — and they reach it on the next render,
+  // not with the click. A run tag typed in the same instant is judged by the
+  // old ones and refused, as an Open Trivia game refuses it; measured, on a
+  // loaded runner, 50 ms after the click. So this waits for the picker to say
+  // it takes ten before typing anything.
+  await expect(page.getByTestId('filter-tag-feedback')).toContainText('of 10 chosen.');
   await chooseTopics(page, options.topics);
   if (options.noTimeLimit) {
     await optionLabel(page, page.getByRole('radio', { name: 'No limit', exact: true })).click();

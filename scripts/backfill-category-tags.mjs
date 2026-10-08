@@ -192,7 +192,9 @@ async function main() {
   for (const [label, value] of rows) {
     console.log(`  ${label.padEnd(width)}  ${value}`);
   }
-  console.log('\nNo field other than tags was touched.\n');
+  console.log(
+    dryRun ? '\nDry run: nothing was written.\n' : '\nNo field other than tags was touched.\n',
+  );
 }
 
 main().catch((error) => {
