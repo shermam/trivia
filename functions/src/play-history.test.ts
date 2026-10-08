@@ -43,10 +43,19 @@ test('accepts a full 25-question game', () => {
 });
 
 /**
- * An Open Trivia DB question: no id, no tags. This is the majority case today
- * and stays so until the bank is big enough to retire the external source, so
- * it is the shape most worth pinning.
+ * An Open Trivia DB question: no id, and its category's seed tag — the topic
+ * the client's adapter stamps on every one it fetches (`FEAT-052`). This is
+ * the majority case today and stays so until the bank is big enough to retire
+ * the external source, so it is the shape most worth pinning.
  */
+test('accepts an answer with no question id and its seed tag', () => {
+  assert.equal(
+    isValidPlayAnswers([{ correct: false, ms: 15_000, difficulty: 'hard', tags: ['history'] }], 1),
+    true,
+  );
+});
+
+/** ...and one whose category the seed-tag table does not hold: no id and no tags. */
 test('accepts an answer with neither a question id nor tags', () => {
   assert.equal(isValidPlayAnswers([{ correct: false, ms: 15_000, difficulty: 'hard' }], 1), true);
 });
