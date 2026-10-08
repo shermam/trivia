@@ -376,9 +376,10 @@ export function duplicateAnswerMessage(duplicate: string): string {
  * A boolean question's incorrect answer is *derived* — the opposite literal —
  * rather than typed, which is the one thing the wrong-answer rows do not cover:
  * however many rows a contributor left behind on switching to true/false, the
- * question is written with exactly the one wrong answer the rules require. Optional fields are omitted entirely when blank rather than
- * written as an empty string: `firestore.rules` refuses an empty `sourceTitle`
- * or `explanation`, and an absent key is the honest representation of "not
+ * question is written with exactly the one wrong answer the rules require.
+ * Optional fields are omitted entirely when blank rather than written as an
+ * empty string: `firestore.rules` refuses an empty `sourceTitle` or
+ * `explanation`, and an absent key is the honest representation of "not
  * given".
  */
 export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>): {
