@@ -74,9 +74,8 @@ registerHooks({
 });
 
 const { categoryTag } = await import('../src/app/utils/category-tags.ts');
-const { MAX_TAGS_PER_QUESTION, isNormalizedTag } = await import(
-  '../src/app/utils/normalize-tag.util.ts'
-);
+const { MAX_TAGS_PER_QUESTION, isNormalizedTag } =
+  await import('../src/app/utils/normalize-tag.util.ts');
 
 const COLLECTION = 'custom_questions';
 

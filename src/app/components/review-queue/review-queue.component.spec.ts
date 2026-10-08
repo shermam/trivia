@@ -358,7 +358,10 @@ describe('ReviewQueueComponent source attribution', () => {
    * category derives. The card has no Category row to read it from any more.
    */
   it('shows a question’s topics, deriving one from a category with no tags', async () => {
-    const cards = await render([question('p1', { tags: ['cold-war', 'treaties'] }), question('p2')]);
+    const cards = await render([
+      question('p1', { tags: ['cold-war', 'treaties'] }),
+      question('p2'),
+    ]);
     const chips = (card: HTMLElement) =>
       [...card.querySelectorAll('[data-cy="review-question-tags"] li')].map((chip) =>
         chip.textContent?.trim(),

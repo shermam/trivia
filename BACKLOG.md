@@ -349,6 +349,7 @@ These are not engineering work; they are in `AUDIT_REMEDIATION.md` §7 with full
     node scripts/backfill-question-status.mjs --project intellectura-3b26a --dry-run
   ```
 
+- **Run `scripts/backfill-category-tags.mjs`** against `trivimind-dev` and then `intellectura-3b26a`, a dry run before each write, before `FEAT-052` merges — and once more on each after it deploys. It writes onto every stored question the tag its category derives; without it a player who picks a topic is never served the bank's existing questions about it, because the draw filters on `tags` in the query. The commands are in `docs/data-model.md` §3, beside the `status` runbook.
 - **Second run of the leaderboard migration** now that [#103](https://github.com/shermam/trivia/pull/103) has deployed — it sweeps up any score written into the old flat collection between the first run and the client switch going live. The script is idempotent and deletes nothing.
 - **Rotate the service-account key** used for that migration if it was pasted into a Codespaces secret.
 - **Add `functions-tests` to `main`'s branch ruleset** — it reports on every PR but does not block a merge until someone adds it under Settings → Rules.

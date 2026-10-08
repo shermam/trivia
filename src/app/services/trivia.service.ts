@@ -12,11 +12,7 @@ import {
   OpenTriviaApiResponse,
   TriviaQuestion,
 } from '../models/question.model';
-import {
-  firstSeedTag,
-  openTriviaCategoryId,
-  seedTagForCategoryName,
-} from '../utils/category-tags';
+import { firstSeedTag, openTriviaCategoryId, seedTagForCategoryName } from '../utils/category-tags';
 import { decodeHtmlEntities } from '../utils/html-entities.util';
 import { readTags } from '../utils/normalize-tag.util';
 import { seenKeyFor } from '../utils/seen-key.util';

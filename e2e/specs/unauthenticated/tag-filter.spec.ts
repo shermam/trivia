@@ -572,6 +572,13 @@ for (const viewport of [
  * frame in between. Holding a callback only delays it; it is the real callback
  * that runs.
  */
+/** What the strip sampler records on every frame: where the Start button is, and the strip. */
+interface SampledFrame {
+  startTop: number;
+  stripHeight: number;
+  chips: number;
+}
+
 test.describe('the shortcut strip', () => {
   test.use({ viewport: { width: 390, height: 1400 } });
 
@@ -605,7 +612,7 @@ test.describe('the shortcut strip', () => {
         held.clear();
       };
 
-      const frames: { startTop: number; stripHeight: number; chips: number }[] = [];
+      const frames: SampledFrame[] = [];
       let sampling = false;
       const sample = () => {
         if (!sampling) {
@@ -647,19 +654,22 @@ test.describe('the shortcut strip', () => {
       (await page.getByTestId('filter-tag-suggestions').boundingBox())!.height,
     ).toBeGreaterThan(60);
 
-    type Frame = { startTop: number; stripHeight: number; chips: number };
     const call = <T>(name: string) =>
       page.evaluate((fn) => (window as unknown as Record<string, () => T>)[fn](), name);
 
     await call('startSampling');
-    await expect.poll(async () => (await call<Frame[]>('sampledFrames')).length).toBeGreaterThan(3);
+    await expect
+      .poll(async () => (await call<SampledFrame[]>('sampledFrames')).length)
+      .toBeGreaterThan(3);
     await call('releaseIdle');
 
     await expect(chips).toHaveCount(SEED_TAG_COUNT);
     await expect
-      .poll(async () => (await call<Frame[]>('sampledFrames')).filter((f) => f.chips > 0).length)
+      .poll(
+        async () => (await call<SampledFrame[]>('sampledFrames')).filter((f) => f.chips > 0).length,
+      )
       .toBeGreaterThan(5);
-    const frames = await call<Frame[]>('stopSampling');
+    const frames = await call<SampledFrame[]>('stopSampling');
 
     // The comparison spans the change, rather than starting after it.
     expect(frames.some((frame) => frame.chips === 0)).toBe(true);
