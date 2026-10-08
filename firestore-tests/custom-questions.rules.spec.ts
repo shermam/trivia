@@ -994,16 +994,17 @@ describe('custom_questions: create — schema validation', () => {
   rejects('an empty category', { category: '' });
   rejects('a category over 100 chars', { category: 'x'.repeat(101) });
   rejects('an empty question', { question: '' });
-  rejects('a question over 500 chars', { question: 'x'.repeat(501) });
+  rejects('a question over 2000 chars', { question: 'x'.repeat(2001) });
   rejects('an empty correct answer', { correct_answer: '' });
   rejects('a correct answer over 200 chars', { correct_answer: 'x'.repeat(201) });
   rejects('incorrect_answers that is not a list', { incorrect_answers: 'CO2' });
   rejects('an empty incorrect_answers list', { incorrect_answers: [] });
-  // 3 is the ceiling now, not 5: the add-question form offers exactly three
-  // incorrect fields for a multiple-choice question and derives one for a
-  // boolean, so anything more was never reachable through the UI — while the
-  // quiz only ever labelled four answers (finding B2).
-  rejects('more than 3 incorrect answers', { incorrect_answers: ['a', 'b', 'c', 'd'] });
+  // Five is the ceiling — six options in all — because the contribute form
+  // offers six at most (`FEAT-051`). The bound moves with the form, which is
+  // the principle finding B2 set when it tightened the ceiling to three.
+  rejects('more than 5 incorrect answers', {
+    incorrect_answers: ['a', 'b', 'c', 'd', 'e', 'f'],
+  });
 
   /*
    * Finding B1. The quiz used to score a click by matching its text against
@@ -1024,7 +1025,7 @@ describe('custom_questions: create — schema validation', () => {
   rejects('a non-string question', { question: 42 });
   rejects('a non-string category', { category: 7 });
 
-  it('accepts the maximum three incorrect answers', async () => {
+  it('accepts three incorrect answers, the shape the form starts on', async () => {
     await assertSucceeds(
       submitQuestion(asPro(env, 'pro-user'), {
         uid: 'pro-user',
@@ -1066,6 +1067,255 @@ describe('custom_questions: create — schema validation', () => {
         }),
       }),
     );
+  });
+});
+
+/**
+ * `FEAT-051`: two to six options, every one of them a string of 1–200
+ * characters, all distinct, exactly two on a true-or-false question — and a
+ * statement of up to 2,000 characters.
+ *
+ * **Every bound is asserted from both sides**, because a rule can fail 100%
+ * closed and no `assertFails` will notice (`CLAUDE.md` §4.6): six options
+ * accepted and seven refused, a 200-character wrong answer accepted at every
+ * position and a 201-character one refused at every position, 2,000
+ * characters accepted and 2,001 refused. The per-position rows exist because
+ * the element check is five separate clauses — the rules language cannot
+ * iterate — and a row that only ever put the bad answer first would let the
+ * other four be deleted without a failure.
+ *
+ * Mutation-verified clause by clause; the run is recorded in
+ * `docs/data-model.md`'s rules-suite section.
+ */
+describe('custom_questions: two to six answers, and questions up to 2,000 characters (FEAT-051)', () => {
+  const AUTHOR = 'feat051-author';
+  /** Far enough in the past that `isNearRequestTime()` would refuse it on a create. */
+  const CREATED_AT = Date.now() - 30 * 24 * 3_600_000;
+
+  /** Five distinct wrong answers — the most a question may carry. */
+  const FIVE_WRONG = ['Venus', 'Mercury', 'Saturn', 'Neptune', 'Uranus'];
+
+  /** A statement of exactly `length` characters, made of words rather than one run. */
+  function statementOf(length: number): string {
+    return 'Which of the following is true? '.repeat(Math.ceil(length / 32)).slice(0, length);
+  }
+
+  const create = (overrides: Record<string, unknown>) =>
+    submitQuestion(asPro(env, 'pro-user'), {
+      uid: 'pro-user',
+      payload: validQuestion('pro-user', overrides),
+    });
+
+  /** The whole document as an owner edit sends it, over the author's seeded question. */
+  function ownerEdit(overrides: Record<string, unknown> = {}) {
+    return {
+      ...validQuestion(AUTHOR, { status: 'pending', createdAt: CREATED_AT }),
+      ...overrides,
+    };
+  }
+  const mine = (ctx: RulesTestContext) => doc(ctx.firestore(), 'custom_questions', 'feat051');
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'feat051'),
+        validQuestion(AUTHOR, { status: 'approved', createdAt: CREATED_AT }),
+      );
+    });
+  });
+
+  describe('the option count', () => {
+    it('accepts six options — five wrong answers, the most a question may carry', async () => {
+      await assertSucceeds(create({ correct_answer: 'Mars', incorrect_answers: FIVE_WRONG }));
+    });
+
+    it('refuses seven options', async () => {
+      await assertFails(
+        create({ correct_answer: 'Mars', incorrect_answers: [...FIVE_WRONG, 'Pluto'] }),
+      );
+    });
+
+    it('accepts five options', async () => {
+      await assertSucceeds(
+        create({ correct_answer: 'Mars', incorrect_answers: FIVE_WRONG.slice(0, 4) }),
+      );
+    });
+
+    // A two-option multiple-choice question is legitimate: it plays like a
+    // true-or-false one, with 50/50 unavailable. The floor is one wrong answer
+    // whatever the type.
+    it('accepts two options on a multiple-choice question', async () => {
+      await assertSucceeds(create({ correct_answer: 'Mars', incorrect_answers: ['Venus'] }));
+    });
+  });
+
+  describe('every wrong answer is a string of 1–200 characters, at every position', () => {
+    /** Five distinct wrong answers of exactly 200 characters each. */
+    const atTheCap = [0, 1, 2, 3, 4].map((index) => `${'w'.repeat(199)}${index}`);
+
+    it('accepts five wrong answers of exactly 200 characters', async () => {
+      await assertSucceeds(create({ correct_answer: 'Mars', incorrect_answers: atTheCap }));
+    });
+
+    for (const position of [0, 1, 2, 3, 4]) {
+      it(`refuses an empty wrong answer in position ${position + 1}`, async () => {
+        const answers = [...FIVE_WRONG];
+        answers[position] = '';
+        await assertFails(create({ correct_answer: 'Mars', incorrect_answers: answers }));
+      });
+
+      it(`refuses a 201-character wrong answer in position ${position + 1}`, async () => {
+        const answers = [...FIVE_WRONG];
+        answers[position] = 'w'.repeat(201);
+        await assertFails(create({ correct_answer: 'Mars', incorrect_answers: answers }));
+      });
+    }
+
+    // A map has a `size()` of its own — its number of keys — so a wrong answer
+    // written as one would pass both length checks without `is string`. (A
+    // list would too, but Firestore stores no array inside an array, so that
+    // write never reaches the rules.)
+    it('refuses a wrong answer that is a map', async () => {
+      await assertFails(
+        create({ correct_answer: 'Mars', incorrect_answers: ['Venus', { text: 'Saturn' }] }),
+      );
+    });
+
+    it('refuses a wrong answer that is a map, in the last position', async () => {
+      await assertFails(
+        create({
+          correct_answer: 'Mars',
+          incorrect_answers: ['Venus', 'Mercury', 'Saturn', 'Neptune', { text: 'Uranus' }],
+        }),
+      );
+    });
+
+    it('refuses a wrong answer that is a number', async () => {
+      await assertFails(create({ correct_answer: 'Mars', incorrect_answers: ['Venus', 4] }));
+    });
+  });
+
+  describe('every option is distinct', () => {
+    it('refuses a duplicate among the last wrong answers', async () => {
+      await assertFails(
+        create({
+          correct_answer: 'Mars',
+          incorrect_answers: ['Venus', 'Mercury', 'Saturn', 'Neptune', 'Neptune'],
+        }),
+      );
+    });
+
+    it('refuses the correct answer repeated in the fifth position', async () => {
+      await assertFails(
+        create({
+          correct_answer: 'Mars',
+          incorrect_answers: ['Venus', 'Mercury', 'Saturn', 'Neptune', 'Mars'],
+        }),
+      );
+    });
+  });
+
+  describe('a true-or-false question has exactly two options', () => {
+    it('refuses a boolean question with two wrong answers', async () => {
+      await assertFails(
+        create({ type: 'boolean', correct_answer: 'True', incorrect_answers: ['False', 'Maybe'] }),
+      );
+    });
+
+    it('refuses a boolean question with five wrong answers', async () => {
+      await assertFails(
+        create({ type: 'boolean', correct_answer: 'True', incorrect_answers: FIVE_WRONG }),
+      );
+    });
+
+    it('accepts a boolean question with its one wrong answer', async () => {
+      await assertSucceeds(
+        create({ type: 'boolean', correct_answer: 'True', incorrect_answers: ['False'] }),
+      );
+    });
+  });
+
+  describe('the statement is at most 2,000 characters', () => {
+    it('accepts a 2,000-character question', async () => {
+      await assertSucceeds(create({ question: statementOf(2000) }));
+    });
+
+    it('refuses a 2,001-character question', async () => {
+      await assertFails(create({ question: statementOf(2001) }));
+    });
+  });
+
+  /**
+   * The owner's edit validates the same shape (`isValidQuestionShape()`), so
+   * the bounds bind a rewrite exactly as they bind a create — which is what
+   * lets an author add rows to a question they wrote before this change, and
+   * what stops an edit doing what a create cannot.
+   */
+  describe("the author's edit is held to the same bounds", () => {
+    it('lets the author rewrite their question with six options and a long statement', async () => {
+      await assertSucceeds(
+        setDoc(
+          mine(asVerifiedPassword(env, AUTHOR)),
+          ownerEdit({
+            question: statementOf(2000),
+            correct_answer: 'Mars',
+            incorrect_answers: FIVE_WRONG,
+          }),
+        ),
+      );
+    });
+
+    it('lets the author keep a two-option question with a wrong answer at the cap', async () => {
+      await assertSucceeds(
+        setDoc(
+          mine(asVerifiedPassword(env, AUTHOR)),
+          ownerEdit({ correct_answer: 'Mars', incorrect_answers: ['w'.repeat(200)] }),
+        ),
+      );
+    });
+
+    it('refuses an edit that leaves no wrong answer at all', async () => {
+      await assertFails(
+        setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ incorrect_answers: [] })),
+      );
+    });
+
+    it('refuses an edit to seven options', async () => {
+      await assertFails(
+        setDoc(
+          mine(asVerifiedPassword(env, AUTHOR)),
+          ownerEdit({ correct_answer: 'Mars', incorrect_answers: [...FIVE_WRONG, 'Pluto'] }),
+        ),
+      );
+    });
+
+    it('refuses an edit carrying an over-long wrong answer', async () => {
+      await assertFails(
+        setDoc(
+          mine(asVerifiedPassword(env, AUTHOR)),
+          ownerEdit({ incorrect_answers: ['CO2', 'O2', 'w'.repeat(201)] }),
+        ),
+      );
+    });
+
+    it('refuses an edit to a boolean question with two wrong answers', async () => {
+      await assertFails(
+        setDoc(
+          mine(asVerifiedPassword(env, AUTHOR)),
+          ownerEdit({
+            type: 'boolean',
+            correct_answer: 'True',
+            incorrect_answers: ['False', 'No'],
+          }),
+        ),
+      );
+    });
+
+    it('refuses an edit to a 2,001-character question', async () => {
+      await assertFails(
+        setDoc(mine(asVerifiedPassword(env, AUTHOR)), ownerEdit({ question: statementOf(2001) })),
+      );
+    });
   });
 });
 

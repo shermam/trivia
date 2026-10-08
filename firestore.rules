@@ -437,6 +437,64 @@ service cloud.firestore {
              && (tags.size() < 8 || isValidTag(tags[7]));
     }
 
+    // The most wrong answers one question may carry (`FEAT-051`): five, so a
+    // question has two to six options in all. Named rather than inlined for
+    // the reason `maxTags()` is — `areValidIncorrectAnswers()` below checks
+    // every element by index, and the two numbers agreeing is what makes a
+    // sixth wrong answer refused rather than merely unchecked.
+    //
+    // Five because the contribute form offers six options at most
+    // (`src/app/components/question-form/question-form.ts`), and the quiz
+    // letters its options from the index rather than from a fixed list. The
+    // ceiling was three while the form offered four options (finding B2,
+    // whose principle this keeps: the rule accepts exactly what the form can
+    // produce, and the two move together).
+    function maxIncorrectAnswers() {
+      return 5;
+    }
+
+    // The text of one option: a non-empty string of at most 200 characters,
+    // the bound `correct_answer` has always had (`FEAT-051`).
+    //
+    // `is string` is not decoration. A map has a `size()` too — its number of
+    // keys — so without it a wrong answer written as `{ text: 'x' }` would
+    // pass both length checks.
+    function isValidAnswerText(answer) {
+      return answer is string && answer.size() > 0 && answer.size() <= 200;
+    }
+
+    // Every wrong answer of a question, checked one index at a time
+    // (`FEAT-051`) — `areValidTags()`'s shape, for `areValidTags()`'s reason:
+    // the rules language cannot apply a predicate to each element of a list,
+    // so there is one clause per permitted position, each guarded by the
+    // list's own size because reading past the end raises and an erroring
+    // rule denies.
+    //
+    // Before this, no element was checked at all: the list's length was
+    // bounded and nothing else, so a wrong answer could be any value of any
+    // size.
+    //
+    // Two pieces of this cannot be observed, and both were measured rather
+    // than assumed (`CLAUDE.md` §4.6). The guard on index 0: the floor above
+    // it refuses an empty list before the index is read, so deleting the guard
+    // fails no test — it is written so the five clauses read alike, and the
+    // floor is the one doing the work (deleting *that* fails the empty-list
+    // tests). And `is list`: a string or a map reaching here errors on its
+    // first index or on the `toSet()` in `isValidQuestionShape()`, and an
+    // erroring rule denies, so deleting it fails no test either. It is stated
+    // for the reader, as `isQuestionAuthor()`'s `in` guard is — do not
+    // mistake it for the thing that refuses a non-list; the language is.
+    function areValidIncorrectAnswers(answers) {
+      return answers is list
+             && answers.size() >= 1
+             && answers.size() <= maxIncorrectAnswers()
+             && (answers.size() < 1 || isValidAnswerText(answers[0]))
+             && (answers.size() < 2 || isValidAnswerText(answers[1]))
+             && (answers.size() < 3 || isValidAnswerText(answers[2]))
+             && (answers.size() < 4 || isValidAnswerText(answers[3]))
+             && (answers.size() < 5 || isValidAnswerText(answers[4]));
+    }
+
     // Everything a `custom_questions` document must *be*, independent of who is
     // writing it and when. Shared by `create` and by the author's own `update`
     // (`FEAT-007`), which is the entire reason it is factored out: an
@@ -477,16 +535,24 @@ service cloud.firestore {
                     && data.category.size() <= 100))
             && data.type in ['multiple', 'boolean']
             && data.difficulty in ['easy', 'medium', 'hard']
-            && data.question is string && data.question.size() > 0 && data.question.size() <= 500
+            // Up to 2,000 characters (`FEAT-051`): long enough for a
+            // public-exam statement with a paragraph of setup, which is the
+            // material the owner wants the bank to hold. The quiz card grows to
+            // fit it and the page scrolls; nothing inside the card does.
+            && data.question is string && data.question.size() > 0 && data.question.size() <= 2000
             && data.correct_answer is string
             && data.correct_answer.size() > 0 && data.correct_answer.size() <= 200
-            && data.incorrect_answers is list
-            // 3, not 5: AddQuestionComponent offers exactly three incorrect
-            // fields for a multiple-choice question and derives one for a
-            // boolean, so 1..3 is every question the app can actually produce.
-            // The old ceiling of 5 allowed six answers in total while the quiz
-            // only ever labelled four (finding B2).
-            && data.incorrect_answers.size() >= 1 && data.incorrect_answers.size() <= 3
+            // One to five wrong answers, each 1–200 characters — a question has
+            // two to six options in all (`FEAT-051`, `areValidIncorrectAnswers()`
+            // above).
+            && areValidIncorrectAnswers(data.incorrect_answers)
+            // A true-or-false question has exactly two options. Nothing said
+            // so while the ceiling was three wrong answers, and the gap was
+            // small; at five, a `boolean` question carrying five wrong answers
+            // would pass, and the type would stop meaning anything. The form
+            // derives the one wrong answer itself, so this refuses only a
+            // client that did not.
+            && (data.type != 'boolean' || data.incorrect_answers.size() == 1)
             // Source attribution (FEAT-022), both optional. A question with no
             // citation is normal — Open Trivia DB exposes none, so most
             // questions a player sees could never have one, and the UI shows
@@ -513,12 +579,12 @@ service cloud.firestore {
             // owns this field's later life, where a reviewer may edit it —
             // which is why it carries that spec's name rather than the label
             // the form shows). Optional like the two above, and bounded at
-            // 1000 rather than the 500 a question gets: it has to hold a
-            // paragraph explaining the question, the correct answer *and* the
-            // distractors, which is strictly more text than the question
-            // itself. Non-empty when present, so "no justification" is an
-            // absent key rather than a blank one there is no way to tell from
-            // a deleted one.
+            // 1000: it has to hold a paragraph saying why the correct answer
+            // is right and why the distractors are wrong — and a longer
+            // statement does not lengthen that, which is why it stayed at 1000
+            // when the question's own cap rose to 2000 (`FEAT-051`). Non-empty
+            // when present, so "no justification" is an absent key rather than
+            // a blank one there is no way to tell from a deleted one.
             && (!('explanation' in data)
                 || (data.explanation is string
                     && data.explanation.size() > 0
@@ -566,6 +632,10 @@ service cloud.firestore {
             // text, but the data should never have contained the ambiguity in
             // the first place — fixing only the reader would leave the next
             // reader to rediscover it.
+            //
+            // These two clauses are what make every option distinct, at six
+            // options as at two: the correct answer is not among the wrong
+            // ones, and no wrong answer repeats another.
             && !(data.correct_answer in data.incorrect_answers)
             && data.incorrect_answers.toSet().size() == data.incorrect_answers.size();
     }
