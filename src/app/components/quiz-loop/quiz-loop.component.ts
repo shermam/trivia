@@ -13,6 +13,7 @@ import { STREAK_INDICATOR_THRESHOLD, multiplierLabel } from '../../models/scorin
 import { AudioService } from '../../services/audio.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { TriviaService } from '../../services/trivia.service';
+import { firstTopicTag } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 
@@ -122,10 +123,26 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
   protected readonly lifelines = this.gameController.lifelines;
 
   /**
+   * The topic pill: the question's first topic (`FEAT-052`) — an Open Trivia
+   * question's seed tag, a contribution's first tag, or the tag a question
+   * written before topics replaced categories derives — through the derivation
+   * every reader shares. `null` for a question with no topic at all, which then
+   * has no pill.
+   *
+   * Fixed for the life of a question, so whether the pill exists never changes
+   * while the reader is looking at it: the row it sits in follows its content
+   * between questions only, like the card does.
+   */
+  protected readonly topic = computed(() => {
+    const question = this.gameController.currentQuestion();
+    return question ? firstTopicTag(question) : null;
+  });
+
+  /**
    * The streak badge (`FEAT-004`).
    *
    * **Rendered on every question and only made `invisible`**, never added and
-   * removed, because it sits in the wrapping badge row beside the category and
+   * removed, because it sits in the wrapping badge row beside the topic and
    * difficulty pills: a pill that appeared on the third correct answer would
    * re-wrap that row and move the question text down the screen, mid-round,
    * while the clock runs (`CLAUDE.md` §4.4).

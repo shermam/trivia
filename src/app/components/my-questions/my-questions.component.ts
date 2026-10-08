@@ -2,7 +2,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
-  OnInit,
   computed,
   effect,
   inject,
@@ -17,7 +16,7 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, UserQuestionCursor } from '../../services/firebase.service';
-import { TriviaCategory, TriviaService } from '../../services/trivia.service';
+import { topicTagsOf } from '../../utils/category-tags';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionFieldsComponent } from '../question-form/question-fields.component';
@@ -88,10 +87,9 @@ const STATUS_LABELS: Record<QuestionStatus, string> = {
   templateUrl: './my-questions.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MyQuestionsComponent implements OnInit {
+export class MyQuestionsComponent {
   private readonly fb = inject(FormBuilder);
   private readonly firebaseService = inject(FirebaseService);
-  private readonly triviaService = inject(TriviaService);
   protected readonly authService = inject(AuthService);
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly embedMode = inject(EmbedModeService);
@@ -101,7 +99,6 @@ export class MyQuestionsComponent implements OnInit {
   protected readonly hasMore = computed(() => this.cursor() !== null);
   protected readonly isLoading = signal(true);
   protected readonly loadError = signal<string | null>(null);
-  protected readonly categories = signal<TriviaCategory[]>([]);
 
   /**
    * Which uid the rows on screen belong to.
@@ -257,18 +254,6 @@ export class MyQuestionsComponent implements OnInit {
 
       this.wasDialogOpen = isOpen;
     });
-  }
-
-  ngOnInit(): void {
-    void this.loadCategories();
-  }
-
-  private async loadCategories(): Promise<void> {
-    try {
-      this.categories.set(await this.triviaService.getCategories());
-    } catch {
-      // Suggestions are a nicety; the category field is free text either way.
-    }
   }
 
   private async load(uid: string): Promise<void> {
@@ -446,6 +431,16 @@ export class MyQuestionsComponent implements OnInit {
     } finally {
       this.isSaving.set(false);
     }
+  }
+
+  /**
+   * What the question is about — its tags, or for a question written before
+   * topics replaced categories the tag its category derives (`FEAT-052`). The
+   * same derivation every reader uses, so the row shows the topic the edit
+   * dialog will open on.
+   */
+  protected topicsOf(question: MyQuestion): string[] {
+    return topicTagsOf(question);
   }
 
   protected statusLabel(question: MyQuestion): string {

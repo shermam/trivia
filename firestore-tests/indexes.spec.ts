@@ -78,18 +78,24 @@ describe('firestore.indexes.json', () => {
   });
 
   /**
-   * The tag filter's four query shapes (`FEAT-021`). `getCustomQuestions` sends
-   * `status` plus an optional `category` and `difficulty`, and adds an
-   * `array-contains-any` on `tags` when the player has selected some — so every
-   * combination of the two optional equalities needs its own composite, with
-   * the array field last because Firestore requires equalities before it.
+   * The tag filter's query shapes (`FEAT-021`). `getCustomQuestions` sends
+   * `status`, an optional `difficulty`, and an `array-contains-any` on `tags`
+   * when the player has chosen topics — `status+tags` and
+   * `status+difficulty+tags`, with the array field last because Firestore
+   * requires equalities before it.
+   *
+   * The two shapes that also name `category` are what a browser still on the
+   * bundle from before topics replaced the category picker sends (`FEAT-052`),
+   * and they stay declared until nothing can: removing a declaration does not
+   * delete an index, and the deploy refuses a live index the file does not
+   * declare (the block comment above, and `docs/data-model.md`).
    *
    * Asserted here rather than left to the deploy, because the emulator cannot
    * enforce index configuration at all: a missing one is green in every local
    * suite and fails only in production, as a filtered draw that returns nothing
    * and looks like an empty bank.
    */
-  it('declares a tags index beside each shape the filtered draw runs', () => {
+  it('declares a tags index for every shape a filtered draw sends, stale bundles included', () => {
     const shapes = spec.indexes
       .filter(
         (index) =>

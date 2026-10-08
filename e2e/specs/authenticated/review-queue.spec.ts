@@ -2,8 +2,9 @@ import { Locator, Page } from '@playwright/test';
 import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
-import { answerQuestion, optionLabel, waitForPlayRoute } from '../../support/game';
-import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { answerQuestion } from '../../support/game';
+import { stubOpenTrivia } from '../../support/open-trivia';
+import { addQuestionTopic, runTag, startTopicGame } from '../../support/topics';
 
 /**
  * The moderation role and queue, end to end (`BACKLOG.md` item 4b-ii).
@@ -20,28 +21,27 @@ import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
  * holds every other test's contributions
  * and the queue lists all of them: a count of rows, a game drawn from the bank,
  * and an email address are all global unless the test makes them its own. The
- * tag goes in the question text (so rows can be counted), the document ids, the
- * accounts, and a **category** that exists for this test alone — which is what
- * makes the custom game below deterministic rather than a draw from whatever
- * the bank happens to hold.
+ * tag goes in the question text (so rows can be counted), the document ids and
+ * the accounts, and every question carries a **topic** that exists for this
+ * test alone — which is what makes the custom game below deterministic rather
+ * than a draw from whatever the bank happens to hold (`e2e/support/topics.ts`).
  */
 test.describe('the review queue', () => {
   const password = 'Password123!';
 
   let tag: string;
-  let category: string;
+  let topic: string;
   let pendingText: string;
   let approvedText: string;
 
   test.beforeEach(async ({ page, firebase }) => {
     tag = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    category = `Review ${tag}`;
+    topic = runTag('review');
     pendingText = `Is this question waiting for review? (${tag})`;
     approvedText = `Is this question already live? (${tag})`;
 
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, category);
-    await seedQuestions(firebase, { tag, category, pendingText, approvedText });
+    await seedQuestions(firebase, { tag, topic, pendingText, approvedText });
   });
 
   /** The reviewer account for this test, with the role already granted. */
@@ -168,9 +168,9 @@ test.describe('the review queue', () => {
     page,
     firebase,
   }) => {
-    // Exactly one question in this category is approved, so the game is
+    // Exactly one question under this topic is approved, so the game is
     // deterministic and the report is about a question this test owns.
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
     await answerQuestion(page, 'Yes');
     await expect(page).toHaveURL(/\/game-over$/);
     await expect(page.getByText('Game Over!').first()).toBeVisible();
@@ -299,7 +299,7 @@ test.describe('the review queue', () => {
 
     const submittedText = `Which planet has the Great Red Spot? (${tag})`;
     await page.goto('/add-question');
-    await page.locator('#category').fill(category);
+    await addQuestionTopic(page, topic);
     await page.locator('#question').fill(submittedText);
     await page.locator('#correctAnswer').fill('Jupiter');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('Mars');
@@ -309,15 +309,25 @@ test.describe('the review queue', () => {
     await expect(page.getByText('submitted for review')).toBeVisible();
 
     // Not served while pending — the whole point of the feature. Exactly one
-    // question in this test's category is approved at this moment, so the game
+    // question under this test's topic is approved at this moment, so the game
     // is deterministic and the assertion below is about which question was
     // served, not about which of several happened to come up first.
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
     await expect(page.getByText(approvedText)).toBeVisible();
     await expect(page.getByText(submittedText)).toHaveCount(0);
 
     await page.goto('/review');
     await expect(page.getByText(submittedText)).toBeVisible();
+    // The topic arrived on the reviewer's card from what Firestore stored — the
+    // only topic a contribution has, since there is no category to fall back
+    // on (`FEAT-052`).
+    await expect(
+      page
+        .getByTestId('review-question')
+        .filter({ hasText: submittedText })
+        .getByTestId('review-question-tags')
+        .getByTestId('question-tag'),
+    ).toHaveText([`#${topic}`]);
     await decideOn(page, submittedText, 'approve');
 
     // Reject the one that was already live, so that again exactly one question
@@ -326,7 +336,7 @@ test.describe('the review queue', () => {
     await reviewTab(page, 'approved').click();
     await decideOn(page, approvedText, 'reject');
 
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
     await expect(page.getByText(submittedText)).toBeVisible();
     await expect(page.getByText(approvedText)).toHaveCount(0);
   });
@@ -339,7 +349,7 @@ test.describe('the review queue', () => {
     // It has to be a **Custom** game. `startGame` uses the Open Trivia source,
     // which never touches `custom_questions` at all, so the negative assertion
     // below would hold no matter what the filter did.
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
 
     // The positive control, and the reason this test is not vacuous: the
     // approved question really is being served from the bank. Without it a
@@ -352,12 +362,12 @@ test.describe('the review queue', () => {
 
 function seedQuestions(
   firebase: FirebaseBackend,
-  ids: { tag: string; category: string; pendingText: string; approvedText: string },
+  ids: { tag: string; topic: string; pendingText: string; approvedText: string },
 ): Promise<void> {
   return firebase.seedCustomQuestions([
     {
       id: `pending-${ids.tag}`,
-      category: ids.category,
+      tags: [ids.topic],
       type: 'multiple',
       difficulty: 'easy',
       question: ids.pendingText,
@@ -369,7 +379,7 @@ function seedQuestions(
     },
     {
       id: `approved-${ids.tag}`,
-      category: ids.category,
+      tags: [ids.topic],
       type: 'multiple',
       difficulty: 'easy',
       question: ids.approvedText,
@@ -383,24 +393,19 @@ function seedQuestions(
 }
 
 /**
- * Starts a **Custom** game in one category. Not `startGame`, which uses the Open
- * Trivia source and never reads `custom_questions` at all — a negative assertion
- * after that would hold no matter what the status filter did.
+ * Starts a **Custom** game over this test's topic. Not `startGame`, which uses
+ * the Open Trivia source and never reads `custom_questions` at all — a negative
+ * assertion after that would hold no matter what the status filter did.
  *
- * The category is what makes the draw deterministic: `getCustomQuestions` filters
- * on it server-side, so a category only this test has written to holds only this
- * test's questions however busy the shared bank is.
+ * The topic is what makes the draw deterministic: `getCustomQuestions` filters
+ * on it in the query, so a tag only this test has written holds only this
+ * test's questions however busy the shared bank is. Exactly one of them is
+ * approved whenever a game starts here, so the setup screen offers that one and
+ * the offer is accepted.
  */
-async function startCustomGame(page: Page, category: string): Promise<void> {
+async function startCustomGame(page: Page, topic: string): Promise<void> {
   await page.goto('/');
-  await page.locator('#amount').selectOption({ label: '5' });
-  // Retries until the stubbed category list has actually populated the picker,
-  // which is the thing a wait on the categories request would be standing in
-  // for.
-  await page.locator('#category').selectOption(category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
+  await startTopicGame(page, { topics: [topic], found: 1 });
 }
 
 /** The Pending / Approved / Rejected / Reports picker, by view rather than by label. */

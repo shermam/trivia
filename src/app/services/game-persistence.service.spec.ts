@@ -65,7 +65,6 @@ function makeQuestion(id: string): TriviaQuestion {
 
 const config: GameConfig = {
   amount: 2,
-  category: '',
   difficulty: '',
   source: 'open_trivia',
   timeLimit: 15,
@@ -196,6 +195,45 @@ describe('GamePersistenceService (B8)', () => {
     await putRaw(validRecord({ config: { ...config, timeLimit: 99 } }));
 
     expect(await service.load()).toBeNull();
+  });
+
+  /*
+   * `FEAT-052`. Topics replaced categories, and the store outlives the deploy in
+   * both directions: a game saved since holds questions with no `category`, and
+   * a game saved before holds a config that still carries one. A reader that
+   * required either would be the only consumer checking a type nobody else
+   * does — `[ngValue]`'s shape (`CLAUDE.md` §4.4) — and the price is the
+   * player's game.
+   */
+  it('saves and restores a game whose questions carry no category', async () => {
+    const { category: _gone, ...uncategorised } = makeQuestion('q0');
+    const tagged: TriviaQuestion = { ...uncategorised, tags: ['world-war-2'] };
+    await service.save(makeGame({ questions: [tagged, makeQuestion('q1')], currentIndex: 0 }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect('category' in loaded!.questions[0]).toBe(false);
+    expect(loaded?.questions[0].tags).toEqual(['world-war-2']);
+  });
+
+  it('saves and restores a game whose config carries the old category key', async () => {
+    const legacyConfig = { ...config, category: 'History' };
+    await service.save(makeGame({ config: legacyConfig as GameConfig }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.config.amount).toBe(2);
+    // Accepted, then left behind: the config has nowhere to put it, and the
+    // game was drawn under a category rather than a topic, so it is not
+    // translated into a tag the draw never used.
+    expect('category' in loaded!.config).toBe(false);
+    expect('tags' in loaded!.config).toBe(false);
+  });
+
+  it('keeps the topics a game was drawn under', async () => {
+    await service.save(makeGame({ config: { ...config, tags: ['history'] } }));
+
+    expect((await service.load())?.config.tags).toEqual(['history']);
   });
 
   // Dropped, not fatal: a flag is a hint about a question, and losing one is
@@ -581,6 +619,11 @@ describe('GamePersistenceService (B8)', () => {
     ['a malformed question', validRecord({ questions: [{ id: 'q0' }] })],
     ['an unknown source', validRecord({ config: { ...config, source: 'wikipedia' } })],
     ['an unknown difficulty', validRecord({ config: { ...config, difficulty: 'trivial' } })],
+    ['a config category that is not a string', validRecord({ config: { ...config, category: 7 } })],
+    [
+      'a question category that is not a string',
+      validRecord({ questions: [{ ...makeQuestion('q0'), category: ['History'] }] }),
+    ],
     ['a non-numeric savedAt', validRecord({ savedAt: 'yesterday' })],
   ])('refuses %s', async (_label, record) => {
     await putRaw(record);

@@ -125,7 +125,8 @@ export class OfflineDbService {
           );
       });
       // A failed open must not be memoized as a permanent failure — same
-      // reasoning as TriviaService.getCategories (finding B3).
+      // reasoning as `SubscriptionService.getProPrices()` (finding B3,
+      // `CLAUDE.md` §4.4).
       this.dbPromise.catch(() => {
         this.dbPromise = null;
       });

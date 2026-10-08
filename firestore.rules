@@ -465,7 +465,16 @@ service cloud.firestore {
                  'sourceUrl', 'sourceTitle', 'explanation', 'format', 'tags',
                  'rejectionReason']
               )
-            && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+            // The free-text category every question written before topics
+            // replaced it carries (`FEAT-052`). **Optional, with the bounds it
+            // always had when present**: the key stays in the allowlist so
+            // every existing document stays valid and its author can still
+            // edit it, and a new contribution carries tags and no category.
+            // Readers derive a tag from it; nothing filters on it any more.
+            && (!('category' in data)
+                || (data.category is string
+                    && data.category.size() > 0
+                    && data.category.size() <= 100))
             && data.type in ['multiple', 'boolean']
             && data.difficulty in ['easy', 'medium', 'hard']
             && data.question is string && data.question.size() > 0 && data.question.size() <= 500
@@ -544,6 +553,12 @@ service cloud.firestore {
             // The bounds are `areValidTags()` above; they are stated there
             // rather than here because the per-element check needs eight
             // clauses of its own.
+            //
+            // Optional *here*, which is the shape of a document rather than of
+            // a new one: the bank still holds questions written before tags
+            // existed, and their authors may still edit them. That a **new**
+            // question carries at least one is a condition on creating, so it
+            // lives in `isValidCustomQuestion()` below (`FEAT-052`).
             && (!('tags' in data) || areValidTags(data.tags))
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
@@ -571,6 +586,30 @@ service cloud.firestore {
             // and refused here so the author cannot be the one who put it there
             // (`FEAT-007`).
             && !('rejectionReason' in data)
+            // At least one topic (`FEAT-052`). Tags are the only topic a
+            // question has since they replaced categories, and the topic
+            // picker can reach a question only through them — the community
+            // draw is an `array-contains-any` on `tags`, which a question with
+            // none matches never. The contribute form asks for one too; that is
+            // UX, and this is the boundary (`CLAUDE.md` §4.1).
+            //
+            // `get` with an empty-list default rather than `'tags' in data &&
+            // data.tags.size() >= 1`: one clause instead of two, and no guard
+            // that the language would make redundant anyway (reading an absent
+            // field errors, and an erroring rule denies). A present value that
+            // is not a list never reaches here: the shape check above refuses
+            // it first, and `&&` short-circuits.
+            //
+            // The same trade `status` made when it became mandatory: a browser
+            // still on the previous bundle submits a category and no tags, is
+            // refused once through the form's existing error path, and is fixed
+            // by a reload. Accepting a category-only create instead would let a
+            // stale client write a question the topic picker can never reach.
+            //
+            // **Create only.** The owner's edit keeps validating the shape
+            // alone, so a question written before topics existed stays
+            // editable by its author.
+            && data.get('tags', []).size() >= 1
             // Mandatory, not optional-if-present. An optional field would let
             // a client cached from before this change keep writing documents
             // with no status at all, which the backfill has already run past —

@@ -244,7 +244,6 @@ describe('GameControllerService persistence (B8)', () => {
     const service = setup(questionCount);
     service.config.set({
       amount: questionCount,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -313,7 +312,6 @@ describe('GameControllerService persistence (B8)', () => {
     const service = setup(5);
     service.config.set({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -343,7 +341,6 @@ describe('GameControllerService persistence (B8)', () => {
     const service = setup(5);
     service.config.set({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -425,7 +422,6 @@ describe('GameControllerService persistence (B8)', () => {
 
     await fresh.startGame({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -480,7 +476,6 @@ describe('GameControllerService persistence (B8)', () => {
 
     await fresh.startGame({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -521,7 +516,6 @@ describe('GameControllerService persistence (B8)', () => {
     const service = setupWithQuestionSource(3);
     const config: GameConfig = {
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -543,7 +537,6 @@ describe('GameControllerService persistence (B8)', () => {
     const service = await playAndPersist(10, 3, 2);
     service.config.set({
       amount: 10,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 'unlimited',
@@ -896,7 +889,6 @@ describe('GameControllerService streaks and multipliers (FEAT-004)', () => {
 
     await service.startGame({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -1068,7 +1060,6 @@ describe('GameControllerService lifelines (FEAT-002)', () => {
     const service = setup(3);
     service.config.set({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1089,7 +1080,6 @@ describe('GameControllerService lifelines (FEAT-002)', () => {
     const abandoned = setup(3);
     abandoned.config.set({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1105,7 +1095,6 @@ describe('GameControllerService lifelines (FEAT-002)', () => {
 
     await fresh.startGame({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1223,18 +1212,17 @@ describe('GameControllerService seen-set (FEAT-034)', () => {
  * were asked for says so and waits, rather than starting a shorter round
  * without mentioning it.
  *
- * **The scoping is what these rows are really about.** A short draw has always
- * been possible — a rare category, a narrow difficulty, a small bank — and
- * interrupting those would change behaviour this feature has no business
- * changing. The bank being mostly untagged is what makes a tag filter
- * different in kind: coming back short is the *expected* result there rather
- * than an unlucky one, and a player has no way to know that unless told.
+ * **The scoping is what these rows are really about.** An unfiltered draw can
+ * come back short too — a narrow difficulty, a small bank — and interrupting
+ * that would change behaviour this feature has no business changing. A topic
+ * filter is different in kind: coming back short is the *expected* result
+ * there rather than an unlucky one, and a player has no way to know that
+ * unless told.
  */
 describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () => {
   function config(overrides: Partial<GameConfig> = {}): GameConfig {
     return {
       amount: 10,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1331,7 +1319,7 @@ describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () =>
 
   /**
    * The additive half. A short draw with no filter is behaviour the app has
-   * always had — a rare category simply plays short — and this feature must not
+   * always had — a small bank simply plays short — and this feature must not
    * have put a confirmation in front of it.
    */
   it('never interrupts an unfiltered draw, however short it comes back', async () => {
@@ -1351,6 +1339,8 @@ describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () =>
 
     expect(service.shortDraw()).toBeNull();
     expect(service.loadError()).toContain('No questions were found');
+    // A topic, never a category (`FEAT-052`): the screen has no category to change.
+    expect(service.loadError()).toContain('Try a different topic, difficulty, or source.');
   });
 
   it('clears a stale notice when the next draw is fine', async () => {

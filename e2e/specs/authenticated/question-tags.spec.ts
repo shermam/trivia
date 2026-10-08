@@ -4,16 +4,19 @@ import { stubOpenTrivia } from '../../support/open-trivia';
 
 /**
  * `FEAT-021`, the write half: a contributor tags their own question, a reviewer
- * sees the tags, and an author editing that question keeps them.
+ * sees the tags, and an author editing that question keeps them. Since topics
+ * replaced categories (`FEAT-052`) the tags are a contribution's only topic,
+ * and one is required.
  *
  * Three seams, and each has already been the shape of a real bug in this
  * repository:
  *
- * - **The rules accept the widened document.** The rules suite proves
- *   `isValidQuestionShape()` admits a `tags` list, but it builds the payload by
- *   hand. Only this proves the payload the **form** builds is the one the rules
- *   were widened for — a mismatch surfaces as a bare `permission-denied` with
- *   the contributor's work lost.
+ * - **The rules accept the document the form builds** — tags and no
+ *   `category`. The rules suite proves `isValidCustomQuestion()` admits that
+ *   shape and refuses one with no tags, but it builds the payload by hand. Only
+ *   this proves the payload the **form** builds is the one the rules expect — a
+ *   mismatch surfaces as a bare `permission-denied` with the contributor's work
+ *   lost.
  * - **The chips reach the reviewer's card**, rendered from what Firestore
  *   stored rather than from anything the test held onto.
  * - **An edit keeps them.** An owner update rewrites the whole document, so a
@@ -64,7 +67,6 @@ test.describe('topic tags on a contributed question', () => {
     await signInViaUi(page, email, password);
 
     await page.goto('/add-question');
-    await page.locator('#category').fill('History');
     await page.locator('#question').fill(questionText);
     await page.locator('#correctAnswer').fill('Versailles');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('Trianon');
@@ -101,6 +103,14 @@ test.describe('topic tags on a contributed question', () => {
     const chips = card.getByTestId('review-question-tags');
     await expect(chips).toHaveAttribute('aria-label', 'Topics');
     await expect(chips.getByTestId('question-tag')).toHaveText(['#world-war-1', '#cold-war']);
+
+    // ...and the half no screen can show, because none shows a category any
+    // more: the document carries its topics as tags and no `category` key at
+    // all (`FEAT-052`). Read through the Admin SDK, scoped to this test's own
+    // account.
+    const [stored] = await firebase.getContributedQuestions(uid);
+    expect(stored['tags']).toEqual(['world-war-1', 'cold-war']);
+    expect('category' in stored).toBe(false);
   });
 
   test('keeps the tags when the author edits the question, and lets them change', async ({

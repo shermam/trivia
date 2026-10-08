@@ -78,7 +78,6 @@ describe('OfflineQuestionsService', () => {
     expect(await service.getCount()).toBe(3);
     const result = await service.getOfflineQuestions({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,
@@ -120,14 +119,12 @@ describe('OfflineQuestionsService', () => {
     // Both pools still hold their own copy — the eviction used to empty one.
     const fromOpenTrivia = await service.getOfflineQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
     });
     const fromCustom = await service.getOfflineQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -175,7 +172,6 @@ describe('OfflineQuestionsService', () => {
 
     const [question] = await service.getOfflineQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,
@@ -185,24 +181,32 @@ describe('OfflineQuestionsService', () => {
     expect(question).not.toHaveProperty('cachedAt');
   });
 
-  it('getOfflineQuestions() prefers questions matching category/difficulty', async () => {
+  /**
+   * `FEAT-052`. The topic picker narrows the saved pool the way the category
+   * picker did — as a preference — and a question is read through the one
+   * derivation every reader shares: its tags, or for a question cached before
+   * topics replaced categories, the tag its category derives. Both kinds are
+   * in this pool on purpose; nothing in the store was migrated.
+   */
+  it('getOfflineQuestions() prefers questions about any of the chosen topics', async () => {
     const service = TestBed.inject(OfflineQuestionsService);
     await service.saveQuestions([
-      makeQuestion({ question: 'q1', category: 'History', difficulty: 'hard' }),
+      makeQuestion({ question: 'q1', tags: ['history'], difficulty: 'hard' }),
       makeQuestion({ question: 'q2', category: 'History', difficulty: 'hard' }),
-      makeQuestion({ question: 'q3', category: 'Science', difficulty: 'easy' }),
+      makeQuestion({ question: 'q3', tags: ['cold-war'], difficulty: 'hard' }),
+      makeQuestion({ question: 'q4', category: 'Science', difficulty: 'hard' }),
+      makeQuestion({ question: 'q5', tags: ['history'], difficulty: 'easy' }),
     ]);
 
     const result = await service.getOfflineQuestions({
-      amount: 2,
-      category: 'History',
+      amount: 3,
       difficulty: 'hard',
       source: 'mixed',
       timeLimit: 15,
+      tags: ['history', 'cold-war'],
     });
 
-    expect(result).toHaveLength(2);
-    expect(result.every((q) => q.category === 'History' && q.difficulty === 'hard')).toBe(true);
+    expect(result.map((q) => q.question).sort()).toEqual(['q1', 'q2', 'q3']);
   });
 
   it('getOfflineQuestions() falls back to the whole pool when too few questions match the filter', async () => {
@@ -210,19 +214,40 @@ describe('OfflineQuestionsService', () => {
     await service.saveQuestions([
       makeQuestion({ question: 'q1', category: 'History', difficulty: 'hard' }),
       makeQuestion({ question: 'q2', category: 'Science', difficulty: 'easy' }),
-      makeQuestion({ question: 'q3', category: 'Geography', difficulty: 'medium' }),
+      makeQuestion({ question: 'q3', tags: ['geography'], difficulty: 'medium' }),
     ]);
 
     const result = await service.getOfflineQuestions({
       amount: 3,
-      category: 'History',
       difficulty: 'hard',
       source: 'mixed',
       timeLimit: 15,
+      tags: ['history'],
     });
 
-    // Only 1 question actually matches History/hard — falls back to the full 3-question pool.
+    // Only 1 question is about history at hard — a mismatched-topic offline
+    // game beats no offline game, so the whole 3-question pool plays.
     expect(result).toHaveLength(3);
+  });
+
+  /**
+   * The reservoir the deduplicating draw substitutes from applies the topics as
+   * a **filter**, not a preference: substituting an off-topic question into a
+   * game the player narrowed would be worse than serving a repeat.
+   */
+  it('getMatchingQuestions() keeps only questions about one of the topics', async () => {
+    const service = TestBed.inject(OfflineQuestionsService);
+    await service.saveQuestions([
+      makeQuestion({ question: 'q1', tags: ['sports'] }),
+      makeQuestion({ question: 'q2', category: 'Sports' }),
+      makeQuestion({ question: 'q3', tags: ['history'] }),
+      makeQuestion({ question: 'q4', source: 'custom', tags: ['sports'] }),
+    ]);
+
+    const matching = await service.getMatchingQuestions('open_trivia', ['sports'], '');
+
+    expect(matching.map((q) => q.question).sort()).toEqual(['q1', 'q2']);
+    expect(await service.getMatchingQuestions('open_trivia', [], '')).toHaveLength(3);
   });
 
   it('getOfflineQuestions() never crosses source — a "custom" request only draws custom questions', async () => {
@@ -236,7 +261,6 @@ describe('OfflineQuestionsService', () => {
 
     const result = await service.getOfflineQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -252,7 +276,6 @@ describe('OfflineQuestionsService', () => {
 
     const result = await service.getOfflineQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -270,7 +293,6 @@ describe('OfflineQuestionsService', () => {
 
     const result = await service.getOfflineQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,
@@ -285,7 +307,6 @@ describe('OfflineQuestionsService', () => {
 
     const result = await service.getOfflineQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,
@@ -298,7 +319,6 @@ describe('OfflineQuestionsService', () => {
     const service = TestBed.inject(OfflineQuestionsService);
     const result = await service.getOfflineQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,

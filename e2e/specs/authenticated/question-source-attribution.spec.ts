@@ -1,8 +1,8 @@
 import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
-import { optionLabel, waitForPlayRoute } from '../../support/game';
-import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { stubOpenTrivia } from '../../support/open-trivia';
+import { addQuestionTopic, runTag, startTopicGame } from '../../support/topics';
 
 /**
  * `FEAT-022`. A contributor can say where an answer comes from and why it is
@@ -76,7 +76,7 @@ test.describe('question source attribution', () => {
     await signInViaUi(page, email, password);
 
     await page.goto('/add-question');
-    await page.locator('#category').fill('Science');
+    await addQuestionTopic(page, 'chemistry');
     await page.locator('#question').fill(questionText);
     await page.locator('#correctAnswer').fill('H2O');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('CO2');
@@ -126,7 +126,7 @@ test.describe('question source attribution', () => {
     await signInViaUi(page, email, password);
 
     await page.goto('/add-question');
-    await page.locator('#category').fill('Science');
+    await addQuestionTopic(page, 'astronomy');
     await page.locator('#question').fill(`What planet is known as the Red Planet? (${tag})`);
     await page.locator('#correctAnswer').fill('Mars');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('Venus');
@@ -148,16 +148,15 @@ test.describe('question source attribution', () => {
     page,
     firebase,
   }) => {
-    const category = `Sourced ${tag}`;
+    const topic = runTag('sourced');
     const sourcedText = `What is the chemical symbol for water? (${tag})`;
     const plainText = `What planet is known as the Red Planet? (${tag})`;
     const justification = 'Water is two hydrogens bonded to one oxygen.';
 
-    await stubExtraCategory(page, category);
     await firebase.seedCustomQuestions([
       {
         id: `sourced-${tag}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         question: sourcedText,
@@ -171,7 +170,7 @@ test.describe('question source attribution', () => {
       },
       {
         id: `plain-${tag}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         question: plainText,
@@ -182,7 +181,8 @@ test.describe('question source attribution', () => {
       },
     ]);
 
-    await startCustomGame(page, category);
+    await page.goto('/');
+    await startTopicGame(page, { topics: [topic], found: 2 });
     await playToGameOver(page);
 
     await page.getByTestId('recap-toggle').click();
@@ -207,29 +207,17 @@ test.describe('question source attribution', () => {
 });
 
 /**
- * Starts a **Custom** game in this test's own category.
- *
- * Not `startGame`, which uses the Open Trivia source and never reads
- * `custom_questions` at all — the recap assertions after that would hold no
- * matter what this feature did, because an Open Trivia question carries no
- * source and never will. The category is what makes the draw deterministic:
- * `getCustomQuestions` filters on it server-side, so a category only this test
- * has written to holds only this test's two questions however busy the shared
- * bank is.
- */
-async function startCustomGame(page: Page, category: string): Promise<void> {
-  await page.goto('/');
-  await page.locator('#amount').selectOption({ label: '5' });
-  // Retries until the stubbed category list has actually populated the picker.
-  await page.locator('#category').selectOption(category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
-}
-
-/**
  * Answers whatever is on screen until the game ends — two questions, because
- * that is all this test's category holds however many were asked for.
+ * that is all this test's topic holds, and the game played is the two-question
+ * one the setup screen offered in place of the five asked for.
+ *
+ * The game is a **Custom** one (`startTopicGame`), not `startGame`'s Open
+ * Trivia one, which never reads `custom_questions` at all — the recap
+ * assertions after that would hold no matter what this feature did, because an
+ * Open Trivia question carries no source and never will. The topic is what
+ * makes the draw deterministic: `getCustomQuestions` filters on it in the
+ * query, so a tag only this test has written holds only its two questions
+ * however busy the shared bank is.
  *
  * The answer is taken by position rather than by text, which is safe for a
  * reason worth naming: answering disables **every** option

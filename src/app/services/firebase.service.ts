@@ -225,17 +225,24 @@ function asCount(value: unknown): number {
  */
 export const MAX_TAG_FILTER_VALUES = 10;
 
-/** What to draw from the shared question bank. `limit` is mandatory on purpose — see `getCustomQuestions`. */
+/**
+ * What to draw from the shared question bank. `limit` is mandatory on purpose —
+ * see `getCustomQuestions`.
+ *
+ * There is no `category` here, and that is `FEAT-052`'s whole change to the
+ * query: the tag is the only topic a draw can ask for. The five composite
+ * indexes that name `category` stay declared in `firestore.indexes.json`
+ * regardless, because a browser still running an older bundle sends that
+ * equality until it updates (`docs/data-model.md`).
+ */
 export interface CustomQuestionsQuery {
-  /** Exact category match; empty/omitted means any. */
-  category?: string;
   /** Exact difficulty match; empty/omitted means any. */
   difficulty?: Difficulty | '';
   /**
-   * Topic tags to narrow the draw to (`FEAT-021`). A question carrying **any**
-   * of them matches; an empty or omitted list adds no clause at all, which is
-   * what makes the filter strictly additive. Clamped to
-   * {@link MAX_TAG_FILTER_VALUES}.
+   * Topic tags to narrow the draw to (`FEAT-021`, `FEAT-052`). A question
+   * carrying **any** of them matches; an empty or omitted list adds no clause
+   * at all, so an any-topic draw sends exactly the query an "Any Category" game
+   * always sent. Clamped to {@link MAX_TAG_FILTER_VALUES}.
    */
   tags?: readonly string[];
   /** Hard ceiling on documents read. */
@@ -347,7 +354,7 @@ export class FirebaseService {
   private async fetchCustomQuestions(
     options: CustomQuestionsQuery,
   ): Promise<(CustomQuestionDoc & { id: string })[]> {
-    const { category, difficulty, limit } = options;
+    const { difficulty, limit } = options;
     if (limit <= 0) {
       return [];
     }
@@ -371,7 +378,6 @@ export class FirebaseService {
       // today — what it does is get the query shape, and the three composite
       // indexes it needs, into production ahead of the rule that requires it.
       { field: 'status', op: 'EQUAL' as const, value: STATUS_APPROVED },
-      ...(category ? [{ field: 'category', op: 'EQUAL' as const, value: category }] : []),
       ...(difficulty ? [{ field: 'difficulty', op: 'EQUAL' as const, value: difficulty }] : []),
       // A question carrying **any** of the selected tags. `ANY` rather than
       // `ALL` because that is what a player picking two topics means, and
@@ -577,9 +583,22 @@ export class FirebaseService {
    * place. `rejectionReason` is in the delete list unconditionally: the note was
    * about text that no longer exists, and the rules refuse an owner update that
    * leaves it standing.
+   *
+   * **`category` is one of those optional fields, and the form never supplies
+   * it** (`FEAT-052`). A question written before topics replaced categories
+   * opens in the edit dialog on the tag its category derives, so resubmitting
+   * it writes that tag and deletes the category — the topic moves from the old
+   * field to the new one rather than being held in both.
    */
   async updateUserQuestion(questionId: string, content: CustomQuestionContent): Promise<void> {
-    const optional = ['sourceUrl', 'sourceTitle', 'explanation', 'format', 'tags'] as const;
+    const optional = [
+      'category',
+      'sourceUrl',
+      'sourceTitle',
+      'explanation',
+      'format',
+      'tags',
+    ] as const;
     // `hasValue`, not truthiness: `tags` is an array, and `[]` is truthy while
     // meaning exactly what an empty string means for the four fields beside it
     // — nothing given. Written as `[]` it would put an empty array on every
@@ -595,7 +614,6 @@ export class FirebaseService {
     await this.rest.setDocument(
       `${CUSTOM_QUESTIONS_COLLECTION}/${questionId}`,
       {
-        category: content.category,
         type: content.type,
         difficulty: content.difficulty,
         question: content.question,

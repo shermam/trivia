@@ -6,7 +6,8 @@ import {
   QuestionFormat,
   QuestionType,
 } from '../../models/question.model';
-import { normalizeTags, readTags } from '../../utils/normalize-tag.util';
+import { topicTagsOf } from '../../utils/category-tags';
+import { normalizeTags } from '../../utils/normalize-tag.util';
 
 /**
  * The one question form, shared by `/add-question` and by `/my-questions`'
@@ -63,7 +64,22 @@ export type QuestionForm = ReturnType<typeof createQuestionForm>;
  */
 export function createQuestionForm(fb: FormBuilder) {
   return fb.nonNullable.group({
-    category: ['', [Validators.required, nonBlank, Validators.maxLength(100)]],
+    // The question's topics (`FEAT-021`), and since `FEAT-052` its only topic:
+    // the category field went, and a create must carry at least one tag.
+    //
+    // **Required, mirroring the rule.** `firestore.rules` refuses a new
+    // question with no tags, so without this the contributor's only feedback
+    // would be a `permission-denied` naming nothing. `Validators.required`
+    // reads an empty array as empty, which is exactly the case.
+    //
+    // **No validator on the tags themselves**, and that is not an oversight:
+    // the selector cannot put an invalid tag in here — every route in goes
+    // through `normalizeTag`, which returns the stored shape or nothing — and
+    // it stops at `MAX_TAGS_PER_QUESTION`. A validator would be an unreachable
+    // branch, like `format`'s. What makes that safe is the same thing:
+    // `firestore.rules` checks the whole list anyway, which is where a check
+    // belongs for a value the server has to be sure of.
+    tags: fb.nonNullable.control<string[]>([], Validators.required),
     difficulty: ['medium' as Difficulty, Validators.required],
     type: ['multiple' as QuestionType, Validators.required],
     question: ['', [Validators.required, nonBlank, Validators.maxLength(500)]],
@@ -99,14 +115,6 @@ export function createQuestionForm(fb: FormBuilder) {
     // question's own cap, because it has to explain the question, the right
     // answer and the wrong ones.
     explanation: ['', [Validators.maxLength(1000)]],
-    // Topic tags (`FEAT-021`). No validator, and that is not an oversight: the
-    // selector cannot put an invalid tag in here — every route in goes through
-    // `normalizeTag`, which returns the stored shape or nothing — and it stops
-    // at `MAX_TAGS_PER_QUESTION`. A validator would be an unreachable branch,
-    // like `format`'s. What makes that safe is the same thing: `firestore.rules`
-    // checks the whole list anyway, which is where a check belongs for a value
-    // the server has to be sure of.
-    tags: fb.nonNullable.control<string[]>([]),
     // Required only for a "multiple" question — for a boolean one these three
     // are irrelevant and hidden, and the opposite value is derived instead.
     // The validators are therefore applied and cleared as `type` changes
@@ -150,7 +158,9 @@ export interface QuestionField {
  */
 export function questionFields(form: QuestionForm, idPrefix = ''): QuestionField[] {
   return [
-    { control: form.controls.category, id: `${idPrefix}category`, label: 'Category' },
+    // The picker's text box, which is where a contributor adds a topic — and
+    // first, because the picker is the first field on the form.
+    { control: form.controls.tags, id: `${idPrefix}tag-input`, label: 'Topics' },
     { control: form.controls.question, id: `${idPrefix}question`, label: 'Question' },
     {
       control: form.controls.correctAnswer,
@@ -287,8 +297,9 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
   const tags = normalizeTags(raw.tags);
 
   return {
+    // No `category`: the topics are the question's topic now (`FEAT-052`), and
+    // an owner edit's write deletes the key from a document that still holds one.
     content: {
-      category: raw.category.trim(),
       type: raw.type,
       difficulty: raw.difficulty,
       question: raw.question.trim(),
@@ -297,10 +308,11 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
       ...(sourceUrl ? { sourceUrl } : {}),
       ...(sourceTitle ? { sourceTitle } : {}),
       ...(explanation ? { explanation } : {}),
-      // Omitted when empty, like every optional field beside it. An empty array
-      // is accepted by the rules and says exactly what an absent key says, so
-      // writing one would put a field on every untagged question to report that
-      // it has no tags.
+      // Omitted when empty, like every optional field beside it — which the
+      // form's own `required` makes unreachable on a submit, and which the
+      // rules would refuse on a create anyway. Kept rather than written as
+      // `tags` unconditionally, so an empty list never reaches a document as a
+      // field that reports it has no tags.
       ...(tags.length > 0 ? { tags } : {}),
       // Written only when the toggle is on Markdown (`FEAT-019`). An absent
       // field already means plain, so writing `'plain'` would add a key to
@@ -325,7 +337,6 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
 export function patchQuestionForm(form: QuestionForm, question: CustomQuestionDoc): void {
   const incorrect = question.type === 'boolean' ? [] : question.incorrect_answers;
   form.reset({
-    category: question.category,
     difficulty: question.difficulty,
     type: question.type,
     question: question.question,
@@ -338,13 +349,15 @@ export function patchQuestionForm(form: QuestionForm, question: CustomQuestionDo
     sourceUrl: question.sourceUrl ?? '',
     sourceTitle: question.sourceTitle ?? '',
     explanation: question.explanation ?? '',
-    // Through `readTags` rather than straight across, so the dialog opens on
-    // what the app would render and what the rules would accept — and so an
-    // author resubmitting a question **keeps** its tags instead of dropping
-    // them, which an owner update would otherwise do silently: the update rule
-    // re-validates the whole payload, so a field the form never loaded is a
-    // field the write deletes.
-    tags: [...(readTags(question.tags) ?? [])],
+    // Through `topicTagsOf` rather than straight across (`FEAT-052`): the
+    // stored tags, re-checked, or — for a question written before topics
+    // replaced categories — the tag its category derives. So the dialog opens
+    // on what the app would render and what the rules would accept, an author
+    // resubmitting a question **keeps** its tags instead of dropping them
+    // (the update re-validates the whole payload, so a field the form never
+    // loaded is a field the write deletes), and a legacy question's topic moves
+    // from its category to its tags on the first save.
+    tags: topicTagsOf(question),
     incorrectAnswers: [0, 1, 2].map((index) => incorrect[index] ?? ''),
   });
   applyIncorrectAnswerValidators(form, question.type);

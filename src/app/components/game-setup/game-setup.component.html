@@ -10,6 +10,7 @@
   ></div>
 
   <div
+    data-cy="setup-card"
     class="relative z-10 w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-hero-card dark:ring-1 dark:ring-white/10 p-8 sm:p-10"
   >
     <div class="text-center mb-8">
@@ -116,15 +117,6 @@
       </p>
     }
 
-    @if (categoriesError()) {
-      <p
-        class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-3 py-2 mb-4"
-      >
-        <app-icon name="triangle-alert" [size]="16" class="shrink-0 mt-0.5" />
-        {{ categoriesError() }}
-      </p>
-    }
-
     @if (gameController.loadError()) {
       <p
         class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mb-4"
@@ -161,31 +153,6 @@
             <option [ngValue]="15">15</option>
             <option [ngValue]="20">20</option>
             <option [ngValue]="25">25</option>
-          </select>
-          <app-icon
-            name="chevron-down"
-            [size]="16"
-            class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400"
-          />
-        </div>
-      </div>
-
-      <div>
-        <label
-          for="category"
-          class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-          >Category</label
-        >
-        <div class="relative">
-          <select
-            id="category"
-            formControlName="category"
-            class="w-full appearance-none rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 pr-10 text-slate-900 dark:text-slate-50 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
-          >
-            <option value="">Any Category</option>
-            @for (category of categories(); track category.id) {
-              <option [value]="category.name">{{ category.name }}</option>
-            }
           </select>
           <app-icon
             name="chevron-down"
@@ -278,40 +245,42 @@
       </div>
 
       <!--
-        The topic filter (`FEAT-021`), beside the category picker because it is
-        the same kind of choice one level finer: "History" is a category,
-        "#world-war-2" is a topic.
+        The topic picker (`FEAT-021`, `FEAT-052`) — the game's only topic choice.
+        Open Trivia DB's former categories are its suggestions, as seed tags,
+        because they are the only topics that narrow both sources; any other
+        tag can be typed for a Custom or Mixed game. Nothing selected is "any
+        topic", for every source, and sends exactly the query an "Any Category"
+        game always sent.
 
-        **Strictly additive.** No selection sends exactly the query the app has
-        always sent, and the draw is unchanged for everyone who never touches
-        this. A selection adds one `array-contains-any` clause, which reaches
-        only questions somebody has tagged — correct rather than lossy, because
-        an untagged question is not known to be about the topic asked for.
+        **Each source takes the selection in the shape it can honour.** Open
+        Trivia alone takes one seed tag — its API takes one `category` per
+        request — so the picker is a single choice there and refuses a typed
+        topic it cannot play; switching into it keeps the first seed tag and
+        says what it removed. A Mixed game's Open Trivia half follows the first
+        seed tag, which the hint names; a Custom game takes up to ten of
+        anything.
 
-        The control keeps the same height while it is being *used* (`CLAUDE.md`
-        §4.4): the chip box, the suggestion box, the hint and the feedback line
-        are all reserved, so picking ten topics never moves the Start button.
-        Both hints go to the picker for the same reason the reasons do — the one
-        that is showing sets what the line *says*, and the pair sets how tall it
-        is, so swapping Custom for Mixed does not rewrap it under the reader.
-
-        The one thing that does resize the control is switching **into** a
-        source that has topics, which reveals the shortcut row — and because
-        reserving that space from first paint would cost the majority who never
-        switch it, the row's height is **animated** instead: the Start button
-        glides its 108 pixels rather than jumping them, unless the reader asked
-        for less motion. The mechanism, and what it cost to measure, are on the
-        selector's own template.
+        **The control keeps its size through all of that** (`CLAUDE.md` §4.4):
+        the chip box, the hint and the feedback line are reserved at the tallest
+        thing each can carry — every hint, one per seed tag for a Mixed game,
+        and every Open Trivia notice — so changing the source or the selection
+        never moves the Start button. The shortcut strip is a fixed-height box
+        from first paint whose chips arrive on the first idle moment or the
+        first focus (`deferSuggestions`), because this card is the home route's
+        largest contentful paint; they land in a box that is already there.
       -->
       <app-tag-selector
         formControlName="tags"
         idPrefix="filter-"
         label="Topics"
-        [max]="maxFilterTags"
-        [suggestions]="tagSuggestions"
-        [hint]="tagFilterHint()"
-        [hintVariants]="tagFilterHints"
-        [disabledReason]="tagFilterDisabledReason()"
+        [max]="topicLimit()"
+        [suggestions]="seedTags"
+        [allowedTags]="allowedTopics()"
+        [notAllowedMessage]="topicNotAllowedMessage"
+        [feedbackVariants]="topicFeedbackVariants"
+        [hint]="topicHint()"
+        [hintVariants]="topicHintVariants"
+        [deferSuggestions]="true"
       />
 
       <div>

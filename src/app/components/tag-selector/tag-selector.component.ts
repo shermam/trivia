@@ -1,10 +1,12 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  afterNextRender,
   computed,
   forwardRef,
+  inject,
   input,
-  linkedSignal,
   signal,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
@@ -15,7 +17,7 @@ import {
   MIN_TAG_LENGTH,
   normalizeTag,
 } from '../../utils/normalize-tag.util';
-import { TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
+import { QUESTION_TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
 import { IconComponent } from '../icon/icon.component';
 
 /** Everything a suggestion chip wears in both states — see `suggestionClass()`. */
@@ -24,8 +26,19 @@ const SUGGESTION_BASE_CLASS =
   'disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 
 /**
+ * How long a deferred shortcut row waits for an idle moment, and what it does
+ * instead where `requestIdleCallback` does not exist (Safari before 18.4).
+ * The same bounds `App` gives the auth bootstrap, for the same reason: idle is
+ * a promise the browser need never keep, so it is bounded.
+ */
+const SUGGESTIONS_IDLE_TIMEOUT_MS = 2_000;
+const SUGGESTIONS_IDLE_FALLBACK_MS = 500;
+
+/**
  * The tag picker (`FEAT-021`), shared by everything that chooses tags: the
- * contribute form, `/my-questions`' edit dialog, and the setup screen's filter.
+ * contribute form, `/my-questions`' edit dialog, and the setup screen's topic
+ * picker — which, since topics replaced categories (`FEAT-052`), is the only
+ * topic choice a game has.
  *
  * **One component for all three, and the edit dialog is the reason it matters.**
  * `FEAT-007` lets an author resubmit their own question, and an owner update
@@ -46,13 +59,29 @@ const SUGGESTION_BASE_CLASS =
  *
  * Every route in — typing, pressing a suggestion, pasting — goes through
  * `normalizeTag`, and the chip that appears is what would be **stored**. Nobody
- * is surprised by what lands, because what lands is what they can see. The hint
- * under the input previews the normalised form while it is being typed, which
- * is the same promise a beat earlier.
+ * is surprised by what lands, because what lands is what they can see. The
+ * feedback line under the input previews the normalised form while it is being
+ * typed, which is the same promise a beat earlier.
  *
- * A refusal says which of the two it is: too short (nothing usable left) or too
- * long. Silence would be the cheaper implementation and the worse one — a chip
- * that simply does not appear reads as a broken control.
+ * A refusal says which it is: too short (nothing usable left), too long, or —
+ * where the caller restricts the choice — not one of the tags on offer. Silence
+ * would be the cheaper implementation and the worse one — a chip that simply
+ * does not appear reads as a broken control.
+ *
+ * ## The two constraints a caller can set
+ *
+ * - **`max`**, and at one the picker is a single choice: picking another tag
+ *   *replaces* the one chosen rather than being refused at a limit of one,
+ *   which is how the category `<select>` this replaces behaved.
+ * - **`allowedTags`**, for the setup screen's Open Trivia game, whose API can
+ *   only be asked for one of the seed tags. A typed tag outside the set is
+ *   refused with the caller's reason, the way a malformed one is.
+ *
+ * A constraint that tightens under a selection is the caller's to apply,
+ * through {@link replaceSelection}: which tags survive is the caller's policy
+ * (the setup screen keeps the first seed tag), while saying what was removed —
+ * in the feedback line and from the live region — is this component's, so it
+ * is said the same way every other change here is.
  *
  * ## Accessibility (`CLAUDE.md` §4.5)
  *
@@ -67,10 +96,13 @@ const SUGGESTION_BASE_CLASS =
  *   buying that complexity for a row of optional shortcuts would be paying for a
  *   pattern nobody asked for — plain buttons are reachable with Tab and pressed
  *   with Enter or Space, which is the whole interaction.
- * - Adding, removing and refusing a chip are announced from a `role="status"`
- *   region that is **rendered from first paint** and has its text swapped in: a
- *   live region inserted while already carrying its message is routinely missed
- *   (finding G3).
+ * - Adding, removing, replacing and refusing a chip are announced from a
+ *   `role="status"` region that is **rendered from first paint** and has its
+ *   text swapped in: a live region inserted while already carrying its message
+ *   is routinely missed (finding G3).
+ * - A required picker says nothing about being optional, carries
+ *   `aria-required`, and names its error from the input's `aria-describedby`,
+ *   the same contract as every other field on the question form.
  * - Backspace on an empty input removes the last chip, the convention every
  *   token field shares. It is a shortcut, never the only way: each chip has its
  *   own button.
@@ -84,15 +116,16 @@ const SUGGESTION_BASE_CLASS =
  * exists for. The box is two chip-rows tall, which is the common case, and the
  * rest scrolls. The hint line and the feedback line are reserved the same way,
  * each at the height of the tallest thing it can carry rather than of the one
- * it is carrying — for the hint that means every string the caller may pass it,
- * because a hint that changes changes how many lines it wraps to.
+ * it is carrying — every string the caller says it may pass, stacked invisibly
+ * in one grid cell, because a line that changes changes how many lines it
+ * wraps to.
  *
- * One change genuinely cannot keep the box the same size: becoming available
- * adds the shortcut row, and reserving 108 pixels of empty space on the home
- * route for the majority who never switch question source would cost every
- * player to spare a few a movement. §4.4's third technique applies instead —
- * the row's height is **animated**, so what is below it glides rather than
- * jumps, and a reader who asked for less motion gets the change at once.
+ * The shortcut row is the same: a fixed-height strip rendered from first paint.
+ * Where the caller defers it — the setup screen, whose card is the home route's
+ * largest contentful paint — the strip is **empty** on the first frame and is
+ * filled on the first idle moment or the first focus inside the picker,
+ * whichever comes first. The chips land in a box that is already there, so
+ * nothing below it moves (§4.4's first technique).
  */
 @Component({
   selector: 'app-tag-selector',
@@ -115,6 +148,21 @@ export class TagSelectorComponent implements ControlValueAccessor {
   /** The visible label above the control. */
   readonly label = input('Tags');
 
+  /**
+   * Whether the caller requires at least one tag — the contribute form, since a
+   * question's tags are its only topic (`FEAT-052`). The picker cannot enforce
+   * it, because the form owns the value and its validity; this decides what the
+   * label promises and what `aria-required` tells a screen reader.
+   */
+  readonly required = input(false);
+
+  /**
+   * The caller's error for this field, or `null`. Rendered under the input and
+   * named in its `aria-describedby`, the contract every field on the question
+   * form keeps — the picker cannot read the form control's validity itself.
+   */
+  readonly errorMessage = input<string | null>(null);
+
   /** One line under the label saying what the control is for. */
   readonly hint = input('');
 
@@ -125,9 +173,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
    * invisibly in one grid cell so the line is as tall as the tallest of them
    * rather than as whichever is showing (`CLAUDE.md` §4.4). A hint that changes
    * changes the line's *wrapping*, not its presence, which is the shape that
-   * moves everything below it at one viewport and nothing at another: the setup
-   * screen's two both wrap to two lines on a phone, and to two against one at
-   * desktop width.
+   * moves everything below it at one viewport and nothing at another.
    *
    * Left empty by a caller whose hint never changes, which costs it nothing.
    */
@@ -135,24 +181,48 @@ export class TagSelectorComponent implements ControlValueAccessor {
 
   /**
    * How many tags may be selected. Eight on a question, because that is what
-   * `firestore.rules` stores; ten on the setup screen's filter, because that is
-   * what the query builder will send.
+   * `firestore.rules` stores; ten on the setup screen's picker, because that is
+   * what the query builder will send; and one for an Open Trivia game, which
+   * makes this a single choice — see {@link add}.
    */
   readonly max = input(MAX_TAGS_PER_QUESTION);
 
   /** The shortcuts offered. A hint, never a gate — see `tag-suggestions.ts`. */
-  readonly suggestions = input<readonly string[]>(TAG_SUGGESTIONS);
+  readonly suggestions = input<readonly string[]>(QUESTION_TAG_SUGGESTIONS);
 
   /**
-   * Why the control is unavailable, or `null` when it is available.
+   * The only tags that may be chosen, or `null` for any tag at all.
    *
-   * A reason rather than a boolean: the two states that disable this — an
-   * offline game and an Open Trivia DB source — are both states the reader can
-   * *fix*, and a greyed-out box that does not say why is a dead end. The
-   * `disabled` attribute follows from the reason being present, so the two
-   * cannot disagree.
+   * Set by the setup screen for an Open Trivia game, whose API can be asked for
+   * one of the seed tags and nothing else: a tag outside the set would be a
+   * selection the draw silently ignores, which is the failure `FEAT-021`
+   * refused to ship. It is refused instead, out loud.
    */
-  readonly disabledReason = input<string | null>(null);
+  readonly allowedTags = input<readonly string[] | null>(null);
+
+  /** What the feedback line and the live region say about a tag outside {@link allowedTags}. */
+  readonly notAllowedMessage = input('That topic is not on offer here.');
+
+  /**
+   * Every message beyond the built-in ones that the feedback line may be asked
+   * to carry — the caller's {@link notAllowedMessage} and the notices it passes
+   * to {@link replaceSelection} — so the line is reserved at the tallest of
+   * them, exactly as {@link hintVariants} reserves the hint.
+   */
+  readonly feedbackVariants = input<readonly string[]>([]);
+
+  /**
+   * Keep the shortcut row empty until the first idle moment or the first focus
+   * inside the picker.
+   *
+   * For the setup screen, whose card Lighthouse measures as the home route's
+   * largest contentful paint: rendering the shortcuts with the first frame put
+   * the median LCP at 4.0 s against 3.7 s without them, on a four-core box over
+   * three runs each. Deferred, they cost the first paint nothing — and the
+   * strip they land in is the same fixed height either way, so arriving late
+   * moves nothing.
+   */
+  readonly deferSuggestions = input(false);
 
   /** The selected tags. Written by the form; read by the template. */
   protected readonly tags = signal<readonly string[]>([]);
@@ -166,57 +236,33 @@ export class TagSelectorComponent implements ControlValueAccessor {
   /** The last thing that happened, for the live region. */
   protected readonly announcement = signal('');
 
+  /**
+   * A sentence about a change the reader did not make with their own keys —
+   * {@link replaceSelection}'s — shown in the feedback line until the next
+   * thing they do here.
+   */
+  protected readonly notice = signal<string | null>(null);
+
+  /** Whether a deferred shortcut row has been filled yet. */
+  private readonly suggestionsFilled = signal(false);
+
   protected readonly minTagLength = MIN_TAG_LENGTH;
   protected readonly maxTagLength = MAX_TAG_LENGTH;
 
-  protected readonly isDisabled = computed(() => this.formDisabled() || !!this.disabledReason());
+  protected readonly isDisabled = computed(() => this.formDisabled());
 
   protected readonly isFull = computed(() => this.tags().length >= this.max());
 
-  /** Whether the shortcut row is on offer: shortcuts to show, and a control able to take one. */
-  protected readonly showSuggestions = computed(
-    () => this.suggestions().length > 0 && !this.isDisabled(),
+  /** A single choice: picking another tag replaces the chosen one. */
+  protected readonly replacesOnAdd = computed(() => this.max() === 1);
+
+  /** Whether another tag can be added, or swapped in for the one there is. */
+  protected readonly canTakeMore = computed(() => !this.isFull() || this.replacesOnAdd());
+
+  /** Whether the shortcut chips are in the strip yet. The strip itself always is. */
+  protected readonly showSuggestionChips = computed(
+    () => !this.deferSuggestions() || this.suggestionsFilled(),
   );
-
-  /**
-   * Whether the shortcut row is in the DOM at all — which is **not** the same
-   * question as whether it is on offer, and both halves of the difference are
-   * load-bearing.
-   *
-   * It stays out of the first render because the home route paints this filter
-   * disabled: forty buttons nobody can press would sit inside the card
-   * Lighthouse measures as the largest contentful paint, and the measurement is
-   * in the template beside the row. It stays in from then on because the row's
-   * height is what animates on the way *out*: content removed in the same frame
-   * as the collapse leaves an empty box with nothing to collapse, and the Start
-   * button snaps back up the screen instead of gliding (`CLAUDE.md` §4.4).
-   * Collapsed, the whole region is `inert`, so nothing in it is tabbable or
-   * announced while it is out of reach.
-   */
-  protected readonly suggestionsMounted = linkedSignal<boolean, boolean>({
-    source: this.showSuggestions,
-    computation: (shown, previous) => shown || previous?.value === true,
-  });
-
-  /**
-   * The last reason this control was unavailable, kept after it stops applying.
-   *
-   * Nothing reads it — it **reserves the feedback line's height**. The reason is
-   * the longest thing that line ever carries (two lines in the card's width
-   * against one for every other message), so a line sized to whichever message
-   * is current shrinks by one line at the exact instant the shortcut row below
-   * it expands: the reader watches the Start button hop sixteen pixels up
-   * before gliding ninety-two down, which is most of what animating the reveal
-   * was for. Stacked in one grid cell with the visible message, so the reserved
-   * height is the taller of the two and follows the copy rather than a
-   * hard-coded `min-h` somebody has to re-measure (`CLAUDE.md` §4.4). Empty —
-   * and therefore free — wherever the control is never unavailable, which is
-   * both question forms.
-   */
-  protected readonly reservedReason = linkedSignal<string | null, string>({
-    source: this.disabledReason,
-    computation: (reason, previous) => reason ?? previous?.value ?? '',
-  });
 
   /**
    * What the current draft would be stored as, or `null` while there is nothing
@@ -233,18 +279,59 @@ export class TagSelectorComponent implements ControlValueAccessor {
     () => this.draft().trim().length > 0 && this.draftPreview() === null,
   );
 
+  /** The draft is a well-formed tag the caller does not offer here. */
+  protected readonly draftNotAllowed = computed(() => {
+    const preview = this.draftPreview();
+    return preview !== null && !this.isAllowed(preview);
+  });
+
+  constructor() {
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      if (!this.deferSuggestions()) {
+        return;
+      }
+      // Torn down with the component (`CLAUDE.md` §4.4): the setup screen is
+      // left for `/play` well inside two seconds by a reader who presses Start
+      // straight away, and a callback outliving the view would write to a
+      // signal nothing renders.
+      if (typeof requestIdleCallback === 'function') {
+        const handle = requestIdleCallback(() => this.fillSuggestions(), {
+          timeout: SUGGESTIONS_IDLE_TIMEOUT_MS,
+        });
+        destroyRef.onDestroy(() => cancelIdleCallback(handle));
+      } else {
+        const handle = setTimeout(() => this.fillSuggestions(), SUGGESTIONS_IDLE_FALLBACK_MS);
+        destroyRef.onDestroy(() => clearTimeout(handle));
+      }
+    });
+  }
+
+  /**
+   * Puts the shortcut chips into their strip. Called on the first idle moment,
+   * and on the first focus or press inside the picker — a reader reaching for
+   * the control should never find the strip empty.
+   */
+  protected fillSuggestions(): void {
+    this.suggestionsFilled.set(true);
+  }
+
   protected isSelected(tag: string): boolean {
     return this.tags().includes(tag);
+  }
+
+  private isAllowed(tag: string): boolean {
+    const allowed = this.allowedTags();
+    return allowed === null || allowed.includes(tag);
   }
 
   /**
    * One class string per suggestion rather than a dozen `[class.x]` bindings.
    *
-   * The setup screen renders this control on first paint with the whole starter
-   * list in it, so the difference is roughly forty binding slots against five
-   * hundred — a measurable share of the home route's Lighthouse performance
-   * budget, on a control most visitors never touch. Same shape as the quiz
-   * loop's `answerClass()`, and for the same reason.
+   * The difference is roughly two dozen binding slots against three hundred on
+   * the setup screen, which renders this control inside the home route's
+   * largest contentful paint — the same shape as the quiz loop's
+   * `answerClass()`, and for the same reason.
    */
   protected suggestionClass(tag: string): string {
     return this.isSelected(tag)
@@ -261,6 +348,27 @@ export class TagSelectorComponent implements ControlValueAccessor {
     }
   }
 
+  /**
+   * Replaces the selection on the caller's behalf, and says so.
+   *
+   * For a constraint that tightens under a selection — the setup screen
+   * switching to Open Trivia keeps the first seed tag and drops the rest
+   * (`FEAT-052`). The caller decides which tags survive; this writes them to
+   * the form, shows `notice` in the feedback line until the reader next does
+   * something here, and speaks `announcement` from the live region every other
+   * change here is announced from.
+   */
+  replaceSelection(tags: readonly string[], notice: string, announcement: string): void {
+    this.commit([...tags]);
+    this.notice.set(notice);
+    this.announcement.set(announcement);
+  }
+
+  /** Withdraws a {@link replaceSelection} notice that no longer describes the control. */
+  clearNotice(): void {
+    this.notice.set(null);
+  }
+
   private onChange: (value: string[]) => void = () => undefined;
   private onTouched: () => void = () => undefined;
 
@@ -270,6 +378,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
     // Firestore held. Neither is this component's to assume.
     this.tags.set(Array.isArray(value) ? value.filter((tag) => typeof tag === 'string') : []);
     this.draft.set('');
+    this.notice.set(null);
   }
 
   registerOnChange(fn: (value: string[]) => void): void {
@@ -288,8 +397,16 @@ export class TagSelectorComponent implements ControlValueAccessor {
     return `${this.idPrefix()}${name}`;
   }
 
+  /** The input's description: its error first when there is one, because it is the part needed. */
+  protected describedBy(): string {
+    return this.errorMessage()
+      ? `${this.id('tag-error')} ${this.id('tag-feedback')}`
+      : this.id('tag-feedback');
+  }
+
   protected onDraftInput(event: Event): void {
     this.draft.set((event.target as HTMLInputElement).value);
+    this.notice.set(null);
   }
 
   /**
@@ -334,16 +451,42 @@ export class TagSelectorComponent implements ControlValueAccessor {
       );
       return;
     }
+    if (!this.isAllowed(tag)) {
+      // Left in the box, like a malformed draft: the feedback line keeps saying
+      // why while the reader decides what to do with it.
+      this.announcement.set(`#${tag} was not added. ${this.notAllowedMessage()}`);
+      return;
+    }
     this.draft.set('');
     this.add(tag);
   }
 
+  /**
+   * Adds a tag — or, in a single choice, swaps it in for the one there is.
+   *
+   * Replacing rather than refusing at a limit of one is what the category
+   * `<select>` the setup screen's Open Trivia game used to have did: choosing
+   * another option changed the choice. A limit of one that answered "that is
+   * the maximum" would make the reader remove a topic before picking the one
+   * they meant.
+   */
   protected add(tag: string): void {
     if (this.isDisabled()) {
       return;
     }
+    this.notice.set(null);
+    if (!this.isAllowed(tag)) {
+      this.announcement.set(`#${tag} was not added. ${this.notAllowedMessage()}`);
+      return;
+    }
     if (this.tags().includes(tag)) {
       this.announcement.set(`${tag} is already added.`);
+      return;
+    }
+    if (this.replacesOnAdd() && this.tags().length > 0) {
+      const replaced = this.tags()[0];
+      this.commit([tag]);
+      this.announcement.set(`Replaced ${replaced} with ${tag}.`);
       return;
     }
     if (this.isFull()) {
@@ -358,6 +501,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
     if (this.isDisabled()) {
       return;
     }
+    this.notice.set(null);
     this.commit(this.tags().filter((existing) => existing !== tag));
     this.announcement.set(`Removed ${tag}. ${this.tags().length} of ${this.max()}.`);
   }

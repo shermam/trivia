@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { firstValueFrom, map } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
 import {
   Answer,
@@ -12,6 +12,11 @@ import {
   OpenTriviaApiResponse,
   TriviaQuestion,
 } from '../models/question.model';
+import {
+  firstSeedTag,
+  openTriviaCategoryId,
+  seedTagForCategoryName,
+} from '../utils/category-tags';
 import { decodeHtmlEntities } from '../utils/html-entities.util';
 import { readTags } from '../utils/normalize-tag.util';
 import { seenKeyFor } from '../utils/seen-key.util';
@@ -20,13 +25,7 @@ import { FirebaseService } from './firebase.service';
 import { OfflineQuestionsService } from './offline-questions.service';
 import { SeenQuestionsService } from './seen-questions.service';
 
-export interface TriviaCategory {
-  id: number;
-  name: string;
-}
-
 const OPEN_TRIVIA_QUESTIONS_URL = 'https://opentdb.com/api.php';
-const OPEN_TRIVIA_CATEGORIES_URL = 'https://opentdb.com/api_category.php';
 
 /** Size the background prefetch (see `initOfflinePrefetch`) tries to keep the offline pool topped up to. */
 const OFFLINE_POOL_TARGET = 100;
@@ -53,8 +52,8 @@ const MAX_PREFETCH_BATCH = 50;
  *
  * Open Trivia DB deliberately gets no equivalent, and not for want of a
  * reservoir: its `amount` is a *requirement*, not a ceiling, so asking for
- * fifty questions in a category holding eight returns `response_code: 1` and
- * no questions at all — turning a playable narrow game into "no questions were
+ * fifty questions in a topic holding eight returns `response_code: 1` and no
+ * questions at all — turning a playable narrow game into "no questions were
  * found". Its substitutions come from the offline pool instead, which is what
  * the background prefetch fills.
  */
@@ -163,43 +162,10 @@ export class TriviaService {
   private readonly offlineQuestionsService = inject(OfflineQuestionsService);
   private readonly seenQuestionsService = inject(SeenQuestionsService);
 
-  private categoriesPromise: Promise<TriviaCategory[]> | null = null;
   private offlinePrefetchScheduled = false;
 
   /** True when the most recent `getQuestions()` call was served from the offline IndexedDB pool instead of the network. */
   readonly playingOffline = signal(false);
-
-  /**
-   * Categories are fetched once and memoized for the session — they change
-   * about never, and both the game-setup form and `resolveCategoryId()` ask
-   * for them.
-   *
-   * The memo is dropped if the fetch fails. Caching a *rejected* promise turns
-   * one bad moment — a flaky connection, Open Trivia DB briefly down — into a
-   * permanently degraded session: every later call returns the same rejection,
-   * so the category picker stays stuck on "Any Category" until a full page
-   * reload, long after the network recovered. Same pattern as
-   * `SubscriptionService.getProPrices()`.
-   *
-   * Clearing unconditionally is safe here: the field is only reassigned when
-   * it is null, and it is still this promise for as long as this promise is
-   * the rejected one, so there is no newer memo to clobber. Attaching
-   * `.catch()` also means the rejection is handled even if no caller is
-   * listening, while callers that are still get their own rejection.
-   */
-  getCategories(): Promise<TriviaCategory[]> {
-    if (!this.categoriesPromise) {
-      this.categoriesPromise = firstValueFrom(
-        this.http
-          .get<{ trivia_categories: TriviaCategory[] }>(OPEN_TRIVIA_CATEGORIES_URL)
-          .pipe(map((res) => res.trivia_categories)),
-      );
-      this.categoriesPromise.catch(() => {
-        this.categoriesPromise = null;
-      });
-    }
-    return this.categoriesPromise;
-  }
 
   /**
    * Unified entry point: fetches questions from Open Trivia DB, Firestore, or both — falling
@@ -288,7 +254,6 @@ export class TriviaService {
       const questions = await this.fetchQuestions(
         {
           amount: Math.min(deficit, MAX_PREFETCH_BATCH),
-          category: '',
           difficulty: '',
           source: 'mixed',
           // Irrelevant here — this is the background prefetch topping up the
@@ -324,28 +289,34 @@ export class TriviaService {
     config: GameConfig,
     seen: Promise<SeenSet | null>,
   ): Promise<TriviaQuestion[]> {
-    const { amount, category, difficulty, source } = config;
-    // Only the bank carries tags (`FEAT-021`), so the selection reaches the
-    // custom draw and no further. An Open Trivia DB question has no such field
-    // and the API has no equivalent parameter, so there is nothing here to
-    // narrow — which is why the setup screen does not offer the filter for that
-    // source at all rather than accepting a selection and quietly ignoring it.
+    const { amount, difficulty, source } = config;
+    // The topic selection is the only topic choice the game has (`FEAT-052`),
+    // and each source takes it in the shape it can honour. The bank filters on
+    // every selected tag at once. Open Trivia DB takes one `category` per
+    // request and refuses a second request inside five seconds, so it follows
+    // the **first seed tag** in the selection — the first one the table can
+    // turn back into an id — or no category at all when there is none, which
+    // is what a Mixed game with only community topics draws for its Open
+    // Trivia half. The setup screen says so before Start.
     const tags = config.tags ?? [];
+    const openTriviaTopic = firstSeedTag(tags);
 
     if (source === 'open_trivia') {
-      return this.drawOpenTriviaQuestions(amount, category, difficulty, seen);
+      return this.drawOpenTriviaQuestions(amount, openTriviaTopic, difficulty, seen);
     }
 
     if (source === 'custom') {
-      return this.drawCustomQuestions(amount, category, difficulty, tags, seen);
+      return this.drawCustomQuestions(amount, difficulty, tags, seen);
     }
 
     const openTriviaAmount = Math.ceil(amount / 2);
     const customAmount = amount - openTriviaAmount;
 
     const [openTriviaQuestions, customQuestions] = await Promise.all([
-      this.drawOpenTriviaQuestions(openTriviaAmount, category, difficulty, seen).catch(() => []),
-      this.drawCustomQuestions(customAmount, category, difficulty, tags, seen),
+      this.drawOpenTriviaQuestions(openTriviaAmount, openTriviaTopic, difficulty, seen).catch(
+        () => [],
+      ),
+      this.drawCustomQuestions(customAmount, difficulty, tags, seen),
     ]);
 
     return shuffleArray([...openTriviaQuestions, ...customQuestions]).slice(0, amount);
@@ -366,21 +337,18 @@ export class TriviaService {
    * question can go stale — there is no moderation state to have changed.
    *
    * **How much it can do varies with the filters, and can be nothing.** The
-   * reserve is the pool narrowed to this game's own category and difficulty,
-   * and the prefetch fills the pool with unfiltered batches — so a game with
-   * no filters draws on most of it and a narrow one on little. A category
-   * invented by a contributor is the extreme: no Open Trivia DB question
-   * carries it, so the reserve is empty and this half of a mixed game simply
-   * does not deduplicate.
+   * reserve is the pool narrowed to the topic this draw follows and the game's
+   * difficulty, and the prefetch fills the pool with unfiltered batches — so a
+   * game with no filters draws on most of it and a narrow one on little.
    */
   private async drawOpenTriviaQuestions(
     amount: number,
-    category: string,
+    topic: string | null,
     difficulty: Difficulty | '',
     seen: Promise<SeenSet | null>,
   ): Promise<TriviaQuestion[]> {
     const [fetched, seenSet] = await Promise.all([
-      this.fetchOpenTriviaQuestions(amount, category, difficulty),
+      this.fetchOpenTriviaQuestions(amount, topic, difficulty),
       seen,
     ]);
     if (!seenSet || fetched.length === 0) {
@@ -388,7 +356,7 @@ export class TriviaService {
     }
     const reserve = await this.offlineQuestionsService.getMatchingQuestions(
       'open_trivia',
-      category,
+      topic === null ? [] : [topic],
       difficulty,
     );
     return preferUnseen([...fetched, ...reserve], Math.min(amount, fetched.length), seenSet);
@@ -418,7 +386,6 @@ export class TriviaService {
    */
   private async drawCustomQuestions(
     amount: number,
-    category: string,
     difficulty: Difficulty | '',
     tags: readonly string[],
     seen: Promise<SeenSet | null>,
@@ -428,21 +395,38 @@ export class TriviaService {
     }
     const seenSet = await seen;
     if (!seenSet) {
-      return this.fetchCustomQuestions(amount, category, difficulty, tags);
+      return this.fetchCustomQuestions(amount, difficulty, tags);
     }
 
     const fetched = await this.fetchCustomQuestions(
       Math.min(amount * DEDUPE_DRAW_MULTIPLIER, MAX_DEDUPE_DRAW),
-      category,
       difficulty,
       tags,
     );
     return preferUnseen(fetched, Math.min(amount, fetched.length), seenSet);
   }
 
+  /**
+   * The Open Trivia DB adapter: one request, and every result decoded and
+   * stamped with its topic.
+   *
+   * **The request runs the seed-tag table backwards.** A topic that is a seed
+   * tag becomes the API's numeric `category`, straight from the table in
+   * `category-tags.ts` — no fetched category list in front of it, so the
+   * request goes out without awaiting anything. Any other topic sends no
+   * `category` rather than a guess.
+   *
+   * **The response runs it forwards.** Each question carries its category's
+   * seed tag in memory, which is what lets the setup screen, the quiz card and
+   * the offline pool treat an Open Trivia question's topic exactly as they
+   * treat a contributed one's. Applied here, per source, beside the entity
+   * decoding it depends on (`CLAUDE.md` §4.4): the table holds decoded names,
+   * and `Musicals &amp; Theatres` is not one of them. A name the table does
+   * not hold yields no tag, and the question is served all the same.
+   */
   private async fetchOpenTriviaQuestions(
     amount: number,
-    category: string,
+    topic: string | null,
     difficulty: Difficulty | '',
   ): Promise<TriviaQuestion[]> {
     if (amount <= 0) {
@@ -451,11 +435,9 @@ export class TriviaService {
 
     let params = new HttpParams().set('amount', amount);
 
-    if (category) {
-      const categoryId = await this.resolveCategoryId(category);
-      if (categoryId !== undefined) {
-        params = params.set('category', categoryId);
-      }
+    const categoryId = topic === null ? undefined : openTriviaCategoryId(topic);
+    if (categoryId !== undefined) {
+      params = params.set('category', categoryId);
     }
     if (difficulty) {
       params = params.set('difficulty', difficulty);
@@ -469,13 +451,15 @@ export class TriviaService {
       return [];
     }
 
-    return response.results.map((raw, index) =>
-      this.mapToTriviaQuestion(
-        decodeOpenTriviaText(raw),
+    return response.results.map((raw, index) => {
+      const decoded = decodeOpenTriviaText(raw);
+      const seedTag = seedTagForCategoryName(decoded.category);
+      return this.mapToTriviaQuestion(
+        { ...decoded, ...(seedTag ? { tags: [seedTag] } : {}) },
         'open_trivia',
         `open-${Date.now()}-${index}`,
-      ),
-    );
+      );
+    });
   }
 
   /**
@@ -485,7 +469,6 @@ export class TriviaService {
    */
   private async fetchCustomQuestions(
     limit: number,
-    category: string,
     difficulty: Difficulty | '',
     tags: readonly string[],
   ): Promise<TriviaQuestion[]> {
@@ -496,15 +479,15 @@ export class TriviaService {
     // Filtering and the ceiling are both the query's job now. This used to pull
     // the whole collection and filter here, which billed for every document
     // anyone had ever contributed on every custom or mixed game (finding C1).
-    // Tags join the same query for the same reason: narrowing in the browser
-    // would still read — and bill for — every question the filter rejects.
-    // The key is **omitted** rather than sent empty when nothing is selected,
-    // so an unfiltered draw asks for exactly what it always asked for. That is
-    // the additive promise stated where it can be seen rather than left to a
-    // downstream `length > 0`, and `trivia.service.spec.ts` asserts the shape.
+    // Tags are the only topic filter there is (`FEAT-052`) and join the same
+    // query for the same reason: narrowing in the browser would still read —
+    // and bill for — every question the filter rejects. The key is **omitted**
+    // rather than sent empty when nothing is selected, so an any-topic draw
+    // asks for exactly what an "Any Category" game always asked for. That is
+    // stated where it can be seen rather than left to a downstream
+    // `length > 0`, and `trivia.service.spec.ts` asserts the shape.
     const docs = await firstValueFrom(
       this.firebaseService.getCustomQuestions({
-        category,
         difficulty,
         limit,
         ...(tags.length > 0 ? { tags } : {}),
@@ -517,27 +500,27 @@ export class TriviaService {
     return shuffleArray(docs).map((doc) => this.mapToTriviaQuestion(doc, 'custom', doc.id));
   }
 
-  private async resolveCategoryId(categoryName: string): Promise<number | undefined> {
-    const categories = await this.getCategories();
-    return categories.find((c) => c.name === categoryName)?.id;
-  }
-
   /**
    * Shapes an already-normalized question. Deliberately performs no text
    * transformation of its own — see `decodeOpenTriviaText`, and `CLAUDE.md`
    * §4.4 on normalizing per source rather than in shared code.
    */
   private mapToTriviaQuestion(
-    raw: OpenTriviaApiQuestion | (CustomQuestionDoc & { id: string }),
+    raw: (OpenTriviaApiQuestion & { tags?: string[] }) | (CustomQuestionDoc & { id: string }),
     source: 'open_trivia' | 'custom',
     id: string,
   ): TriviaQuestion {
     const { question, correct_answer, incorrect_answers } = raw;
-    const tags = readTags((raw as { tags?: unknown }).tags);
+    const tags = readTags(raw.tags);
 
     return {
       id,
-      category: raw.category,
+      // Absent rather than `undefined` on a contribution written since topics
+      // replaced categories, and only ever a string: a saved game is
+      // validated on the way back in (`parseSavedGame`), and a stored value of
+      // another type — which a console can write — would cost the player the
+      // whole game rather than one label.
+      ...(typeof raw.category === 'string' ? { category: raw.category } : {}),
       type: raw.type,
       difficulty: raw.difficulty,
       question,
@@ -571,8 +554,9 @@ export class TriviaService {
       // `decodeOpenTriviaText` above, which is where a per-source
       // transformation belongs, and nothing stores it for a field to describe.
       ...('format' in raw && raw.format ? { format: raw.format } : {}),
-      // The topic tags (`FEAT-021`), read through `readTags` rather than
-      // spread straight across. `custom_questions` is a public API that a
+      // The topic tags (`FEAT-021`) — a contribution's stored list, or the seed
+      // tag the Open Trivia adapter stamped — read through `readTags` rather
+      // than spread straight across. `custom_questions` is a public API that a
       // console can write to directly, so the stored value is a writer's word
       // and the chips are rendered from what survives checking it — the same
       // stance `SourceLinkComponent` takes to a stored URL (`CLAUDE.md` §4.4).

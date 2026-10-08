@@ -112,11 +112,7 @@
       </div>
     } @else {
       <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
-        <app-question-fields
-          [form]="form"
-          [categories]="categories()"
-          [validationSummary]="validationSummary()"
-        />
+        <app-question-fields [form]="form" [validationSummary]="validationSummary()" />
 
         @if (submitError()) {
           <p

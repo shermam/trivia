@@ -1,6 +1,12 @@
 export interface CustomQuestionSeed {
   id?: string;
-  category: string;
+  /**
+   * The free-text category a question written before topics replaced
+   * categories carries (`FEAT-052`). Optional, as it is in the schema: a
+   * contribution written since has none, and a spec that seeds one is standing
+   * in for a question from before the change.
+   */
+  category?: string;
   type: 'multiple' | 'boolean';
   difficulty: 'easy' | 'medium' | 'hard';
   question: string;
@@ -38,10 +44,13 @@ export interface CustomQuestionSeed {
    */
   format?: 'plain' | 'markdown';
   /**
-   * Normalised topic tags (`FEAT-021`). Absent on every other seed in the
-   * suite, which is the shape the whole bank has today — and what makes a
-   * tag-filtered draw provable against a shared emulator: a spec that invents
-   * its own tag owns every question that can match it.
+   * Normalised topic tags (`FEAT-021`) — the only topic a question has since
+   * they replaced categories (`FEAT-052`), and what isolates a spec's game in
+   * a bank every worker shares: a spec that seeds its questions under a tag it
+   * minted itself (`e2e/support/topics.ts`) owns every question that can match
+   * it. Optional here although a client's create must carry one, because these
+   * seeds go in through the Admin SDK and a spec may want a question that has
+   * none.
    */
   tags?: string[];
 }

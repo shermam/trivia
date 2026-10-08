@@ -107,7 +107,7 @@ test.describe('streak bonuses and score multipliers', () => {
   });
 
   /**
-   * The badge sits in the wrapping row beside the category and difficulty
+   * The badge sits in the wrapping row beside the topic and difficulty
    * pills, so what would break is that row growing a line the moment a streak
    * starts — pushing the question and every answer below it down the screen,
    * under the reader's eye, mid-round.

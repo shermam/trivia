@@ -6,7 +6,6 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, UserQuestionCursor } from '../../services/firebase.service';
-import { TriviaService } from '../../services/trivia.service';
 import { MyQuestion, MyQuestionsComponent, MyQuestionsView } from './my-questions.component';
 
 /**
@@ -120,7 +119,6 @@ function configure(options: SetupOptions = {}) {
         provide: FirebaseService,
         useValue: { getUserQuestions, updateUserQuestion, deleteUserQuestion },
       },
-      { provide: TriviaService, useValue: { getCategories: () => Promise.resolve([]) } },
       {
         provide: AuthService,
         useValue: {
@@ -445,12 +443,11 @@ describe('MyQuestionsComponent editing', () => {
   });
 
   /**
-   * Removing every tag hands over content with **no** `tags` key rather than an
-   * empty array — the same asymmetry `format` has, and for the same reason:
-   * absent is what "none" means everywhere else in this collection.
-   * `FirebaseService.updateUserQuestion` turns that into a field deletion.
+   * A question's tags are its only topic now (`FEAT-052`), so the edit form
+   * asks for one the way the contribute form does — and names the field rather
+   * than letting Save do nothing.
    */
-  it('drops the key when the author removes every tag', async () => {
+  it('will not save with every topic removed, and says which field', async () => {
     const { component, updateUserQuestion } = setup({
       questions: [myQuestion('q1', { tags: ['world-war-2'] })],
     });
@@ -461,12 +458,47 @@ describe('MyQuestionsComponent editing', () => {
     await component.saveEdit();
     await settle();
 
-    const [, content] = updateUserQuestion.mock.calls[0];
-    expect('tags' in content).toBe(false);
+    expect(updateUserQuestion).not.toHaveBeenCalled();
+    expect(component.validationSummary()).toMatch(/Topics/);
   });
 
-  it('opens an untagged question with no chips rather than with undefined', async () => {
-    const { component } = setup({ questions: [myQuestion('q1')] });
+  /**
+   * The edit dialog opens a question written before topics replaced
+   * categories on the tag its category derives (`FEAT-052`) — the same
+   * derivation every reader uses — so a resubmit writes the topic as a tag.
+   */
+  it('opens a question that predates topics on the tag its category derives', async () => {
+    const { component } = setup({ questions: [myQuestion('q1', { category: 'World War 2' })] });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+
+    expect(component.form.getRawValue().tags).toEqual(['world-war-2']);
+  });
+
+  /**
+   * …and the write that follows moves the topic from the old field to the new
+   * one: tags in the content, no category. `FirebaseService.updateUserQuestion`
+   * turns the absent key into a deletion, so the document stops holding both.
+   */
+  it('resubmits such a question with the tag and without the category', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [myQuestion('q1', { category: 'Entertainment: Video Games' })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    component.form.controls.question.setValue('Corrected?');
+    await component.saveEdit();
+    await settle();
+
+    const [, content] = updateUserQuestion.mock.calls[0];
+    expect(content.tags).toEqual(['video-games']);
+    expect('category' in content).toBe(false);
+  });
+
+  it('opens a question with no topic at all on no chips rather than on undefined', async () => {
+    const { component } = setup({ questions: [myQuestion('q1', { category: undefined })] });
     await settle();
 
     component.openEdit(component.questions()[0], clickOn());
@@ -636,6 +668,25 @@ describe('MyQuestionsComponent rendered', () => {
     const { query } = await render({ questions: [myQuestion('q1', { status: 'approved' })] });
 
     expect(query('[data-cy="my-question-rejection"]')).toBeNull();
+  });
+
+  /**
+   * A row's topics (`FEAT-052`), through the derivation every reader shares:
+   * the author's tags, or for a question written before topics replaced
+   * categories the tag its category derives — which is exactly what the edit
+   * dialog will open on, so the row tells the author what Edit will show.
+   */
+  it('shows each question’s topics, deriving one from a category with no tags', async () => {
+    const { host } = await render({
+      questions: [myQuestion('q1', { tags: ['cold-war'] }), myQuestion('q2')],
+    });
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-cy="my-question-tags"]')];
+
+    expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '#cold-war',
+      '#science',
+    ]);
+    expect(host.textContent).not.toContain('Category:');
   });
 
   it('opens the edit dialog as a labelled modal carrying the shared form', async () => {

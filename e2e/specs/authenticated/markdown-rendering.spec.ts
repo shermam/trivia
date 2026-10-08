@@ -1,9 +1,10 @@
 import { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
-import { optionLabel, waitForPlayRoute } from '../../support/game';
+import { optionLabel } from '../../support/game';
 import { drift, settledHeight } from '../../support/layout';
-import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { stubOpenTrivia } from '../../support/open-trivia';
+import { addQuestionTopic, runTag, startTopicGame } from '../../support/topics';
 
 /**
  * `FEAT-019`. A question can be written in Markdown with LaTeX math, and every
@@ -39,7 +40,7 @@ test.describe('markdown and math rendering', () => {
   /**
    * Everything this file writes is keyed on a tag unique to the test, and that
    * is the whole of its isolation. Workers share one emulator with no reset, so
-   * `custom_questions` holds every other test's rows: a category, an email
+   * `custom_questions` holds every other test's rows: a topic, an email
    * address and a queue row matched by its question text are all global unless
    * the test makes them its own.
    */
@@ -64,14 +65,13 @@ test.describe('markdown and math rendering', () => {
   }) => {
     await page.setViewportSize({ width: 1024, height: 1000 });
 
-    const category = `Markdown ${tag}`;
+    const topic = runTag('markdown');
     const questionText = `Which expression is quadratic? (${tag})`;
 
-    await stubExtraCategory(page, category);
     await firebase.seedCustomQuestions([
       {
         id: `markdown-${tag}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         // Both overflowing shapes, and both deliberately **wider than the
@@ -91,7 +91,7 @@ test.describe('markdown and math rendering', () => {
       },
     ]);
 
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
 
     // The rendered branch, not the source-text fallback the component shows
     // while its engine is in flight. Waiting on the marker rather than on the
@@ -155,14 +155,13 @@ test.describe('markdown and math rendering', () => {
   });
 
   test('leaves a plain question exactly as it was written', async ({ page, firebase }) => {
-    const category = `Plain ${tag}`;
+    const topic = runTag('plain');
     const questionText = `Is **this** literally asterisks and $x^2$? (${tag})`;
 
-    await stubExtraCategory(page, category);
     await firebase.seedCustomQuestions([
       {
         id: `plain-${tag}`,
-        category,
+        tags: [topic],
         type: 'boolean',
         difficulty: 'easy',
         question: questionText,
@@ -173,7 +172,7 @@ test.describe('markdown and math rendering', () => {
       },
     ]);
 
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
 
     // No `format` field at all, which is every question in the bank today: the
     // text is shown as typed, and neither engine is ever fetched.
@@ -211,15 +210,14 @@ test.describe('markdown and math rendering', () => {
       (window as unknown as Record<string, unknown>)['__xssFired'] = false;
     });
 
-    const category = `Injection ${tag}`;
+    const topic = runTag('inject');
     const marker = `payload-${tag}`;
     const fire = 'window.__xssFired = true';
 
-    await stubExtraCategory(page, category);
     await firebase.seedCustomQuestions([
       {
         id: `injection-${tag}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         question:
@@ -248,7 +246,7 @@ test.describe('markdown and math rendering', () => {
       },
     ]);
 
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
 
     const card = page.getByTestId('question-card');
     await expect(page.getByTestId('question-text').getByTestId('rendered-text')).toHaveAttribute(
@@ -302,14 +300,13 @@ test.describe('markdown and math rendering', () => {
       (route) => route.abort(),
     );
 
-    const category = `Chunkless ${tag}`;
+    const topic = runTag('chunkless');
     const source = `**Bold** and $x^2$ (${tag})`;
 
-    await stubExtraCategory(page, category);
     await firebase.seedCustomQuestions([
       {
         id: `chunkless-${tag}`,
-        category,
+        tags: [topic],
         type: 'boolean',
         difficulty: 'easy',
         question: source,
@@ -321,7 +318,7 @@ test.describe('markdown and math rendering', () => {
       },
     ]);
 
-    await startCustomGame(page, category);
+    await startCustomGame(page, topic);
 
     const prompt = page.getByTestId('question-text').getByTestId('rendered-text');
     // `loading` rather than `plain`: the document did ask for Markdown, and the
@@ -351,7 +348,7 @@ test.describe('markdown and math rendering', () => {
     await signInViaUi(page, email, password);
 
     await page.goto('/add-question');
-    await page.locator('#category').fill('Programming');
+    await addQuestionTopic(page, 'programming');
     await page.locator('#question').fill(`**${questionText}** with $x^2$`);
     await page.locator('#correctAnswer').fill('`let a = 1;`');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('`let 1 = a;`');
@@ -396,23 +393,19 @@ test.describe('markdown and math rendering', () => {
 });
 
 /**
- * Starts a **Custom** game in this test's own category.
+ * Starts a **Custom** game over this test's own topic.
  *
  * Not `startGame`, which uses the Open Trivia source and never reads
  * `custom_questions` at all — no Open Trivia question can carry a `format`, so
- * the assertions after that would hold whatever this feature did. The category
- * is what makes the draw deterministic: `getCustomQuestions` filters on it
- * server-side, so a category only this test has written to holds only this
- * test's question however busy the shared bank is.
+ * the assertions after that would hold whatever this feature did. The topic is
+ * what makes the draw deterministic: `getCustomQuestions` filters on it in the
+ * query, so a tag only this test has written holds only this test's one
+ * question however busy the shared bank is — which the setup screen offers as
+ * a one-question game, and the offer is accepted.
  */
-async function startCustomGame(page: Page, category: string): Promise<void> {
+async function startCustomGame(page: Page, topic: string): Promise<void> {
   await page.goto('/');
-  await page.locator('#amount').selectOption({ label: '5' });
-  // Retries until the stubbed category list has actually populated the picker.
-  await page.locator('#category').selectOption(category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
+  await startTopicGame(page, { topics: [topic], found: 1 });
 }
 
 /**

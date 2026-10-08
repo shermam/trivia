@@ -1,7 +1,8 @@
 import { expect, test } from '../../fixtures/test';
-import { answerQuestion, optionLabel, startGame, waitForPlayRoute } from '../../support/game';
+import { answerQuestion, startGame } from '../../support/game';
 import { readSavedGame } from '../../support/offline-storage';
-import { CORRECT_ANSWERS, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { runTag, startTopicGame } from '../../support/topics';
 
 /**
  * Finding B8's resume path, in a browser — which, until finding B11, nothing
@@ -195,15 +196,15 @@ test.describe('resuming from the setup screen (B8)', () => {
 test.describe('flagged questions survive a reload (B8 + H4)', () => {
   test('keeps the flag, and the chosen time limit, across a reload', async ({ page, firebase }) => {
     // Unique per test, not merely per run: workers share one emulator, so the
-    // ids **and** the category have to be this test's alone — see the category
-    // note on `stubExtraCategory`. Against the preview target the same uniqueness
+    // ids **and** the topic have to be this test's alone — see
+    // `e2e/support/topics.ts`. Against the preview target the same uniqueness
     // is what keeps the real bank from colliding with itself.
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const category = `Resume Flags ${runId}`;
+    const topic = runTag('resume');
     const customQuestions = [
       {
         id: `resume-flag-q1-${runId}`,
-        category,
+        tags: [topic],
         type: 'multiple' as const,
         difficulty: 'easy' as const,
         question: 'Which planet is known as the Red Planet?',
@@ -212,7 +213,7 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
       },
       {
         id: `resume-flag-q2-${runId}`,
-        category,
+        tags: [topic],
         type: 'boolean' as const,
         difficulty: 'easy' as const,
         question: 'Sound travels faster in water than in air.',
@@ -226,26 +227,27 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
     // acted on.
     await firebase.seedCustomQuestions(customQuestions);
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, category);
     await page.goto('/');
-    await expect(page.locator('#category')).toContainText(category);
 
-    // Non-default on purpose, for the same reason `startGame(page, 5)` is
-    // load-bearing above: B11 only ever bit a player who touched this control,
-    // and a spec that leaves it alone passes against that bug.
-    await page.locator('#amount').selectOption({ label: '5' });
-    await page.locator('#category').selectOption(category);
-    await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
+    // The count is chosen — five, away from the default ten — for the same
+    // reason `startGame(page, 5)` is load-bearing above: B11 only ever bit a
+    // player who touched that control, and a spec that leaves it alone passes
+    // against that bug. Two questions against five, so the short-draw offer is
+    // accepted on the way in.
+    //
     // No countdown. This test is about what survives a reload, and a 15-second
     // deadline running underneath it would auto-answer the question being
     // asserted on. It also puts the chosen limit — part of the persisted
     // config, and the field that decides which leaderboard the score lands on
     // — through the same round trip, which is the assertion G7 wanted and
-    // could not have while the reload itself was broken.
-    await optionLabel(page, page.getByTestId('time-limit-unlimited')).click();
-    await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-
-    await waitForPlayRoute(page);
+    // could not have while the reload itself was broken. The topic goes
+    // through it too: it is part of the config a resumed game is restored with.
+    await startTopicGame(page, {
+      topics: [topic],
+      amount: 5,
+      found: customQuestions.length,
+      noTimeLimit: true,
+    });
     await expect(page.getByTestId('no-time-limit')).toBeVisible();
 
     // Read from the DOM rather than assumed: the bank serves in an order this
@@ -280,5 +282,17 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
     await expect(page.getByTestId('flag-question')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('flag-notice')).toBeVisible();
     await expect(page.getByTestId('no-time-limit')).toBeVisible();
+
+    // ...and so does what the game is about: the question's own topic on the
+    // card, and the topic the restored config records. A config that lost it
+    // would describe, from then on, a game about anything.
+    await expect(page.getByTestId('question-topic')).toHaveText(`#${topic}`);
+    await expect
+      .poll(async () => {
+        const config = (await readSavedGame(page))?.['config'] as
+          Record<string, unknown> | undefined;
+        return config?.['tags'];
+      })
+      .toEqual([topic]);
   });
 });

@@ -1,8 +1,9 @@
 import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
-import { answerQuestion, optionLabel, waitForPlayRoute } from '../../support/game';
-import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { answerQuestion } from '../../support/game';
+import { stubOpenTrivia } from '../../support/open-trivia';
+import { runTag, startTopicGame } from '../../support/topics';
 
 /**
  * `FEAT-034` — the draw does not serve a question this device has already
@@ -21,12 +22,11 @@ import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
  * in one run: the unseen come first, and the shortfall is filled with the
  * least-recently-seen rather than by serving a three-question game.
  *
- * **The test seeds its own category and that is the whole of its isolation.**
- * The emulator is shared by every worker, so the bank has to hold exactly this
- * test's seven questions for the assertion to mean anything. The category
- * dropdown is built from the stubbed Open Trivia response and its value goes
- * straight into the `custom_questions` query, so inventing a category and
- * picking it is the whole mechanism (`stubExtraCategory`).
+ * **The test seeds its own topic and that is the whole of its isolation.**
+ * The emulator is shared by every worker, so the game has to draw from exactly
+ * this test's seven questions for the assertion to mean anything. They carry a
+ * tag minted for this test alone, and choosing it narrows the `custom_questions`
+ * query to them in the query itself (`e2e/support/topics.ts`).
  *
  * **The seen-set being per device is not asserted here**, and does not need to
  * be: nothing in it is keyed by account, and `test-isolation.spec.ts` already
@@ -39,18 +39,18 @@ const BANK_SIZE = 7;
 const GAME_SIZE = 5;
 
 interface Seed {
-  category: string;
+  topic: string;
   questions: (CustomQuestionSeed & { id: string })[];
 }
 
 function seedFor(): Seed {
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const category = `Dedup ${runId}`;
+  const topic = runTag('dedup');
   return {
-    category,
+    topic,
     questions: Array.from({ length: BANK_SIZE }, (_, index) => ({
       id: `dedup-q${index}-${runId}`,
-      category,
+      tags: [topic],
       type: 'multiple' as const,
       difficulty: 'easy' as const,
       // The wording is the identity a player would recognise a repeat by, and
@@ -63,34 +63,33 @@ function seedFor(): Seed {
 }
 
 /**
- * Configures and starts a five-question game over this test's own category,
- * from `/`.
+ * Configures and starts a five-question game over this test's own topic, from
+ * `/`.
  *
  * Re-selected on every game rather than once, because "Play Again" returns to
- * a freshly constructed setup form: the category, the source and the count are
+ * a freshly constructed setup form: the topic, the source and the count are
  * all back at their defaults, and a game started without re-picking them would
  * be a five-question Open Trivia game that happens to pass the count
  * assertion.
+ *
+ * Played with **no time limit on purpose**. This spec walks fifteen questions
+ * across three rounds, and a fifteen-second countdown running underneath every
+ * one of them makes the deadline the subject of a test about something else: a
+ * starved worker loses a question to a timeout, the quiz auto-advances, and the
+ * failure lands on a later assertion about which questions were served
+ * (`docs/ci-cd.md` §4.3 records the same trade for `streak-multipliers.spec.ts`).
+ * A timeout marks a question seen exactly as an answer does, so nothing about
+ * the feature goes untested by removing it.
+ *
+ * The topic holds seven, more than a game asks for, so no game here is short.
  */
 async function startSeededGame(page: Page, seed: Seed): Promise<void> {
-  await expect(page).toHaveURL(/\/$/);
-  // Stands in for a wait on the categories request, and does more: the
-  // invented category has to be in the dropdown before it can be selected.
-  await expect(page.locator('#category')).toContainText(seed.category);
-  await page.locator('#amount').selectOption({ label: String(GAME_SIZE) });
-  await page.locator('#category').selectOption(seed.category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  // Played with **no time limit on purpose**. This spec walks fifteen
-  // questions across three rounds, and a fifteen-second countdown running
-  // underneath every one of them makes the deadline the subject of a test
-  // about something else: a starved worker loses a question to a timeout, the
-  // quiz auto-advances, and the failure lands on a later assertion about which
-  // questions were served (`docs/ci-cd.md` §4.3 records the same trade for
-  // `streak-multipliers.spec.ts`). A timeout marks a question seen exactly as
-  // an answer does, so nothing about the feature goes untested by removing it.
-  await optionLabel(page, page.getByRole('radio', { name: 'No limit', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
+  await startTopicGame(page, {
+    topics: [seed.topic],
+    amount: GAME_SIZE,
+    found: GAME_SIZE,
+    noTimeLimit: true,
+  });
 }
 
 /**
@@ -147,7 +146,6 @@ test.describe('Question deduplication (FEAT-034)', () => {
     const seed = seedFor();
     await firebase.seedCustomQuestions(seed.questions);
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, seed.category);
     await page.goto('/');
 
     // Game one: nothing has been answered on this device, so the draw is the

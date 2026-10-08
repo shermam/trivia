@@ -6,6 +6,7 @@ import {
   computed,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -20,8 +21,7 @@ import { MAX_TAG_FILTER_VALUES } from '../../services/firebase.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
 import { SubscriptionService } from '../../services/subscription.service';
-import { TriviaCategory, TriviaService } from '../../services/trivia.service';
-import { TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
+import { SEED_TAGS, firstSeedTag } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
@@ -43,16 +43,51 @@ function donationStatusFrom(value: string | null): DonationQueryStatus {
 }
 
 /**
- * What the topic filter says it will narrow, for each source that has topics.
+ * What the topic picker says the selection will do, per source (`FEAT-052`).
  *
- * Constants rather than two literals in a ternary because both strings are
- * needed twice over: once as the hint that is showing, and once in the set the
- * picker reserves the line's height against.
+ * Constants rather than literals in a `computed` because every one is needed
+ * twice over: once as the hint that is showing, and once in the set the picker
+ * reserves the line's height against. A Mixed game's hint names the topic its
+ * Open Trivia half follows, so that one is a function — and every value it can
+ * take is in {@link TOPIC_HINT_VARIANTS}, one per seed tag.
  */
-const TAG_FILTER_HINTS = {
-  single: 'Pick topics to play questions about exactly those subjects.',
-  mixed: 'Narrows the community half of the game; Open Trivia questions carry no topics.',
+const TOPIC_HINTS = {
+  openTrivia: 'Pick one of the suggested topics, or none to play every topic.',
+  custom: 'Pick topics to play questions about exactly those subjects.',
+  mixedEmpty: 'Pick topics to narrow the community half; a suggested one narrows Open Trivia too.',
+  mixedUnseeded:
+    'Community questions match any of these; Open Trivia ones cover every topic until you add a suggested one.',
+  mixedSeeded: (tag: string) =>
+    `Community questions match any of these; Open Trivia ones follow #${tag}.`,
 } as const;
+
+/** Every hint the picker can be given, so it reserves the tallest (`CLAUDE.md` §4.4). */
+const TOPIC_HINT_VARIANTS: readonly string[] = [
+  TOPIC_HINTS.openTrivia,
+  TOPIC_HINTS.custom,
+  TOPIC_HINTS.mixedEmpty,
+  TOPIC_HINTS.mixedUnseeded,
+  ...SEED_TAGS.map(TOPIC_HINTS.mixedSeeded),
+];
+
+/**
+ * What the feedback line says about an Open Trivia game's one rule: it plays a
+ * seed tag or nothing. The first refuses a typed tag; the other two say what
+ * switching into the source removed.
+ */
+const OPEN_TRIVIA_TOPIC_MESSAGES = {
+  notAllowed: 'Open Trivia plays only the suggested topics — Custom and Mixed take any.',
+  keptOne: 'Open Trivia plays one suggested topic, so the others were removed.',
+  keptNone: 'Open Trivia plays only the suggested topics, so yours were removed.',
+} as const;
+
+/** `#a`, `#a and #b`, `#a, #b and #c` — for the live region, which has room for the names. */
+function listTags(tags: readonly string[]): string {
+  const named = tags.map((tag) => `#${tag}`);
+  return named.length <= 1
+    ? (named[0] ?? '')
+    : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+}
 
 @Component({
   selector: 'app-game-setup',
@@ -67,7 +102,6 @@ export class GameSetupComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
-  private readonly triviaService = inject(TriviaService);
   protected readonly gameController = inject(GameControllerService);
   protected readonly subscriptionService = inject(SubscriptionService);
   protected readonly connectivity = inject(ConnectivityService);
@@ -75,9 +109,6 @@ export class GameSetupComponent implements OnInit {
   protected readonly dailyLimit = inject(DailyGameLimitService);
 
   protected readonly dailyGameLimit = DAILY_FREE_GAME_LIMIT;
-
-  protected readonly categories = signal<TriviaCategory[]>([]);
-  protected readonly categoriesError = signal<string | null>(null);
 
   /**
    * Where Stripe sent the reader back from a donation, if that is why they are
@@ -101,27 +132,29 @@ export class GameSetupComponent implements OnInit {
     // entry's totalQuestions at 25, so the two must agree or a tampered form
     // would produce a game whose score can never be saved.
     amount: [10, [Validators.required, Validators.min(5), Validators.max(25)]],
-    category: [''],
     difficulty: [''],
     source: ['open_trivia' as GameConfig['source'], Validators.required],
     timeLimit: [DEFAULT_TIME_LIMIT as TimeLimitOption, Validators.required],
-    // The topic filter (`FEAT-021`). A form control like every other setting,
+    // The topic picker (`FEAT-021`, `FEAT-052`) — the game's only topic choice
+    // since the category picker went. A form control like every other setting,
     // so `form.getRawValue()` is still the whole of what the player chose.
     tags: this.fb.nonNullable.control<string[]>([]),
   });
 
-  /**
-   * How many topics one game may filter on.
-   *
-   * Firestore refuses an `array-contains-any` past 30 values outright, and the
-   * query builder clamps at ten — so this number and
-   * `MAX_TAG_FILTER_VALUES` have to agree, or the picker would offer a
-   * selection the draw silently trims. The service is the authority; this is
-   * the picker being told.
-   */
-  protected readonly maxFilterTags = MAX_TAG_FILTER_VALUES;
+  /** The picker, for the one change it cannot see coming: a source that takes fewer topics. */
+  private readonly topicPicker = viewChild(TagSelectorComponent);
 
-  protected readonly tagSuggestions = TAG_SUGGESTIONS;
+  /**
+   * What the picker suggests: the seed tags, Open Trivia DB's former
+   * categories, because they are the only tags that narrow **both** sources —
+   * which makes them the only ones every source can be offered. Any other tag
+   * can still be typed for a Custom or Mixed game.
+   */
+  protected readonly seedTags = SEED_TAGS;
+
+  protected readonly topicHintVariants = TOPIC_HINT_VARIANTS;
+  protected readonly topicNotAllowedMessage = OPEN_TRIVIA_TOPIC_MESSAGES.notAllowed;
+  protected readonly topicFeedbackVariants = Object.values(OPEN_TRIVIA_TOPIC_MESSAGES);
 
   /**
    * The picker's options. Labelled in words rather than as raw values —
@@ -157,65 +190,127 @@ export class GameSetupComponent implements OnInit {
   /** Mirrors the form control into a signal so `timeLimitNote` recomputes. */
   private readonly timeLimit = signal<TimeLimitOption>(DEFAULT_TIME_LIMIT);
 
-  /** Mirrors the source control, for the two computed values below. */
+  /** Mirrors the source control, for the computed values below. */
   private readonly source = signal<GameConfig['source']>('open_trivia');
 
-  /**
-   * Why the topic filter is unavailable right now, or `null`.
-   *
-   * Two states, and both are the reader's to change, which is why each says so
-   * rather than leaving a greyed-out box to be interpreted:
-   *
-   * - **Offline.** The offline pool is whatever was cached; it stores no tags
-   *   and cannot be queried by one, so a selection would be silently ignored.
-   * - **Open Trivia DB.** Only the community bank carries tags. Accepting a
-   *   selection here and drawing an unfiltered game anyway is the worse
-   *   failure, because nothing on screen would contradict it.
-   */
-  protected readonly tagFilterDisabledReason = computed(() => {
-    if (!this.connectivity.isOnline()) {
-      return 'Offline games play from the saved pool, which cannot be filtered by topic.';
-    }
-    if (this.source() === 'open_trivia') {
-      return 'Only community questions carry topics. Switch to Custom or Mixed to filter by one.';
-    }
-    return null;
-  });
+  /** Mirrors the topic selection, for the hint that names what Open Trivia follows. */
+  private readonly selectedTopics = signal<readonly string[]>([]);
 
-  /** Says what a topic filter will and will not narrow, for the source in play. */
-  protected readonly tagFilterHint = computed(() =>
-    this.source() === 'mixed' ? TAG_FILTER_HINTS.mixed : TAG_FILTER_HINTS.single,
+  /**
+   * How many topics this source can be asked for (`FEAT-052` §0).
+   *
+   * **One for Open Trivia alone**, because its API takes one `category` per
+   * request and refuses a second request inside five seconds — so the picker
+   * offers exactly the choice the category `<select>` it replaced did, and at
+   * one it is a single choice: picking another seed tag swaps it in. **Ten
+   * otherwise**, which is `MAX_TAG_FILTER_VALUES`: Firestore refuses an
+   * `array-contains-any` past thirty values outright and the query builder
+   * clamps at ten, so the two have to agree or the picker would offer a
+   * selection the draw silently trims. The service is the authority; this is
+   * the picker being told.
+   */
+  protected readonly topicLimit = computed(() =>
+    this.source() === 'open_trivia' ? 1 : MAX_TAG_FILTER_VALUES,
   );
 
   /**
-   * Both of them, so the picker reserves its hint line at the height of the
-   * taller (`CLAUDE.md` §4.4). Read from the same constants the hint above is
-   * chosen from: a copy edit that reached one and not the other would restore
-   * the jump this exists to remove, and nothing below a real browser would say
-   * so.
+   * The only topics this source can play, or `null` for any. An Open Trivia
+   * game can be asked for a seed tag and nothing else, so a typed topic outside
+   * the set is refused with the reason rather than accepted and ignored.
    */
-  protected readonly tagFilterHints = Object.values(TAG_FILTER_HINTS);
+  protected readonly allowedTopics = computed(() =>
+    this.source() === 'open_trivia' ? SEED_TAGS : null,
+  );
 
-  // Synchronous on purpose — see the note on AddQuestionComponent.ngOnInit.
+  /**
+   * What the selection will do, for the source in play. A Mixed game's says
+   * which topic its Open Trivia half follows — the first seed tag selected — or
+   * that it covers every topic until there is one, which is the draw a player
+   * would otherwise only discover after Start.
+   */
+  protected readonly topicHint = computed(() => {
+    switch (this.source()) {
+      case 'open_trivia':
+        return TOPIC_HINTS.openTrivia;
+      case 'custom':
+        return TOPIC_HINTS.custom;
+      case 'mixed': {
+        const topics = this.selectedTopics();
+        if (topics.length === 0) {
+          return TOPIC_HINTS.mixedEmpty;
+        }
+        const followed = firstSeedTag(topics);
+        return followed === null ? TOPIC_HINTS.mixedUnseeded : TOPIC_HINTS.mixedSeeded(followed);
+      }
+    }
+  });
+
+  // Angular calls `ngOnInit` and discards whatever it returns, so an `async`
+  // one would let a rejection escape unhandled rather than be reported. Kept
+  // synchronous, with the async work started explicitly.
   ngOnInit(): void {
-    void this.loadCategories();
     void this.dailyLimit.refresh();
     this.form.controls.timeLimit.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.timeLimit.set(value));
     this.form.controls.source.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((value) => this.source.set(value));
+      .subscribe((value) => {
+        this.source.set(value);
+        this.fitTopicsTo(value);
+      });
+    this.form.controls.tags.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => this.selectedTopics.set(value));
     // Any edit at all withdraws the short-draw message, because it and the
     // Start button's "Play {n} Questions" label describe the draw made for the
     // *previous* selection. `startGame` would already redraw rather than apply
     // a held draw to a changed selection — this is so the button stops
     // promising the old number in the meantime. `valueChanges` and not the
-    // individual controls: the count, the category, the difficulty and the
+    // individual controls: the count, the source, the difficulty and the
     // topics all change what a draw would return.
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.gameController.clearShortDrawNotice());
+  }
+
+  /**
+   * Fits the selection to the source just chosen, and says what that removed.
+   *
+   * **Switching into Open Trivia keeps the selection's first seed tag and
+   * removes the rest** (`FEAT-052` §0): it is the one topic the API could be
+   * asked for, and the first is the reader's own order. The feedback line says
+   * what happened and the live region names what went, through the picker,
+   * which says it the way it says every other change. With no seed tag
+   * selected the selection empties, and says so.
+   *
+   * Leaving Open Trivia widens the choice and removes nothing, so all it does
+   * is withdraw a notice about a rule that no longer applies.
+   */
+  private fitTopicsTo(source: GameConfig['source']): void {
+    const picker = this.topicPicker();
+    picker?.clearNotice();
+    if (source !== 'open_trivia') {
+      return;
+    }
+    const selected = this.form.controls.tags.value;
+    const kept = firstSeedTag(selected);
+    const removed = selected.filter((tag) => tag !== kept);
+    if (removed.length === 0) {
+      return;
+    }
+    const keptTags = kept === null ? [] : [kept];
+    if (!picker) {
+      this.form.controls.tags.setValue(keptTags);
+      return;
+    }
+    picker.replaceSelection(
+      keptTags,
+      kept === null ? OPEN_TRIVIA_TOPIC_MESSAGES.keptNone : OPEN_TRIVIA_TOPIC_MESSAGES.keptOne,
+      kept === null
+        ? `Open Trivia plays only the suggested topics. Removed ${listTags(removed)}.`
+        : `Open Trivia plays one suggested topic. Kept #${kept}; removed ${listTags(removed)}.`,
+    );
   }
 
   /**
@@ -231,17 +326,6 @@ export class GameSetupComponent implements OnInit {
     this.gameController.discardSavedGame();
   }
 
-  private async loadCategories(): Promise<void> {
-    try {
-      const categories = await this.triviaService.getCategories();
-      this.categories.set(categories);
-    } catch {
-      this.categoriesError.set(
-        'Could not load categories from Open Trivia DB. You can still start with "Any Category".',
-      );
-    }
-  }
-
   onSubmit(): void {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
@@ -249,20 +333,34 @@ export class GameSetupComponent implements OnInit {
     }
 
     const raw = this.form.getRawValue();
+    const topics = this.topicsTheDrawUses(raw.source, raw.tags);
     const config: GameConfig = {
       amount: raw.amount,
-      category: raw.category,
       difficulty: raw.difficulty as GameConfig['difficulty'],
       source: raw.source,
       timeLimit: raw.timeLimit,
-      // Dropped entirely when the filter is unavailable, rather than sent and
-      // ignored: an offline draw and an Open Trivia draw both have nothing to
-      // match it against, and a config carrying a filter that did not apply is
-      // a config that says something untrue about the game it produced —
-      // including in the saved snapshot a resume reads back.
-      ...(this.tagFilterDisabledReason() || raw.tags.length === 0 ? {} : { tags: raw.tags }),
+      // Absent when there are none, which is "any topic" — Start works with
+      // nothing selected for every source, as it did on "Any Category".
+      ...(topics.length === 0 ? {} : { tags: topics }),
     };
 
     void this.gameController.startGame(config);
+  }
+
+  /**
+   * The topics the draw will actually use, which is all a config may record:
+   * a config carrying a filter that did not apply says something untrue about
+   * the game it produced — including in the saved snapshot a resume reads back.
+   *
+   * An Open Trivia game uses at most one seed tag, so that is all it records,
+   * even if something left more in the control; a Custom or Mixed game uses
+   * every topic, the community half filtering on all of them.
+   */
+  private topicsTheDrawUses(source: GameConfig['source'], tags: readonly string[]): string[] {
+    if (source !== 'open_trivia') {
+      return [...tags];
+    }
+    const followed = firstSeedTag(tags);
+    return followed === null ? [] : [followed];
   }
 }
