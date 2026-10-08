@@ -50,6 +50,13 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // promise in the Privacy Policy rather than merely a bug.
     const leaderboardPaths = await allLeaderboardPathsFor(firestore, uid);
     await Promise.all(leaderboardPaths.map((path) => firestore.doc(path).delete()));
+    // The play history first, then the document it hangs under. **A parent
+    // delete does not take its subcollections** — that is the trap this order
+    // exists to avoid, and the reason `deleteCustomerRecord` below is shaped
+    // the same way. Leaving `plays` behind would orphan a per-player record of
+    // every question the account was shown, beyond the reach of the only
+    // function able to delete it.
+    await deletePlayHistory(uid);
     // Lifetime totals. A delete on a document that was never created is a
     // no-op, which is the normal case for an account that never finished a
     // game — the document is created lazily by `recordGameResult`.
@@ -99,6 +106,7 @@ export const exportAccountData = onCall(async (request) => {
       leaderboard,
       regional,
       stats,
+      plays,
       questions,
       customer,
       subscriptions,
@@ -121,6 +129,12 @@ export const exportAccountData = onCall(async (request) => {
       // less than the app publishes.
       Promise.all(regionalRefs.map((entry) => firestore.doc(entry.path).get())),
       firestore.collection('users').doc(uid).get(),
+      // The play history (`FEAT-049`), newest first, so a reader opening the
+      // file finds the games they remember at the top. Unbounded like every
+      // other section here and bounded in practice by two things that are not
+      // this function's: the twelve-month retention sweep, and the callable's
+      // own per-hour cap on how many games one account can bank.
+      firestore.collection('users').doc(uid).collection('plays').orderBy('at', 'desc').get(),
       firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
       customerRef.get(),
       customerRef.collection('subscriptions').get(),
@@ -154,6 +168,10 @@ export const exportAccountData = onCall(async (request) => {
       // Explicit null rather than an absent key when the account has never
       // finished a game — see `AccountExport.gameplayStats`.
       gameplayStats: stats.exists ? (stats.data() as Record<string, unknown>) : null,
+      // The game id rides along as `id`, the way every other collection in this
+      // export carries its document id: it is the only thing tying a round here
+      // to the totals' `lastGameId`.
+      playHistory: plays.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
       // Serialised rather than passed through: `supporterSince` is a Firestore
@@ -229,6 +247,36 @@ async function anonymiseContributedQuestions(uid: string): Promise<void> {
       batch.update(doc.ref, { createdBy: ANONYMISED_AUTHOR });
     }
     await batch.commit();
+  }
+}
+
+/**
+ * Removes every `users/{uid}/plays/{gameId}` document (`FEAT-049`).
+ *
+ * Paged and batched rather than read whole: the subcollection holds up to
+ * twelve months of games, and a heavy player's could run to thousands — more
+ * than one `WriteBatch`'s 500-write limit, and more than is wise to hold in
+ * memory at once. Each page is re-queried from the start because the previous
+ * one is gone by then, so there is no cursor to carry.
+ */
+async function deletePlayHistory(uid: string): Promise<void> {
+  const firestore = getFirestore();
+  const plays = firestore.collection('users').doc(uid).collection('plays');
+  const BATCH_LIMIT = 500;
+
+  for (;;) {
+    const page = await plays.limit(BATCH_LIMIT).get();
+    if (page.empty) {
+      return;
+    }
+    const batch = firestore.batch();
+    for (const doc of page.docs) {
+      batch.delete(doc.ref);
+    }
+    await batch.commit();
+    if (page.size < BATCH_LIMIT) {
+      return;
+    }
   }
 }
 

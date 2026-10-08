@@ -38,6 +38,23 @@ export interface AccountExport {
    * same convention `notHeldHere` exists for.
    */
   gameplayStats: Record<string, unknown> | null;
+  /**
+   * One entry per game played while signed in, newest first (`FEAT-049`) —
+   * which questions were asked, whether each was answered correctly, how long
+   * it took, and the question's difficulty and tags at the time.
+   *
+   * An **empty array** rather than `null` for an account with none, unlike
+   * `gameplayStats` above, and the asymmetry follows the shape of the two
+   * things: the totals are one document that either exists or does not, this is
+   * a collection that is either empty or not. The same convention every other
+   * collection in this export uses.
+   *
+   * This is also the only place a player ever sees their own history — there is
+   * no history screen, by design. Games older than twelve months are gone:
+   * `sweepPlayHistory` deletes them, the Privacy Policy says so, and what
+   * survives is the aggregate above.
+   */
+  playHistory: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
   billing: {
     stripeCustomerId: string | null;
@@ -86,6 +103,7 @@ export function buildAccountExport(input: {
   leaderboardEntries: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
   gameplayStats: Record<string, unknown> | null;
+  playHistory?: Record<string, unknown>[];
   stripeCustomerId: string | null;
   supporterSince?: string | null;
   subscriptions: Record<string, unknown>[];
@@ -107,6 +125,7 @@ export function buildAccountExport(input: {
     },
     leaderboardEntries: input.leaderboardEntries,
     gameplayStats: input.gameplayStats,
+    playHistory: input.playHistory ?? [],
     contributedQuestions: input.contributedQuestions,
     billing: {
       stripeCustomerId: input.stripeCustomerId,

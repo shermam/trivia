@@ -6,11 +6,14 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   documentId,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
   setDoc,
   updateDoc,
@@ -55,16 +58,38 @@ const STATS = {
   gamesInWindow: 3,
 };
 
+/**
+ * One completed game, as `recordGameResult` writes it into the play history
+ * (`FEAT-049`). Seeded with rules disabled for the same reason `STATS` is:
+ * there is no client write path to this collection either, which is why there
+ * is no create accept case below.
+ */
+const PLAY = {
+  at: 1_757_900_000_000,
+  answers: [
+    { questionId: 'bank-question-1', correct: true, ms: 4_200, difficulty: 'medium' },
+    { correct: false, ms: 15_000, difficulty: 'hard' },
+  ],
+};
+
+const GAME = 'game-abc';
+
 beforeEach(async () => {
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'users', OWNER), STATS);
     await setDoc(doc(ctx.firestore(), 'users', OTHER), { ...STATS, gamesPlayed: 3 });
+    await setDoc(doc(ctx.firestore(), 'users', OWNER, 'plays', GAME), PLAY);
+    await setDoc(doc(ctx.firestore(), 'users', OTHER, 'plays', GAME), PLAY);
   });
 });
 
 const statsRef = (ctx: RulesTestContext, uid: string) => doc(ctx.firestore(), 'users', uid);
 const users = (ctx: RulesTestContext) => collection(ctx.firestore(), 'users');
+const playRef = (ctx: RulesTestContext, uid: string, gameId = GAME) =>
+  doc(ctx.firestore(), 'users', uid, 'plays', gameId);
+const plays = (ctx: RulesTestContext, uid: string) =>
+  collection(ctx.firestore(), 'users', uid, 'plays');
 
 describe('users: get — you may read your own totals', () => {
   it('allows the owner to read their own document', async () => {
@@ -271,5 +296,151 @@ describe('users: schema — deliberately unconstrained', () => {
     });
 
     await assertSucceeds(getDoc(statsRef(asVerifiedPassword(env, 'future-uid'), 'future-uid')));
+  });
+});
+
+/**
+ * `users/{uid}/plays/{gameId}` — one document per completed game (`FEAT-049`).
+ *
+ * Two properties, and they pull in opposite directions from the parent's. The
+ * collection is **listable by its owner**, unlike `users` itself, because the
+ * path already names the uid: a list here returns the caller's own history and
+ * nothing else, which is what the export and the recommender read. And it is
+ * **writable by nobody**, exactly like the parent — the bounds that keep these
+ * records plausible live in the callable, where no rule can reach them.
+ */
+describe('users/{uid}/plays: read — your own history, and only yours', () => {
+  it('allows the owner to read one of their own plays', async () => {
+    await assertSucceeds(getDoc(playRef(asVerifiedPassword(env, OWNER), OWNER)));
+  });
+
+  /**
+   * **The accept case the parent collection cannot have**, and the one row that
+   * tells `allow read` apart from `allow get` + `allow list: if false`. Replace
+   * this rule with the parent's shape and everything else in this block still
+   * passes; this goes red.
+   */
+  it('allows the owner to list their whole history', async () => {
+    await assertSucceeds(getDocs(plays(asVerifiedPassword(env, OWNER), OWNER)));
+  });
+
+  // The shape Firestore can actually prove — `CLAUDE.md` §4.6's worked example,
+  // one collection deeper. An unfiltered list is denied by a rule that refuses
+  // lists *and* by one that cannot be proven, so a constrained query is what
+  // distinguishes them.
+  it('allows the owner a query constrained to one of their own game ids', async () => {
+    await assertSucceeds(
+      getDocs(query(plays(asVerifiedPassword(env, OWNER), OWNER), where(documentId(), '==', GAME))),
+    );
+  });
+
+  it('allows the owner an ordered, bounded read of their own history', async () => {
+    // The shape `exportAccountData` and the retention sweep's per-account
+    // equivalent use. Ordering by `at` is served by the automatic single-field
+    // index, so nothing about this needs `firestore.indexes.json`.
+    await assertSucceeds(
+      getDocs(
+        query(plays(asVerifiedPassword(env, OWNER), OWNER), orderBy('at', 'desc'), limit(10)),
+      ),
+    );
+  });
+
+  it('allows the owner to read a game that does not exist', async () => {
+    // A `get` on a missing document must be allowed and return nothing — an
+    // account with no history is a first-class state, not an error.
+    await assertSucceeds(getDoc(playRef(asVerifiedPassword(env, OWNER), OWNER, 'never-played')));
+  });
+
+  it('allows an anonymous session to list its own (empty) history', async () => {
+    // Anonymous sessions never get a document — the callable refuses to write
+    // one — but the rule still has to let them look, for the reason the parent
+    // does: narrowing to `isRealAuthedUser()` adds a condition that stays in
+    // step with nothing.
+    await assertSucceeds(getDocs(plays(asAnonymous(env, 'anon-uid'), 'anon-uid')));
+  });
+
+  it('allows an unverified password account to read its own history', async () => {
+    await assertSucceeds(getDocs(plays(asUnverifiedPassword(env, OWNER), OWNER)));
+  });
+
+  it('allows an OAuth account to read its own history', async () => {
+    await assertSucceeds(getDocs(plays(asOAuth(env, OWNER), OWNER)));
+  });
+
+  it("denies reading another account's play", async () => {
+    await assertFails(getDoc(playRef(asVerifiedPassword(env, OWNER), OTHER)));
+  });
+
+  it("denies listing another account's history", async () => {
+    await assertFails(getDocs(plays(asVerifiedPassword(env, OWNER), OTHER)));
+  });
+
+  it("denies a constrained query against another account's history", async () => {
+    await assertFails(
+      getDocs(query(plays(asVerifiedPassword(env, OWNER), OTHER), where(documentId(), '==', GAME))),
+    );
+  });
+
+  it('denies a signed-out caller', async () => {
+    await assertFails(getDoc(playRef(asSignedOut(env), OWNER)));
+    await assertFails(getDocs(plays(asSignedOut(env), OWNER)));
+  });
+
+  it("denies an anonymous session reading a real account's history", async () => {
+    await assertFails(getDocs(plays(asAnonymous(env, 'anon-uid'), OWNER)));
+  });
+
+  /**
+   * A collection-group query is the shape the retention sweep uses, and it is
+   * the one that would reach **every** player's history at once. The Admin SDK
+   * bypasses these rules; a client must never get there, and no `plays` rule
+   * matches `{path=**}/plays/{id}` so it is refused whoever asks.
+   */
+  it('denies a collection-group query across everybody’s history', async () => {
+    await assertFails(
+      getDocs(collectionGroup(asVerifiedPassword(env, OWNER).firestore(), 'plays')),
+    );
+  });
+});
+
+describe('users/{uid}/plays: write — every write is out of band', () => {
+  /**
+   * **The tripwire.** These records are the input to what the app will choose
+   * to show the player, and the bounds that keep them plausible live in the
+   * callable (`functions/src/play-history.ts`), where no rule can reach. A
+   * future PR that gives this collection a client write path has to make one of
+   * these rows go red.
+   */
+  it('denies the owner creating a play of their own', async () => {
+    await assertFails(setDoc(playRef(asVerifiedPassword(env, OWNER), OWNER, 'forged'), PLAY));
+  });
+
+  it('denies the owner rewriting a play they already have', async () => {
+    await assertFails(
+      updateDoc(playRef(asVerifiedPassword(env, OWNER), OWNER), { at: Date.now() }),
+    );
+  });
+
+  it('denies the owner deleting one of their own plays', async () => {
+    // Deletion is the account-wide "Delete account" button's job, through
+    // `deleteAccount` on the Admin SDK — not a per-row edit, which would let a
+    // player curate the history their own recommendations are built from.
+    await assertFails(deleteDoc(playRef(asVerifiedPassword(env, OWNER), OWNER)));
+  });
+
+  it("denies writing into another account's history", async () => {
+    await assertFails(setDoc(playRef(asVerifiedPassword(env, OWNER), OTHER, 'forged'), PLAY));
+  });
+
+  it('denies a Pro subscriber writing their own history', async () => {
+    await assertFails(setDoc(playRef(asPro(env, 'pro-uid'), 'pro-uid', 'forged'), PLAY));
+  });
+
+  it('denies an anonymous session writing a history for itself', async () => {
+    await assertFails(setDoc(playRef(asAnonymous(env, 'anon-uid'), 'anon-uid', 'forged'), PLAY));
+  });
+
+  it('denies a signed-out caller writing anything', async () => {
+    await assertFails(setDoc(playRef(asSignedOut(env), OWNER, 'forged'), PLAY));
   });
 });

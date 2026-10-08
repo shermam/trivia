@@ -14,6 +14,7 @@ import {
   LeaderboardEntryQuery,
   LeaderboardEntryRecord,
   LeaderboardSeed,
+  PlayRecord,
   RegionalLeaderboardEntryQuery,
   ProPriceSeed,
   ProSubscriptionSeed,
@@ -363,6 +364,25 @@ export class FirebaseBackend {
    */
   async seedGameplayStats({ uid, ...totals }: GameplayStatsSeed): Promise<void> {
     await this.firestore.doc(`users/${uid}`).set({ ...totals, updatedAt: Date.now() });
+  }
+
+  /**
+   * One account's whole play history (`FEAT-049`), newest first, or an empty
+   * list when it has none.
+   *
+   * **Read through the Admin SDK rather than off the screen, and there is no
+   * screen**: nothing in the app renders a play history, by design — the export
+   * is where a player sees it. Scoped to one uid by the path itself, so this is
+   * safe against the shared emulator without any filtering of its own.
+   */
+  async getPlayHistory(uid: string): Promise<PlayRecord[]> {
+    const snapshot = await this.firestore
+      .collection('users')
+      .doc(uid)
+      .collection('plays')
+      .orderBy('at', 'desc')
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as PlayRecord);
   }
 
   /** Writes a single board entry, bypassing Firestore rules. */

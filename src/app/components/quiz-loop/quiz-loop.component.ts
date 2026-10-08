@@ -370,6 +370,20 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     // Reaching here means hasActiveGameGuard passed — a question is in memory
     // (finding F4; the no-game redirect lives on the route, not here).
     document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.beginQuestion();
+  }
+
+  /**
+   * The question on screen is new: start both of its clocks.
+   *
+   * One funnel rather than two calls at each of the two sites a question
+   * appears, for the reason `GameControllerService.record()` is one — two call
+   * sites are two things to keep in step and a third to forget. The countdown's
+   * clock is the visible one; the other is how long the answer took
+   * (`FEAT-049`), which an `unlimited` game has no countdown to derive it from.
+   */
+  private beginQuestion(): void {
+    this.gameController.markQuestionShown();
     this.startTimer();
   }
 
@@ -628,7 +642,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     this.selectedAnswer.set(null);
     this.lifelineAnnouncement.set('');
     this.streakAnnouncement.set('');
-    this.startTimer();
+    this.beginQuestion();
   }
 
   private clearTimers(): void {

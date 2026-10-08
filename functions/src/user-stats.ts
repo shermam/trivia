@@ -5,7 +5,7 @@ import { type UserStats, nextUserStats } from './game-stats';
 
 /**
  * Banks one completed game into the caller's lifetime totals at
- * `users/{uid}`.
+ * `users/{uid}`, and the round itself into `users/{uid}/plays/{gameId}`.
  *
  * **A callable rather than a client write, and that is the whole design.**
  * `firestore.rules` gives `users/{uid}` no client write path at all, which is
@@ -71,6 +71,18 @@ export const recordGameResult = onCall(async (request) => {
       }
 
       tx.set(ref, decision.stats);
+      // The play history, in the same transaction and under the same game id
+      // (`FEAT-049`). `lastGameId` *is* that id, so nothing here re-reads the
+      // payload — the decision already validated it, and the duplicate check
+      // that protects the totals therefore protects this document too.
+      //
+      // `null` whenever the submission carried no per-answer records: a
+      // pre-feature client, or a game restored from a save whose history could
+      // not be lined up with its questions. Those games bank their totals and
+      // leave no history, which is the right way round.
+      if (decision.play) {
+        tx.set(ref.collection('plays').doc(decision.stats.lastGameId), decision.play);
+      }
       return decision;
     });
 
