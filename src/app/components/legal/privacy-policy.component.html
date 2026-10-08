@@ -6,9 +6,10 @@
     generic policy template assumes.
   </p>
   <p>
-    The short version: you can play without an account, the app has no analytics or advertising of
-    any kind, it sets no cookies, and nothing about you is sold or shared. The leaderboard and the
-    community question bank are <strong>public</strong> — everything else is not.
+    The short version: you can play without an account, the app has no advertising and no analytics
+    that watch what you do, it sets no cookies, and nothing about you is sold or shared. The
+    leaderboard and the community question bank are <strong>public</strong> — everything else is
+    not.
   </p>
 
   <h2>Who is responsible for your information</h2>
@@ -65,10 +66,13 @@
     text, the answers, its topic tags (and, for a question written before topics replaced
     categories, its category), the difficulty and — if you provide them — the source link, the
     source name and the justification are <strong>published publicly</strong> and shown to every
-    other player. Your account identifier is stored alongside each question as its author. Treat
-    anything you submit as permanently public, and please don't put personal information about
-    yourself or anyone else into a question — see <a routerLink="/terms">the Terms</a> for what
-    happens to contributions if you later delete your account.
+    other player. Once players have answered it, it also carries the counts described under
+    &ldquo;Your play history&rdquo; below — how often it has been answered, and how often correctly
+    — which are public along with it. Your account identifier is stored alongside each question as
+    its author. Treat anything you submit as permanently public, and please don't put personal
+    information about yourself or anyone else into a question — see
+    <a routerLink="/terms">the Terms</a> for what happens to contributions if you later delete your
+    account.
   </p>
   <p>
     Submissions are reviewed before they are shown to other players. A question you submit is stored
@@ -176,9 +180,26 @@
     play &mdash; not one game &mdash; and nothing is recorded before you finish your first game
     signed in. A game older than <strong>twelve months</strong> is deleted automatically; what
     outlives it is the running totals above, which are a summary rather than a record of individual
-    rounds. Deleting your account deletes all of it, and &ldquo;Export my data&rdquo; returns every
-    game we still hold, question by question &mdash; which is where you can read the whole of it,
-    since the app itself has no screen that shows it back to you.
+    rounds, and the per-question counts described next, which hold nothing of yours. Deleting your
+    account deletes all of it, and &ldquo;Export my data&rdquo; returns every game we still hold,
+    question by question &mdash; which is where you can read the whole of it, since the app itself
+    has no screen that shows it back to you.
+  </p>
+  <p>
+    <strong
+      >A game you finish signed in also adds to two counts kept on each community question it
+      held</strong
+    >: how many times that question has been answered, and how many of those answers were right.
+    That is all a count is &mdash; two numbers on the question, with
+    <strong>no link to who answered</strong>: no account identifier, no time and no game is stored
+    beside them, so nothing can trace a count back to you or to the record of your games above, and
+    nothing joins the two. The app uses the counts to work out how hard each question really is,
+    which the end-of-game review of your answers shows beside each community question. They are
+    stored on the question itself, so anyone who can read the question can read them, and they are
+    kept for as long as the question is. Because nothing in them says who answered, deleting your
+    account cannot take your own answers back out of them, and &ldquo;Export my data&rdquo; cannot
+    pick them out. Anonymous play adds nothing to them, and neither do questions from Open Trivia
+    DB.
   </p>
 
   <h3>Questions you like or dislike — these are private to you</h3>
@@ -361,6 +382,17 @@
         <td>Legitimate interests</td>
       </tr>
       <tr>
+        <td>
+          Add each game you finish signed in to the counts kept on each community question &mdash;
+          how many times it has been answered, and how many times correctly
+        </td>
+        <td>
+          So the app can tell how hard a question really is rather than only how hard its author
+          thought it was. The counts record nothing about who answered
+        </td>
+        <td>Legitimate interests</td>
+      </tr>
+      <tr>
         <td>Count how many games you banked in the past hour</td>
         <td>
           So one account cannot inflate its own totals by submitting the same game over and over
@@ -528,11 +560,14 @@
   <p>
     Trivimind has
     <strong
-      >no analytics, no advertising, no tracking pixels and no third-party marketing tools</strong
+      >no analytics service, no advertising, no tracking pixels and no third-party marketing
+      tools</strong
     >
-    of any kind. We do not sell your information and we do not share it for advertising. The one
-    profile we build &mdash; the record of your own games, kept so the app can choose questions for
-    you &mdash; is described above, is visible to nobody but you, and goes no further than this
+    of any kind. The only thing it counts beyond your own records is how often each community
+    question has been answered and answered correctly, described above, and those counts say nothing
+    about who answered. We do not sell your information and we do not share it for advertising. The
+    one profile we build &mdash; the record of your own games, kept so the app can choose questions
+    for you &mdash; is described above, is visible to nobody but you, and goes no further than this
     application. The likes and dislikes you give questions are kept for you alone, and nothing about
     you is inferred from them. The services in the table above are there because the app cannot
     function without them, not to observe you.
