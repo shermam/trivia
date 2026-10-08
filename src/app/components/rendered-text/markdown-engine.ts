@@ -239,7 +239,7 @@ const LANGUAGE_CLASS = /^language-[A-Za-z0-9#+._-]*$/;
  *
  * **`USE_PROFILES` is deliberately absent**, against the obvious reading of
  * DOMPurify's documentation, and this is the one thing in the file worth
- * checking before changing. Measured against `dompurify@3.4.15`
+ * checking before changing. Measured against `dompurify@3.4.16`
  * (`_parseConfig`): when `USE_PROFILES` is set it **overwrites** `ALLOWED_TAGS`
  * and `ALLOWED_ATTR` outright rather than being intersected or merged with
  * them. A config passing both — `USE_PROFILES: { html: true, mathMl: true }`
