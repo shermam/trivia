@@ -46,6 +46,42 @@ test('includes every category of data the app actually holds', () => {
   assert.equal(result.exportedAt, '2026-01-01T00:00:00.000Z');
 });
 
+/**
+ * The play history (`FEAT-049`). There is no history screen in the app, so this
+ * file is the only place a player ever sees it — which makes its presence here
+ * the feature rather than a completeness nicety.
+ */
+test('includes the play history, whole rather than summarised', () => {
+  const result = buildAccountExport({
+    ...base,
+    playHistory: [
+      {
+        id: 'game-2',
+        at: 1_757_900_000_000,
+        answers: [{ questionId: 'q1', correct: true, ms: 3_000, difficulty: 'easy' }],
+      },
+      { id: 'game-1', at: 1_757_800_000_000, answers: [] },
+    ],
+  });
+
+  assert.equal(result.playHistory.length, 2);
+  assert.equal(result.playHistory[0]['id'], 'game-2');
+  assert.deepEqual(result.playHistory[0]['answers'], [
+    { questionId: 'q1', correct: true, ms: 3_000, difficulty: 'easy' },
+  ]);
+});
+
+/**
+ * Empty rather than absent, and empty rather than `null`. An account that has
+ * never played signed in has no history, which is a normal state and not
+ * something to answer with a missing key — the same convention every other
+ * collection in this export follows. `gameplayStats` is `null` instead because
+ * it is one document rather than a collection.
+ */
+test('represents an account with no play history as an empty list', () => {
+  assert.deepEqual(buildAccountExport(base).playHistory, []);
+});
+
 test('represents "nothing here" as empty rather than omitting the section', () => {
   const result = buildAccountExport(base);
   // A missing key reads as "we are not telling you"; an explicit null or []

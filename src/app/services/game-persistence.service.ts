@@ -12,6 +12,7 @@ import {
   isTimeLimitOption,
 } from '../models/question.model';
 import { displayScore, maxScoreFor } from '../models/scoring';
+import { MAX_ANSWER_MS } from '../utils/play-history.util';
 import { CURRENT_GAME_KEY, GAME_STATE_STORE, OfflineDbService } from './offline-db.service';
 
 /**
@@ -111,6 +112,24 @@ export interface PersistedGame {
    * `GameOverComponent.recap`.
    */
   answerHistory: PickedAnswer[];
+  /**
+   * How long each of those answers took, in milliseconds, positionally beside
+   * `answerHistory` (`FEAT-049`) — what the play history a finished game banks
+   * is built from.
+   *
+   * **Additive, no `SCHEMA_VERSION` bump**, for the same reason as every field
+   * before it: a mismatch discards the game rather than migrating it. A save
+   * written before this existed restores with an empty array, which means that
+   * game banks its totals and leaves no play history — the two arrays are
+   * positional, so a partial one would describe a different game rather than a
+   * smaller one.
+   *
+   * Kept as its own array rather than folded into `PickedAnswer` because the
+   * two have different shelf lives: a `PickedAnswer` is validated against the
+   * question it belongs to and means something to an older build, a duration
+   * has nothing to validate against and means nothing to one.
+   */
+  answerDurations: number[];
   /**
    * Which lifelines are still unspent (`FEAT-002`), and which options 50/50 has
    * already removed from the question the player is looking at.
@@ -251,6 +270,7 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     isComplete,
     flaggedQuestionIds,
     answerHistory,
+    answerDurations,
     lifelines,
     eliminatedAnswerIds,
     gameId,
@@ -319,6 +339,15 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
 
   const restoredStreak = isCountWithin(currentStreak, questions.length) ? currentStreak : 0;
 
+  // Dropped wholesale rather than filtered, unlike the flags below, and the
+  // difference is that this array is *positional*: entry `i` is the answer to
+  // question `i`. Filtering out one bad entry would silently shift every later
+  // answer onto the wrong question, which is worse than no recap — it would
+  // confidently show the player picking things they never picked. So it is
+  // all-or-nothing, and the recap renders only when the history covers the
+  // whole game.
+  const restoredHistory = isUsableAnswerHistory(answerHistory, questions) ? answerHistory : [];
+
   return {
     version: SCHEMA_VERSION,
     savedAt,
@@ -345,14 +374,16 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
             typeof id === 'string' && questions.some((question) => question.id === id),
         )
       : [],
-    // Dropped wholesale rather than filtered, unlike the flags above, and the
-    // difference is that this array is *positional*: entry `i` is the answer to
-    // question `i`. Filtering out one bad entry would silently shift every
-    // later answer onto the wrong question, which is worse than no recap —
-    // it would confidently show the player picking things they never picked.
-    // So it is all-or-nothing, and the recap renders only when the history
-    // covers the whole game.
-    answerHistory: isUsableAnswerHistory(answerHistory, questions) ? answerHistory : [],
+    answerHistory: restoredHistory,
+    // Dropped wholesale alongside the history it is indexed against, and only
+    // kept when the two are the same length: a duration array that had drifted
+    // out of step would time the wrong questions, which is the same failure as
+    // a shifted recap and just as invisible. Everything outside the range the
+    // server accepts is rejected here too, so a hand-edited record cannot turn
+    // a real game into a submission `recordGameResult` refuses whole.
+    answerDurations: isUsableAnswerDurations(answerDurations, restoredHistory.length)
+      ? answerDurations
+      : [],
     // Both or neither, per the field comment: restoring a spent 50/50 without
     // the options it removed is strictly worse than restoring a fresh set.
     ...restoreLifelines(lifelines, eliminatedAnswerIds, questions[currentIndex]),
@@ -397,6 +428,25 @@ function isUsableAnswerHistory(
         return false;
     }
   });
+}
+
+/**
+ * Whether restored answer durations can be trusted to line up with the answers
+ * they time: one per restored answer, each an integer inside the range
+ * `recordGameResult` accepts (`FEAT-049`).
+ *
+ * Checked against the *restored* history rather than the stored one, so a
+ * history that was itself discarded takes its durations with it — the pair is
+ * only meaningful together, and half of it is worse than neither.
+ */
+function isUsableAnswerDurations(value: unknown, answerCount: number): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === answerCount &&
+    value.every(
+      (ms) => typeof ms === 'number' && Number.isInteger(ms) && ms >= 0 && ms <= MAX_ANSWER_MS,
+    )
+  );
 }
 
 /**

@@ -188,7 +188,55 @@ describe('legal pages', () => {
     expect(text).toContain('nothing is kept for anonymous play');
     // ...and the two promises the account lifecycle has to keep honouring.
     expect(text).toContain('deletes your gameplay totals');
-    expect(text).toContain('your gameplay totals, every question you have contributed');
+    expect(text).toContain('your gameplay totals, your play history');
+  });
+
+  /**
+   * **The play-history disclosure (`FEAT-049`).** `users/{uid}/plays` is the
+   * first thing the app stores that is a *profile* in the ordinary sense — a
+   * record of which questions a player was shown, how they did and how long
+   * they took — so the page had to stop saying no profile is built, and what
+   * replaced that sentence has to keep being true.
+   *
+   * Written in the shape of the "no unqualified no-profiling claim" test below
+   * rather than as prose matching, because the risk is the same: a later
+   * feature widens what is kept, or narrows who can read it, and no test
+   * notices. Each assertion is one factual claim the code has to keep.
+   */
+  it('describes the play history: what is kept, why, for how long, and for whom', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    // What is kept, field by field — the enumeration `FEAT-022` showed is the
+    // quiet way one of these goes stale.
+    expect(text).toContain('Your play history');
+    expect(text).toContain(
+      'whether you answered correctly, how long you took to answer, the question',
+    );
+    // Why, which is what the lawful-basis row rests on.
+    expect(text).toContain('We keep it in order to choose questions for you');
+    // For how long, as a number rather than "as long as necessary".
+    expect(text).toContain('A game older than');
+    expect(text).toContain('twelve months');
+    // For whom: signed-in accounts only. The gate lives in the callable's
+    // provider allowlist, and this is the sentence it keeps honest.
+    expect(text).toContain('Nothing is recorded for anonymous play');
+    // And the two account-lifecycle promises `deleteAccount` and
+    // `exportAccountData` have to go on keeping.
+    expect(text).toContain('deletes your gameplay totals and your whole play history');
+    expect(text).toContain('your play history — every game we still hold, question by question');
+  });
+
+  /**
+   * The other half of the same claim: the page says outright that a profile is
+   * built, so that "we do not build a profile of you" cannot creep back in
+   * while the code goes on building one. Kept separate from the test below,
+   * which pins the two *older* absolute forms.
+   */
+  it('says a profile is built rather than denying it', async () => {
+    const text = (await render(PrivacyPolicyComponent)).textContent ?? '';
+
+    expect(text).toContain('We do build a profile of your play');
+    expect(text).not.toContain('we do not build a profile of you');
   });
 
   /**
@@ -204,6 +252,14 @@ describe('legal pages', () => {
    * feature had to change because it falsified them: "signing in is only
    * needed to…" was an exhaustive list in both documents, and voting is a new
    * entry on it.
+   *
+   * And on where it sits beside the play history (`FEAT-049`), because the two
+   * are easy to blur and are not the same record: a game is kept twelve months
+   * and feeds the one profile the page admits to; a vote is kept as long as the
+   * account and is used for nothing but showing the player their own choice.
+   * The sentence saying every other question-level record is one the player
+   * chose to make is the one play history falsified, so it is pinned in the
+   * form that names the exception rather than the absolute one.
    */
   it('discloses the private vote, who reads it, how long it is kept, and how it goes', async () => {
     const privacy = collapse((await render(PrivacyPolicyComponent)).textContent);
@@ -222,6 +278,19 @@ describe('legal pages', () => {
     expect(privacy).toContain('deletes your likes and dislikes');
     expect(privacy).toContain('every like or dislike you have given a question');
     expect(privacy).toContain('Keep the likes and dislikes you give questions');
+
+    // Beside the play history: a separate record, kept for a different time,
+    // and not part of the profile.
+    expect(privacy).toContain(
+      'Apart from the play history described next, a record naming a question you were shown exists only where you chose to make one',
+    );
+    expect(privacy).not.toContain('Among what we hold, a record naming a question');
+    expect(privacy).toContain(
+      'The likes and dislikes you give questions are visible to nobody but you as well, and are kept only so the buttons can show your choice back to you',
+    );
+    expect(privacy).toContain(
+      'The likes and dislikes you give questions are kept for you alone, and nothing about you is inferred from them',
+    );
 
     // The exhaustive "only needed to…" lists, in both documents.
     expect(privacy).toContain('to save a score to the public leaderboard, to like or dislike');

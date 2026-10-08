@@ -39,9 +39,20 @@ interface IndexField {
   arrayConfig?: 'CONTAINS';
 }
 
+interface FieldOverrideIndex {
+  order?: 'ASCENDING' | 'DESCENDING';
+  arrayConfig?: 'CONTAINS';
+  queryScope?: 'COLLECTION' | 'COLLECTION_GROUP';
+}
+
 interface IndexSpec {
   indexes: { collectionGroup: string; fields: IndexField[] }[];
-  fieldOverrides: { collectionGroup: string; fieldPath: string; ttl?: boolean }[];
+  fieldOverrides: {
+    collectionGroup: string;
+    fieldPath: string;
+    ttl?: boolean;
+    indexes?: FieldOverrideIndex[];
+  }[];
 }
 
 const spec = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')) as IndexSpec;
@@ -126,5 +137,36 @@ describe('firestore.indexes.json', () => {
       .sort();
 
     expect(ttlGroups).toEqual(['checkout_sessions', 'donation_sessions', 'portal_sessions']);
+  });
+
+  /**
+   * The retention sweep's index (`FEAT-049`). `sweepPlayHistory` runs
+   * `collectionGroup('plays').where('at','<',cutoff)`, and **Firestore's
+   * automatic single-field indexes are collection-scoped only** — a
+   * collection-group query over one field still needs its index declared. Get
+   * this wrong and the sweep fails with `FAILED_PRECONDITION` on a schedule
+   * nobody is watching, so the twelve months the Privacy Policy promises
+   * quietly stops being enforced.
+   *
+   * The two collection-scoped entries come with it because a `fieldOverrides`
+   * entry **replaces** automatic indexing for that field rather than adding to
+   * it: declaring only the collection-group scope would take away the ordinary
+   * `orderBy('at')` that `exportAccountData` uses.
+   *
+   * Asserted here rather than left to the deploy, because the emulator enforces
+   * no index configuration at all — a missing one is green in every local suite.
+   */
+  it('declares the collection-group index the play-history sweep queries', () => {
+    const override = spec.fieldOverrides.find(
+      (entry) => entry.collectionGroup === 'plays' && entry.fieldPath === 'at',
+    );
+
+    expect(override, 'plays.at field override').toBeDefined();
+    expect(override?.ttl).toBeUndefined();
+    expect(override?.indexes).toEqual([
+      { order: 'ASCENDING', queryScope: 'COLLECTION' },
+      { order: 'DESCENDING', queryScope: 'COLLECTION' },
+      { order: 'ASCENDING', queryScope: 'COLLECTION_GROUP' },
+    ]);
   });
 });

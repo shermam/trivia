@@ -84,6 +84,7 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     isComplete: false,
     flaggedQuestionIds: [],
     answerHistory: [],
+    answerDurations: [],
     lifelines: ALL_LIFELINES_AVAILABLE,
     eliminatedAnswerIds: [],
     gameId: 'game-fixture',
@@ -290,6 +291,78 @@ describe('GamePersistenceService (B8)', () => {
     await service.save(makeGame({ answerHistory: [SKIPPED, TIMED_OUT] }));
 
     expect((await service.load())?.answerHistory).toEqual([SKIPPED, TIMED_OUT]);
+  });
+
+  /*
+   * `answerDurations` (`FEAT-049`) — how long each of those answers took, and
+   * the array `buildPlayAnswers` needs one entry of per question before a
+   * finished game can bank any play history at all. Additive on the same terms
+   * as everything above it.
+   */
+  it('round-trips the answer durations beside the history they time', async () => {
+    await service.save(
+      makeGame({
+        answerHistory: [answeredWith('q0:correct'), TIMED_OUT],
+        answerDurations: [0, 15_000],
+      }),
+    );
+
+    expect((await service.load())?.answerDurations).toEqual([0, 15_000]);
+  });
+
+  it('restores a record written before the durations existed', async () => {
+    await putRaw(validRecord({ answerHistory: [answeredWith('q0:correct')] }));
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull();
+    expect(loaded?.answerHistory).toHaveLength(1); // the recap survives…
+    expect(loaded?.answerDurations).toEqual([]); // …and that game banks no history
+  });
+
+  /*
+   * Dropped whole, like the history, and for the same reason: the array is
+   * positional, so a durations array out of step with the answers would time
+   * the wrong questions — and `recordGameResult` refuses a value outside its
+   * range, which would cost the game its totals as well as its history.
+   */
+  it.each([
+    ['a non-array value', 5_000],
+    ['fewer durations than answers', [1_000]],
+    ['more durations than answers', [1_000, 2_000, 3_000]],
+    ['a non-numeric entry', [1_000, '2000']],
+    ['a fractional entry', [1_000, 1_500.5]],
+    ['a negative entry', [1_000, -1]],
+    ['a duration past the bound the server accepts', [1_000, 120_001]],
+  ])('discards %s rather than storing it', async (_label, stored) => {
+    await putRaw(
+      validRecord({
+        questions: [makeQuestion('q0'), makeQuestion('q1')],
+        answerHistory: [answeredWith('q0:correct'), TIMED_OUT],
+        answerDurations: stored,
+      }),
+    );
+
+    const loaded = await service.load();
+    expect(loaded).not.toBeNull(); // the game itself survives
+    expect(loaded?.answerDurations).toEqual([]);
+  });
+
+  /*
+   * The pair moves together. A history the parser discards takes its durations
+   * with it — half of a positional pair is worse than neither, because the
+   * surviving half would look usable.
+   */
+  it('drops the durations when the history they index was itself discarded', async () => {
+    await putRaw(
+      validRecord({
+        answerHistory: ['q0:correct'], // the pre-FEAT-002 scalar shape
+        answerDurations: [1_000],
+      }),
+    );
+
+    const loaded = await service.load();
+    expect(loaded?.answerHistory).toEqual([]);
+    expect(loaded?.answerDurations).toEqual([]);
   });
 
   /*
