@@ -985,6 +985,109 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Whether a `question_votes` document id belongs to the caller: it starts
+    // with their uid and an underscore (`FEAT-027`).
+    //
+    // Compared as a literal prefix rather than through `matches()`, so nothing
+    // about the uid is ever read as a pattern. What keeps one account's prefix
+    // from being the start of another's is that a uid holds no `_`:
+    // Firebase-minted uids are alphanumeric, and this app mints no custom
+    // tokens — the same assumption the `question_reports` id pattern rests on.
+    //
+    // No length guard before the slice: an id shorter than the prefix cannot
+    // equal it, whether the slice stops at the end of the string or raises —
+    // and an erroring rule denies — so a guard would be a clause no mutation
+    // run could tell from its absence (`CLAUDE.md` §4.6).
+    function isOwnQuestionVoteId(voteId) {
+      let prefix = request.auth.uid + '_';
+      return voteId[0:prefix.size()] == prefix;
+    }
+
+    // Everything a new vote must be (`FEAT-027`).
+    //
+    // **The id equals `{uid}_{questionId}`, and that one comparison is three
+    // checks.** The prefix is the ownership check: a caller can only ever
+    // write under their own uid. The suffix ties the id to the payload, without
+    // which a caller writes `questionId: A` into the document for question B.
+    // And because the id is fixed by the pair, one vote per account per
+    // question is a property of the key rather than of anything a rule has to
+    // count — a second vote on the same question can only be an update of the
+    // first.
+    //
+    // No separate `is string` on `questionId`: anything that is not a string
+    // cannot be concatenated into the id that clause compares against, and an
+    // erroring rule denies. `value in [1, -1]` is its own type check for the
+    // same reason `format`'s is on `custom_questions` — a string, a boolean or
+    // a map is not in that list either.
+    //
+    // `createdAt` is the time of the **first** vote on the pair. The update
+    // rule below changes `value` and nothing else, so changing one's mind
+    // leaves it where it was.
+    function isValidQuestionVote(voteId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['questionId', 'value', 'createdAt'])
+            && data.questionId.size() <= 128
+            && voteId == request.auth.uid + '_' + data.questionId
+            && data.value in [1, -1]
+            && isNearRequestTime(data.createdAt);
+    }
+
+    // A player's private like or dislike of one community question
+    // (`FEAT-027`). No count is kept anywhere and nothing triggers on a write:
+    // a vote is one document, written by its owner and read by its owner, and
+    // the preference signal `FEAT-029` will read is that same owner-scoped read.
+    //
+    // **The document id is `{uid}_{questionId}`, uid first**, and that order
+    // is what makes an account's votes findable at all. `deleteAccount` and
+    // `exportAccountData` sweep them as the range of ids that start with the
+    // uid (`functions/src/question-votes.ts`); nothing can query an id by its
+    // suffix, so the other order would have left them undeletable.
+    //
+    // **Real accounts only, on every verb.** An anonymous account is free to
+    // mint, so an anonymous vote is free to farm, and the signal is only worth
+    // collecting if it is worth something — the app shows a guest the buttons
+    // and opens the sign-in menu instead of writing (`FEAT-027` Decision 1).
+    // Reads are gated the same way as writes so that "who may vote" and "who
+    // has votes to read" are one predicate rather than two that can drift.
+    //
+    // **No volume cap, and none is needed while nothing triggers on a write**
+    // (`CLAUDE.md` §4.1 asks for one on a path that spends a Cloud Function).
+    // The id is the bound: one document per account per question, and
+    // `exists()` on create holds `questionId` to a question in the bank, so an
+    // account can hold at most one vote per question the bank actually has. A
+    // `question_vote_quota/{window}-{uid}` counter, written in the same batch
+    // the way `custom_question_quota` is, is the mechanism to reach for if a
+    // trigger ever appears.
+    //
+    // **Rules are not filters**: a query is served only when Firestore can
+    // prove every document it could return is the caller's, so the client asks
+    // for its own ids by name — `where(documentId(), 'in', …)` over the current
+    // game's questions — and an unfiltered list is refused rather than
+    // narrowed.
+    match /question_votes/{voteId} {
+      allow read: if isRealAuthedUser() && isOwnQuestionVoteId(voteId);
+
+      // One billed read for `exists()`, worth it for the bound above: without
+      // it the id would cap nothing, because a caller could mint question ids.
+      allow create: if isRealAuthedUser()
+                    && isValidQuestionVote(voteId)
+                    && exists(/databases/$(database)/documents/custom_questions/$(request.resource.data.questionId));
+
+      // Changing one's mind: the value moves and nothing else does — not the
+      // question, and not the time of the first vote. No `exists()` here, so a
+      // vote on a question its author has since withdrawn can still be
+      // changed or removed by the person who cast it.
+      allow update: if isRealAuthedUser()
+                    && isOwnQuestionVoteId(voteId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['value'])
+                    && request.resource.data.value in [1, -1];
+
+      // Tapping the pressed button again. Ownership only: there is no payload
+      // to validate, and deleting a vote that is not there succeeds, so a
+      // retried removal is not reported as a failure.
+      allow delete: if isRealAuthedUser() && isOwnQuestionVoteId(voteId);
+    }
+
     // Collections managed by our own Cloud Functions backend (`functions/`)
     // — this used to be the "Run Subscriptions with Stripe" Firebase
     // Extension, migrated off ahead of that product line's March 2027

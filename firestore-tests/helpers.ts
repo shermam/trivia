@@ -151,6 +151,23 @@ export function validReport(reportedBy: string, overrides: Record<string, unknow
   };
 }
 
+/**
+ * The id a `question_votes` document must have: `{uid}_{questionId}`, uid
+ * first, so that one account's votes are one contiguous range of ids
+ * (`FEAT-027`). Mirrors `questionVoteId` in `src/app/models/question-vote.ts`
+ * deliberately — see `sessionDocId` above.
+ */
+export const questionVoteId = (uid: string, questionId: string): string => `${uid}_${questionId}`;
+
+/**
+ * A schema-valid `question_votes` document; spread over it for invalid
+ * variants. The question it names must be seeded into `custom_questions`
+ * first — the create rule checks it exists.
+ */
+export function validVote(questionId: string, overrides: Record<string, unknown> = {}) {
+  return { questionId, value: 1, createdAt: Date.now(), ...overrides };
+}
+
 /** A schema-valid `checkout_sessions` document; spread over it for invalid variants. */
 export function validCheckoutSession(overrides: Record<string, unknown> = {}) {
   return { price: 'price_test_pro', origin: 'https://example.web.app', ...overrides };
