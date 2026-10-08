@@ -144,14 +144,13 @@ Full-screen centered card on an indigo/purple gradient background.
     - "Custom"
     - "Mixed"
     - Selected segment is visually distinguished (indigo border + light indigo fill)
-  - **Field: "Topics" (optional)** — the shared tag picker (`FEAT-021`), the game's only topic choice (`FEAT-052`), below the source picker and above the time limit. Nothing chosen plays every topic, for every source. The helper line says what the selection does for the source in play:
-    - Open Trivia: "Pick one of the suggested topics, or none to play every topic."
-    - Custom: "Pick topics to play questions about exactly those subjects."
-    - Mixed, nothing chosen: "Pick topics to narrow the community half; a suggested one narrows Open Trivia too."
-    - Mixed, no suggested topic among them: "Community questions match any of these; Open Trivia ones cover every topic until you add a suggested one."
-    - Mixed, with one: "Community questions match any of these; Open Trivia ones follow #{seed tag}." — naming the first suggested topic in the selection
-
-    The line is reserved at the height of the tallest of all of those, one Mixed variant per suggested topic, so changing the source or the selection swaps the words without rewrapping the line and moving everything below it
+  - **Field: "Topics" (optional)** — the shared tag picker (`FEAT-021`), the game's only topic choice (`FEAT-052`), below the source picker and above the time limit. Nothing chosen plays every topic, for every source.
+    - A helper line saying what the selection does for the source in play, reserved at the height of the tallest of them all — one Mixed variant per suggested topic — so changing the source or the selection swaps the words without rewrapping the line and moving everything below it:
+      - Open Trivia: "Pick one of the suggested topics, or none to play every topic."
+      - Custom: "Pick topics to play questions about exactly those subjects."
+      - Mixed, nothing chosen: "Pick topics to narrow the community half; a suggested one narrows Open Trivia too."
+      - Mixed, no suggested topic among them: "Community questions match any of these; Open Trivia ones cover every topic until you add a suggested one."
+      - Mixed, with one: "Community questions match any of these; Open Trivia ones follow #{seed tag}." — naming the first suggested topic in the selection
     - A fixed-height box of chosen chips, reading "No tags yet." until one is added; each chip is `#tag` with an × button named "Remove tag {tag}". It scrolls rather than grows
     - A text input, placeholder "Type a topic and press Enter" ("Maximum reached" at ten), and an "Add" button
     - One reserved feedback line under it, carrying whichever is true: "Too long — a tag is at most 32 characters." / "A tag needs at least 2 letters or digits." on a malformed draft, "Open Trivia plays only the suggested topics — Custom and Mixed take any." on a well-formed one an Open Trivia game cannot play, "Will be saved as #{normalised}" while typing, a notice about a source switch (below), or "{n} of {max} chosen." Reserved at the height of the longest of those
