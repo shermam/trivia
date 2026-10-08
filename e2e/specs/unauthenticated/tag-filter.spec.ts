@@ -553,6 +553,13 @@ for (const viewport of [
   });
 }
 
+/** What the strip sampler records on every frame: where the Start button is, and the strip. */
+interface SampledFrame {
+  startTop: number;
+  stripHeight: number;
+  chips: number;
+}
+
 /**
  * The shortcut strip is the one part of the picker that arrives by itself: its
  * chips render on the first idle moment, or the first focus inside the picker,
@@ -572,13 +579,6 @@ for (const viewport of [
  * frame in between. Holding a callback only delays it; it is the real callback
  * that runs.
  */
-/** What the strip sampler records on every frame: where the Start button is, and the strip. */
-interface SampledFrame {
-  startTop: number;
-  stripHeight: number;
-  chips: number;
-}
-
 test.describe('the shortcut strip', () => {
   test.use({ viewport: { width: 390, height: 1400 } });
 
