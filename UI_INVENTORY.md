@@ -28,7 +28,7 @@ Every route renders inside a fixed shell:
 Sticky header, present on every screen except in **embed mode**.
 
 - **Container**: full-width sticky header (64px tall), translucent white, blurred backdrop, bottom hairline border. Inner content max-width constrained and centered.
-- **Logo / home link**: gradient (indigo→violet) rounded-square icon mark containing a sparkles glyph, plus text "**Trivimind**" — bold, indigo — links to `/`.
+- **Logo / home link**: an emerald rounded-square mark containing a white "?" glyph, plus the text "**Trivimind**" — extra-bold, dark emerald (`emerald-800`, `emerald-400` in dark mode), darker than the mark because it is body-size text on a translucent bar (`BRAND_DESIGN_SYSTEM.md` §1) — links to `/`.
 - **Two layouts, one breakpoint at Tailwind `sm` (640px).**
   - **≥ 640px** — the original row: brand on the left; "Review" (reviewers only), "Pricing", the theme toggle, the sound toggle and the account trigger on the right.
   - **< 640px** — three zones: a **hamburger button** on the left, the brand **centred**, and the account trigger on the right. "Review", "Pricing" and the theme and sound toggles move into the drawer the hamburger opens; the links are the _same_ elements hidden by `sm:` classes, while the two toggles are rendered twice — an icon button in the bar (`hidden sm:flex`) and a labelled row in the drawer (`sm:hidden`) — because neither surface exists at both widths.
