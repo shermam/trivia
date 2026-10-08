@@ -91,7 +91,7 @@ async function startCustomGame(page: Page, seed: Seed): Promise<void> {
 async function nextQuestion(
   page: Page,
   seed: Seed,
-  answered: Set<string> = new Set(),
+  answered = new Set<string>(),
 ): Promise<SeededQuestion> {
   const heading = page.getByTestId('question-text');
   let found: SeededQuestion | undefined;
