@@ -67,14 +67,21 @@ const TICK_WINDOW_SECONDS = 5;
  * Option labels are derived from the index rather than read out of a fixed
  * array. The array had four entries while `firestore.rules` permitted up to
  * six answers, so a five-answer question rendered a blank badge — finding B2.
- * Deriving makes the mismatch impossible rather than merely fixed: the rules
- * are tightened to what the form can produce in the same change, and this
- * still holds if that ever moves again, or for a legacy document written
- * under the older bound.
+ * Deriving made the mismatch impossible rather than merely fixed, which is why
+ * moving the ceiling back to six options (`FEAT-051`) needed nothing here: the
+ * letters run A to F because the index does.
  */
 function answerLabel(index: number): string {
   return String.fromCharCode(65 + index);
 }
+
+/**
+ * The most options that still sit two to a row at `sm` and up (`FEAT-051`).
+ * A fifth in a two-column grid leaves an orphan cell, and the questions that
+ * carry five or six — an exam paper's — have options long enough to read
+ * better at full width, so those take one column at every width.
+ */
+const MAX_TWO_COLUMN_OPTIONS = 4;
 const TIMER_RING_RADIUS = 18;
 const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 
@@ -224,9 +231,9 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * Whether the game is timed is fixed before the first question and cannot
    * change while this component is alive, so hiding the button costs no layout
    * shift — it is simply a two-button toolbar for that whole game. Whether a
-   * question is true/false changes *per question*, so hiding 50/50 would resize
-   * the toolbar mid-round, which is the thing `CLAUDE.md` §4.4 forbids. A
-   * disabled button keeps its box.
+   * question has only two options changes *per question*, so hiding 50/50 would
+   * resize the toolbar mid-round, which is the thing `CLAUDE.md` §4.4 forbids.
+   * A disabled button keeps its box.
    */
   protected readonly showsExtraTime = this.isTimed;
 
@@ -235,11 +242,25 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     if (!question) {
       return false;
     }
-    // Mirrors `useFiftyFifty()`'s own rule — never reduce a question to a
-    // single option — so the button's enabled state and what the service will
-    // actually do cannot disagree.
+    // Mirrors `useFiftyFifty()`'s own rule — leave the correct option and one
+    // other, so there must be a second wrong one to remove — so the button's
+    // enabled state and what the service will actually do cannot disagree.
     return question.all_answers.filter((answer) => !answer.isCorrect).length > 1;
   });
+
+  /**
+   * Whether the options sit two to a row from `sm` up: four or fewer do, five
+   * or six take one column at every width (`MAX_TWO_COLUMN_OPTIONS`).
+   *
+   * Decided per question, by its own option count, so it can change between
+   * one question and the next — which is the card following its content, as
+   * it does for a longer prompt — and never within one: an eliminated option
+   * keeps its cell, so 50/50 changes no count this reads.
+   */
+  protected readonly twoColumnOptions = computed(
+    () =>
+      (this.gameController.currentQuestion()?.all_answers.length ?? 0) <= MAX_TWO_COLUMN_OPTIONS,
+  );
 
   protected readonly eliminatedAnswerIds = this.gameController.eliminatedAnswerIds;
 

@@ -80,15 +80,15 @@ function setup(
     gameController.lifelines.set({ ...state, [id]: false });
     return true;
   });
+  // The real service's rule (`FEAT-051`): every wrong answer but one, so two
+  // options survive whatever the count.
   const useFiftyFifty = vi.fn(() => {
     if (!consumeLifeline('fiftyFifty')) {
       return false;
     }
     const question = gameController.currentQuestion();
     const wrong = (question?.all_answers ?? []).filter((a) => !a.isCorrect);
-    gameController.eliminatedAnswerIds.set(
-      wrong.slice(0, Math.min(2, wrong.length - 1)).map((a) => a.id),
-    );
+    gameController.eliminatedAnswerIds.set(wrong.slice(0, wrong.length - 1).map((a) => a.id));
     return true;
   });
   const currentStreak = signal(options.currentStreak ?? 0);
@@ -894,16 +894,49 @@ describe('QuizLoopComponent — lifelines (FEAT-002)', () => {
 
   /*
    * ...and 50/50 gets the opposite treatment on a question it cannot help
-   * with, for the mirror-image reason: whether a question is true/false varies
-   * question to question, so hiding it would resize the toolbar mid-round.
+   * with, for the mirror-image reason: whether a question has only two options
+   * varies question to question, so hiding it would resize the toolbar
+   * mid-round.
+   *
+   * The name says why in the rule's own terms (`FEAT-051`): "a question with
+   * two options" covers true/false and a two-option multiple choice alike,
+   * where "a true or false question" named only the first.
    */
-  it('disables rather than hides 50/50 on a true/false question', () => {
-    const { query } = setup(); // makeQuestion() is two options
+  it('disables rather than hides 50/50 on a true/false question, and says why', () => {
+    const { query } = setup({
+      question: makeQuestion({
+        type: 'boolean',
+        all_answers: [
+          { id: 'q1:correct', text: 'True', isCorrect: true },
+          { id: 'q1:incorrect-0', text: 'False', isCorrect: false },
+        ],
+      }),
+    });
 
     const button = query('[data-cy="lifeline-fiftyFifty"]') as HTMLButtonElement;
     expect(button).not.toBeNull();
     expect(button.disabled).toBe(true);
-    expect(button.getAttribute('aria-label')).toContain('unavailable');
+    expect(button.getAttribute('aria-label')).toBe(
+      'Fifty-fifty is unavailable on a question with two options.',
+    );
+  });
+
+  it('disables 50/50 on a two-option multiple-choice question, with the same reason', () => {
+    const { query } = setup(); // makeQuestion() is a multiple-choice question with two options
+
+    const button = query('[data-cy="lifeline-fiftyFifty"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-label')).toBe(
+      'Fifty-fifty is unavailable on a question with two options.',
+    );
+  });
+
+  it('names 50/50 by what it does at any count: every wrong answer but one', () => {
+    const { query } = setup({ question: fourAnswers() });
+
+    expect(query('[data-cy="lifeline-fiftyFifty"]')?.getAttribute('aria-label')).toBe(
+      'Fifty-fifty: remove every wrong answer but one. One use per game.',
+    );
   });
 
   it('greys out the options 50/50 removed, and makes them unclickable', () => {
@@ -1133,6 +1166,98 @@ describe('QuizLoopComponent — lifelines (FEAT-002)', () => {
  * ends up in a per-player profile a recommender will read. Hence a row on each
  * of the two moments a question appears, and one on the moment none does.
  */
+/**
+ * `FEAT-051`. A question carries two to six options, and a statement of up to
+ * 2,000 characters. jsdom has no layout, so what this can pin is the mechanism
+ * the layout comes from — which class the grid carries at each count, which
+ * letter each option wears, what 50/50 leaves — while the pixels (one column
+ * measured, the card measured through the reveal, no inner scroll region) are
+ * `variable-answer-count.spec.ts`'s half.
+ */
+describe('QuizLoopComponent — two to six options (FEAT-051)', () => {
+  function withOptions(count: number, overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
+    const all_answers: Answer[] = Array.from({ length: count }, (_, index) => ({
+      id: `q1:option-${index}`,
+      text: `Option ${index + 1}`,
+      isCorrect: index === count - 1,
+    }));
+    return makeQuestion({
+      all_answers,
+      correct_answer: `Option ${count}`,
+      incorrect_answers: all_answers.filter((a) => !a.isCorrect).map((a) => a.text),
+      ...overrides,
+    });
+  }
+
+  it('letters six options A to F, from the index', () => {
+    const { queryAll } = setup({ question: withOptions(6) });
+
+    expect(
+      queryAll('[data-cy="answer-option"]').map((option) =>
+        option.querySelector('span')?.textContent?.trim(),
+      ),
+    ).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+  });
+
+  it.each([2, 3, 4])('sets %i options two to a row from sm up', (count) => {
+    const { query } = setup({ question: withOptions(count) });
+
+    expect(query('[data-cy="answer-options"]')?.classList).toContain('sm:grid-cols-2');
+  });
+
+  it.each([5, 6])('sets %i options in one column at every width', (count) => {
+    const { query } = setup({ question: withOptions(count) });
+    const grid = query('[data-cy="answer-options"]');
+
+    expect(grid?.classList).toContain('grid');
+    expect([...(grid?.classList ?? [])].filter((name) => name.includes('grid-cols'))).toEqual([]);
+  });
+
+  it('leaves two of six options after 50/50, keeps all six cells, and says two remain', () => {
+    const { query, queryAll, fixture } = setup({ question: withOptions(6) });
+
+    query('[data-cy="lifeline-fiftyFifty"]')?.click();
+    fixture.detectChanges();
+
+    const options = queryAll('[data-cy="answer-option"]');
+    expect(options).toHaveLength(6);
+    const standing = options.filter((option) => !option.hasAttribute('data-eliminated'));
+    expect(standing).toHaveLength(2);
+    expect(standing.map((option) => option.textContent)).toContainEqual(
+      expect.stringContaining('Option 6'),
+    );
+    expect(query('[data-cy="lifeline-status"]')?.textContent).toContain(
+      'Fifty-fifty used. 2 options remain.',
+    );
+    // Spending it cannot change the column rule, because no option left the grid.
+    expect([...(query('[data-cy="answer-options"]')?.classList ?? [])]).not.toContain(
+      'sm:grid-cols-2',
+    );
+  });
+
+  /**
+   * The prompt grows the card and the page scrolls; nothing inside the card
+   * does (decided 8 October 2026). What jsdom can see of that is that the
+   * whole statement is rendered and that nothing between it and the card is
+   * given a height to scroll inside.
+   */
+  it('renders a 2,000-character statement in full, in no scroll region of its own', () => {
+    const statement = 'Which of the following is true? '.repeat(63).slice(0, 2000);
+    const { query } = setup({ question: withOptions(5, { question: statement }) });
+    const heading = query('[data-cy="question-text"]')!;
+
+    expect(heading.textContent?.trim()).toBe(statement.trim());
+    const card = query('[data-cy="question-card"]')!;
+    for (let element: HTMLElement | null = heading; element && element !== card;) {
+      const classes = [...element.classList];
+      expect(classes.filter((name) => /^(overflow-(y-)?(auto|scroll)|max-h-)/.test(name))).toEqual(
+        [],
+      );
+      element = element.parentElement;
+    }
+  });
+});
+
 describe('QuizLoopComponent — the answer clock (FEAT-049)', () => {
   it('starts the clock for the question already on screen when the route opens', () => {
     const { gameController } = setup({ question: makeQuestion() });

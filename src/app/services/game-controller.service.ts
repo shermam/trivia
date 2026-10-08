@@ -731,14 +731,18 @@ export class GameControllerService {
    * Removes wrong options from the current question, and returns whether it
    * did anything.
    *
-   * **It never reduces the question to one option**, which is a deliberate
-   * departure from the spec's "fewer than 4 choices → remove 1 instead of 2".
-   * Taken literally on a true/false question that removes the only wrong
-   * answer and hands over the correct one — not a 50/50, a free point. The
-   * rule here is `min(2, wrongAnswers - 1)`: two removals on a four-option
-   * question, one on a three-option, and **none** on true/false, where the
-   * button is disabled rather than hidden (see the template for why disabled
-   * and not hidden).
+   * **It always leaves exactly two options — the correct one and one wrong
+   * one — whatever the count** (`FEAT-051`, decided 8 October 2026). The rule
+   * is `wrongAnswers - 1`: one removal on a three-option question, two on a
+   * four-option one, four on six. A question can carry up to six options now,
+   * and the rule this replaced, `min(2, wrongAnswers - 1)`, would have left
+   * three or four of them standing — no longer a fifty-fifty.
+   *
+   * **It never reduces the question to one option**, so on a question with two
+   * options — true/false, or a two-option multiple choice — there is nothing to
+   * remove: removing the only wrong answer hands over the correct one, a free
+   * point rather than a 50/50. The button is disabled there rather than hidden
+   * (see the template for why disabled and not hidden).
    */
   useFiftyFifty(): boolean {
     const question = this.currentQuestion();
@@ -746,7 +750,7 @@ export class GameControllerService {
       return false;
     }
     const wrong = question.all_answers.filter((answer) => !answer.isCorrect);
-    const removals = Math.min(2, wrong.length - 1);
+    const removals = wrong.length - 1;
     if (removals <= 0) {
       return false;
     }
@@ -759,7 +763,7 @@ export class GameControllerService {
     if (!this.consumeLifeline('fiftyFifty')) {
       return false;
     }
-    // Shuffled then sliced, so which two go is not always the first two —
+    // Shuffled then sliced, so which ones go is not always the first ones —
     // otherwise the surviving wrong answer is always the last option, which is
     // a pattern a player learns in about three questions.
     const eliminated = shuffleArray([...wrong])

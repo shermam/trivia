@@ -923,15 +923,23 @@ describe('markdown engine: KaTeX runs untrusted', () => {
   });
 
   /**
-   * A 500-character question is the largest a contributor can write
-   * (`firestore.rules`, `data-model.md` §3), so the input is bounded before it
-   * reaches KaTeX. This checks the bound is enough — that the worst formula
-   * that fits does not lock the tab up.
+   * A 2,000-character question is the largest a contributor can write
+   * (`firestore.rules`, `data-model.md` §3, `FEAT-051`), so the input is
+   * bounded before it reaches KaTeX. This checks the bound is enough — that the
+   * worst formula that fits does not lock the tab up.
+   *
+   * The depth is the deepest chain of superscripts the cap holds: `$`, then
+   * `x^{` and `}` once per level, then `a` and `$` — four characters a level
+   * and three besides, so 499 levels in 1,999 characters. It moved with the
+   * cap, because a check against the old 500-character bound would say
+   * nothing about the formulas a question may carry now.
    */
-  it('compiles the deepest formula a 500-character question can hold, quickly', () => {
-    const depth = 160;
+  it('compiles the deepest formula a 2,000-character question can hold, quickly', () => {
+    const depth = Math.floor((2000 - 3) / 4);
+    const source = `$${'x^{'.repeat(depth)}a${'}'.repeat(depth)}$`;
+    expect(source.length).toBeLessThanOrEqual(2000);
     const started = Date.now();
-    const out = parse(render(`$${'x^{'.repeat(depth)}a${'}'.repeat(depth)}$`));
+    const out = parse(render(source));
     expect(Date.now() - started).toBeLessThan(5000);
     expect(tagNames(out)).toContain('math');
   });

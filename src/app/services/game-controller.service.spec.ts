@@ -945,45 +945,71 @@ describe('GameControllerService lifelines (FEAT-002)', () => {
     expect(service.lifelines()).toEqual({ fiftyFifty: true, extraTime: false, skip: true });
   });
 
-  // Two removals on a four-option question, leaving the correct answer and one
-  // wrong one — the classic 50/50.
-  it('removes two wrong options from a four-option question', () => {
+  /**
+   * `FEAT-051`: a question carries two to six options now, and 50/50 keeps its
+   * meaning across all of them — **exactly two survive, the correct one and one
+   * other**, whatever the count. The rule it replaced, `min(2, wrong - 1)`, was
+   * identical up to four options and would have left three or four standing on
+   * five or six.
+   */
+  function optionsOf(count: number): Answer[] {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `option-${index}`,
+      text: `Option ${index}`,
+      isCorrect: index === 0,
+    }));
+  }
+
+  it.each([3, 4, 5, 6])('leaves exactly two of %i options, the correct one among them', (count) => {
     const service = setup(1);
-    const question = service.questions()[0];
-    question.all_answers = [
-      { id: 'a', text: 'A', isCorrect: true },
-      { id: 'b', text: 'B', isCorrect: false },
-      { id: 'c', text: 'C', isCorrect: false },
-      { id: 'd', text: 'D', isCorrect: false },
-    ];
+    service.questions()[0].all_answers = optionsOf(count);
 
     expect(service.useFiftyFifty()).toBe(true);
 
     const eliminated = service.eliminatedAnswerIds();
-    expect(eliminated).toHaveLength(2);
-    expect(eliminated).not.toContain('a'); // never the correct one
+    expect(eliminated).toHaveLength(count - 2);
+    expect(eliminated).not.toContain('option-0'); // never the correct one
+    const survivors = optionsOf(count).filter((answer) => !eliminated.includes(answer.id));
+    expect(survivors).toHaveLength(2);
+    expect(survivors.filter((answer) => answer.isCorrect)).toHaveLength(1);
   });
 
-  it('removes one from a three-option question, still leaving a choice', () => {
+  // Shuffled before it is sliced, so the wrong answer left standing is not
+  // always the same one — on six options as on four.
+  it('leaves a different wrong answer standing from one game to the next', () => {
     const service = setup(1);
-    const question = service.questions()[0];
-    question.all_answers = [
-      { id: 'a', text: 'A', isCorrect: true },
-      { id: 'b', text: 'B', isCorrect: false },
-      { id: 'c', text: 'C', isCorrect: false },
-    ];
+    service.questions()[0].all_answers = optionsOf(6);
+    const survivors = new Set<string>();
+    for (let attempt = 0; attempt < 50 && survivors.size < 2; attempt++) {
+      // A fresh game's lifelines, so the one question can be asked again.
+      service.lifelines.set(ALL_LIFELINES_AVAILABLE);
+      expect(service.useFiftyFifty()).toBe(true);
+      const eliminated = service.eliminatedAnswerIds();
+      const wrongSurvivor = optionsOf(6).find(
+        (answer) => !answer.isCorrect && !eliminated.includes(answer.id),
+      );
+      survivors.add(wrongSurvivor!.id);
+    }
 
-    expect(service.useFiftyFifty()).toBe(true);
-    expect(service.eliminatedAnswerIds()).toHaveLength(1);
+    expect(survivors.size).toBeGreaterThan(1);
   });
 
   /*
-   * **Deliberately not what the spec says.** "Fewer than 4 choices → remove 1"
-   * applied to true/false removes the only wrong answer and hands over the
-   * correct one — a free point, not a 50/50. The rule is
-   * `min(2, wrongAnswers - 1)`, so a two-option question yields nothing and the
-   * lifeline is not spent.
+   * **Deliberately not what the original spec said.** "Fewer than 4 choices →
+   * remove 1" applied to true/false removes the only wrong answer and hands over
+   * the correct one — a free point, not a 50/50. A two-option question yields
+   * nothing and the lifeline is not spent, whether it is true/false or a
+   * two-option multiple choice (`FEAT-051`).
    */
+  it('does nothing on a two-option multiple-choice question, and does not spend the lifeline', () => {
+    const service = setup(1);
+    service.questions()[0].all_answers = optionsOf(2);
+
+    expect(service.useFiftyFifty()).toBe(false);
+    expect(service.eliminatedAnswerIds()).toEqual([]);
+    expect(service.lifelines().fiftyFifty).toBe(true);
+  });
+
   it('does nothing on a true/false question, and does not spend the lifeline', () => {
     const service = setup(1);
     const question = service.questions()[0];
