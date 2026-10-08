@@ -30,7 +30,7 @@
  * That is calibration, not a security boundary: the report channel catches a
  * bad question; this catches a badly labelled one.
  */
-import type { PlayAnswer } from './play-history';
+import { type PlayAnswer, isSafeDocumentId } from './play-history';
 
 /** What one banked game adds to one question's counters. */
 export interface QuestionCounterIncrement {
@@ -60,6 +60,14 @@ export interface QuestionCounters {
  * game's worth per call. The first entry is the one counted; which one is
  * arbitrary, because only a forged payload can disagree with itself.
  *
+ * **An id that cannot name one question document counts nothing**, the same
+ * as an Open Trivia entry. The id becomes a path — `custom_questions/{id}` —
+ * and a forged `x/notes/y` would otherwise point the Admin SDK at a
+ * subcollection document past every rule, while `a/b` or a reserved id would
+ * throw inside the transaction and cost the caller the whole game. No honest
+ * client sends one: a bank question's id is a Firestore document id already.
+ * The play history still records the entry as sent, as it always has.
+ *
  * **`correct` is derived from the same entry as `answered`**, so an increment
  * can never claim a right answer to a question it did not count as answered —
  * the invariant the stored pair has to keep (`correct <= answered`).
@@ -78,7 +86,7 @@ export function counterIncrementsFrom(
   const increments: QuestionCounterIncrement[] = [];
   for (const answer of answers) {
     const { questionId } = answer;
-    if (questionId === undefined || counted.has(questionId)) {
+    if (questionId === undefined || !isSafeDocumentId(questionId) || counted.has(questionId)) {
       continue;
     }
     counted.add(questionId);

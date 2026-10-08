@@ -12,6 +12,7 @@
 import {
   type PlayAnswer,
   type PlayRecord,
+  isSafeDocumentId,
   isValidPlayAnswers,
   playRecordFrom,
 } from './play-history';
@@ -116,20 +117,6 @@ function isNonNegativeInt(value: unknown): value is number {
 }
 
 /**
- * Whether a game id is safe to use as a Firestore document id, which it now has
- * to be: `FEAT-049` keys `users/{uid}/plays/{gameId}` on it.
- *
- * Every id the app mints is a `crypto.randomUUID()`, so nothing real is
- * affected — but the value arrives on the wire, and `collection.doc()` on a
- * path-shaped string either throws or resolves somewhere nobody intended.
- * Refusing it here means one rejected submission rather than an `internal`
- * error from inside a transaction.
- */
-function isSafeDocumentId(value: string): boolean {
-  return !value.includes('/') && value !== '.' && value !== '..' && !/^__.*__$/.test(value);
-}
-
-/**
  * Whether a submission is self-consistent and within the bounds a real game
  * could produce.
  *
@@ -150,6 +137,10 @@ export function isValidSubmission(submission: unknown): submission is GameResult
   if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > 128) {
     return false;
   }
+  // It names `users/{uid}/plays/{gameId}` (`FEAT-049`). Every id the app mints
+  // is a `crypto.randomUUID()`, so refusing a path-shaped one costs nothing
+  // real, and it means one rejected submission rather than an `internal` error
+  // from inside the transaction.
   if (!isSafeDocumentId(gameId)) {
     return false;
   }

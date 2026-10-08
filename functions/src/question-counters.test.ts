@@ -50,6 +50,34 @@ describe('counterIncrementsFrom', () => {
     assert.deepEqual(increments, [{ questionId: 'bank-2', answered: 1, correct: 1 }]);
   });
 
+  /**
+   * The id becomes a path, `custom_questions/{id}`, so one that is not a single
+   * document id counts nothing — never followed into a subcollection, and
+   * never left to throw inside the transaction.
+   */
+  it('counts nothing for an id that cannot name one question document', () => {
+    const increments = counterIncrementsFrom([
+      answer({ questionId: 'bank-1/notes/n1' }),
+      answer({ questionId: 'a/b' }),
+      answer({ questionId: '.' }),
+      answer({ questionId: '..' }),
+      answer({ questionId: '__name__' }),
+      answer({ questionId: 'bank-2', correct: false }),
+    ]);
+
+    assert.deepEqual(increments, [{ questionId: 'bank-2', answered: 1, correct: 0 }]);
+  });
+
+  it('counts an id that merely looks unusual', () => {
+    const ids = ['a.b', '...', '__x', 'x__', '_'];
+    const increments = counterIncrementsFrom(ids.map((questionId) => answer({ questionId })));
+
+    assert.deepEqual(
+      increments.map((increment) => increment.questionId),
+      ids,
+    );
+  });
+
   it('counts nothing for a game drawn wholly from Open Trivia DB', () => {
     assert.deepEqual(
       counterIncrementsFrom([answer({ questionId: undefined }), answer({ questionId: undefined })]),

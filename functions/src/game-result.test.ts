@@ -249,8 +249,8 @@ describe('applyGameResult', () => {
     assert.deepEqual(reads, ['users/player-1']);
   });
 
-  // `getAll` refuses an empty list, and a game wholly from Open Trivia DB is
-  // the commonest game there is.
+  // A game wholly from Open Trivia DB — the commonest game there is — asks for
+  // no question at all.
   it('reads no question for a game drawn wholly from Open Trivia DB', async () => {
     const { transaction, reads, writes } = fakeTransaction();
     const openTriviaOnly = mixedGame({
@@ -290,6 +290,32 @@ describe('applyGameResult', () => {
       writes.some((write) => write.path === 'custom_questions/bank-2'),
       false,
     );
+  });
+
+  /**
+   * A question id becomes a path, and a forged one must never be followed:
+   * `bank-1/notes/n1` would be a document in a subcollection, which the Admin
+   * SDK reads and writes past every rule.
+   */
+  it('reads and writes nothing for an id that cannot name one question document', async () => {
+    const { transaction, reads, writes } = fakeTransaction({
+      questions: { 'bank-1/notes/n1': { answered: 4, correct: 2 }, 'bank-2': {} },
+    });
+    const forged = mixedGame({
+      answers: [
+        answer({ questionId: 'bank-1/notes/n1', correct: true }),
+        answer({ questionId: 'bank-2', correct: false }),
+        answer({ questionId: undefined, correct: true }),
+      ],
+    });
+
+    const decision = await applyGameResult(transaction, refs, forged, NOW);
+
+    assert.equal(decision.accepted, true);
+    assert.deepEqual(reads, ['users/player-1', 'custom_questions/bank-2']);
+    assert.deepEqual(questionWrites(writes), [
+      { op: 'update', path: 'custom_questions/bank-2', data: { answered: 1, correct: 0 } },
+    ]);
   });
 
   it('counts a question once when a forged payload names it in every entry', async () => {

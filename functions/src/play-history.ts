@@ -63,6 +63,23 @@ export const MAX_TAG_LENGTH = 32;
 /** Lower-case alphanumeric words joined by single hyphens — `normalizeTag`'s output. */
 const TAG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
+/**
+ * Whether a client-supplied id is safe to use as one Firestore document id —
+ * a single path segment, and not one Firestore reserves.
+ *
+ * Two ids from the payload name documents: the game id keys
+ * `users/{uid}/plays/{gameId}` (`FEAT-049`), and a question id names the
+ * `custom_questions/{questionId}` document whose difficulty counters the game
+ * adds to (`FEAT-023`). Both arrive on the wire, and `collection.doc()` on a
+ * path-shaped string either throws — `a/b` — or resolves somewhere nobody
+ * intended: `a/b/c` is a document in a subcollection, which the Admin SDK would
+ * read and write past every rule. Reserved ids (`.`, `..`, `__name__`) are
+ * refused by the server, which inside a transaction is an `internal` error.
+ */
+export function isSafeDocumentId(value: string): boolean {
+  return !value.includes('/') && value !== '.' && value !== '..' && !/^__.*__$/.test(value);
+}
+
 const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
 
 export type PlayDifficulty = (typeof DIFFICULTIES)[number];

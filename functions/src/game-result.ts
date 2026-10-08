@@ -71,8 +71,10 @@ export async function applyGameResult(
   }
 
   const questionRefs = decision.counters.map((increment) => refs.question(increment.questionId));
-  // `getAll` refuses an empty list of documents, and a game with no bank
-  // question in it is the common case — every Open Trivia game.
+  // A game with no bank question in it is the common case — every Open Trivia
+  // game — and asks for nothing. (An empty `getAll` returns nothing here, after
+  // the totals read; as a transaction's first read it fails outright, measured
+  // against the emulator.)
   const questions =
     questionRefs.length > 0
       ? await transaction.getAll(...questionRefs, { fieldMask: COUNTER_FIELDS })
