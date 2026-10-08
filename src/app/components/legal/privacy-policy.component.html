@@ -35,9 +35,10 @@
 
   <h3>Signing in</h3>
   <p>
-    Signing in is optional. It is only needed to save a score to the public leaderboard, or to
-    subscribe to Pro. If you sign in from an anonymous session, that same account is upgraded rather
-    than a second one being created, so anything already saved carries over.
+    Signing in is optional. It is only needed to save a score to the public leaderboard, to keep
+    your gameplay totals and play history, to like or dislike a question, or to subscribe to Pro. If
+    you sign in from an anonymous session, that same account is upgraded rather than a second one
+    being created, so anything already saved carries over.
   </p>
   <ul>
     <li>
@@ -143,7 +144,9 @@
     <strong>Only you can read it.</strong> It is never shown to other players and never appears on a
     leaderboard. Nothing is kept at all until you finish your first game while signed in, and
     <strong>nothing is kept for anonymous play</strong>. Deleting your account deletes it, and
-    &ldquo;Export my data&rdquo; returns it in full.
+    &ldquo;Export my data&rdquo; returns it in full. Apart from the play history described next, a
+    record naming a question you were shown exists only where you chose to make one: a report about
+    it, described above, or a like or dislike, described after the play history.
   </p>
 
   <h3>Your play history &mdash; also private to you</h3>
@@ -171,11 +174,28 @@
     <strong>Signed-in accounts only, and twelve months.</strong> Nothing is recorded for anonymous
     play &mdash; not one game &mdash; and nothing is recorded before you finish your first game
     signed in. A game older than <strong>twelve months</strong> is deleted automatically; what
-    outlives it is the running totals above, and the general picture of your preferences the app
-    works out from your history, both of which are summaries rather than a record of individual
+    outlives it is the running totals above, which are a summary rather than a record of individual
     rounds. Deleting your account deletes all of it, and &ldquo;Export my data&rdquo; returns every
     game we still hold, question by question &mdash; which is where you can read the whole of it,
     since the app itself has no screen that shows it back to you.
+  </p>
+
+  <h3>Questions you like or dislike — these are private to you</h3>
+  <p>
+    After you answer a question from the community bank, and again on the end-of-game review of your
+    answers, you can mark it as one you liked or one you disliked. If you do, we store which
+    question it was, whether you liked or disliked it, and when you first voted on it, under your
+    account identifier. Changing your mind replaces the vote, and pressing the same button again
+    removes it. Nothing is stored unless you press one, and a vote needs a signed-in account: a
+    guest who presses one is asked to sign in, and nothing is recorded.
+  </p>
+  <p>
+    <strong>Only you can read your votes.</strong> They are never shown to other players,
+    <strong>no count of likes or dislikes is kept or shown anywhere</strong>, and a dislike is not a
+    report — nobody reviews it, and it does nothing to the question. The app uses a vote for one
+    thing: when that question is in front of you again, its button shows the choice you made. Your
+    votes are kept for as long as your account exists or until you remove them; deleting your
+    account deletes them, and &ldquo;Export my data&rdquo; returns them in full.
   </p>
 
   <h3>Subscription records</h3>
@@ -250,7 +270,9 @@
     not ask for consent for any of it, because none of it is the kind of processing that consent
     would be the right basis for — there is no advertising and no tracking here to consent to, and
     the only profile we build is the record of your own play described above, which is visible to
-    nobody but you and is used only to choose which questions you are shown.
+    nobody but you and is used only to choose which questions you are shown. The likes and dislikes
+    you give questions are visible to nobody but you as well, and are kept only so the buttons can
+    show your choice back to you.
   </p>
   <table>
     <thead>
@@ -343,6 +365,11 @@
           So one account cannot inflate its own totals by submitting the same game over and over
         </td>
         <td>Legitimate interests</td>
+      </tr>
+      <tr>
+        <td>Keep the likes and dislikes you give questions</td>
+        <td>You asked us to record them, and the buttons show your choice back to you</td>
+        <td>Performance of a contract</td>
       </tr>
     </tbody>
   </table>
@@ -505,8 +532,9 @@
     of any kind. We do not sell your information and we do not share it for advertising. The one
     profile we build &mdash; the record of your own games, kept so the app can choose questions for
     you &mdash; is described above, is visible to nobody but you, and goes no further than this
-    application. The services in the table above are there because the app cannot function without
-    them, not to observe you.
+    application. The likes and dislikes you give questions are kept for you alone, and nothing about
+    you is inferred from them. The services in the table above are there because the app cannot
+    function without them, not to observe you.
   </p>
 
   <h2>Where your information is stored</h2>
@@ -531,18 +559,18 @@
   <ul>
     <li>
       <strong
-        >Your account, leaderboard entries, gameplay totals, subscription records and donation
-        records</strong
+        >Your account, leaderboard entries, gameplay totals, the likes and dislikes you give
+        questions, subscription records and donation records</strong
       >
-      are kept for as long as your account exists. Delete your account and they go — see below.
+      are kept for as long as your account exists. Delete your account and they go — see below. A
+      like or dislike can also be removed on its own, by pressing the same button again wherever
+      that question appears.
     </li>
     <li>
       <strong>Your play history</strong> — the per-game record of which questions you were asked and
       how you did — is kept for <strong>twelve months</strong> from the day each game was played,
       and is then deleted automatically by a job that runs once a day. Delete your account and all
-      of it goes at once. What outlives the twelve months is the running totals above and the
-      general picture of your preferences worked out from your play, neither of which is a record of
-      an individual round.
+      of it goes at once.
     </li>
     <li>
       <strong>Checkout, donation and billing-portal records</strong> — the short-lived scratch
@@ -592,14 +620,16 @@
       <strong>Download my data</strong> gives you a JSON file containing your account details, your
       leaderboard entries on every board, global and country alike, your gameplay totals, your play
       history — every game we still hold, question by question, newest first — every question you
-      have contributed, each one whole, so a reviewer's rejection note comes with it, and your
-      billing records. It also lists what is deliberately not in it and why.
+      have contributed, each one whole, so a reviewer's rejection note comes with it, every like or
+      dislike you have given a question, and your billing records. It also lists what is
+      deliberately not in it and why.
     </li>
     <li>
       <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
       record and the payment methods stored against it, deletes your leaderboard entries on every
       board, <strong>country boards included</strong>, deletes your gameplay totals and your whole
-      play history, deletes your billing records, and deletes your sign-in account itself.
+      play history, deletes your likes and dislikes, deletes your billing records, and deletes your
+      sign-in account itself.
       <strong
         >Questions you contributed are kept, with your authorship replaced by a
         <code>[deleted-user]</code> marker.</strong
@@ -618,7 +648,8 @@
   </p>
   <p>
     You do not have to give us anything beyond an account to play. An email address is only required
-    if you want to save a score or subscribe.
+    if you want to save a score, keep your gameplay totals and play history, like or dislike a
+    question, or subscribe.
   </p>
 
   <h2>Children</h2>

@@ -209,6 +209,34 @@ export interface GameplayStatsSeed {
 }
 
 /**
+ * A `question_votes` document as Firestore holds it (`FEAT-027`), read back
+ * for assertions. The id is `{uid}_{questionId}`, so it says whose vote it is.
+ */
+export interface QuestionVoteRecord {
+  id: string;
+  questionId: string;
+  /** `1` a like, `-1` a dislike. */
+  value: number;
+  /** Epoch ms of the first vote on the pair; a change of mind leaves it alone. */
+  createdAt: number;
+}
+
+/**
+ * A vote written straight into the collection, for the votes a test needs
+ * that no browser in it can cast — another account's, above all, which is
+ * what the deletion sweep must leave alone.
+ *
+ * `id` defaults to `{uid}_{questionId}`, the only shape the rules accept.
+ */
+export interface QuestionVoteSeed {
+  uid: string;
+  questionId: string;
+  value: 1 | -1;
+  createdAt?: number;
+  id?: string;
+}
+
+/**
  * One question inside a `users/{uid}/plays/{gameId}` document (`FEAT-049`), as
  * `recordGameResult` wrote it.
  *

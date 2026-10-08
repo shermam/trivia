@@ -224,6 +224,11 @@ describe('legal pages', () => {
     // `exportAccountData` have to go on keeping.
     expect(text).toContain('deletes your gameplay totals and your whole play history');
     expect(text).toContain('your play history — every game we still hold, question by question');
+    // What outlives the twelve months is the totals and nothing else: no
+    // summary of preferences is derived from the plays, because nothing reads
+    // them yet. Announcing one before it exists is what `CLAUDE.md` §4.0
+    // forbids; the recommender's own PR adds the sentence with the practice.
+    expect(text).not.toContain('general picture of your preferences');
   });
 
   /**
@@ -237,6 +242,76 @@ describe('legal pages', () => {
 
     expect(text).toContain('We do build a profile of your play');
     expect(text).not.toContain('we do not build a profile of you');
+  });
+
+  /**
+   * The private like or dislike (`FEAT-027`) — a record of a player's own
+   * taste, which is the kind of data §4.0's second bullet is about, and the
+   * kind of disclosure a later feature most easily falsifies: one count shown
+   * beside a question, one reviewer reading a dislike, or one recommender
+   * acting on it, and these sentences stop being true with nothing going red.
+   *
+   * Pinned on each claim the code has to keep honouring — what is kept, that
+   * only the player reads it, that no count exists, how long it stays, and
+   * that deletion and export both reach it — and on the two sentences the
+   * feature had to change because it falsified them: "signing in is only
+   * needed to…" was an exhaustive list in both documents, and voting is a new
+   * entry on it.
+   *
+   * And on where it sits beside the play history (`FEAT-049`), because the two
+   * are easy to blur and are not the same record: a game is kept twelve months
+   * and feeds the one profile the page admits to; a vote is kept as long as the
+   * account and is used for nothing but showing the player their own choice.
+   * The sentence saying every other question-level record is one the player
+   * chose to make is the one play history falsified, so it is pinned in the
+   * form that names the exception rather than the absolute one.
+   */
+  it('discloses the private vote, who reads it, how long it is kept, and how it goes', async () => {
+    const privacy = collapse((await render(PrivacyPolicyComponent)).textContent);
+    const terms = collapse((await render(TermsOfServiceComponent)).textContent);
+
+    expect(privacy).toContain('Questions you like or dislike');
+    expect(privacy).toContain(
+      'which question it was, whether you liked or disliked it, and when you first voted on it',
+    );
+    expect(privacy).toContain('Only you can read your votes');
+    expect(privacy).toContain('no count of likes or dislikes is kept or shown anywhere');
+    expect(privacy).toContain('a dislike is not a report');
+    // Retention, deletion and export — the three promises the sweeps in
+    // `functions/src/question-votes.ts` keep.
+    expect(privacy).toContain('kept for as long as your account exists or until you remove them');
+    expect(privacy).toContain('deletes your likes and dislikes');
+    expect(privacy).toContain('every like or dislike you have given a question');
+    expect(privacy).toContain('Keep the likes and dislikes you give questions');
+
+    // Beside the play history: a separate record, kept for a different time,
+    // and not part of the profile.
+    expect(privacy).toContain(
+      'Apart from the play history described next, a record naming a question you were shown exists only where you chose to make one',
+    );
+    expect(privacy).not.toContain('Among what we hold, a record naming a question');
+    expect(privacy).toContain(
+      'The likes and dislikes you give questions are visible to nobody but you as well, and are kept only so the buttons can show your choice back to you',
+    );
+    expect(privacy).toContain(
+      'The likes and dislikes you give questions are kept for you alone, and nothing about you is inferred from them',
+    );
+
+    // The exhaustive "only needed to…" lists, in both documents — whole, since
+    // each entry is a thing that really does need an account: the totals and
+    // the play history are banked only for one (`recordGameResult`'s provider
+    // allowlist), and a list without them said they were not.
+    const signInList =
+      'only needed to save a score to the public leaderboard, to keep your gameplay totals and play history, to like or dislike a question, or to subscribe to Pro';
+    expect(privacy).toContain(signInList);
+    expect(terms).toContain(signInList);
+    expect(privacy).toContain(
+      'An email address is only required if you want to save a score, keep your gameplay totals and play history, like or dislike a question, or subscribe',
+    );
+    expect(privacy).not.toContain('only needed to save a score to the public leaderboard, or to');
+    expect(terms).not.toContain('only needed to save a score to the public leaderboard or to');
+    expect(privacy).not.toContain('to save a score to the public leaderboard, to like or dislike');
+    expect(terms).not.toContain('to save a score to the public leaderboard, to like or dislike');
   });
 
   /**

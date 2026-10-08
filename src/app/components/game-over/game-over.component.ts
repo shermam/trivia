@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
   viewChild,
   viewChildren,
 } from '@angular/core';
@@ -24,6 +25,7 @@ import {
   TriviaQuestion,
   boardKey,
 } from '../../models/question.model';
+import { VoteValue } from '../../models/question-vote';
 import { regionName, regionOptions } from '../../models/regions';
 import { AudioService } from '../../services/audio.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
@@ -33,12 +35,14 @@ import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, QuestionReportRejectedError } from '../../services/firebase.service';
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { GameControllerService } from '../../services/game-controller.service';
+import { QuestionVoteService, describeVoteOutcome } from '../../services/question-vote.service';
 import { RegionService } from '../../services/region.service';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { buildPlayAnswers } from '../../utils/play-history.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
+import { QuestionVoteComponent } from '../question-vote/question-vote.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
 
@@ -95,6 +99,7 @@ type BoardScope = 'global' | 'regional';
     SourceLinkComponent,
     QuestionJustificationComponent,
     QuestionTagsComponent,
+    QuestionVoteComponent,
     RenderedTextComponent,
   ],
   templateUrl: './game-over.component.html',
@@ -110,6 +115,7 @@ export class GameOverComponent implements OnInit {
   private readonly firebaseService = inject(FirebaseService);
   private readonly audio = inject(AudioService);
   private readonly regionService = inject(RegionService);
+  private readonly questionVotes = inject(QuestionVoteService);
 
   protected readonly initialsFor = initialsFor;
 
@@ -430,6 +436,21 @@ export class GameOverComponent implements OnInit {
 
       this.wasDialogOpen = isOpen;
     });
+
+    // The player's own votes on the round's community questions, for the
+    // recap's buttons (`FEAT-027`). Usually free: `/play` has already read
+    // them and the service asks only about questions it does not know. It
+    // pays for one query after a reload of this screen, and again after a
+    // guest signs in here — the moment the buttons can first show a vote.
+    effect(() => {
+      const user = this.authService.user();
+      const canVote = this.authService.isFullyAuthenticated();
+      const questionIds = this.voteableQuestionIds();
+      if (!user || !canVote || questionIds.length === 0) {
+        return;
+      }
+      untracked(() => void this.questionVotes.load(questionIds));
+    });
   }
 
   protected openReportDialog(): void {
@@ -607,6 +628,50 @@ export class GameOverComponent implements OnInit {
 
   protected toggleRecap(): void {
     this.isRecapOpenSignal.update((open) => !open);
+  }
+
+  /**
+   * Whether a recap row offers the like and dislike buttons (`FEAT-027`) — the
+   * same gate as the quiz's: a community question, outside an embed.
+   *
+   * **This is the vote with no clock on it.** During the round the buttons
+   * last the two seconds the result is on screen; a player who needs longer
+   * than that to reach them — a screen-reader user above all — has the same
+   * buttons here, for every community question of the round, for as long as
+   * they like (WCAG 2.2.1, `CLAUDE.md` §4.5).
+   */
+  protected showsVote(question: TriviaQuestion): boolean {
+    return question.source === 'custom' && !this.embedMode.isEmbedded();
+  }
+
+  /**
+   * What a screen reader is told about a vote cast from the recap. A region of
+   * its own, permanent and outside the recap card, so it exists before it has
+   * anything to say (G3).
+   */
+  protected readonly voteAnnouncement = signal('');
+
+  /** The recap's community questions — the ones its rows can be voted on. */
+  private readonly voteableQuestionIds = computed(() =>
+    this.recap()
+      .filter((row) => this.showsVote(row.question))
+      .map((row) => row.question.id),
+  );
+
+  /**
+   * A press of like or dislike on one recap row. Same contract as the quiz's:
+   * the buttons move at once, the write follows, and a tap without a real
+   * account opens the account menu instead of writing (`FEAT-027` Decision 1).
+   */
+  protected async vote(questionId: string, position: number, value: VoteValue): Promise<void> {
+    const outcome = await this.questionVotes.toggle(questionId, value);
+    if (outcome.kind === 'needs-account') {
+      this.authMenuState.open();
+    }
+    const message = describeVoteOutcome(outcome, position);
+    if (message !== null) {
+      this.voteAnnouncement.set(message);
+    }
   }
 
   /**

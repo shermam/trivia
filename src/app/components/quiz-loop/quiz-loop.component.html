@@ -423,6 +423,38 @@
             <span class="text-sm font-semibold text-red-800 dark:text-red-300">Incorrect.</span>
           </div>
         </div>
+
+        <!--
+          **Like or dislike** (`FEAT-027`), on a community question, once the
+          answer is revealed — never before, when a vote would be a guess about
+          a question the player has not finished.
+
+          **The row is in the card from the moment the question appears, and
+          the reveal only makes it visible** (`CLAUDE.md` §4.4). The card is
+          vertically centred, so a row that arrived on answering would lift the
+          whole card by half its height, the way the result banner above used
+          to. `invisible` keeps the box and takes the buttons out of the tab
+          order and the accessibility tree until there is something to rate.
+
+          Under the answers and the result, and nowhere near the report flag
+          beside the question text: a dislike is taste, a report is a complaint
+          a reviewer acts on, and the two are kept apart on screen so the second
+          does not quietly become the first.
+
+          The row lasts the two seconds the result is shown; the recap on
+          `/game-over` offers the same buttons with no clock (WCAG 2.2.1).
+        -->
+        @if (showsVote(question)) {
+          <div class="mt-3" [class.invisible]="!isAnswered()" data-cy="quiz-vote">
+            <app-question-vote [questionId]="question.id" (voted)="vote(question.id, $event)" />
+          </div>
+        }
+
+        <!-- Permanent, and outside the row above: a vote's write can settle
+             after the quiz has moved on to a question that has no row. -->
+        <p role="status" aria-live="polite" data-cy="vote-status" class="sr-only">
+          {{ voteAnnouncement() }}
+        </p>
       </div>
     </div>
   </div>
