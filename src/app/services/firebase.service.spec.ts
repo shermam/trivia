@@ -435,23 +435,21 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
     ]);
   });
 
-  it('filters by category and difficulty server-side, not in the browser', async () => {
+  it('filters by difficulty server-side, not in the browser', async () => {
     pinCursor(LOW_CURSOR);
     const seed: SeedDoc[] = [
-      { id: 'qa', data: makeQuestion({ category: 'Science', difficulty: 'easy' }) },
-      { id: 'qb', data: makeQuestion({ category: 'History', difficulty: 'easy' }) },
-      { id: 'qc', data: makeQuestion({ category: 'Science', difficulty: 'hard' }) },
+      { id: 'qa', data: makeQuestion({ difficulty: 'easy' }) },
+      { id: 'qb', data: makeQuestion({ difficulty: 'hard' }) },
     ] as unknown as SeedDoc[];
     const { service, queries } = setup(seed);
 
     const result = await firstValueFrom(
-      service.getCustomQuestions({ category: 'Science', difficulty: 'easy', limit: 10 }),
+      service.getCustomQuestions({ difficulty: 'easy', limit: 10 }),
     );
 
     expect(result.map((q) => q.id)).toEqual(['qa']);
     expect(queries[0].wheres).toEqual([
       { field: 'status', value: 'approved' },
-      { field: 'category', value: 'Science' },
       { field: 'difficulty', value: 'easy' },
     ]);
   });
@@ -474,10 +472,10 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
     pinCursor(LOW_CURSOR);
     const { service, queries } = setup(bank);
 
-    await firstValueFrom(service.getCustomQuestions({ category: '', difficulty: '', limit: 3 }));
+    await firstValueFrom(service.getCustomQuestions({ difficulty: '', limit: 3 }));
 
-    // Only `status`, which is never optional — the two the caller declined are
-    // absent. An empty category must not become `category == ''`.
+    // Only `status`, which is never optional — the difficulty the caller
+    // declined is absent. An empty one must not become `difficulty == ''`.
     expect(queries[0].wheres).toEqual([{ field: 'status', value: 'approved' }]);
   });
 
@@ -528,25 +526,26 @@ describe('FirebaseService.getCustomQuestions (C1)', () => {
     expect(queries[0].wheres).toEqual([{ field: 'status', value: 'approved' }]);
   });
 
-  it('keeps the category and difficulty equalities beside the tag clause', async () => {
+  /**
+   * The richest shape the draw sends since topics replaced categories
+   * (`FEAT-052`): status, difficulty and the tags — no `category` equality,
+   * because the tag is the only topic there is. Served by the `status +
+   * difficulty + tags` composite `firestore-tests/indexes.spec.ts` pins.
+   */
+  it('keeps the difficulty equality beside the tag clause, and no category', async () => {
     pinCursor(LOW_CURSOR);
     const { service, queries } = setup(bank);
 
     await firstValueFrom(
       service.getCustomQuestions({
-        category: 'Science',
         difficulty: 'easy',
         tags: ['chemistry'],
         limit: 5,
       }),
     );
 
-    // This is the four-field query shape, and therefore the composite index
-    // `firestore.indexes.json` has to declare: status + category + difficulty +
-    // tags. `firestore-tests/indexes.spec.ts` pins the other half.
     expect(queries[0].wheres).toEqual([
       { field: 'status', value: 'approved' },
-      { field: 'category', value: 'Science' },
       { field: 'difficulty', value: 'easy' },
     ]);
     expect(queries[0].arrayContainsAny?.field).toBe('tags');
@@ -1217,7 +1216,6 @@ describe('FirebaseService.getUserQuestions (FEAT-007)', () => {
  */
 describe('FirebaseService.updateUserQuestion / deleteUserQuestion (FEAT-007)', () => {
   const content = {
-    category: 'History',
     type: 'multiple' as const,
     difficulty: 'hard' as const,
     question: 'Corrected?',
@@ -1253,6 +1251,24 @@ describe('FirebaseService.updateUserQuestion / deleteUserQuestion (FEAT-007)', (
     expect(writes[0].mask).toEqual(
       expect.arrayContaining(['sourceUrl', 'sourceTitle', 'explanation', 'rejectionReason']),
     );
+  });
+
+  /**
+   * `FEAT-052`. The edit form has no category field, so a question written
+   * before topics replaced categories is resubmitted with tags and **without**
+   * its category — and the key is deleted rather than left standing, so the
+   * document stops holding the topic in two places.
+   */
+  it('deletes the category the edit form no longer carries', async () => {
+    const { service, writes } = setup(seed);
+
+    await service.updateUserQuestion('mine', { ...content, tags: ['history'] });
+
+    expect(Object.keys(writes[0].fields)).not.toContain('category');
+    expect(writes[0].mask).toContain('category');
+    expect(writes[0].fields['tags']).toEqual({
+      arrayValue: { values: [{ stringValue: 'history' }] },
+    });
   });
 
   it('writes the optional fields the author did fill in', async () => {

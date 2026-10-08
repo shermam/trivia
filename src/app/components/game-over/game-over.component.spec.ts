@@ -85,7 +85,7 @@ function makeEntry(overrides: Partial<LeaderboardEntry> = {}): LeaderboardEntry 
 
 /** A config whose only interesting part here is which board the game ranks on. */
 function makeConfig(timeLimit: TimeLimitOption = 15): GameConfig {
-  return { amount: 10, category: '', difficulty: '', source: 'open_trivia', timeLimit };
+  return { amount: 10, difficulty: '', source: 'open_trivia', timeLimit };
 }
 
 function setup(options: {
@@ -1560,8 +1560,48 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
       false,
     ]);
     expect(rows[1].textContent).toContain('q1 text?');
-    expect(rows[1].textContent).toContain('History');
     expect(rows[1].textContent).toContain('medium');
+  });
+
+  /**
+   * The row's label is the question's first topic (`FEAT-052`), through the
+   * derivation every reader shares: a contribution's first tag, or — for a
+   * question written before topics replaced categories — the tag its category
+   * derives, which is what these fixtures are.
+   */
+  it('labels each row with its first topic', () => {
+    const tagged = recapQuestion('q0', { tags: ['world-war-2', 'treaties'] });
+    const { queryAll, open } = render({
+      questions: [tagged, q1],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    const label = (row: HTMLElement) =>
+      row.querySelector('[data-cy="recap-topic"]')?.textContent?.trim();
+    expect(label(rows[0])).toBe('#world-war-2');
+    expect(label(rows[1])).toBe('#history');
+  });
+
+  /**
+   * The chips list every topic, and appear only when there is more than the
+   * one the label already names — a single-topic row showing the same tag
+   * twice reads as a mistake, and that row is every Open Trivia question.
+   */
+  it('lists every topic as chips only when there is more than one', () => {
+    const tagged = recapQuestion('q0', { tags: ['world-war-2', 'treaties'] });
+    const { queryAll, open } = render({
+      questions: [tagged, q1],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    const chips = (row: HTMLElement) =>
+      [...row.querySelectorAll('[data-cy="question-tag"]')].map((chip) => chip.textContent?.trim());
+    expect(chips(rows[0])).toEqual(['#world-war-2', '#treaties']);
+    expect(chips(rows[1])).toEqual([]);
   });
 
   // A correct answer shows what was picked and nothing else — repeating the
@@ -2744,6 +2784,11 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
             saveHighScore: vi.fn(),
             getLeaderboardEntry: () => Promise.resolve(null),
             getTopScores: () => of([]),
+            // The recap reads a signed-in player's own votes on the round's
+            // community questions (`FEAT-027`), through the real
+            // `QuestionVoteService` here — so the stub answers that read too,
+            // rather than letting it throw into the service's catch.
+            getOwnQuestionVotes: vi.fn().mockResolvedValue(new Map()),
           },
         },
         { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
@@ -2754,6 +2799,12 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
     return { recordGameResult };
   }
 
+  /**
+   * The fixture is a question written before topics replaced categories — a
+   * category and no tags — so each record carries the tag that category
+   * derives (`FEAT-052`): the topic the card showed, through the derivation
+   * every reader uses.
+   */
   it('submits one record per question beside the totals', () => {
     const { recordGameResult } = render({
       questions: [question('q0'), question('q1')],
@@ -2767,8 +2818,8 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
       correctAnswers: 1,
       bestStreak: 1,
       answers: [
-        { questionId: 'q0', correct: true, ms: 2_500, difficulty: 'easy' },
-        { questionId: 'q1', correct: false, ms: 15_000, difficulty: 'easy' },
+        { questionId: 'q0', correct: true, ms: 2_500, difficulty: 'easy', tags: ['science'] },
+        { questionId: 'q1', correct: false, ms: 15_000, difficulty: 'easy', tags: ['science'] },
       ],
     });
   });

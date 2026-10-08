@@ -60,8 +60,7 @@ test.describe('daily free game limit', () => {
   test.beforeEach(async ({ page }) => {
     await stubOpenTrivia(page);
     await page.goto('/');
-    // Waiting for the allowance to render its resolved sentence is this
-    // suite's stand-in for waiting on the categories request: it is proof the
+    // Waiting for the allowance to render its resolved sentence is proof the
     // app has booted *and* that it has opened its IndexedDB database, which is
     // what `seedDailyLimit` above attaches to.
     await expect(page.getByTestId('daily-allowance')).toContainText('free games left today');

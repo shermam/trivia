@@ -8,21 +8,33 @@ import { AuthService } from './services/auth.service';
 import { RouteAnnouncerService } from './services/route-announcer.service';
 import { TriviaService } from './services/trivia.service';
 
-/** The providers `App` needs to stand up at all, plus the background tasks no unit test wants. */
+/**
+ * The providers `App` needs to stand up at all, plus the background tasks no
+ * unit test wants — and a fake clock, which {@link releaseAppTestBed} drops
+ * with whatever it still holds.
+ *
+ * **The clock is what keeps this file's timers in this file.** Rendering `App`
+ * schedules its bootstrap — the auth sign-in and the offline prefetch, both
+ * behind `FEAT-017` §3.2's deferral — and under jsdom that is a 500 ms
+ * `setTimeout` (no `requestIdleCallback` there), which `App` deliberately never
+ * cancels (its constructor says why). Every test here finishes long before it
+ * fires. On the real clock it then fired half a second later in whichever file
+ * this worker had moved on to, because the unit suite runs non-isolated
+ * (`@angular/build:unit-test` defaults `isolate` to false) — and by then Vitest
+ * had restored every mock at the end of this file, so the stubs below were
+ * gone and the real `ensureSignedIn` and `initOfflinePrefetch` ran against a
+ * destroyed injector, arming timers of their own in somebody else's test —
+ * which is how `poll-until.util.spec.ts` came to count timers it never armed.
+ */
 async function configureAppTestBed(): Promise<void> {
+  vi.useFakeTimers();
   // Real background prefetch schedules a timer + a real opentdb.com fetch (see
   // TriviaService.initOfflinePrefetch) — neither belongs in a unit test.
   vi.spyOn(TriviaService.prototype, 'initOfflinePrefetch').mockImplementation(() => {
     /* intentional no-op */
   });
-  // And the auth bootstrap, which since `FEAT-017` §3.2 is scheduled behind a
-  // timer rather than called from the constructor. Under jsdom that is a real
-  // 500ms `setTimeout` (no `requestIdleCallback` there), and every one of
-  // these tests finishes long before it fires — so today it lands after the
-  // fixture is gone, into a dynamic `firebase/auth` import that fails and is
-  // swallowed. Stubbed rather than left to chance: the fallback is a number
-  // somebody may shorten, and a suite whose green depends on out-running a
-  // timer is green by ordering luck.
+  // And the auth bootstrap, whose dynamic `firebase/auth` import does not
+  // belong in one either — stubbed for any test that does advance the clock.
   vi.spyOn(AuthService.prototype, 'ensureSignedIn').mockResolvedValue(undefined);
 
   await TestBed.configureTestingModule({
@@ -31,8 +43,16 @@ async function configureAppTestBed(): Promise<void> {
   }).compileComponents();
 }
 
+/** Destroys the fixtures, then drops the bootstrap timers they armed — unfired. */
+function releaseAppTestBed(): void {
+  TestBed.resetTestingModule();
+  vi.clearAllTimers();
+  vi.useRealTimers();
+}
+
 describe('App', () => {
   beforeEach(configureAppTestBed);
+  afterEach(releaseAppTestBed);
 
   it('should create the app', () => {
     const fixture = TestBed.createComponent(App);
@@ -128,6 +148,7 @@ describe('App bootstrap ordering (FEAT-017)', () => {
  */
 describe('App shell accessibility (G5)', () => {
   beforeEach(configureAppTestBed);
+  afterEach(releaseAppTestBed);
 
   it('offers a skip link as the first thing in the tab order', () => {
     const fixture = TestBed.createComponent(App);

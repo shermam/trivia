@@ -3,9 +3,10 @@ import { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
 import { authMenu, openAuthMenu, signInViaUi } from '../../support/auth';
-import { answerQuestion, optionLabel, startGame, waitForPlayRoute } from '../../support/game';
+import { answerQuestion, startGame } from '../../support/game';
 import { drift } from '../../support/layout';
-import { CORRECT_ANSWERS, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { runTag, startTopicGame } from '../../support/topics';
 
 /**
  * `FEAT-027` — a private like or dislike per community question, read only by
@@ -23,29 +24,30 @@ import { CORRECT_ANSWERS, stubExtraCategory, stubOpenTrivia } from '../../suppor
  * against the real project's deployed functions. The guest's test lives here
  * too, for the first of those reasons.
  *
- * **Isolation is a category this test invented**, as in
+ * **Isolation is a topic this test invented**, as in
  * `question-reporting.spec.ts`: the emulator is shared by every worker, and a
- * custom-source game draws from the whole bank, so each test seeds its own
- * questions under a category nobody else can pick.
+ * custom-source game draws from the whole bank unless a topic narrows it, so
+ * each test seeds its own questions under a run tag nobody else can pick
+ * (`e2e/support/topics.ts`).
  */
 
 const password = 'Str0ngPassw0rd!';
 
 const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-/** This test's own slice of the bank: two community questions, one category, nobody else's. */
+/** This test's own slice of the bank: two community questions, one topic, nobody else's. */
 function seedFor(label: string): {
-  category: string;
+  topic: string;
   questions: (CustomQuestionSeed & { id: string })[];
 } {
   const runId = unique();
-  const category = `Votes ${label} ${runId}`;
+  const topic = runTag(`vote-${label}`);
   return {
-    category,
+    topic,
     questions: [
       {
         id: `vote-q1-${runId}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         question: `Which planet is known as the red planet? (${runId})`,
@@ -54,7 +56,7 @@ function seedFor(label: string): {
       },
       {
         id: `vote-q2-${runId}`,
-        category,
+        tags: [topic],
         type: 'boolean',
         difficulty: 'easy',
         question: `The Pacific is the largest ocean on Earth. (${runId})`,
@@ -68,16 +70,11 @@ function seedFor(label: string): {
 type Seed = ReturnType<typeof seedFor>;
 type SeededQuestion = Seed['questions'][number];
 
-/** Seeds the slice, picks its category and the custom source, and starts the game. */
+/** Picks the slice's topic and the custom source, and starts the game. */
 async function startCustomGame(page: Page, seed: Seed): Promise<void> {
-  // Stands in for a wait on the categories request, and does more: the
-  // invented category has to be in the dropdown before it can be selected.
-  await expect(page.locator('#category')).toContainText(seed.category);
-  await page.locator('#amount').selectOption({ label: '5' });
-  await page.locator('#category').selectOption(seed.category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
+  // Two questions against a five-question game: the setup screen says so and
+  // offers the two, and accepting is part of starting.
+  await startTopicGame(page, { topics: [seed.topic], found: seed.questions.length });
 }
 
 /**
@@ -133,7 +130,6 @@ test.describe('liking and disliking a community question (FEAT-027)', () => {
     const { uid } = await firebase.createVerifiedUser({ email, password });
     await firebase.seedCustomQuestions(seed.questions);
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, seed.category);
     await page.goto('/');
     await signInViaUi(page, email, password);
     await startCustomGame(page, seed);
@@ -224,7 +220,6 @@ test.describe('liking and disliking a community question (FEAT-027)', () => {
     await firebase.createVerifiedUser({ email, password });
     await firebase.seedCustomQuestions(seed.questions);
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, seed.category);
     await page.goto('/');
     await signInViaUi(page, email, password);
     await startCustomGame(page, seed);
@@ -280,7 +275,6 @@ test.describe('liking and disliking a community question (FEAT-027)', () => {
     const seed = seedFor('guest');
     await firebase.seedCustomQuestions(seed.questions);
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, seed.category);
     await page.goto('/');
     await startCustomGame(page, seed);
 

@@ -37,6 +37,7 @@ import { isFirestorePermissionDenied } from '../../services/firestore-rest/fires
 import { GameControllerService } from '../../services/game-controller.service';
 import { QuestionVoteService, describeVoteOutcome } from '../../services/question-vote.service';
 import { RegionService } from '../../services/region.service';
+import { topicTagsOf } from '../../utils/category-tags';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { buildPlayAnswers } from '../../utils/play-history.util';
 import { IconComponent } from '../icon/icon.component';
@@ -73,6 +74,15 @@ interface RecapRow {
    */
   outcome: PickedAnswer['kind'];
   wasRight: boolean;
+  /**
+   * What the question is about, through the derivation every reader shares
+   * (`FEAT-052`): its tags, or the tag a pre-topics question's category
+   * derives. The first is the row's label; the whole list is rendered as
+   * chips only when there is more than that one, so a single-topic question
+   * — every Open Trivia question, and most contributions — does not show the
+   * same tag twice in one row.
+   */
+  topics: string[];
 }
 
 /**
@@ -613,6 +623,7 @@ export class GameOverComponent implements OnInit {
         correct: question.all_answers.find((a) => a.isCorrect) ?? null,
         outcome: outcome.kind,
         wasRight: picked?.isCorrect === true,
+        topics: topicTagsOf(question),
       });
     }
     return rows;

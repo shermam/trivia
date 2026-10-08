@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -8,7 +8,6 @@ import { AuthService } from '../../services/auth.service';
 import { FirebaseService, QuestionQuotaExceededError } from '../../services/firebase.service';
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { SubscriptionService } from '../../services/subscription.service';
-import { TriviaCategory, TriviaService } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionFieldsComponent } from '../question-form/question-fields.component';
 import {
@@ -29,16 +28,14 @@ import {
   styleUrl: './add-question.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class AddQuestionComponent implements OnInit {
+export class AddQuestionComponent {
   private readonly fb = inject(FormBuilder);
   private readonly firebaseService = inject(FirebaseService);
-  private readonly triviaService = inject(TriviaService);
   private readonly router = inject(Router);
   protected readonly authService = inject(AuthService);
   protected readonly authMenuState = inject(AuthMenuStateService);
   protected readonly subscriptionService = inject(SubscriptionService);
 
-  protected readonly categories = signal<TriviaCategory[]>([]);
   protected readonly isSubmitting = signal(false);
   protected readonly submitError = signal<string | null>(null);
   protected readonly hasSubmitted = signal(false);
@@ -62,23 +59,6 @@ export class AddQuestionComponent implements OnInit {
     this.form.controls.type.valueChanges
       .pipe(takeUntilDestroyed())
       .subscribe((type) => applyIncorrectAnswerValidators(this.form, type));
-  }
-
-  // Angular calls `ngOnInit` and discards whatever it returns, so an `async`
-  // one is an interface misuse: any rejection escapes as an unhandled promise
-  // rather than being reported. Keep the hook synchronous and kick the async
-  // work off explicitly.
-  ngOnInit(): void {
-    void this.loadCategories();
-  }
-
-  private async loadCategories(): Promise<void> {
-    try {
-      this.categories.set(await this.triviaService.getCategories());
-    } catch {
-      // Category suggestions are a nicety (via <datalist>) — the category
-      // field stays a free-text input either way.
-    }
   }
 
   protected openSignIn(): void {
@@ -106,8 +86,8 @@ export class AddQuestionComponent implements OnInit {
     // Every field's validity lives on the form itself, so an invalid submit can
     // say *what* is wrong and put the cursor on it. It used to
     // `markAllAsTouched()` and return into a template that rendered no field
-    // errors at all — so forgetting the category produced a Save button that
-    // silently did nothing, with no way to discover why.
+    // errors at all — so forgetting a required field produced a Save button
+    // that silently did nothing, with no way to discover why.
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       const fields = questionFields(this.form);

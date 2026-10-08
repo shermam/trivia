@@ -49,11 +49,12 @@ test.describe('the mute toggle in the nav drawer', () => {
   test.use({ viewport: MOBILE });
 
   test.beforeEach(async ({ page }) => {
-    // No game is started in this block; the stub is only so that four tests
-    // about a button in the top bar never depend on a third-party service
-    // being up — the setup screen fetches its category list on load. Same
-    // reasoning as `embed-mode.spec.ts`, and it matters more here, because
-    // these run against a real deployed channel in the preview slice too.
+    // No game is started in this block, and nothing on `/` contacts Open
+    // Trivia DB; the stub is so that stays true for four tests about a button
+    // in the top bar if the setup screen ever does — a run should never depend
+    // on a third-party service being up. Same reasoning as
+    // `embed-mode.spec.ts`, and it matters more here, because these run
+    // against a real deployed channel in the preview slice too.
     await stubOpenTrivia(page);
     await page.goto('/');
   });

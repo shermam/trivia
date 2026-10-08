@@ -333,6 +333,27 @@ describe('legal pages', () => {
   });
 
   /**
+   * `FEAT-052` made the same kind of edit to the same enumeration: topics
+   * replaced categories, so the list names the tags a question is published
+   * with, and keeps the category for the questions written before the change —
+   * which still carry one and still publish it. And the Terms' reason for
+   * keeping contributions after an account is deleted speaks of topics, the
+   * only thing a player can now ask the bank for.
+   */
+  it('names the topic tags a question publishes, and the category it may still carry', async () => {
+    const privacy = (await render(PrivacyPolicyComponent)).textContent ?? '';
+    const terms = (await render(TermsOfServiceComponent)).textContent ?? '';
+    const flat = (text: string) => text.replace(/\s+/g, ' ');
+
+    expect(flat(privacy)).toContain('its topic tags');
+    expect(flat(privacy)).toContain(
+      'for a question written before topics replaced categories, its category',
+    );
+    expect(flat(terms)).toContain('would empty whole topics for everyone else');
+    expect(flat(terms)).not.toContain('whole categories');
+  });
+
+  /**
    * `FEAT-007` changed two things both documents asserted the *opposite* of,
    * and the sentences it falsified were the kind nobody re-reads: "there is
    * currently no way to edit or withdraw a question from within the app",

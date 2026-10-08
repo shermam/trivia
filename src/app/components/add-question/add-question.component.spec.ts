@@ -7,7 +7,6 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { FirebaseService } from '../../services/firebase.service';
 import { SubscriptionService } from '../../services/subscription.service';
-import { TriviaService } from '../../services/trivia.service';
 import { AddQuestionComponent } from './add-question.component';
 
 /**
@@ -68,7 +67,6 @@ function setup(
       },
       { provide: SubscriptionService, useValue: { isProUser: signal(true) } },
       { provide: AuthMenuStateService, useValue: { open: () => undefined } },
-      { provide: TriviaService, useValue: { getCategories: () => Promise.resolve([]) } },
       { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
     ],
   });
@@ -77,7 +75,6 @@ function setup(
   const component = fixture.componentInstance as unknown as {
     form: {
       controls: {
-        category: { setValue: (v: string) => void };
         question: { setValue: (v: string) => void };
         correctAnswer: { setValue: (v: string) => void };
         type: { setValue: (v: string) => void };
@@ -94,9 +91,9 @@ function setup(
     hasSubmitted: () => boolean;
   };
 
-  /** Fills every field a valid multiple-choice question needs. */
+  /** Fills every field a valid multiple-choice question needs — a topic among them (`FEAT-052`). */
   const fillValidForm = () => {
-    component.form.controls.category.setValue('Science');
+    component.form.controls.tags.setValue(['chemistry']);
     component.form.controls.question.setValue('What is the chemical symbol for water?');
     component.form.controls.correctAnswer.setValue('H2O');
     const [a, b, c] = component.form.controls.incorrectAnswers.controls;
@@ -111,16 +108,18 @@ function setup(
 describe('AddQuestionComponent validation', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  // The reported behaviour: Save appeared to do nothing at all.
-  it('explains a missing category instead of silently refusing to submit', async () => {
+  // The reported behaviour: Save appeared to do nothing at all. Topics are the
+  // first required field now (`FEAT-052`), and the rules refuse a create
+  // without one — so forgetting them has to be said, not refused in silence.
+  it('explains missing topics instead of silently refusing to submit', async () => {
     const { component, addCustomQuestion, fillValidForm } = setup();
     fillValidForm();
-    component.form.controls.category.setValue('');
+    component.form.controls.tags.setValue([]);
 
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/Category/i);
+    expect(component.validationSummary()).toMatch(/Topics/i);
   });
 
   it('names every offending field when several are empty', async () => {
@@ -129,7 +128,7 @@ describe('AddQuestionComponent validation', () => {
     await component.onSubmit();
 
     expect(component.validationSummary()).toMatch(/fields need your attention/i);
-    expect(component.validationSummary()).toMatch(/category/i);
+    expect(component.validationSummary()).toMatch(/topics/i);
     expect(component.validationSummary()).toMatch(/question/i);
   });
 
@@ -139,12 +138,12 @@ describe('AddQuestionComponent validation', () => {
   it('treats a whitespace-only field as empty, the way the rules do', async () => {
     const { component, addCustomQuestion, fillValidForm } = setup();
     fillValidForm();
-    component.form.controls.category.setValue('   ');
+    component.form.controls.question.setValue('   ');
 
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/Category/i);
+    expect(component.validationSummary()).toMatch(/Question/i);
   });
 
   it('submits a valid multiple-choice question', async () => {
@@ -163,7 +162,7 @@ describe('AddQuestionComponent validation', () => {
   // invalid with nothing on screen to fix.
   it('submits a boolean question without the hidden incorrect-answer fields', async () => {
     const { component, addCustomQuestion } = setup();
-    component.form.controls.category.setValue('Science');
+    component.form.controls.tags.setValue(['physics']);
     component.form.controls.question.setValue('Water boils at 100C at sea level.');
     component.form.controls.type.setValue('boolean');
     component.form.controls.correctAnswer.setValue('True');
@@ -176,7 +175,7 @@ describe('AddQuestionComponent validation', () => {
 
   it('re-applies the incorrect-answer requirement when switching back to multiple choice', async () => {
     const { component, addCustomQuestion } = setup();
-    component.form.controls.category.setValue('Science');
+    component.form.controls.tags.setValue(['physics']);
     component.form.controls.question.setValue('Q?');
     component.form.controls.type.setValue('boolean');
     component.form.controls.correctAnswer.setValue('True');
@@ -399,23 +398,36 @@ describe('AddQuestionComponent justification', () => {
 });
 
 /**
- * Topic tags (`FEAT-021`). What the *selector* does with a keystroke is
- * `tag-selector.component.spec.ts`' subject; what the **submit** writes is
- * this one's, because that is the boundary `firestore.rules` sees.
+ * Topic tags (`FEAT-021`, `FEAT-052`). What the *selector* does with a
+ * keystroke is `tag-selector.component.spec.ts`' subject; what the **submit**
+ * writes is this one's, because that is the boundary `firestore.rules` sees.
  */
 describe('AddQuestionComponent topic tags', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('writes no key at all when no topic was chosen', async () => {
+  /**
+   * The rules refuse a create with no tags, because a question the topic
+   * picker can never reach is one nobody asking for a topic is served. The
+   * form refuses first, so the contributor is told rather than refused.
+   */
+  it('does not submit without a topic', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.tags.setValue([]);
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+  });
+
+  /** Topics replaced the category; a new question carries no category at all. */
+  it('writes no category', async () => {
     const { component, addCustomQuestion, fillValidForm } = setup();
     fillValidForm();
 
     await component.onSubmit();
 
-    // An empty array is accepted by the rules and says exactly what an absent
-    // key says, so writing one would put a field on every untagged question to
-    // report that it has none.
-    expect('tags' in addCustomQuestion.mock.calls[0][0]).toBe(false);
+    expect('category' in addCustomQuestion.mock.calls[0][0]).toBe(false);
   });
 
   it('writes the chosen topics', async () => {
@@ -518,17 +530,40 @@ describe('AddQuestionComponent rendered feedback', () => {
     const { fixture, component, fillValidForm } = setup();
     fixture.detectChanges();
     fillValidForm();
-    component.form.controls.category.setValue('');
+    component.form.controls.question.setValue('');
 
     await component.onSubmit();
     fixture.detectChanges();
 
-    const error: HTMLElement | null = fixture.nativeElement.querySelector('#category-error');
-    expect(error?.textContent).toMatch(/Category is required/i);
+    const error: HTMLElement | null = fixture.nativeElement.querySelector('#question-error');
+    expect(error?.textContent).toMatch(/Question is required/i);
 
-    const input: HTMLElement | null = fixture.nativeElement.querySelector('#category');
+    const input: HTMLElement | null = fixture.nativeElement.querySelector('#question');
     expect(input?.getAttribute('aria-invalid')).toBe('true');
-    expect(input?.getAttribute('aria-describedby')).toBe('category-error');
+    expect(input?.getAttribute('aria-describedby')).toBe('question-error');
+  });
+
+  /**
+   * The topic picker is a component of its own, and the same contract has to
+   * reach through it: the error under the input, `aria-invalid` on it, and the
+   * error first in its description.
+   */
+  it('renders the missing-topic error through the picker, linked for assistive tech', async () => {
+    const { fixture, component, fillValidForm } = setup();
+    fixture.detectChanges();
+    fillValidForm();
+    component.form.controls.tags.setValue([]);
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    const error: HTMLElement | null = fixture.nativeElement.querySelector('#tag-error');
+    expect(error?.textContent).toMatch(/Add at least one topic/);
+
+    const input: HTMLElement | null = fixture.nativeElement.querySelector('#tag-input');
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(input?.getAttribute('aria-required')).toBe('true');
+    expect(input?.getAttribute('aria-describedby')).toBe('tag-error tag-feedback');
   });
 
   /**
@@ -614,12 +649,12 @@ describe('AddQuestionComponent rendered feedback', () => {
     const { fixture, component, fillValidForm } = setup();
     fixture.detectChanges();
     fillValidForm();
-    component.form.controls.category.setValue('');
+    component.form.controls.tags.setValue([]);
 
     await component.onSubmit();
     fixture.detectChanges();
 
-    expect(document.activeElement?.id).toBe('category');
+    expect(document.activeElement?.id).toBe('tag-input');
   });
 
   // Control for the test above: focus is only claimed when something is
@@ -632,6 +667,6 @@ describe('AddQuestionComponent rendered feedback', () => {
     await component.onSubmit();
     fixture.detectChanges();
 
-    expect(document.activeElement?.id).not.toBe('category');
+    expect(document.activeElement?.id).not.toBe('tag-input');
   });
 });

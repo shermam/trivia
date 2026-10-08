@@ -156,10 +156,6 @@
               class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400"
             >
               <div class="flex gap-1">
-                <dt>Category:</dt>
-                <dd>{{ question.category }}</dd>
-              </div>
-              <div class="flex gap-1">
                 <dt>Difficulty:</dt>
                 <dd>{{ question.difficulty }}</dd>
               </div>
@@ -170,12 +166,18 @@
             </dl>
 
             <!--
-              The topics the author chose (`FEAT-021`). Here as well as on the
-              reviewer's card because this is the screen where they decide
-              whether to edit: an author who cannot see the tags on their own
-              question cannot tell whether the edit dialog will open with them.
+              The question's topics (`FEAT-021`), through the derivation every
+              reader shares (`FEAT-052`): the tags the author chose, or — for a
+              question written before topics replaced categories — the tag its
+              category derives. Here as well as on the reviewer's card because
+              this is the screen where an author decides whether to edit, and
+              it shows exactly the topics the edit dialog will open on.
             -->
-            <app-question-tags [tags]="question.tags" label="Topics" testId="my-question-tags" />
+            <app-question-tags
+              [tags]="topicsOf(question)"
+              label="Topics"
+              testId="my-question-tags"
+            />
 
             <!--
               The reviewer's note, on a rejected question only. Absent is the
@@ -310,7 +312,6 @@
           <app-question-fields
             [form]="form"
             idPrefix="edit-"
-            [categories]="categories()"
             [validationSummary]="validationSummary()"
           />
 

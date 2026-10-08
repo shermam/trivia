@@ -7,7 +7,8 @@ import {
   normalizeTags,
   readTags,
 } from './normalize-tag.util';
-import { TAG_SUGGESTIONS } from './tag-suggestions';
+import { SEED_TAGS } from './category-tags';
+import { QUESTION_TAG_SUGGESTIONS, TAG_SUGGESTIONS } from './tag-suggestions';
 
 describe('normalizeTag', () => {
   it("lower-cases and hyphenates the spec's three spellings of one tag", () => {
@@ -190,7 +191,33 @@ describe('TAG_SUGGESTIONS', () => {
     expect(new Set(TAG_SUGGESTIONS).size).toBe(TAG_SUGGESTIONS.length);
   });
 
-  it('offers enough to cover the categories the setup screen lists', () => {
+  it('offers a starter list of at least forty finer topics', () => {
     expect(TAG_SUGGESTIONS.length).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe('QUESTION_TAG_SUGGESTIONS', () => {
+  /**
+   * The contribute form's list (`FEAT-052`): the seed tags first, in the
+   * table's order, because those are the topics a player can ask for by name —
+   * then every starter, each once.
+   */
+  it('leads with the seed tags and keeps every starter after them', () => {
+    expect(QUESTION_TAG_SUGGESTIONS.slice(0, SEED_TAGS.length)).toEqual(SEED_TAGS);
+    for (const starter of TAG_SUGGESTIONS) {
+      expect(QUESTION_TAG_SUGGESTIONS).toContain(starter);
+    }
+  });
+
+  /** Five starters are seed tags in their own right; a chip offered twice would toggle twice. */
+  it('offers each tag once', () => {
+    expect(new Set(QUESTION_TAG_SUGGESTIONS).size).toBe(QUESTION_TAG_SUGGESTIONS.length);
+    expect(QUESTION_TAG_SUGGESTIONS).toHaveLength(SEED_TAGS.length + TAG_SUGGESTIONS.length - 5);
+  });
+
+  it('is entirely made of tags the normaliser and the rules both accept', () => {
+    for (const suggestion of QUESTION_TAG_SUGGESTIONS) {
+      expect(normalizeTag(suggestion)).toBe(suggestion);
+    }
   });
 });

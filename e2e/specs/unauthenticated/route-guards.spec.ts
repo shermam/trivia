@@ -17,8 +17,9 @@ async function expectPathname(page: Page, pathname: string): Promise<void> {
 
 test.describe('route guards', () => {
   // The stub is not what is under test here — none of these tests starts a
-  // game — but landing on `/` fetches the category list, and a run should
-  // never depend on a third-party service being up.
+  // game, and nothing on `/` contacts Open Trivia DB — but it keeps that true
+  // if the setup screen ever does: a run should never depend on a third-party
+  // service being up.
   test.beforeEach(async ({ page }) => {
     await stubOpenTrivia(page);
   });

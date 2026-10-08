@@ -19,7 +19,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   asAnonymous,
   asOAuth,
@@ -542,9 +542,10 @@ describe('custom_questions: text format (FEAT-019)', () => {
  * here — the two halves of "free-form does not mean unbounded".
  *
  * **Both directions, and the accept cases carry the block.** A rule that
- * refused every tag would look exactly like a rule that worked, because every
- * question in the bank today has none — and the symptom in production would be
- * every tagged submission failing with a bare `permission-denied`.
+ * refused every tag would look exactly like a rule that worked to a suite of
+ * reject cases — and the symptom in production would be every submission
+ * failing with a bare `permission-denied`, since a new question must now carry
+ * one (`FEAT-052`, the block below).
  *
  * **Mutation-verified** (`CLAUDE.md` §4.6), by breaking the rule on purpose
  * rather than by reading it:
@@ -570,24 +571,9 @@ describe('custom_questions: text format (FEAT-019)', () => {
  * be relied on; `firestore.rules` says the same beside the clause.
  */
 describe('custom_questions: topic tags (FEAT-021)', () => {
-  it('accepts a question with no tags at all — every question in the bank today', async () => {
+  it('accepts a question with one tag — the least a new one may carry', async () => {
     await assertSucceeds(
       submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: validQuestion('pro') }),
-    );
-  });
-
-  /**
-   * An explicit empty list is a different shape from an absent key and both are
-   * legal. The client writes the absent form, but a document is a document —
-   * and a rule that accepted only one of the two would refuse a shape nothing
-   * in the app forbids.
-   */
-  it('accepts an explicitly empty tag list', async () => {
-    await assertSucceeds(
-      submitQuestion(asPro(env, 'pro'), {
-        uid: 'pro',
-        payload: validQuestion('pro', { tags: [] }),
-      }),
     );
   });
 
@@ -812,6 +798,135 @@ describe('custom_questions: topic tags (FEAT-021)', () => {
         status: 'approved',
         tags: ['injected'],
       }),
+    );
+  });
+});
+
+/**
+ * `FEAT-052`. Topics replaced categories: `category` stays in the allowlist as
+ * an **optional** field with the bounds it always had, and a **create** must
+ * carry at least one tag. The owner's edit is unchanged — it validates the
+ * shape — so a question written before the change stays editable.
+ *
+ * **Mutation-verified in both directions** (`CLAUDE.md` §4.6), by breaking each
+ * clause on purpose and watching these rows fail:
+ *
+ * - Making `category` mandatory again fails 34 tests: the accept rows here
+ *   whose payload has none — the tags-only create and the owner edit that
+ *   moves a topic from the category to the tags — and every other accept case
+ *   in the file, since the shared factory writes no category.
+ * - Deleting the create's `tags` clause, or weakening it to `>= 0`, fails
+ *   exactly the three reject rows: a category with no tags, neither, and an
+ *   empty tag list.
+ * - Moving the tag requirement into `isValidQuestionShape()` — where it would
+ *   bind the owner's edit as well — fails two: the legacy-shaped owner edit,
+ *   which is the row a suite of nothing but `assertFails` cannot see, and the
+ *   tag block's "remove every tag" edit.
+ * - Dropping the category's bounds while keeping it optional fails four: the
+ *   empty and over-long category rows in the schema block, the owner edit
+ *   below that breaks them, and the tag block's "valid tags on an invalid
+ *   document".
+ */
+describe('custom_questions: topics replace categories (FEAT-052)', () => {
+  const AUTHOR = 'legacy-author';
+  /** Far enough in the past that `isNearRequestTime()` would refuse it on a create. */
+  const CREATED_AT = Date.now() - 30 * 24 * 3_600_000;
+
+  /** A question as every document written before the change looks: a category, no tags. */
+  function legacyQuestion(overrides: Record<string, unknown> = {}) {
+    const { tags: _none, ...withoutTags } = validQuestion(AUTHOR, {
+      category: 'Science',
+      status: 'approved',
+      createdAt: CREATED_AT,
+    });
+    return { ...withoutTags, ...overrides };
+  }
+
+  const legacy = (ctx: RulesTestContext) => doc(ctx.firestore(), 'custom_questions', 'legacy');
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'legacy'), legacyQuestion());
+    });
+  });
+
+  it('accepts a create with tags and no category — what the app writes now', async () => {
+    const payload = validQuestion('pro');
+    expect('category' in payload).toBe(false);
+
+    await assertSucceeds(submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload }));
+  });
+
+  it('accepts a category beside the tags, under the bounds it always had', async () => {
+    await assertSucceeds(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { category: 'x'.repeat(100) }),
+      }),
+    );
+  });
+
+  /**
+   * The stale client's write: a browser still on the previous bundle submits a
+   * category and no tags. Refused, because it would be a question the topic
+   * picker can never reach — the trade `status` made when it became mandatory.
+   */
+  it('refuses a create with a category and no tags', async () => {
+    const { tags: _none, ...categoryOnly } = validQuestion('pro', { category: 'Science' });
+
+    await assertFails(submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: categoryOnly }));
+  });
+
+  it('refuses a create with neither tags nor a category', async () => {
+    const { tags: _none, ...neither } = validQuestion('pro');
+
+    await assertFails(submitQuestion(asPro(env, 'pro'), { uid: 'pro', payload: neither }));
+  });
+
+  /**
+   * An empty list is a different shape from an absent key, and refused just
+   * the same: zero topics is zero topics.
+   */
+  it('refuses a create with an empty tag list', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro'), {
+        uid: 'pro',
+        payload: validQuestion('pro', { tags: [] }),
+      }),
+    );
+  });
+
+  /**
+   * The half `assertFails` cannot see. A question written before topics existed
+   * has a category and no tags, and its author must still be able to correct
+   * it without being made to tag it in the same breath — the owner-edit rule
+   * validates the shape and nothing more.
+   */
+  it('accepts a legacy-shaped owner edit: category kept, still no tags', async () => {
+    await assertSucceeds(
+      setDoc(
+        legacy(asVerifiedPassword(env, AUTHOR)),
+        legacyQuestion({ question: 'A corrected question?', status: 'pending' }),
+      ),
+    );
+  });
+
+  /** …and the edit the app actually sends: the derived tag in, the category out. */
+  it('accepts an owner edit that moves the topic from the category to the tags', async () => {
+    const { category: _gone, ...moved } = legacyQuestion({
+      tags: ['science'],
+      status: 'pending',
+    });
+
+    await assertSucceeds(setDoc(legacy(asVerifiedPassword(env, AUTHOR)), moved));
+  });
+
+  it('still refuses an owner edit whose category breaks the old bounds', async () => {
+    await assertFails(
+      setDoc(
+        legacy(asVerifiedPassword(env, AUTHOR)),
+        legacyQuestion({ category: '', status: 'pending' }),
+      ),
     );
   });
 });

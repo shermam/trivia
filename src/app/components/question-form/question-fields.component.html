@@ -1,35 +1,30 @@
 <div [formGroup]="form()" class="space-y-4">
-  <div>
-    <label
-      [attr.for]="id('category')"
-      class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-      >Category</label
-    >
-    <input
-      [id]="id('category')"
-      type="text"
-      formControlName="category"
-      [attr.list]="id('category-suggestions')"
-      placeholder="e.g. Science"
-      [attr.aria-invalid]="showsError(form().controls.category)"
-      [attr.aria-describedby]="showsError(form().controls.category) ? id('category-error') : null"
-      class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
-    />
-    <datalist [id]="id('category-suggestions')">
-      @for (category of categories(); track category.id) {
-        <option [value]="category.name"></option>
-      }
-    </datalist>
-    @if (showsError(form().controls.category)) {
-      <p
-        [id]="id('category-error')"
-        [attr.data-cy]="id('category-error')"
-        class="mt-1.5 text-sm text-red-700 dark:text-red-300"
-      >
-        {{ errorFor(form().controls.category, 'Category', 100) }}
-      </p>
-    }
-  </div>
+  <!--
+    The question's topics (`FEAT-021`), and since `FEAT-052` its only topic —
+    first on the form, where the category field it replaced was, and required:
+    `firestore.rules` refuses a new question with no tags, because a question
+    the topic picker can never reach is one nobody asking for a topic is
+    served. The seed tags lead the suggestions — Open Trivia DB's former
+    categories, the topics a player can pick on the setup screen — and the
+    finer starters follow.
+
+    A `formControlName`, so the value lives on the form with everything else:
+    the edit dialog's `reset()` reaches it, and an author resubmitting a
+    question keeps the tags they chose rather than having them cleared by an
+    owner update that re-validates the whole payload.
+
+    Difficulty is deliberately **not** offered as a tag, here or in the
+    suggestion list: it is an existing validated enum one field down, and a
+    `#hard` beside it would be a second place for the same fact to be wrong.
+  -->
+  <app-tag-selector
+    formControlName="tags"
+    [idPrefix]="idPrefix()"
+    label="Topics"
+    [required]="true"
+    [errorMessage]="topicsError()"
+    hint="A few words for what this question is about, so players can ask for exactly this subject. Reviewers see them too."
+  />
 
   <div>
     <label
@@ -474,21 +469,4 @@
       the right answer is right. Reviewers see it, and so do players after they answer.
     </p>
   </div>
-
-  <!--
-    Topic tags (`FEAT-021`). A `formControlName`, so the value lives on the form
-    with everything else: the edit dialog's `reset()` reaches it, and an author
-    resubmitting a question keeps the tags they chose rather than having them
-    cleared by an owner update that re-validates the whole payload.
-
-    Difficulty is deliberately **not** offered as a tag, here or in the
-    suggestion list: it is an existing validated enum two fields up, and a
-    `#hard` beside it would be a second place for the same fact to be wrong.
-  -->
-  <app-tag-selector
-    formControlName="tags"
-    [idPrefix]="idPrefix()"
-    label="Topics"
-    hint="A few words for what this question is about, so players can ask for exactly this subject. Reviewers see them too."
-  />
 </div>

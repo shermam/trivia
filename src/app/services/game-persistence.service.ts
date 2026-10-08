@@ -187,13 +187,21 @@ function isAnswer(value: unknown): boolean {
   );
 }
 
+/**
+ * `category` is **optional** here, and not as a courtesy (`FEAT-052`). A
+ * contribution written since topics replaced categories carries none, so
+ * requiring one would make every saved game that drew such a question
+ * unrestorable — `[ngValue]`'s shape again (`CLAUDE.md` §4.4: a runtime type
+ * only one consumer checks), with this function as the one consumer. A present
+ * value still has to be a string, which is all a reader of it assumes.
+ */
 function isQuestion(value: unknown): value is TriviaQuestion {
   return (
     isRecord(value) &&
     typeof value['id'] === 'string' &&
     typeof value['question'] === 'string' &&
     typeof value['correct_answer'] === 'string' &&
-    typeof value['category'] === 'string' &&
+    (value['category'] === undefined || typeof value['category'] === 'string') &&
     Array.isArray(value['incorrect_answers']) &&
     Array.isArray(value['all_answers']) &&
     value['all_answers'].length > 0 &&
@@ -210,12 +218,18 @@ function isQuestion(value: unknown): value is TriviaQuestion {
  * prevent a problem that does not exist. A *present* value still has to be one
  * of the real options: a hand-edited record naming a board that isn't real
  * would produce a game whose score the rules refuse.
+ *
+ * `category` is the reverse case (`FEAT-052`): a key `GameConfig` no longer has,
+ * still present on every save written before topics replaced categories.
+ * Accepted when it is a string, so a game in flight across the deploy resumes,
+ * and dropped by {@link restoredConfig} rather than carried into a config that
+ * has nowhere to put it.
  */
 function isConfig(value: unknown): value is GameConfig {
   return (
     isRecord(value) &&
     typeof value['amount'] === 'number' &&
-    typeof value['category'] === 'string' &&
+    (value['category'] === undefined || typeof value['category'] === 'string') &&
     (value['difficulty'] === '' || DIFFICULTIES.includes(value['difficulty'] as Difficulty)) &&
     SOURCES.includes(value['source'] as QuestionSource) &&
     (value['timeLimit'] === undefined || isTimeLimitOption(value['timeLimit'])) &&
@@ -230,9 +244,23 @@ function isConfig(value: unknown): value is GameConfig {
   );
 }
 
-/** Fills in the limit a pre-G7 save was necessarily played under. */
-function withTimeLimit(config: GameConfig): GameConfig {
-  return { ...config, timeLimit: config.timeLimit ?? DEFAULT_TIME_LIMIT };
+/**
+ * The config as the app holds it now, built field by field from a validated
+ * save: the limit a pre-G7 save was necessarily played under filled in, and a
+ * pre-`FEAT-052` save's `category` left behind.
+ *
+ * Not translated into a tag. The game was drawn under that category, not under
+ * a topic, and a config records the filter the draw actually used — so the
+ * honest translation of "drawn under a category" is no topic at all.
+ */
+function restoredConfig(config: GameConfig): GameConfig {
+  return {
+    amount: config.amount,
+    difficulty: config.difficulty,
+    source: config.source,
+    timeLimit: config.timeLimit ?? DEFAULT_TIME_LIMIT,
+    ...(config.tags === undefined ? {} : { tags: config.tags }),
+  };
 }
 
 /**
@@ -351,7 +379,7 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
   return {
     version: SCHEMA_VERSION,
     savedAt,
-    config: withTimeLimit(config),
+    config: restoredConfig(config),
     questions,
     currentIndex,
     score: displayScore(restoredPoints),

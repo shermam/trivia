@@ -818,10 +818,17 @@
                       />
                     </div>
                     <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                      <span
-                        class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-600 dark:text-slate-300"
-                        >{{ row.question.category }}</span
-                      >
+                      <!--
+                        The question's first topic (`FEAT-052`), as the tag a
+                        player could pick — plain text, never Markdown.
+                      -->
+                      @if (row.topics[0]; as topic) {
+                        <span
+                          data-cy="recap-topic"
+                          class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-600 dark:text-slate-300"
+                          >#{{ topic }}</span
+                        >
+                      }
                       <span
                         class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
                         >{{ row.question.difficulty }}</span
@@ -918,13 +925,18 @@
                     }
 
                     <!--
-                      The question's topic tags (`FEAT-021`), so a player who
-                      enjoyed one knows what to ask the setup screen for next
-                      time. Absent on everything from Open Trivia DB and on
-                      every contribution written before tags existed, so the
-                      component renders nothing at all rather than an empty row.
+                      Every topic the question carries (`FEAT-021`), so a player
+                      who enjoyed one knows what to ask the setup screen for
+                      next time — through the same derivation as the label
+                      above, and only when there is more than that one topic:
+                      a single-topic question, which is every Open Trivia
+                      question and most contributions, is already named in full
+                      by the label, and a second copy of the same tag would read
+                      as a mistake.
                     -->
-                    <app-question-tags [tags]="row.question.tags" label="Topics" />
+                    @if (row.topics.length > 1) {
+                      <app-question-tags [tags]="row.topics" label="Topics" />
+                    }
 
                     <!--
                       Optional source attribution (FEAT-022). Absent on the

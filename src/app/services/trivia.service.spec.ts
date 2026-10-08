@@ -109,7 +109,6 @@ describe('TriviaService offline fallback', () => {
     const triviaService = TestBed.inject(TriviaService);
     const promise = triviaService.getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -144,7 +143,6 @@ describe('TriviaService offline fallback', () => {
     const triviaService = TestBed.inject(TriviaService);
     const promise = triviaService.getQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -177,7 +175,6 @@ describe('TriviaService offline fallback', () => {
     await expect(
       triviaService.getQuestions({
         amount: 5,
-        category: '',
         difficulty: '',
         source: 'custom',
         timeLimit: 15,
@@ -190,7 +187,6 @@ describe('TriviaService offline fallback', () => {
     const triviaService = TestBed.inject(TriviaService);
     const promise = triviaService.getQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -243,7 +239,6 @@ describe('TriviaService offline fallback', () => {
     const triviaService = TestBed.inject(TriviaService);
     const promise = triviaService.getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -301,7 +296,6 @@ describe('TriviaService answer identity', () => {
     const httpMock = TestBed.inject(HttpTestingController);
     const promise = service.getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -367,62 +361,6 @@ describe('TriviaService answer identity', () => {
 });
 
 /**
- * Finding B3. `getCategories()` memoizes its promise, and used to keep that
- * memo even when the fetch rejected — so a single flaky moment left the
- * category picker stuck on "Any Category" for the rest of the session, long
- * after the network came back, with a full page reload the only way out.
- */
-describe('TriviaService category caching', () => {
-  let httpMock: HttpTestingController;
-
-  beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        { provide: FirebaseService, useValue: { getCustomQuestions: () => of([]) } },
-        nothingSeenYet(),
-      ],
-    });
-    httpMock = TestBed.inject(HttpTestingController);
-  });
-
-  const flushCategories = () =>
-    httpMock
-      .expectOne((r) => r.url.includes('api_category.php'))
-      .flush({ trivia_categories: [{ id: 9, name: 'General Knowledge' }] });
-
-  it('fetches once and reuses the result', async () => {
-    const service = TestBed.inject(TriviaService);
-    const first = service.getCategories();
-    flushCategories();
-    await first;
-
-    const second = await service.getCategories();
-    expect(second).toHaveLength(1);
-    // No second request to flush — a pending one would fail verify().
-    httpMock.verify();
-  });
-
-  it('retries after a failure instead of replaying the rejection forever', async () => {
-    const service = TestBed.inject(TriviaService);
-
-    const failing = service.getCategories();
-    httpMock
-      .expectOne((r) => r.url.includes('api_category.php'))
-      .error(new ProgressEvent('network error'));
-    await expect(failing).rejects.toBeTruthy();
-
-    // The retry has to reach the network again. Before the fix this threw
-    // "expected one matching request, found none" — the service handed back
-    // the cached rejection without asking.
-    const retried = service.getCategories();
-    flushCategories();
-    await expect(retried).resolves.toHaveLength(1);
-  });
-});
-
-/**
  * Finding B9. `decodeHtmlEntities` exists because Open Trivia DB returns its
  * text entity-encoded. It used to run in the shared mapper, so it also
  * rewrote Firestore-authored questions — which are stored exactly as a
@@ -459,7 +397,6 @@ describe('TriviaService entity decoding is per source', () => {
     configure([customDoc]);
     const [question] = await TestBed.inject(TriviaService).getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -477,7 +414,6 @@ describe('TriviaService entity decoding is per source', () => {
     const service = TestBed.inject(TriviaService);
     const promise = service.getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -503,6 +439,9 @@ describe('TriviaService entity decoding is per source', () => {
     expect(question.category).toBe('Science & Nature');
     expect(question.correct_answer).toBe('Tom & Jerry');
     expect(question.incorrect_answers).toContain("It's a protocol");
+    // The seed tag is looked up by the *decoded* name, which is why the two
+    // transformations sit together in the adapter (`FEAT-052`).
+    expect(question.tags).toEqual(['science-nature']);
   });
 });
 
@@ -539,7 +478,6 @@ describe('TriviaService contributor attribution passes through the mapper', () =
   function play(): Promise<TriviaQuestion[]> {
     return TestBed.inject(TriviaService).getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -586,11 +524,11 @@ describe('TriviaService contributor attribution passes through the mapper', () =
 });
 
 /**
- * Finding C1. The category/difficulty filter and the amount ceiling used to be
+ * Finding C1. The topic/difficulty filter and the amount ceiling used to be
  * applied here, in the browser, over every document in the collection. They are
  * the query's job now — so what this layer must get right is *forwarding* them.
  * Dropping that would be silent: the game would still run, still show custom
- * questions, and simply ignore the category and difficulty the player picked.
+ * questions, and simply ignore the topics and difficulty the player picked.
  */
 describe('TriviaService custom-question queries (C1)', () => {
   function setupWithSpy() {
@@ -608,21 +546,21 @@ describe('TriviaService custom-question queries (C1)', () => {
 
   afterEach(() => TestBed.resetTestingModule());
 
-  it('passes the chosen category, difficulty and amount to the query', async () => {
+  it('passes the chosen topics, difficulty and amount to the query', async () => {
     const { service, getCustomQuestions } = setupWithSpy();
 
     await service.getQuestions({
       amount: 7,
-      category: 'History',
       difficulty: 'hard',
       source: 'custom',
       timeLimit: 15,
+      tags: ['history'],
     });
 
     expect(getCustomQuestions).toHaveBeenCalledWith({
-      category: 'History',
       difficulty: 'hard',
       limit: 7,
+      tags: ['history'],
     });
   });
 
@@ -632,7 +570,6 @@ describe('TriviaService custom-question queries (C1)', () => {
 
     const promise = service.getQuestions({
       amount: 10,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,
@@ -643,7 +580,6 @@ describe('TriviaService custom-question queries (C1)', () => {
     // Mixed splits 10 into 5 from each source; asking for 10 here would double
     // the read this finding exists to bound.
     expect(getCustomQuestions).toHaveBeenCalledWith({
-      category: '',
       difficulty: '',
       limit: 5,
     });
@@ -713,11 +649,11 @@ describe('TriviaService deduplication (FEAT-034)', () => {
   }
 
   function customGame(amount: number) {
-    return { amount, category: '', difficulty: '', source: 'custom', timeLimit: 15 } as const;
+    return { amount, difficulty: '', source: 'custom', timeLimit: 15 } as const;
   }
 
   function openTriviaGame(amount: number) {
-    return { amount, category: '', difficulty: '', source: 'open_trivia', timeLimit: 15 } as const;
+    return { amount, difficulty: '', source: 'open_trivia', timeLimit: 15 } as const;
   }
 
   /** One Open Trivia DB result, as the API shapes it. */
@@ -857,7 +793,7 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
     await service.getQuestions(customGame(5));
 
-    expect(getCustomQuestions).toHaveBeenCalledWith({ category: '', difficulty: '', limit: 10 });
+    expect(getCustomQuestions).toHaveBeenCalledWith({ difficulty: '', limit: 10 });
   });
 
   it('reads exactly the game when the device has answered nothing', async () => {
@@ -865,7 +801,7 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
     await service.getQuestions(customGame(5));
 
-    expect(getCustomQuestions).toHaveBeenCalledWith({ category: '', difficulty: '', limit: 5 });
+    expect(getCustomQuestions).toHaveBeenCalledWith({ difficulty: '', limit: 5 });
   });
 
   it('caps the widened read, so the longest game does not read fifty documents twice', async () => {
@@ -873,7 +809,7 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
     await service.getQuestions(customGame(25));
 
-    expect(getCustomQuestions).toHaveBeenCalledWith({ category: '', difficulty: '', limit: 50 });
+    expect(getCustomQuestions).toHaveBeenCalledWith({ difficulty: '', limit: 50 });
   });
 
   it('does not consult the offline pool at all on a plain draw', async () => {
@@ -961,7 +897,7 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
   /**
    * Open Trivia DB gets no widened request — its `amount` is a requirement
-   * rather than a ceiling, so asking for more than a narrow category holds
+   * rather than a ceiling, so asking for more than a narrow topic holds
    * returns `response_code: 1` and no questions at all, and its rate limit
    * refuses a second call in the same draw. Its substitutions come from the
    * offline pool instead.
@@ -971,7 +907,6 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
     const promise = service.getQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -992,7 +927,6 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
     const promise = service.getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: 15,
@@ -1015,17 +949,17 @@ describe('TriviaService deduplication (FEAT-034)', () => {
 
     const drawn = await promise;
     expect(drawn.map((question) => question.question)).toEqual(['A question from the pool?']);
-    // Source-scoped, and filtered by the game's own category/difficulty — a
-    // substitution that ignored either would drop an off-topic question into a
-    // game the player filtered.
-    expect(getMatchingQuestions).toHaveBeenCalledWith('open_trivia', '', '');
+    // Source-scoped, and filtered by the topic this draw follows and the
+    // game's difficulty — a substitution that ignored either would drop an
+    // off-topic question into a game the player filtered.
+    expect(getMatchingQuestions).toHaveBeenCalledWith('open_trivia', [], '');
     httpMock.verify();
   });
 });
 
 /**
- * `FEAT-021`. Where the player's topic selection goes — and, more importantly,
- * where it does not.
+ * `FEAT-021`, `FEAT-052`. Where the player's topic selection goes — and, more
+ * importantly, where it does not.
  */
 describe('TriviaService topic tags (FEAT-021)', () => {
   function taggedDoc(id: string, tags?: unknown) {
@@ -1075,7 +1009,6 @@ describe('TriviaService topic tags (FEAT-021)', () => {
 
     await service.getQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1083,7 +1016,6 @@ describe('TriviaService topic tags (FEAT-021)', () => {
     });
 
     expect(getCustomQuestions).toHaveBeenCalledWith({
-      category: '',
       difficulty: '',
       limit: 5,
       tags: ['world-war-2'],
@@ -1091,24 +1023,23 @@ describe('TriviaService topic tags (FEAT-021)', () => {
   });
 
   /**
-   * The additive promise, asserted on the **shape of the options object**: no
-   * selection means no `tags` key at all, not an empty one. A clause that
-   * leaked into the default draw would not narrow the game — the bank is almost
-   * entirely untagged, so it would empty it.
+   * The any-topic promise, asserted on the **shape of the options object**: no
+   * selection means no `tags` key at all, not an empty one — and no `category`
+   * key either, since topics replaced categories (`FEAT-052`). This is exactly
+   * the query an "Any Category" game always sent; a clause that leaked into it
+   * would narrow every game to whatever happens to be tagged.
    */
   it('sends no tags key at all when nothing is selected', async () => {
     const { service, getCustomQuestions } = configure();
 
     await service.getQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
     });
     await service.getQuestions({
       amount: 5,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1116,28 +1047,26 @@ describe('TriviaService topic tags (FEAT-021)', () => {
     });
 
     expect(getCustomQuestions).toHaveBeenNthCalledWith(1, {
-      category: '',
       difficulty: '',
       limit: 5,
     });
     expect(getCustomQuestions).toHaveBeenNthCalledWith(2, {
-      category: '',
       difficulty: '',
       limit: 5,
     });
   });
 
   /**
-   * Only the bank carries tags, so a mixed game narrows its community half and
-   * leaves the Open Trivia DB half exactly as it was — which is what the setup
-   * screen's hint tells the player.
+   * A Mixed selection with no seed tag in it narrows the community half and
+   * draws the Open Trivia half unfiltered — `calculus` is not one of Open
+   * Trivia's former categories, so there is no `category` it could be sent as.
+   * The setup screen's hint says so before Start.
    */
-  it('narrows only the community half of a mixed game', async () => {
+  it('narrows only the community half of a mixed game with no seed tag', async () => {
     const { service, getCustomQuestions, httpMock } = configure();
 
     const promise = service.getQuestions({
       amount: 10,
-      category: '',
       difficulty: '',
       source: 'mixed',
       timeLimit: 15,
@@ -1145,17 +1074,194 @@ describe('TriviaService topic tags (FEAT-021)', () => {
     });
 
     const request = httpMock.expectOne((r) => r.url === 'https://opentdb.com/api.php');
-    // No tag parameter reaches Open Trivia DB — there is none to send.
+    // No category reaches Open Trivia DB — the selection holds no seed tag.
     expect(request.request.params.keys()).toEqual(['amount']);
     request.flush({ response_code: 0, results: [] });
     await promise;
 
     expect(getCustomQuestions).toHaveBeenCalledWith({
-      category: '',
       difficulty: '',
       limit: 5,
       tags: ['calculus'],
     });
+    httpMock.verify();
+  });
+
+  /**
+   * The request runs the seed-tag table backwards (`FEAT-052`): an Open Trivia
+   * game's one seed tag becomes the API's numeric `category`, straight from the
+   * table — no fetched category list, and no `api_category.php` request, which
+   * `httpMock.verify()` would report.
+   */
+  it('sends an Open Trivia game’s seed tag as the table’s category id', async () => {
+    const { service, httpMock, getCustomQuestions } = configure();
+
+    const promise = service.getQuestions({
+      amount: 5,
+      difficulty: 'hard',
+      source: 'open_trivia',
+      timeLimit: 15,
+      tags: ['history'],
+    });
+
+    const request = httpMock.expectOne((r) => r.url === 'https://opentdb.com/api.php');
+    expect(request.request.params.get('category')).toBe('23');
+    expect(request.request.params.get('difficulty')).toBe('hard');
+    request.flush({ response_code: 0, results: [] });
+    await promise;
+
+    expect(getCustomQuestions).not.toHaveBeenCalled();
+    httpMock.verify();
+  });
+
+  /**
+   * A Mixed game's Open Trivia half follows the **first seed tag** in the
+   * selection — the API takes one `category` per request — while the community
+   * half filters on every tag, seed or not.
+   */
+  it('sends a mixed game’s first seed tag to Open Trivia and every tag to the bank', async () => {
+    const { service, httpMock, getCustomQuestions } = configure();
+
+    const promise = service.getQuestions({
+      amount: 10,
+      difficulty: '',
+      source: 'mixed',
+      timeLimit: 15,
+      tags: ['calculus', 'sports', 'history'],
+    });
+
+    const request = httpMock.expectOne((r) => r.url === 'https://opentdb.com/api.php');
+    expect(request.request.params.get('category')).toBe('21');
+    expect(request.request.params.get('amount')).toBe('5');
+    request.flush({ response_code: 0, results: [] });
+    await promise;
+
+    expect(getCustomQuestions).toHaveBeenCalledWith({
+      difficulty: '',
+      limit: 5,
+      tags: ['calculus', 'sports', 'history'],
+    });
+    httpMock.verify();
+  });
+
+  it('sends no category to Open Trivia when no topic is chosen', async () => {
+    const { service, httpMock } = configure();
+
+    const promise = service.getQuestions({
+      amount: 5,
+      difficulty: '',
+      source: 'open_trivia',
+      timeLimit: 15,
+    });
+
+    const request = httpMock.expectOne((r) => r.url === 'https://opentdb.com/api.php');
+    expect(request.request.params.keys()).toEqual(['amount']);
+    request.flush({ response_code: 0, results: [] });
+    await promise;
+    httpMock.verify();
+  });
+
+  /**
+   * The response runs the table forwards: every fetched question carries its
+   * category's seed tag in memory, so the quiz card, the offline pool and the
+   * setup screen read an Open Trivia question's topic exactly as they read a
+   * contribution's. A name the table does not know yields no tag — and the
+   * question is still served.
+   */
+  it('stamps each fetched Open Trivia question with its seed tag, and serves an unknown one bare', async () => {
+    const { service, httpMock } = configure();
+
+    const promise = service.getQuestions({
+      amount: 2,
+      difficulty: '',
+      source: 'open_trivia',
+      timeLimit: 15,
+    });
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        results: [
+          {
+            category: 'Entertainment: Video Games',
+            type: 'multiple',
+            difficulty: 'easy',
+            question: 'Who is the plumber?',
+            correct_answer: 'Mario',
+            incorrect_answers: ['Link', 'Kirby', 'Sonic'],
+          },
+          {
+            category: 'Entertainment: Podcasts',
+            type: 'boolean',
+            difficulty: 'easy',
+            question: 'Podcasts exist.',
+            correct_answer: 'True',
+            incorrect_answers: ['False'],
+          },
+        ],
+      });
+
+    const questions = await promise;
+    const byText = (text: string) => questions.find((question) => question.question === text)!;
+    expect(byText('Who is the plumber?').tags).toEqual(['video-games']);
+    expect('tags' in byText('Podcasts exist.')).toBe(false);
+    expect(questions).toHaveLength(2);
+    httpMock.verify();
+  });
+
+  /**
+   * The deduplicating Open Trivia draw substitutes from the offline pool
+   * narrowed to the topic it was drawn under — the seed tag it followed, not
+   * the whole selection, since that is all the request asked the API for.
+   */
+  it('narrows the Open Trivia reserve to the seed tag the draw followed', async () => {
+    const getMatchingQuestions = vi.fn(() => Promise.resolve([]));
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getCustomQuestions: () => of([]) } },
+        {
+          provide: OfflineQuestionsService,
+          useValue: { getMatchingQuestions, getOfflineQuestions: () => Promise.resolve([]) },
+        },
+        {
+          provide: SeenQuestionsService,
+          useValue: {
+            readSeenSet: () => Promise.resolve(new Map([['otdb:whatever', 1]])),
+            markSeen: () => Promise.resolve(),
+          },
+        },
+      ],
+    });
+    const service = TestBed.inject(TriviaService);
+    const httpMock = TestBed.inject(HttpTestingController);
+
+    const promise = service.getQuestions({
+      amount: 1,
+      difficulty: '',
+      source: 'mixed',
+      timeLimit: 15,
+      tags: ['cold-war', 'history'],
+    });
+    httpMock
+      .expectOne((r) => r.url === 'https://opentdb.com/api.php')
+      .flush({
+        response_code: 0,
+        results: [
+          {
+            category: 'History',
+            type: 'boolean',
+            difficulty: 'easy',
+            question: 'The Berlin Wall fell in 1989.',
+            correct_answer: 'True',
+            incorrect_answers: ['False'],
+          },
+        ],
+      });
+    await promise;
+
+    expect(getMatchingQuestions).toHaveBeenCalledWith('open_trivia', ['history'], '');
     httpMock.verify();
   });
 
@@ -1164,7 +1270,6 @@ describe('TriviaService topic tags (FEAT-021)', () => {
 
     const [question] = await service.getQuestions({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,
@@ -1189,7 +1294,6 @@ describe('TriviaService topic tags (FEAT-021)', () => {
 
     const questions = await service.getQuestions({
       amount: 3,
-      category: '',
       difficulty: '',
       source: 'custom',
       timeLimit: 15,

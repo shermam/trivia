@@ -295,10 +295,6 @@
 
   <dl class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
     <div class="flex gap-1">
-      <dt>Category:</dt>
-      <dd>{{ question.category }}</dd>
-    </div>
-    <div class="flex gap-1">
       <dt>Difficulty:</dt>
       <dd>{{ question.difficulty }}</dd>
     </div>
@@ -317,15 +313,16 @@
   </dl>
 
   <!--
-    The contributor's topic tags (`FEAT-021`), so a reviewer can see whether a
-    question is tagged sensibly before approving it into the shared bank — a
-    wrongly-tagged question is drawn into games about a subject it is not about,
-    which is a quality problem only this screen can catch. Renders nothing when
-    there are none, which is most questions. Plain text always: a tag is a key
-    the filter compares, never prose, so it never goes near the Markdown
-    renderer whatever `format` says.
+    The question's topics (`FEAT-021`), so a reviewer can see whether it is
+    tagged sensibly before approving it into the shared bank — a wrongly-tagged
+    question is drawn into games about a subject it is not about, which is a
+    quality problem only this screen can catch. Read through the derivation
+    every reader shares (`FEAT-052`), so a question written before topics
+    replaced categories shows the tag its category derives rather than
+    nothing. Plain text always: a tag is a key the filter compares, never
+    prose, so it never goes near the Markdown renderer whatever `format` says.
   -->
-  <app-question-tags [tags]="question.tags" label="Topics" testId="review-question-tags" />
+  <app-question-tags [tags]="topicsOf(question)" label="Topics" testId="review-question-tags" />
 
   <!--
     The source, when the contributor gave one (FEAT-022). Styled to match the

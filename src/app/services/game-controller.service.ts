@@ -453,12 +453,12 @@ export class GameControllerService {
    * second press plays what was found; nothing is drawn again, so saying so
    * costs no extra read.
    *
-   * **Scoped to a tag-filtered draw on purpose.** A short draw has always been
-   * possible — a rare category, a narrow difficulty, a small bank — and
-   * interrupting those would change behaviour this feature has no business
-   * changing. A tag filter is different in kind: the bank is mostly untagged,
-   * so "fewer than you asked for" is the *expected* result rather than an
-   * unlucky one, and a player has no way to know that unless they are told.
+   * **Scoped to a tag-filtered draw on purpose.** An unfiltered draw can come
+   * back short too — a narrow difficulty, a small bank — and interrupting that
+   * would change behaviour this feature has no business changing. A tag filter
+   * is different in kind: much of the bank holds few tags, so "fewer than you
+   * asked for" is the *expected* result rather than an unlucky one, and a
+   * player has no way to know that unless they are told.
    */
   readonly shortDraw = signal<{ found: number; asked: number } | null>(null);
 
@@ -493,7 +493,7 @@ export class GameControllerService {
     try {
       // Pressing Start again on an unchanged selection accepts the short draw
       // that was just described. Any edit to the form — one tag more, a
-      // different category, a different count — makes this comparison fail and
+      // different source, a different count — makes this comparison fail and
       // draws again, so a stale confirmation cannot be applied to a selection
       // the player has since changed.
       const accepted = this.takeAcceptedDraw(config);
@@ -501,7 +501,7 @@ export class GameControllerService {
 
       if (questions.length === 0) {
         this.loadError.set(
-          'No questions were found for the selected options. Try a different category, difficulty, or source.',
+          'No questions were found for the selected options. Try a different topic, difficulty, or source.',
         );
         return;
       }
@@ -590,7 +590,6 @@ export class GameControllerService {
     const before = pending.config;
     const same =
       before.amount === config.amount &&
-      before.category === config.category &&
       before.difficulty === config.difficulty &&
       before.source === config.source &&
       before.timeLimit === config.timeLimit &&

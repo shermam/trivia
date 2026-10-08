@@ -97,6 +97,25 @@ export class FirebaseBackend {
   }
 
   /**
+   * Every question one account contributed, exactly as Firestore stores it —
+   * for the assertion a rendered card cannot make, which is about a field that
+   * is **absent**: a contribution carries its topics as tags and no `category`
+   * since topics replaced categories (`FEAT-052`), and no screen shows a
+   * category any more, so only the document can say none was written.
+   *
+   * **Scoped by author**, and the author is an account the test created for
+   * itself, so another worker's contributions never reach the assertion. One
+   * equality filter, which Firestore's automatic single-field index serves.
+   */
+  async getContributedQuestions(createdBy: string): Promise<Record<string, unknown>[]> {
+    const snapshot = await this.firestore
+      .collection('custom_questions')
+      .where('createdBy', '==', createdBy)
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  }
+
+  /**
    * The reports filed against these questions, read through the Admin SDK
    * because the only clients `firestore.rules` lets read `question_reports` are
    * the appointed reviewers (`FEAT-026`) — never the player who filed one, so

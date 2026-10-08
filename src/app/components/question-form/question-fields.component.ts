@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { AbstractControl, ReactiveFormsModule } from '@angular/forms';
-import { TriviaCategory } from '../../services/trivia.service';
 import { IconComponent } from '../icon/icon.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
@@ -33,8 +32,6 @@ import { QuestionForm, fieldErrorFor, showsFieldError } from './question-form';
 export class QuestionFieldsComponent {
   readonly form = input.required<QuestionForm>();
   readonly idPrefix = input('');
-  /** `<datalist>` suggestions; an empty list simply offers none. */
-  readonly categories = input<TriviaCategory[]>([]);
   /**
    * What was wrong with the last submit, or `null`. Rendered here rather than
    * by the host because it is announced from a live region that has to exist
@@ -52,5 +49,14 @@ export class QuestionFieldsComponent {
 
   protected errorFor(control: AbstractControl, label: string, maxLength: number): string {
     return fieldErrorFor(control, label, maxLength);
+  }
+
+  /**
+   * The topic picker's error, once the contributor has engaged with the form.
+   * Its own sentence rather than `fieldErrorFor`'s "Topics is required.": the
+   * fix is to add one, and saying so is what makes the message actionable.
+   */
+  protected topicsError(): string | null {
+    return showsFieldError(this.form().controls.tags) ? 'Add at least one topic.' : null;
   }
 }

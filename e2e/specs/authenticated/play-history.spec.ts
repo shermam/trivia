@@ -4,8 +4,9 @@ import { expect, test } from '../../fixtures/test';
 import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { PlayRecord } from '../../fixtures/types';
 import { openAuthMenu, signInViaUi } from '../../support/auth';
-import { answerQuestion, optionLabel, startNewGame, waitForPlayRoute } from '../../support/game';
-import { CORRECT_ANSWERS, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { answerQuestion, startNewGame } from '../../support/game';
+import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { runTag, startTopicGame } from '../../support/topics';
 
 const password = 'Str0ngPassw0rd!';
 
@@ -88,10 +89,12 @@ test.describe('per-player play history', () => {
       expect(answer.correct, 'every question was answered correctly').toBe(true);
       expect(answer.difficulty).toBe('easy');
       // Open Trivia ids are minted per fetch and mean nothing across batches,
-      // so the key is omitted rather than filled with one — and the same for
-      // tags, which that source does not have.
+      // so the key is omitted rather than filled with one.
       expect('questionId' in answer, 'no id for an Open Trivia question').toBe(false);
-      expect('tags' in answer, 'no tags for an Open Trivia question').toBe(false);
+      // Its topic is recorded, though: every fixture question is `General
+      // Knowledge`, which the adapter stamps with its seed tag (`FEAT-052`) —
+      // the same topic the quiz card showed.
+      expect(answer.tags, 'the seed tag of an Open Trivia question').toEqual(['general-knowledge']);
       // Bounded rather than exact: the number is real wall-clock time on a
       // shared runner, so the assertion is that it is a plausible duration and
       // not a placeholder.
@@ -119,15 +122,14 @@ test.describe('per-player play history', () => {
     const email = `plays-bank-${unique()}@example.com`;
     const { uid } = await firebase.createVerifiedUser({ email, password });
     const runId = unique();
-    // This test's own category, so the draw can only serve questions it seeded
-    // — the emulator is shared and the bank is not.
-    const category = `Play History ${runId}`;
+    // This test's own topic, so the draw can only serve questions it seeded —
+    // the emulator is shared and the bank is not (`e2e/support/topics.ts`).
+    const topic = runTag('plays');
     const questionIds = [0, 1, 2, 3, 4].map((index) => `play-history-${runId}-${index}`);
 
     await firebase.seedCustomQuestions(
       questionIds.map((id, index) => ({
         id,
-        category,
         type: 'multiple' as const,
         difficulty: 'hard' as const,
         question: `Play-history question ${index} (${runId})?`,
@@ -140,30 +142,19 @@ test.describe('per-player play history', () => {
         // which question came when.
         correct_answer: 'Right',
         incorrect_answers: [`Wrong ${index}a`, `Wrong ${index}b`, `Wrong ${index}c`],
-        tags: ['play-history', `run-${index}`],
+        tags: [topic, `run-${index}`],
       })),
     );
 
     await stubOpenTrivia(page);
-    // The setup screen's category list comes from Open Trivia DB, not from the
-    // bank, so a seeded custom category is not in the dropdown until the stub
-    // puts it there — which is also what keeps this draw to questions this test
-    // owns, against an emulator every worker is writing to.
-    await stubExtraCategory(page, category);
     await page.goto('/');
     await signInViaUi(page, email, password);
 
-    await expect(page.locator('#category')).toContainText(category);
-    await page.locator('#amount').selectOption({ label: '5' });
-    await page.locator('#category').selectOption(category);
-    await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
     // No deadline, so a starved worker cannot turn a question into a timeout
     // and make this a test about the countdown. A timeout would still be
     // recorded — as `correct: false` — so removing it costs the feature no
     // coverage (`docs/ci-cd.md` §4.3 records the same trade elsewhere).
-    await optionLabel(page, page.getByRole('radio', { name: 'No limit', exact: true })).click();
-    await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-    await waitForPlayRoute(page);
+    await startTopicGame(page, { topics: [topic], found: 5, noTimeLimit: true });
 
     // Five clicks on the same label. Answering disables every option until the
     // next question renders, and a Playwright click waits for an enabled
@@ -179,7 +170,7 @@ test.describe('per-player play history', () => {
     expect(play.answers.map((answer) => answer.questionId).sort()).toEqual([...questionIds].sort());
     for (const answer of play.answers) {
       expect(answer.difficulty).toBe('hard');
-      expect(answer.tags).toContain('play-history');
+      expect(answer.tags).toContain(topic);
     }
   });
 

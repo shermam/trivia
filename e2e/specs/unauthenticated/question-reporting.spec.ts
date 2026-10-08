@@ -3,8 +3,9 @@ import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
 import { expectRadiosAreGrouped } from '../../support/a11y';
-import { answerQuestion, optionLabel, startGame, waitForPlayRoute } from '../../support/game';
-import { questionsFixture, stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { answerQuestion, startGame } from '../../support/game';
+import { questionsFixture, stubOpenTrivia } from '../../support/open-trivia';
+import { runTag, startTopicGame } from '../../support/topics';
 
 /**
  * Finding H4 — the reporting path for community questions, driven as an
@@ -21,29 +22,29 @@ import { questionsFixture, stubExtraCategory, stubOpenTrivia } from '../../suppo
  * looking at, and game-over then leads with what they flagged. The dialog is
  * the escape hatch for "I noticed but didn't flag it", so it lists everything.
  *
- * **Every test seeds its own two questions under a category it invented**, and
+ * **Every test seeds its own two questions under a topic it invented**, and
  * that is the whole of its isolation. These tests assert on
  * *exactly* the questions they seeded — that the dialog offers both, that a
  * report was filed for one and none for the other — and the emulator is shared
  * by every worker in the run, so the game has to be served from a slice of the
- * bank that is this test's alone. The Category dropdown is built from the
- * stubbed Open Trivia response and its value goes straight into the
- * `custom_questions` query, so inventing a category and picking it is the whole
- * mechanism (see `stubExtraCategory`). The ids are unique per test for the same
- * reason, which is also what lets `getQuestionReports` be scoped rather than a
- * read of the whole collection.
+ * bank that is this test's alone. Choosing a tag only this test has written
+ * narrows the `custom_questions` query to its two questions in the query
+ * itself, so minting one and picking it is the whole mechanism
+ * (`e2e/support/topics.ts`). The ids are unique per test for the same reason,
+ * which is also what lets `getQuestionReports` be scoped rather than a read of
+ * the whole collection.
  */
 
-/** This test's own slice of the question bank: two questions, one category, nobody else's. */
-function seedFor(): { category: string; questions: (CustomQuestionSeed & { id: string })[] } {
+/** This test's own slice of the question bank: two questions, one topic, nobody else's. */
+function seedFor(): { topic: string; questions: (CustomQuestionSeed & { id: string })[] } {
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const category = `Reporting ${runId}`;
+  const topic = runTag('report');
   return {
-    category,
+    topic,
     questions: [
       {
         id: `report-q1-${runId}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         question: 'What planet do we live on?',
@@ -52,7 +53,7 @@ function seedFor(): { category: string; questions: (CustomQuestionSeed & { id: s
       },
       {
         id: `report-q2-${runId}`,
-        category,
+        tags: [topic],
         type: 'boolean',
         difficulty: 'easy',
         question: 'Water boils at 100°C at sea level.',
@@ -70,16 +71,10 @@ async function startCustomGame(
 ): Promise<void> {
   await firebase.seedCustomQuestions(seed.questions);
   await stubOpenTrivia(page);
-  await stubExtraCategory(page, seed.category);
   await page.goto('/');
-  // Stands in for a wait on the categories request, and does more: the
-  // invented category has to be in the dropdown before it can be selected.
-  await expect(page.locator('#category')).toContainText(seed.category);
-  await page.locator('#amount').selectOption({ label: '5' });
-  await page.locator('#category').selectOption(seed.category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
+  // Two questions against a five-question game: the setup screen says so and
+  // offers the two, and accepting is part of starting.
+  await startTopicGame(page, { topics: [seed.topic], found: seed.questions.length });
 }
 
 /**

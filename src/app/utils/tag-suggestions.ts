@@ -1,6 +1,8 @@
+import { SEED_TAGS } from './category-tags';
+
 /**
- * The starter tags offered on the contribute form and the setup screen's
- * filter (`FEAT-021`).
+ * The starter tags offered on the contribute form after the seed tags
+ * (`FEAT-021`, `FEAT-052`).
  *
  * **A hint, never a gate.** Nothing validates against this list: a tag outside
  * it is perfectly valid, `firestore.rules` has never heard of it, and a
@@ -14,11 +16,11 @@
  * tag is a Cloud Function, a volume cap and an idempotency problem for a number
  * whose only job is ordering an autocomplete list.
  *
- * **Exported for the generator** (`FEAT-020`), which will be given this same
- * list in its prompt and told to prefer an existing tag over inventing one —
- * which is where the great majority of tags will come from once the pipeline
- * runs. That is why it is a plain constant in `utils/` rather than something
- * private to the selector component.
+ * **Exported for the generator** (`FEAT-020`), which will be given this list
+ * in its prompt beside the seed tags and told to prefer an existing tag over
+ * inventing one — which is where the great majority of tags will come from once
+ * the pipeline runs. That is why it is a plain constant in `utils/` rather than
+ * something private to the selector component.
  *
  * Every entry is already normalised, so the picker never surprises anybody with
  * a chip that differs from the label they clicked. `normalize-tag.util.spec.ts`
@@ -26,9 +28,12 @@
  * against different rules — which is what keeps a hand-edited entry from
  * becoming a suggestion that cannot be selected.
  *
- * The categories are the ones Open Trivia DB's category list actually offers,
- * since those are what the setup screen's picker shows and therefore what a
- * contributor is most likely to be writing for.
+ * Grouped under the subjects Open Trivia DB's categories cover, because those
+ * are now the seed tags (`category-tags.ts`) and therefore what a contributor
+ * is most likely to be writing for: the starters are the finer topics beneath
+ * them. Five of them — `mythology`, `film`, `television`, `video-games` and
+ * `board-games` — are seed tags in their own right, which is why the contribute
+ * form's list is deduplicated rather than concatenated.
  */
 export const TAG_SUGGESTIONS: readonly string[] = [
   // History
@@ -83,4 +88,18 @@ export const TAG_SUGGESTIONS: readonly string[] = [
   // Everyday
   'food-and-drink',
   'languages',
+];
+
+/**
+ * What the contribute form and `/my-questions`' edit dialog offer: the seed
+ * tags first, then the starters above, each once (`FEAT-052` §0).
+ *
+ * **Seed tags lead because they are the ones a player can ask for by name.**
+ * A contribution tagged `history` is one tap away for every player who picks
+ * that topic on the setup screen — whose suggestions are the seed tags and
+ * nothing else — and it narrows both halves of a Mixed game, where a finer
+ * starter narrows only the community half.
+ */
+export const QUESTION_TAG_SUGGESTIONS: readonly string[] = [
+  ...new Set([...SEED_TAGS, ...TAG_SUGGESTIONS]),
 ];

@@ -98,7 +98,17 @@ export const ALL_LIFELINES_AVAILABLE: LifelineState = {
 
 export interface TriviaQuestion {
   id: string;
-  category: string;
+  /**
+   * The category the question was written under, where it has one
+   * (`FEAT-052`). Open Trivia DB names one on every question; a contribution
+   * written since topics replaced categories carries none.
+   *
+   * **Nothing displays or filters on it directly.** A reader that wants to
+   * know what a question is about asks `topicTagsOf()` (`category-tags.ts`),
+   * which reads `tags` and falls back to the tag this derives — so a question
+   * cached or stored before the change still shows a topic.
+   */
+  category?: string;
   type: QuestionType;
   difficulty: Difficulty;
   question: string;
@@ -138,13 +148,18 @@ export interface TriviaQuestion {
    */
   format?: QuestionFormat;
   /**
-   * Normalised topic tags (`FEAT-021`), for a question that came from the bank.
+   * Normalised topic tags (`FEAT-021`).
    *
-   * Absent on every Open Trivia DB question — the API exposes nothing like it,
-   * and nothing here invents one, for the same reason `format` describes no
-   * source with no stored documents. Rendered as plain-text chips and **never**
-   * through the Markdown renderer: a tag is a key the filter compares, not
-   * prose.
+   * A bank question carries what its contributor chose. An Open Trivia DB
+   * question carries its category's **seed tag**, stamped in memory by the
+   * adapter from the table in `category-tags.ts` (`FEAT-052`) — the API has no
+   * such field, so this is a property of the fetch, like the entity decoding
+   * beside it, and a category the table does not know yields none. Absent on a
+   * question that predates topics; readers go through `topicTagsOf()`, which
+   * derives one from `category` then.
+   *
+   * Rendered as plain-text chips and **never** through the Markdown renderer: a
+   * tag is a key the filter compares, not prose.
    */
   tags?: string[];
 }
@@ -181,18 +196,24 @@ export function isTimeLimitOption(value: unknown): value is TimeLimitOption {
 
 export interface GameConfig {
   amount: number;
-  category: string;
   difficulty: Difficulty | '';
   source: QuestionSource;
   timeLimit: TimeLimitOption;
   /**
-   * Topic tags the player asked for (`FEAT-021`). Empty or absent means no tag
-   * clause at all, which is the query the app has always run — the filter is
-   * additive, and this optional field is where that starts.
+   * The topics the game was drawn under (`FEAT-021`, `FEAT-052`) — the only
+   * topic choice there is, since the category picker went. Empty or absent
+   * means any topic: no tag clause in the community query and no `category` in
+   * the Open Trivia request.
    *
-   * Only the **bank** carries tags, so this narrows a `custom` draw and the
-   * custom half of a `mixed` one, and is not offered for an `open_trivia`
-   * game at all rather than being accepted and silently ignored.
+   * **It records what applied and nothing else.** An `open_trivia` game holds
+   * at most one seed tag, because that API takes one category per request; a
+   * `mixed` game holds up to ten tags, its Open Trivia half following the
+   * first seed tag among them; a `custom` game up to ten of any kind. A tag the
+   * draw did not use is not here, so a resumed game never claims a filter it
+   * was not drawn under.
+   *
+   * There is no `category` any more. A save written before topics replaced it
+   * still carries one, which `parseSavedGame` accepts and drops.
    */
   tags?: string[];
 }
@@ -259,7 +280,18 @@ export type QuestionStatus = 'approved' | 'pending' | 'rejected';
 
 /** The question content itself, independent of who submitted it or when. */
 export interface CustomQuestionContent {
-  category: string;
+  /**
+   * The free-text category every question written before `FEAT-052` carries.
+   *
+   * **Optional, and nothing writes it any more.** The contribute form asks for
+   * topics instead; `firestore.rules` keeps the key in its allowlist with the
+   * bounds it always had, so every existing document stays valid and its
+   * author can still edit it — and the edit drops it, because the form has no
+   * field to carry it back. Readers derive a tag from it through
+   * `topicTagsOf()`, and `scripts/backfill-category-tags.mjs` writes that tag
+   * onto the document so the draw can see it too.
+   */
+  category?: string;
   type: QuestionType;
   difficulty: Difficulty;
   question: string;
@@ -296,12 +328,16 @@ export interface CustomQuestionContent {
   format?: QuestionFormat;
   /**
    * Free-form topic tags, normalised by `normalizeTag()` before they are
-   * stored (`FEAT-021`).
+   * stored (`FEAT-021`) — and, since topics replaced categories, the question's
+   * only topic (`FEAT-052`).
    *
-   * Optional, and **zero tags is the normal case** — every question in the bank
-   * predates the field, and an untagged question is still drawn by every
-   * unfiltered game. Written only when there is at least one: an empty array
-   * would say what an absent key already says.
+   * **Required on create, optional on the shape.** `firestore.rules` refuses a
+   * new question with no tags, because a question the topic filter can never
+   * reach is a question nobody asking for a topic is served; the contribute
+   * form asks for at least one for the same reason. The field stays optional
+   * here because the bank still holds documents written before either rule —
+   * an untagged question is still drawn by every unfiltered game, and its
+   * author may still edit it.
    *
    * `firestore.rules` bounds it at eight entries, each a distinct lower-case
    * kebab-case string of 2–32 characters. The rule cannot call the normaliser,
@@ -425,7 +461,11 @@ export interface QuestionReport {
   createdAt: number | null;
 }
 
-/** Raw shape of a question as returned by the Open Trivia DB API. */
+/**
+ * Raw shape of a question as returned by the Open Trivia DB API. `category`
+ * is the API's own and always present; the adapter turns it into the
+ * question's seed tag (`category-tags.ts`).
+ */
 export interface OpenTriviaApiQuestion {
   category: string;
   type: QuestionType;

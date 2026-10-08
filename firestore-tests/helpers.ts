@@ -88,10 +88,16 @@ export async function grantReviewer(
  * A schema-valid `custom_questions` document; spread over it to build invalid
  * variants. `createdBy` must match the uid of whichever context writes it, so
  * it's a required argument rather than a default nobody notices is wrong.
+ *
+ * **The shape the app writes since topics replaced categories** (`FEAT-052`):
+ * tags, and no `category`. A create must carry at least one tag, so a default
+ * without them would make every accept case in the suite a refusal; a question
+ * written before the change — a category and no tags — is built explicitly by
+ * the tests that are about one.
  */
 export function validQuestion(createdBy: string, overrides: Record<string, unknown> = {}) {
   return {
-    category: 'Science',
+    tags: ['chemistry'],
     type: 'multiple',
     difficulty: 'easy',
     question: 'What is the chemical symbol for water?',

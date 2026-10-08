@@ -10,7 +10,6 @@ import {
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
 import { SubscriptionService } from '../../services/subscription.service';
-import { TriviaService } from '../../services/trivia.service';
 import { GameSetupComponent } from './game-setup.component';
 
 /**
@@ -26,8 +25,8 @@ function setup(
   // Held out of the stub below so a test can seed a short draw and then watch
   // the screen withdraw it (`FEAT-021`).
   const shortDraw = signal<{ found: number; asked: number } | null>(null);
-  // Returned so a test can take the browser offline, which is one of the two
-  // states that puts the topic filter out of reach (`FEAT-021`).
+  // Returned so a test can take the browser offline, which leaves the topic
+  // picker usable as a preference over the saved pool (`FEAT-052`).
   const isOnline = signal(true);
   const dailyLimit = {
     isUnlimited: signal(allowance.isUnlimited ?? false),
@@ -58,7 +57,6 @@ function setup(
       // and read the `stripeRole` claim to answer a question these tests hand
       // it the answer to.
       { provide: DailyGameLimitService, useValue: dailyLimit },
-      { provide: TriviaService, useValue: { getCategories: () => Promise.resolve([]) } },
       { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
       { provide: ConnectivityService, useValue: { isOnline } },
       { provide: OfflineQuestionsService, useValue: { cachedCount: signal(0) } },
@@ -149,7 +147,9 @@ describe('GameSetupComponent — the config it emits (B11)', () => {
     // value, not only in the reader that noticed it.
     const config = startGame.mock.calls[0][0];
     expect(typeof config.amount).toBe('number');
-    expect(typeof config.category).toBe('string');
+    // No category any more (`FEAT-052`): the topic picker is the only topic
+    // choice, and an untouched one sends no topic at all.
+    expect('category' in config).toBe(false);
     expect(typeof config.difficulty).toBe('string');
     expect(config.source).toBe('open_trivia');
     expect(config.timeLimit).toBe(15);
@@ -192,18 +192,28 @@ describe('GameSetupComponent — the daily allowance', () => {
 });
 
 /**
- * The topic filter (`FEAT-021`).
+ * The topic picker (`FEAT-021`, `FEAT-052`) — the game's only topic choice.
  *
  * What the picker does with a keystroke is `tag-selector.component.spec.ts`'
  * subject. What this screen has to get right is narrower and easier to get
- * wrong: **what reaches `GameConfig`**, and when the filter is offered at all.
+ * wrong: **what reaches `GameConfig`** for each source, and what the picker is
+ * told the source can take.
  */
-describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
-  /** Picks a suggestion the way a player does, through the real button. */
+describe('GameSetupComponent — the topic picker (FEAT-052)', () => {
+  const el = (fixture: ReturnType<typeof setup>['fixture']) => fixture.nativeElement as HTMLElement;
+
+  /**
+   * Picks a suggestion the way a player does, through the real button. The
+   * shortcut strip is filled on the first focus inside the picker (or the
+   * first idle moment), so the focus comes first — which is also the order a
+   * player's gesture produces.
+   */
   function chooseTopic(fixture: ReturnType<typeof setup>['fixture'], tag: string): void {
-    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
-      `[data-cy="suggest-tag-${tag}"]`,
-    );
+    el(fixture)
+      .querySelector('[data-cy="filter-tag-input"]')!
+      .dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    fixture.detectChanges();
+    const button = el(fixture).querySelector<HTMLButtonElement>(`[data-cy="suggest-tag-${tag}"]`);
     if (!button) {
       throw new Error(`no "${tag}" suggestion — the test is asserting against markup that changed`);
     }
@@ -211,8 +221,18 @@ describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
     fixture.detectChanges();
   }
 
+  /** Types a topic and presses Enter, for one that is not among the suggestions. */
+  function typeTopic(fixture: ReturnType<typeof setup>['fixture'], text: string): void {
+    const input = el(fixture).querySelector<HTMLInputElement>('[data-cy="filter-tag-input"]')!;
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    fixture.detectChanges();
+  }
+
   function chooseSource(fixture: ReturnType<typeof setup>['fixture'], value: string): void {
-    const radio = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>(
+    const radio = el(fixture).querySelector<HTMLInputElement>(
       `input[type="radio"][value="${value}"]`,
     )!;
     radio.click();
@@ -222,117 +242,265 @@ describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
   /** What the submit button currently offers to do. */
   function startButtonLabel(fixture: ReturnType<typeof setup>['fixture']): string {
     return (
-      (fixture.nativeElement as HTMLElement)
-        .querySelector<HTMLElement>('button[type="submit"]')
-        ?.textContent?.trim() ?? ''
+      el(fixture).querySelector<HTMLElement>('button[type="submit"]')?.textContent?.trim() ?? ''
     );
   }
 
-  function feedback(fixture: ReturnType<typeof setup>['fixture']): string {
-    return (
-      (fixture.nativeElement as HTMLElement)
-        .querySelector<HTMLElement>('[data-cy="filter-tag-feedback"]')
-        ?.textContent?.trim() ?? ''
+  const textOf = (fixture: ReturnType<typeof setup>['fixture'], testId: string): string =>
+    el(fixture).querySelector<HTMLElement>(`[data-cy="${testId}"]`)?.textContent?.trim() ?? '';
+
+  const chips = (fixture: ReturnType<typeof setup>['fixture']): string[] =>
+    [...el(fixture).querySelectorAll<HTMLElement>('[data-cy="selected-tag"]')].map(
+      (chip) => chip.textContent?.trim().split(/\s+/)[0] ?? '',
     );
-  }
 
   /**
-   * The additive promise at the screen's own boundary: a player who never
-   * touches the filter emits a config with **no** `tags` key, so nothing
-   * downstream can add a clause. An empty array here would be harmless today
-   * and one `length` check away from emptying every game tomorrow.
+   * "Any topic", for every source: a player who never touches the picker emits
+   * a config with **no** `tags` key, so nothing downstream can add a clause —
+   * the draw is the one "Any Category" always made. An empty array here would
+   * be harmless today and one `length` check away from emptying every game.
    */
-  it('emits no tags key when the player chooses no topic', () => {
+  it('emits no tags key when the player chooses no topic, whatever the source', () => {
     const { fixture, startGame } = setup();
 
-    submit(fixture);
+    for (const source of ['open_trivia', 'custom', 'mixed']) {
+      chooseSource(fixture, source);
+      submit(fixture);
+    }
 
-    expect('tags' in startGame.mock.calls[0][0]).toBe(false);
+    expect(startGame).toHaveBeenCalledTimes(3);
+    for (const [config] of startGame.mock.calls) {
+      expect('tags' in config).toBe(false);
+    }
     fixture.destroy();
   });
 
-  it('emits the topics the player chose', () => {
+  it('offers the seed tags — Open Trivia’s former categories — as its suggestions', () => {
+    const { fixture } = setup();
+
+    chooseTopic(fixture, 'general-knowledge');
+
+    const offered = [
+      ...el(fixture).querySelectorAll<HTMLElement>('[data-cy="filter-tag-suggestions"] button'),
+    ].map((button) => button.textContent?.trim());
+    expect(offered).toHaveLength(24);
+    expect(offered[0]).toBe('#general-knowledge');
+    expect(offered).toContain('#video-games');
+    fixture.destroy();
+  });
+
+  describe('for an Open Trivia game', () => {
+    it('emits the one seed tag chosen', () => {
+      const { fixture, startGame } = setup();
+
+      chooseTopic(fixture, 'history');
+      submit(fixture);
+
+      expect(startGame.mock.calls[0][0].tags).toEqual(['history']);
+      fixture.destroy();
+    });
+
+    /** A single choice, as the category `<select>` was: picking another swaps it in. */
+    it('swaps a second seed tag in for the first', () => {
+      const { fixture, startGame } = setup();
+
+      chooseTopic(fixture, 'history');
+      chooseTopic(fixture, 'sports');
+      submit(fixture);
+
+      expect(chips(fixture)).toEqual(['#sports']);
+      expect(startGame.mock.calls[0][0].tags).toEqual(['sports']);
+      fixture.destroy();
+    });
+
+    /** Refused out loud: a topic the API cannot be asked for would be ignored by the draw. */
+    it('refuses a typed topic that is not a seed tag, and says why', () => {
+      const { fixture, startGame } = setup();
+
+      typeTopic(fixture, 'World War 2');
+      submit(fixture);
+
+      expect(textOf(fixture, 'filter-tag-feedback')).toContain(
+        'Open Trivia plays only the suggested topics',
+      );
+      expect(textOf(fixture, 'filter-tag-status')).toContain('#world-war-2 was not added');
+      expect('tags' in startGame.mock.calls[0][0]).toBe(false);
+      fixture.destroy();
+    });
+  });
+
+  describe('switching into Open Trivia', () => {
+    /**
+     * The selection keeps its first seed tag and loses the rest, and says so in
+     * the feedback line and from the live region — the state that would
+     * otherwise be silent, with topics on screen the game was never going to
+     * play.
+     */
+    it('keeps the first seed tag, removes the rest and says what went', () => {
+      const { fixture, startGame } = setup();
+
+      chooseSource(fixture, 'custom');
+      typeTopic(fixture, 'world war 2');
+      chooseTopic(fixture, 'history');
+      chooseTopic(fixture, 'sports');
+      chooseSource(fixture, 'open_trivia');
+
+      expect(chips(fixture)).toEqual(['#history']);
+      expect(textOf(fixture, 'filter-tag-feedback')).toBe(
+        'Open Trivia plays one suggested topic, so the others were removed.',
+      );
+      expect(textOf(fixture, 'filter-tag-status')).toBe(
+        'Open Trivia plays one suggested topic. Kept #history; removed #world-war-2 and #sports.',
+      );
+
+      submit(fixture);
+      expect(startGame.mock.calls[0][0].tags).toEqual(['history']);
+      fixture.destroy();
+    });
+
+    it('empties a selection with no seed tag in it, and says so', () => {
+      const { fixture, startGame } = setup();
+
+      chooseSource(fixture, 'custom');
+      typeTopic(fixture, 'cold war');
+      chooseSource(fixture, 'open_trivia');
+
+      expect(chips(fixture)).toEqual([]);
+      expect(textOf(fixture, 'filter-tag-feedback')).toBe(
+        'Open Trivia plays only the suggested topics, so yours were removed.',
+      );
+      expect(textOf(fixture, 'filter-tag-status')).toBe(
+        'Open Trivia plays only the suggested topics. Removed #cold-war.',
+      );
+
+      submit(fixture);
+      expect('tags' in startGame.mock.calls[0][0]).toBe(false);
+      fixture.destroy();
+    });
+
+    it('withdraws that notice on leaving Open Trivia again', () => {
+      const { fixture } = setup();
+
+      chooseSource(fixture, 'custom');
+      typeTopic(fixture, 'cold war');
+      chooseSource(fixture, 'open_trivia');
+      chooseSource(fixture, 'mixed');
+
+      expect(textOf(fixture, 'filter-tag-feedback')).toBe('0 of 10 chosen.');
+      fixture.destroy();
+    });
+  });
+
+  describe('for a Mixed game', () => {
+    /** Every topic reaches the config: the community half filters on all of them. */
+    it('emits every topic chosen', () => {
+      const { fixture, startGame } = setup();
+
+      chooseSource(fixture, 'mixed');
+      typeTopic(fixture, 'world war 2');
+      chooseTopic(fixture, 'history');
+      submit(fixture);
+
+      expect(startGame.mock.calls[0][0].tags).toEqual(['world-war-2', 'history']);
+      fixture.destroy();
+    });
+
+    /** The Open Trivia half follows the first seed tag, and the hint names it before Start. */
+    it('names the topic the Open Trivia half follows, or says it covers every topic', () => {
+      const { fixture } = setup();
+
+      chooseSource(fixture, 'mixed');
+      typeTopic(fixture, 'world war 2');
+      expect(textOf(fixture, 'filter-tag-hint')).toContain('cover every topic');
+
+      chooseTopic(fixture, 'sports');
+      chooseTopic(fixture, 'history');
+      expect(textOf(fixture, 'filter-tag-hint')).toContain('Open Trivia ones follow #sports');
+      fixture.destroy();
+    });
+  });
+
+  it('emits any topic for a Custom game, typed or suggested', () => {
     const { fixture, startGame } = setup();
 
     chooseSource(fixture, 'custom');
-    chooseTopic(fixture, 'world-war-2');
+    typeTopic(fixture, 'world war 2');
+    chooseTopic(fixture, 'history');
     submit(fixture);
 
-    expect(startGame.mock.calls[0][0].tags).toEqual(['world-war-2']);
+    expect(startGame.mock.calls[0][0].tags).toEqual(['world-war-2', 'history']);
     fixture.destroy();
   });
 
   /**
-   * Only the community bank carries tags, so the filter is put out of reach for
-   * an Open Trivia DB game rather than accepted and quietly ignored — and it
-   * says which, because switching source is the fix.
+   * Offline the picker stays usable — the selection narrows the saved pool as a
+   * preference, as the category did — so it is neither disabled nor dropped.
    */
-  it('is unavailable for an Open Trivia game, and says why', () => {
-    const { fixture } = setup();
+  it('stays usable offline, and sends what was chosen', () => {
+    const { fixture, startGame, isOnline } = setup();
 
-    expect(feedback(fixture)).toContain('Only community questions carry topics');
+    isOnline.set(false);
+    fixture.detectChanges();
+    chooseTopic(fixture, 'history');
+    submit(fixture);
+
+    expect(
+      el(fixture).querySelector<HTMLInputElement>('[data-cy="filter-tag-input"]')?.disabled,
+    ).toBe(false);
+    expect(startGame.mock.calls[0][0].tags).toEqual(['history']);
     fixture.destroy();
   });
 
   /**
    * The hint that is showing has to be one of the strings the picker was given
-   * to reserve the line's height against, or the line is sized for a message it
-   * will never carry and rewraps under the reader when the other one arrives.
-   * Both sources with topics are walked, because the reserve is only as good as
-   * its *worst* member.
+   * to reserve the line's height against, or the line is sized for messages it
+   * may not carry and rewraps under the reader when another arrives. Every
+   * source and every Mixed state is walked, because the reserve is only as good
+   * as its *worst* member.
    *
-   * jsdom has no layout, so what this can assert is the pairing; the sixteen
-   * pixels it is worth are measured in `tag-filter.spec.ts` at a viewport wide
-   * enough for the two hints to wrap differently.
+   * jsdom has no layout, so what this can assert is the pairing; what it is
+   * worth is measured in `tag-filter.spec.ts`.
    */
   it('shows only hints it also reserves space for', () => {
     const { fixture } = setup();
-    const el = fixture.nativeElement as HTMLElement;
     const reserved = () =>
-      [...el.querySelectorAll('[data-cy="filter-tag-hint-reserve"]')].map((twin) =>
+      [...el(fixture).querySelectorAll('[data-cy="filter-tag-hint-reserve"]')].map((twin) =>
         twin.textContent?.trim(),
       );
+    const showing = () => textOf(fixture, 'filter-tag-hint');
+    const seen = new Set<string>();
+    const check = () => {
+      expect(showing()).toBeTruthy();
+      expect(reserved()).toContain(showing());
+      seen.add(showing());
+    };
 
-    for (const source of ['custom', 'mixed']) {
-      chooseSource(fixture, source);
-      const showing = el.querySelector('[data-cy="filter-tag-hint"]')?.textContent?.trim();
+    check();
+    chooseSource(fixture, 'custom');
+    check();
+    chooseSource(fixture, 'mixed');
+    check();
+    typeTopic(fixture, 'cold war');
+    check();
+    chooseTopic(fixture, 'japanese-anime-manga');
+    check();
 
-      expect(showing).toBeTruthy();
-      expect(reserved()).toContain(showing);
-    }
-
-    // Two distinct hints rather than one repeated, which is what makes the
-    // reserve necessary in the first place.
-    expect(new Set(reserved()).size).toBe(2);
+    expect(seen.size).toBe(5);
     fixture.destroy();
   });
 
-  it('is unavailable offline, and says why', () => {
-    const { fixture, isOnline } = setup();
+  /** The notices about Open Trivia's rule are reserved too, so arriving moves nothing below. */
+  it('reserves the feedback line for every Open Trivia notice', () => {
+    const { fixture } = setup();
+    const reserved = [
+      ...el(fixture).querySelectorAll('[data-cy="filter-tag-feedback-reserve"]'),
+    ].map((twin) => twin.textContent?.trim());
 
-    chooseSource(fixture, 'custom');
-    isOnline.set(false);
-    fixture.detectChanges();
-
-    expect(feedback(fixture)).toContain('Offline games');
-    fixture.destroy();
-  });
-
-  /**
-   * The state that would otherwise be silent: a player picks topics on a Custom
-   * game, then switches back to Open Trivia. The selection is still in the
-   * control, and sending it would describe a game that was never filtered —
-   * including in the snapshot a resume reads back.
-   */
-  it('drops a selection the source can no longer use', () => {
-    const { fixture, startGame } = setup();
-
-    chooseSource(fixture, 'custom');
-    chooseTopic(fixture, 'world-war-2');
-    chooseSource(fixture, 'open_trivia');
-    submit(fixture);
-
-    expect('tags' in startGame.mock.calls[0][0]).toBe(false);
+    expect(reserved).toEqual([
+      'Open Trivia plays only the suggested topics — Custom and Mixed take any.',
+      'Open Trivia plays one suggested topic, so the others were removed.',
+      'Open Trivia plays only the suggested topics, so yours were removed.',
+    ]);
     fixture.destroy();
   });
 
@@ -347,16 +515,15 @@ describe('GameSetupComponent — the topic filter (FEAT-021)', () => {
     const { fixture, shortDraw } = setup();
 
     chooseSource(fixture, 'custom');
-    chooseTopic(fixture, 'world-war-2');
+    chooseTopic(fixture, 'history');
     shortDraw.set({ found: 3, asked: 20 });
     fixture.detectChanges();
 
-    const notice = () =>
-      (fixture.nativeElement as HTMLElement).querySelector('[data-cy="short-draw-notice"]');
+    const notice = () => el(fixture).querySelector('[data-cy="short-draw-notice"]');
     expect(notice()).not.toBeNull();
     expect(startButtonLabel(fixture)).toContain('Play 3 Questions');
 
-    chooseTopic(fixture, 'cold-war');
+    chooseTopic(fixture, 'sports');
 
     expect(shortDraw()).toBeNull();
     expect(notice()).toBeNull();

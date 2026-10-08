@@ -15,6 +15,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/**
+ * Lets pending promise continuations run, and nothing else: every step is a
+ * microtask, so no timer callback — fake or real — can run in between.
+ */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve();
+  }
+}
+
 /** Runs `promise` while draining the fake timer queue, so awaits inside resolve. */
 async function settle<T>(promise: Promise<T>): Promise<T> {
   const result = promise.then(
@@ -146,12 +156,31 @@ describe('pollUntil', () => {
     // implementation does — the assertion was a tautology, and a leaked
     // one-hour timer per iteration passed it. Advancing by exactly one
     // interval instead leaves any leaked timer still pending and countable.
+    //
+    // And deliberately never yielding to the event loop between a fresh clock
+    // and the count, so the count is pollUntil's alone. The unit suite runs
+    // non-isolated (`@angular/build:unit-test` defaults `isolate` to false), so
+    // a real timer another file left armed fires in whichever file its worker
+    // has moved on to — and `advanceTimersByTimeAsync` lets real macrotasks run
+    // between its ticks. One did, here: `App`'s bootstrap timer from
+    // `app.spec.ts`, whose callback armed fake timers of its own that this
+    // count then blamed on pollUntil. With a clock installed in this body and
+    // only microtasks after it, no other code can run until the last line.
+    vi.useFakeTimers();
     const attempt = vi.fn().mockResolvedValueOnce(null).mockResolvedValue('done');
 
     const pending = pollUntil(attempt, { intervalMs: 500, timeoutMs: 20_000 });
-    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+    // The first attempt said "not yet", so the poll is waiting out its
+    // interval — and the count can see that timer, or the zero below would
+    // prove nothing.
+    expect(attempt).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+
+    vi.advanceTimersByTime(500);
 
     expect(await pending).toBe('done');
+    expect(attempt).toHaveBeenCalledTimes(2);
     // A poll that resolved while still holding a pending timer is the same
     // leak `Promise.race` had against `onSnapshot` (`CLAUDE.md` §4.4).
     expect(vi.getTimerCount()).toBe(0);

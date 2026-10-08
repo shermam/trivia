@@ -17,13 +17,11 @@ test.describe('segmented radio groups (G4)', () => {
   test('labels the question-source picker on the setup screen', async ({ page }) => {
     await stubOpenTrivia(page);
     await page.goto('/');
-    // Stands in for a wait on the categories request: the dropdown is built
-    // from the stubbed response, so a stubbed name appearing in it means the
-    // setup *screen* is really rendered, which is the screen this test names.
-    // The sweep below waits for the radios itself, so this is not what keeps it
-    // from running against a blank page — it is what stops the test passing on
-    // some other screen that happens to have radios on it.
-    await expect(page.locator('#category')).toContainText('General Knowledge');
+    // The setup *screen* is really rendered, which is the screen this test
+    // names. The sweep below waits for the radios itself, so this is not what
+    // keeps it from running against a blank page — it is what stops the test
+    // passing on some other screen that happens to have radios on it.
+    await expect(page.getByRole('button', { name: 'Start Game', exact: true })).toBeVisible();
 
     await expectRadiosAreGrouped(page);
 

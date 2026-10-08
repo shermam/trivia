@@ -2,8 +2,8 @@ import { Locator, Page } from '@playwright/test';
 import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { authMenu, openAuthMenu, signInViaUi } from '../../support/auth';
-import { optionLabel, waitForPlayRoute } from '../../support/game';
-import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
+import { stubOpenTrivia } from '../../support/open-trivia';
+import { addQuestionTopic, configureTopicGame, runTag, startTopicGame } from '../../support/topics';
 
 /**
  * `/my-questions` end to end (`FEAT-007`).
@@ -23,9 +23,10 @@ import { stubExtraCategory, stubOpenTrivia } from '../../support/open-trivia';
  * **Everything this file touches carries a per-test tag**, and that is the whole
  * of its isolation. Workers share one emulator, so `custom_questions` holds
  * every other test's contributions: the tag goes in the question text, the
- * document ids, the accounts, and a **category** that exists for this test
- * alone, which is what makes the custom game below deterministic rather than a
- * draw from whatever the bank happens to hold.
+ * document ids and the accounts, and every question carries a **topic** that
+ * exists for this test alone, which is what makes the custom game below
+ * deterministic rather than a draw from whatever the bank happens to hold
+ * (`e2e/support/topics.ts`).
  *
  * Questions submitted through the UI get Firestore auto-ids that reach no sweep
  * list, which is why this spec is emulator-only — the same reason
@@ -35,13 +36,12 @@ test.describe('my questions', () => {
   const password = 'Password123!';
 
   let tag: string;
-  let category: string;
+  let topic: string;
 
   test.beforeEach(async ({ page }) => {
     tag = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    category = `Mine ${tag}`;
+    topic = runTag('mine');
     await stubOpenTrivia(page);
-    await stubExtraCategory(page, category);
   });
 
   /**
@@ -108,9 +108,10 @@ test.describe('my questions', () => {
     await createReviewer(firebase);
     await signIn(page, authorEmail());
 
-    // 1. Contribute.
+    // 1. Contribute — with a topic, which a contribution cannot be submitted
+    // without since topics replaced categories (`FEAT-052`).
     await page.goto('/add-question');
-    await page.locator('#category').fill(category);
+    await addQuestionTopic(page, topic);
     await page.locator('#question').fill(submitted);
     await page.locator('#correctAnswer').fill('Jupiter');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('Mars');
@@ -207,7 +208,7 @@ test.describe('my questions', () => {
    *
    * Seeded rather than submitted, because this one has to start **approved** —
    * a pending question is not in the draw to begin with, so removing it would
-   * prove nothing. Exactly one approved question exists in this category, so
+   * prove nothing. Exactly one approved question carries this test's topic, so
    * the game is deterministic and the "no questions" state after removal is
    * about this test's own bank rather than about the emulator's.
    */
@@ -218,7 +219,7 @@ test.describe('my questions', () => {
     await firebase.seedCustomQuestions([
       {
         id: `mine-${tag}`,
-        category,
+        tags: [topic],
         type: 'multiple',
         difficulty: 'easy',
         question: live,
@@ -232,7 +233,8 @@ test.describe('my questions', () => {
 
     // The positive control, and the reason this test is not vacuous: the
     // question really is being served before it is withdrawn.
-    await startCustomGame(page, category);
+    await page.goto('/');
+    await startTopicGame(page, { topics: [topic], found: 1 });
     await expect(page.getByText(live)).toBeVisible();
 
     await page.goto('/my-questions');
@@ -241,12 +243,10 @@ test.describe('my questions', () => {
     await page.getByTestId('remove-question-dialog').getByTestId('confirm-remove').click();
     await expect(myRows(page)).toHaveCount(0);
 
-    // Nothing approved is left in this category, so the draw comes up empty
+    // Nothing approved is left under this topic, so the draw comes up empty
     // rather than serving the withdrawn question.
     await page.goto('/');
-    await page.locator('#amount').selectOption({ label: '5' });
-    await page.locator('#category').selectOption(category);
-    await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
+    await configureTopicGame(page, { topics: [topic] });
     await page.getByRole('button', { name: 'Start Game', exact: true }).click();
     await expect(page.getByText('No questions were found for the selected options.')).toBeVisible();
   });
@@ -276,25 +276,4 @@ test.describe('my questions', () => {
 /** The Pending / Approved / Rejected / Reports picker, by view rather than by label. */
 function reviewTab(page: Page, view: 'pending' | 'approved' | 'rejected' | 'reports'): Locator {
   return page.locator(`[data-cy="review-tab"][data-status="${view}"]`);
-}
-
-/**
- * Starts a **Custom** game in one category. Not `startGame`, which uses the Open
- * Trivia source and never reads `custom_questions` at all — an assertion about
- * the bank after that would hold no matter what the draw did.
- *
- * The category is what makes it deterministic: `getCustomQuestions` filters on
- * it server-side, so a category only this test has written to holds only this
- * test's questions however busy the shared bank is.
- */
-async function startCustomGame(page: Page, category: string): Promise<void> {
-  await page.goto('/');
-  await page.locator('#amount').selectOption({ label: '5' });
-  // Retries until the stubbed category list has actually populated the picker,
-  // which is the thing a wait on the categories request would be standing in
-  // for.
-  await page.locator('#category').selectOption(category);
-  await optionLabel(page, page.getByRole('radio', { name: 'Custom', exact: true })).click();
-  await page.getByRole('button', { name: 'Start Game', exact: true }).click();
-  await waitForPlayRoute(page);
 }

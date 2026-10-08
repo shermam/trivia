@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Difficulty, GameConfig, TriviaQuestion } from '../models/question.model';
+import { topicTagsOf } from '../utils/category-tags';
 import { shuffleArray } from '../utils/shuffle.util';
 import { OfflineDbService, QUESTIONS_STORE as STORE_NAME } from './offline-db.service';
 
@@ -39,6 +40,25 @@ function dedupeKeyFor(question: TriviaQuestion): string {
   return question.source === 'custom'
     ? `custom:${question.id}`
     : `open_trivia:${question.question}`;
+}
+
+/**
+ * Whether a pooled question is about any of the selected topics — the offline
+ * equivalent of the community query's `array-contains-any` (`FEAT-052`).
+ *
+ * Read through `topicTagsOf`, the derivation every reader shares, because the
+ * pool outlives deploys: a question cached before topics replaced categories
+ * carries a `category` and no `tags`, and it is read as carrying the tag that
+ * category derives rather than as being about nothing. Nothing in the store
+ * needs migrating for that, and an Open Trivia question cached since carries
+ * its seed tag already.
+ */
+function isAboutAnyOf(question: TriviaQuestion, topics: readonly string[]): boolean {
+  if (topics.length === 0) {
+    return true;
+  }
+  const tags = topicTagsOf(question);
+  return topics.some((topic) => tags.includes(topic));
 }
 
 /**
@@ -103,20 +123,22 @@ export class OfflineQuestionsService {
   /**
    * Best-effort offline draw: never crosses `source` — a "Custom" request only ever draws from
    * cached `custom`-sourced questions (and vice versa for "Open Trivia"), never silently
-   * substituting the other, since that's a stronger promise to the player than category/
+   * substituting the other, since that's a stronger promise to the player than topic/
    * difficulty ("community question bank" vs "random trivia" isn't a matter of degree). Within
-   * that source-scoped pool, category/difficulty are only a *preference* — falls back to the
-   * whole source-scoped pool if too few match, since a mismatched-topic offline game beats no
-   * offline game at all.
+   * that source-scoped pool, the selected topics and the difficulty are only a *preference* —
+   * falls back to the whole source-scoped pool if too few match, since a mismatched-topic
+   * offline game beats no offline game at all. A question matches when it is about **any** of
+   * the selected topics (`FEAT-052`), as it would in the community query.
    */
   async getOfflineQuestions(config: GameConfig): Promise<TriviaQuestion[]> {
-    const { amount, category, difficulty, source } = config;
+    const { amount, difficulty, source } = config;
+    const topics = config.tags ?? [];
     const all = await this.getAllQuestions();
 
     const sourceScoped = source === 'mixed' ? all : all.filter((q) => q.source === source);
 
     const filtered = sourceScoped.filter(
-      (q) => (!category || q.category === category) && (!difficulty || q.difficulty === difficulty),
+      (q) => isAboutAnyOf(q, topics) && (!difficulty || q.difficulty === difficulty),
     );
     const pool = filtered.length >= Math.min(amount, sourceScoped.length) ? filtered : sourceScoped;
 
@@ -128,8 +150,8 @@ export class OfflineQuestionsService {
    * deduplicating draw substitutes from (`FEAT-034`, `TriviaService`).
    *
    * **Two things separate this from `getOfflineQuestions()` above, and both
-   * follow from it being used while the network is working.** It applies
-   * category and difficulty as a *filter* rather than a preference, because
+   * follow from it being used while the network is working.** It applies the
+   * topics and the difficulty as a *filter* rather than a preference, because
    * substituting an off-topic question into a game the player filtered would
    * be a worse outcome than serving a repeat — the preference fallback there
    * is justified by "a mismatched-topic offline game beats no offline game at
@@ -142,7 +164,7 @@ export class OfflineQuestionsService {
    */
   async getMatchingQuestions(
     source: TriviaQuestion['source'],
-    category: string,
+    topics: readonly string[],
     difficulty: Difficulty | '',
   ): Promise<TriviaQuestion[]> {
     let all: TriviaQuestion[];
@@ -154,7 +176,7 @@ export class OfflineQuestionsService {
     return all.filter(
       (question) =>
         question.source === source &&
-        (!category || question.category === category) &&
+        isAboutAnyOf(question, topics) &&
         (!difficulty || question.difficulty === difficulty),
     );
   }

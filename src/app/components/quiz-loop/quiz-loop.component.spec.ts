@@ -96,7 +96,6 @@ function setup(
   const gameController = {
     config: signal<GameConfig | null>({
       amount: 1,
-      category: '',
       difficulty: '',
       source: 'open_trivia',
       timeLimit: options.timeLimit ?? 15,
@@ -1433,6 +1432,43 @@ describe('QuizLoopComponent — audio cues (FEAT-003)', () => {
     vi.advanceTimersByTime(1_000);
 
     expect(audio.playTimerTick).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * The topic pill (`FEAT-052`): the question's first topic, through the one
+ * derivation every reader shares, written as the tag a player could pick.
+ */
+describe('QuizLoopComponent — the topic pill', () => {
+  const pill = (query: ReturnType<typeof setup>['query']) =>
+    query('[data-cy="question-topic"]')?.textContent?.trim() ?? null;
+
+  it('shows an Open Trivia question’s seed tag', () => {
+    const { query } = setup({ question: makeQuestion({ tags: ['geography'] }) });
+
+    expect(pill(query)).toBe('#geography');
+  });
+
+  /** A contribution's own first tag — tags win over the category it may also carry. */
+  it('shows a contribution’s first tag', () => {
+    const { query } = setup({
+      question: makeQuestion({ source: 'custom', tags: ['capitals', 'geography'] }),
+    });
+
+    expect(pill(query)).toBe('#capitals');
+  });
+
+  /** A question cached or stored before topics replaced categories still shows one. */
+  it('derives one from the category of a question with no tags', () => {
+    const { query } = setup({ question: makeQuestion({ category: 'Science: Computers' }) });
+
+    expect(pill(query)).toBe('#computers');
+  });
+
+  it('renders no pill for a question with no topic at all', () => {
+    const { query } = setup({ question: makeQuestion({ category: undefined }) });
+
+    expect(pill(query)).toBeNull();
   });
 });
 

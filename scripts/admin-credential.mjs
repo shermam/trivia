@@ -46,11 +46,16 @@ export function fail(message) {
   process.exit(1);
 }
 
-/** `--project <id>` and `--dry-run`, the two flags every script here takes. */
+/**
+ * `--project <id>` and `--dry-run`, the two flags every script here takes, and
+ * `--write`, which the scripts that dry-run unless told otherwise
+ * (`backfill-category-tags.mjs`) take instead of the second.
+ */
 export function parseArgs(argv) {
-  const args = { dryRun: false, project: '' };
+  const args = { dryRun: false, project: '', write: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dry-run') args.dryRun = true;
+    else if (argv[i] === '--write') args.write = true;
     else if (argv[i] === '--project') args.project = argv[++i] ?? '';
   }
   return args;
@@ -116,14 +121,14 @@ function loadServiceAccount() {
 
 /**
  * Parses the arguments, resolves and cross-checks the credential, initializes
- * the Admin app, and hands back `{ dryRun, project }`.
+ * the Admin app, and hands back `{ dryRun, project, write }`.
  *
  * Every exit path here is a `process.exit(1)` with an explanation, so a script
  * that gets a value back from this has a credential that is real, parseable,
  * and for the project the operator named.
  */
 export function initAdminApp(argv) {
-  const { dryRun, project } = parseArgs(argv);
+  const { dryRun, project, write } = parseArgs(argv);
 
   if (!project) {
     fail('--project is required. Refusing to guess which Firestore to write to.');
@@ -143,5 +148,5 @@ export function initAdminApp(argv) {
   }
 
   initializeApp({ credential: cert(serviceAccount), projectId: project });
-  return { dryRun, project };
+  return { dryRun, project, write };
 }

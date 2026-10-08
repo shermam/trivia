@@ -1,6 +1,7 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { afterEach, vi } from 'vitest';
 import { TagSelectorComponent } from './tag-selector.component';
 
 /**
@@ -19,7 +20,12 @@ import { TagSelectorComponent } from './tag-selector.component';
     [formControl]="control"
     [max]="max()"
     [suggestions]="suggestions()"
-    [disabledReason]="disabledReason()"
+    [allowedTags]="allowedTags()"
+    [notAllowedMessage]="notAllowedMessage()"
+    [feedbackVariants]="feedbackVariants()"
+    [required]="required()"
+    [errorMessage]="errorMessage()"
+    [deferSuggestions]="deferSuggestions()"
     [hint]="hint()"
     [hintVariants]="hintVariants()"
   />`,
@@ -28,21 +34,26 @@ class HostComponent {
   readonly control = new FormControl<string[]>([], { nonNullable: true });
   readonly max = signal(8);
   readonly suggestions = signal<readonly string[]>(['world-war-2', 'calculus']);
-  readonly disabledReason = signal<string | null>(null);
+  readonly allowedTags = signal<readonly string[] | null>(null);
+  readonly notAllowedMessage = signal('Only the suggested topics work here.');
+  readonly feedbackVariants = signal<readonly string[]>([]);
+  readonly required = signal(false);
+  readonly errorMessage = signal<string | null>(null);
+  readonly deferSuggestions = signal(false);
   readonly hint = signal('');
   readonly hintVariants = signal<readonly string[]>([]);
+  readonly picker = viewChild.required(TagSelectorComponent);
 }
 
 /**
- * `disabledReason` is settable **before the first render** as well as after,
- * because the two are different states rather than the same one reached twice:
- * the shortcut row is not rendered at all until the control has been available
- * once, which is what keeps forty buttons out of the home route's first paint.
+ * `deferSuggestions` is settable **before the first render**, because a
+ * deferred strip and an immediate one are different first frames rather than
+ * the same one reached twice — which is the whole point of deferring.
  */
-function render(initial: { disabledReason?: string | null } = {}) {
+function render(initial: { deferSuggestions?: boolean } = {}) {
   const fixture = TestBed.createComponent(HostComponent);
-  if (initial.disabledReason !== undefined) {
-    fixture.componentInstance.disabledReason.set(initial.disabledReason);
+  if (initial.deferSuggestions !== undefined) {
+    fixture.componentInstance.deferSuggestions.set(initial.deferSuggestions);
   }
   fixture.detectChanges();
   const el: HTMLElement = fixture.nativeElement;
@@ -268,113 +279,227 @@ describe('TagSelectorComponent — the suggestions', () => {
   });
 });
 
-describe('TagSelectorComponent — unavailable', () => {
-  it('says why rather than leaving a greyed-out box to be interpreted', () => {
-    const { host, fixture, input, feedback } = render();
-    host.disabledReason.set('Offline games cannot be filtered by topic.');
+describe('TagSelectorComponent — a single choice', () => {
+  /**
+   * At a limit of one the picker behaves like the category `<select>` it
+   * replaced on the setup screen's Open Trivia game: choosing another option
+   * changes the choice. Refusing at the limit instead would make the reader
+   * remove a topic before picking the one they meant.
+   */
+  it('replaces the chosen tag rather than refusing a second one', () => {
+    const { host, fixture, suggestion, status } = render();
+    host.max.set(1);
     fixture.detectChanges();
 
-    expect(input().disabled).toBe(true);
-    expect(feedback()).toBe('Offline games cannot be filtered by topic.');
+    suggestion('world-war-2').click();
+    fixture.detectChanges();
+    suggestion('calculus').click();
+    fixture.detectChanges();
+
+    expect(host.control.value).toEqual(['calculus']);
+    expect(status()).toBe('Replaced world-war-2 with calculus.');
+    expect(suggestion('world-war-2').getAttribute('aria-pressed')).toBe('false');
+    expect(suggestion('calculus').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('keeps every suggestion pressable while one is chosen', () => {
+    const { host, fixture, suggestion, input } = render();
+    host.max.set(1);
+    fixture.detectChanges();
+
+    suggestion('calculus').click();
+    fixture.detectChanges();
+
+    expect(suggestion('world-war-2').disabled).toBe(false);
+    expect(input().disabled).toBe(false);
+  });
+
+  it('replaces from the text box too', () => {
+    const { host, fixture, enter } = render();
+    host.max.set(1);
+    fixture.detectChanges();
+
+    enter('calculus');
+    enter('world war 2');
+
+    expect(host.control.value).toEqual(['world-war-2']);
+  });
+});
+
+describe('TagSelectorComponent — a restricted choice', () => {
+  /**
+   * The setup screen's Open Trivia game can be asked for a seed tag and nothing
+   * else, so a typed tag outside the set is refused **out loud** — a selection
+   * the draw silently ignored is the failure `FEAT-021` refused to ship.
+   */
+  it('refuses a typed tag outside the allowed set, and says why', () => {
+    const { host, fixture, enter, feedback, status } = render();
+    host.allowedTags.set(['world-war-2', 'calculus']);
+    fixture.detectChanges();
+
+    enter('Cold War');
+
+    expect(host.control.value).toEqual([]);
+    expect(feedback()).toBe('Only the suggested topics work here.');
+    expect(status()).toBe('#cold-war was not added. Only the suggested topics work here.');
+  });
+
+  it('says so while the draft is still being typed, and offers no Add', () => {
+    const { host, fixture, type, feedback, el } = render();
+    host.allowedTags.set(['calculus']);
+    fixture.detectChanges();
+
+    type('algebra');
+
+    expect(feedback()).toBe('Only the suggested topics work here.');
+    expect(el.querySelector<HTMLButtonElement>('[data-cy="add-tag"]')?.disabled).toBe(true);
+  });
+
+  it('takes a tag inside the set as it always did', () => {
+    const { host, fixture, enter } = render();
+    host.allowedTags.set(['calculus']);
+    fixture.detectChanges();
+
+    enter('Calculus');
+
+    expect(host.control.value).toEqual(['calculus']);
+  });
+});
+
+describe('TagSelectorComponent — a change the caller makes', () => {
+  /**
+   * The setup screen switching to Open Trivia keeps the first seed tag and
+   * drops the rest. Which survive is the caller's policy; saying what went is
+   * this component's, from the same feedback line and live region every other
+   * change here uses.
+   */
+  it('writes the replacement to the form, shows the notice and announces it', () => {
+    const { host, fixture, enter, feedback, status } = render();
+    enter('cold-war');
+    enter('calculus');
+
+    host.picker().replaceSelection(['calculus'], 'One topic only here.', 'Removed #cold-war.');
+    fixture.detectChanges();
+
+    expect(host.control.value).toEqual(['calculus']);
+    expect(feedback()).toBe('One topic only here.');
+    expect(status()).toBe('Removed #cold-war.');
+  });
+
+  it('withdraws the notice at the reader’s next move', () => {
+    const { host, fixture, type, feedback } = render();
+
+    host.picker().replaceSelection([], 'One topic only here.', 'Removed everything.');
+    fixture.detectChanges();
+    type('alg');
+    type('');
+
+    expect(feedback()).toBe('0 of 8 chosen.');
+  });
+
+  it('withdraws it when the caller says it no longer applies', () => {
+    const { host, fixture, feedback } = render();
+
+    host.picker().replaceSelection([], 'One topic only here.', 'Removed everything.');
+    fixture.detectChanges();
+    host.picker().clearNotice();
+    fixture.detectChanges();
+
+    expect(feedback()).toBe('0 of 8 chosen.');
+  });
+});
+
+describe('TagSelectorComponent — required', () => {
+  /**
+   * A question's tags are its only topic (`FEAT-052`), so the contribute form
+   * requires one. The label stops promising the field is optional, and the
+   * error is named from the input like every other field's on that form.
+   */
+  it('stops calling itself optional and tells assistive tech it is required', () => {
+    const { host, fixture, el, input } = render();
+
+    expect(el.querySelector('label')?.textContent).toContain('(optional)');
+    expect(input().getAttribute('aria-required')).toBeNull();
+
+    host.required.set(true);
+    fixture.detectChanges();
+
+    expect(el.querySelector('label')?.textContent).not.toContain('(optional)');
+    expect(input().getAttribute('aria-required')).toBe('true');
+  });
+
+  it('renders the caller’s error and names it first in the input’s description', () => {
+    const { host, fixture, el, input } = render();
+    host.errorMessage.set('Add at least one topic.');
+    fixture.detectChanges();
+
+    const error = el.querySelector<HTMLElement>('[data-cy="tag-error"]')!;
+    expect(error.textContent?.trim()).toBe('Add at least one topic.');
+    expect(input().getAttribute('aria-invalid')).toBe('true');
+    expect(input().getAttribute('aria-describedby')).toBe(`${error.id} tag-feedback`);
+  });
+});
+
+describe('TagSelectorComponent — the shortcut strip', () => {
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   /**
-   * The shortcuts are **not rendered at all** until the control is first
-   * available, which is a performance decision as much as a tidy one: the home
-   * route renders this filter on first paint with the source defaulting to Open
-   * Trivia — a state that disables it — so forty buttons nobody can press would
-   * sit inside the card Lighthouse measures as the largest contentful paint.
+   * The strip is a fixed-height box from first paint whether or not its chips
+   * are in it, which is what lets them arrive late without moving anything
+   * below (`CLAUDE.md` §4.4). jsdom has no layout, so what is pinned is that
+   * the box and its height class are there before the chips are;
+   * `tag-filter.spec.ts` measures the result in a browser.
    */
-  it('renders no shortcuts at all until it is first available', () => {
-    // Unavailable from the first render, which is the state the home route
-    // paints — not "available, then disabled", which is a different state.
-    const { el } = render({ disabledReason: 'Not here.' });
+  it('renders the strip, empty, on the first frame when deferred', () => {
+    const { el } = render({ deferSuggestions: true });
+    const strip = el.querySelector<HTMLElement>('[data-cy="tag-suggestions"]');
 
-    expect(el.querySelector('[data-cy="tag-suggestions"]')).toBeNull();
+    expect(strip).not.toBeNull();
+    expect(strip?.className).toContain('h-20');
+    expect(strip?.querySelectorAll('button')).toHaveLength(0);
   });
 
   /**
-   * Once they have been rendered they **stay** rendered, collapsed and `inert`.
-   * The row's height is what animates on the way out (`CLAUDE.md` §4.4), and
-   * content removed in the same frame as the collapse leaves an empty box with
-   * nothing to collapse — so the Start button would snap back up the screen
-   * instead of gliding. `inert` is what keeps a row nobody can see out of the
-   * tab order and out of the accessibility tree; nothing in jsdom enforces it,
-   * so this asserts the attribute rather than the behaviour.
+   * jsdom has no `requestIdleCallback`, so this exercises the bounded
+   * `setTimeout` fallback a browser without one takes — and fakes only the
+   * timer pair, so the idle API stays as absent as it really is here.
    */
-  it('keeps the shortcuts mounted but out of reach once it becomes unavailable', () => {
-    const { host, fixture, el } = render();
+  it('fills it on the first idle moment', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { el, fixture } = render({ deferSuggestions: true });
 
-    expect(el.querySelector('[data-cy="tag-suggestions"]')).not.toBeNull();
-
-    host.disabledReason.set('Not here.');
+    await vi.advanceTimersByTimeAsync(2_000);
     fixture.detectChanges();
 
-    const reveal = el.querySelector<HTMLElement>('[data-cy="tag-suggestions-reveal"]')!;
-    expect(el.querySelector('[data-cy="tag-suggestions"]')).not.toBeNull();
-    expect(reveal.getAttribute('inert')).toBe('');
-    expect(reveal.className).toContain('grid-rows-[0fr]');
+    expect(el.querySelectorAll('[data-cy="tag-suggestions"] button')).toHaveLength(2);
   });
 
-  /**
-   * The gate the whole animation hangs on. `npm run motion:verify` fails on an
-   * ungated layout transition, but nothing checks that the transition is there
-   * at all — and an un-animated reveal drops the Start button 108px in one
-   * frame, which is invisible to jsdom, to Lighthouse and to a green e2e run
-   * that never measures it. `tag-filter.spec.ts` measures the real thing in a
-   * real browser; this pins the classes it depends on.
-   */
-  it('animates the reveal, gated on the reader not having asked for less motion', () => {
-    const { host, fixture, el } = render({ disabledReason: 'Not here.' });
-    const reveal = () => el.querySelector<HTMLElement>('[data-cy="tag-suggestions-reveal"]')!;
+  /** A reader reaching for the control must never find the strip empty. */
+  it('fills it at once on the first focus inside the picker', () => {
+    const { el, input, fixture } = render({ deferSuggestions: true });
 
-    expect(reveal().className).toContain('motion-safe:transition-[grid-template-rows]');
-    expect(reveal().className).toContain('motion-safe:duration-');
-    expect(reveal().className).toContain('grid-rows-[0fr]');
-
-    host.disabledReason.set(null);
+    input().dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
     fixture.detectChanges();
 
-    expect(reveal().className).toContain('grid-rows-[1fr]');
-    expect(reveal().getAttribute('inert')).toBeNull();
+    expect(el.querySelectorAll('[data-cy="tag-suggestions"] button')).toHaveLength(2);
   });
 
-  /**
-   * The feedback line keeps the height of the *longest* message it can carry,
-   * not of the current one — otherwise it loses a line at the same instant the
-   * shortcut row expands, and the Start button hops upwards before gliding
-   * down. jsdom has no layout, so what is asserted is the twin that reserves
-   * the space; `tag-filter.spec.ts` measures the result.
-   */
-  it('keeps reserving the unavailability reason after it stops applying', () => {
-    const reason = 'Only community questions carry topics.';
-    const { host, fixture, el } = render({ disabledReason: reason });
-    const twin = () => el.querySelector<HTMLElement>('[data-cy="tag-feedback-reserve"]');
-
-    expect(twin()?.textContent?.trim()).toBe(reason);
-    expect(twin()?.getAttribute('aria-hidden')).toBe('true');
-
-    host.disabledReason.set(null);
-    fixture.detectChanges();
-
-    expect(twin()?.textContent?.trim()).toBe(reason);
-  });
-
-  /** …and costs nothing at all where no reason is ever given, which is both question forms. */
-  it('reserves nothing extra where the control is never unavailable', () => {
+  it('renders the chips with the first frame when not deferred', () => {
     const { el } = render();
 
-    expect(el.querySelector('[data-cy="tag-feedback-reserve"]')?.textContent?.trim()).toBe('');
+    expect(el.querySelectorAll('[data-cy="tag-suggestions"] button')).toHaveLength(2);
   });
+});
 
+describe('TagSelectorComponent — reserved lines', () => {
   /**
    * The hint line is reserved at the tallest hint the caller can pass rather
    * than at the one showing. A hint that *changes* changes how many lines it
    * wraps to, which is a resize the reader sees as everything below the control
-   * jumping — and unlike the feedback line, the previous value is no use here,
-   * because the taller of the two can be the one that has not been shown yet.
-   * jsdom has no layout, so this pins the twins; `tag-filter.spec.ts` measures
-   * what they are worth.
+   * jumping. jsdom has no layout, so this pins the twins; `tag-filter.spec.ts`
+   * measures what they are worth.
    */
   it('stacks an invisible copy of every hint it may be given', () => {
     const variants = ['The short one.', 'The considerably longer one, which wraps.'];
@@ -410,16 +535,27 @@ describe('TagSelectorComponent — unavailable', () => {
     );
   });
 
-  it('accepts nothing typed while it is unavailable', () => {
-    const { host, fixture, enter } = render();
-    host.disabledReason.set('Not here.');
+  /**
+   * The feedback line the same way: a notice about a source switch, or a
+   * refusal of a tag the caller does not offer, can wrap further than the
+   * count it replaces, and the line must not grow under the reader when it
+   * arrives.
+   */
+  it('stacks an invisible copy of every feedback message the caller may need', () => {
+    const variants = ['Removed the topics this game cannot play.', 'Only the suggested topics.'];
+    const { host, fixture, el } = render();
+    host.feedbackVariants.set(variants);
     fixture.detectChanges();
 
-    enter('calculus');
+    const twins = [...el.querySelectorAll<HTMLElement>('[data-cy="tag-feedback-reserve"]')];
 
-    expect(host.control.value).toEqual([]);
+    expect(twins.map((twin) => twin.textContent?.trim())).toEqual(variants);
+    expect(twins.every((twin) => twin.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(twins.every((twin) => twin.className.includes('row-start-1'))).toBe(true);
   });
+});
 
+describe('TagSelectorComponent — disabled by its form', () => {
   it('follows the form control being disabled, not only its own input', () => {
     const { host, fixture, input } = render();
 
@@ -427,5 +563,15 @@ describe('TagSelectorComponent — unavailable', () => {
     fixture.detectChanges();
 
     expect(input().disabled).toBe(true);
+  });
+
+  it('accepts nothing typed while disabled', () => {
+    const { host, fixture, enter } = render();
+    host.control.disable();
+    fixture.detectChanges();
+
+    enter('calculus');
+
+    expect(host.control.value).toEqual([]);
   });
 });

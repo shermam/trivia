@@ -23,6 +23,7 @@ import {
   REVIEW_PAGE_SIZE,
 } from '../../services/firebase.service';
 import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
+import { topicTagsOf } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
@@ -429,6 +430,15 @@ export class ReviewQueueComponent implements OnInit {
 
   protected answersFor(question: ReviewQuestion): string[] {
     return [question.correct_answer, ...question.incorrect_answers];
+  }
+
+  /**
+   * What the question is about, through the derivation every reader shares
+   * (`FEAT-052`): its tags, or the tag a pre-topics question's category
+   * derives. The only place the card names a topic.
+   */
+  protected topicsOf(question: ReviewQuestion): string[] {
+    return topicTagsOf(question);
   }
 
   protected submittedAt(question: ReviewQuestion): string {

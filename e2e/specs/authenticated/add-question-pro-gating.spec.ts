@@ -1,6 +1,7 @@
 import { expect, test } from '../../fixtures/test';
 import { expectRadiosAreGrouped } from '../../support/a11y';
 import { signInViaUi } from '../../support/auth';
+import { addQuestionTopic } from '../../support/topics';
 
 test.describe('add-question Pro gating', () => {
   const password = 'correct horse battery staple';
@@ -70,7 +71,7 @@ test.describe('add-question Pro gating', () => {
     // Each of these retries until the Pro-gated form actually renders — i.e.
     // until the subscription read and the forced token refresh have landed, not
     // just until the doc write resolved.
-    await page.locator('#category').fill('Science');
+    await addQuestionTopic(page, 'astronomy');
     await page.locator('#question').fill('What planet is known as the Red Planet?');
     await page.locator('#correctAnswer').fill('Mars');
     await page.getByPlaceholder('Incorrect answer 1', { exact: true }).fill('Venus');

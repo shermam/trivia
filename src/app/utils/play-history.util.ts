@@ -1,5 +1,5 @@
 import { Difficulty, PickedAnswer, TriviaQuestion } from '../models/question.model';
-import { readTags } from './normalize-tag.util';
+import { topicTagsOf } from './category-tags';
 
 /**
  * The per-answer records a finished game submits alongside its totals
@@ -67,7 +67,11 @@ export interface PlayAnswerRecord {
   correct: boolean;
   ms: number;
   difficulty: Difficulty;
-  /** The question's tags at play time, omitted when it has none. */
+  /**
+   * The question's topic tags at play time, omitted when it has none — its own
+   * tags, or the one its category derives for a question written before topics
+   * replaced categories (`FEAT-052`).
+   */
   tags?: string[];
 }
 
@@ -142,11 +146,17 @@ export function buildPlayAnswers(
     ) {
       record.questionId = question.id;
     }
-    // Read through the same predicate the chips render with, so a tag the rules
-    // would refuse — one written straight into the console, say — never reaches
-    // the payload and turns an honest game into a rejected submission.
-    const tags = readTags(question.tags);
-    if (tags) {
+    // What the question is about, through the one derivation every reader of a
+    // topic uses (`FEAT-052`): its own tags, or — for a question written before
+    // topics replaced categories, which has none — the tag its category
+    // derives, so the recommender sees the same topic the player was shown on
+    // the card. Its own tags are read through the predicate the chips render
+    // with, so one the rules would refuse — written straight into the
+    // console, say — never reaches the payload and turns an honest game into
+    // a rejected submission; a derived tag is the normaliser's output, which is
+    // that shape by construction.
+    const tags = topicTagsOf(question);
+    if (tags.length > 0) {
       record.tags = tags;
     }
     return record;

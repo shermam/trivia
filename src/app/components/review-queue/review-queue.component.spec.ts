@@ -350,6 +350,27 @@ describe('ReviewQueueComponent source attribution', () => {
 
     expect(cards[0].querySelector('[data-cy="question-justification"]')).toBeNull();
   });
+
+  /**
+   * The card's topics (`FEAT-052`), through the derivation every reader
+   * shares: a contribution's own tags, or — for a question written before
+   * topics replaced categories, like this file's fixtures — the tag its
+   * category derives. The card has no Category row to read it from any more.
+   */
+  it('shows a question’s topics, deriving one from a category with no tags', async () => {
+    const cards = await render([
+      question('p1', { tags: ['cold-war', 'treaties'] }),
+      question('p2'),
+    ]);
+    const chips = (card: HTMLElement) =>
+      [...card.querySelectorAll('[data-cy="review-question-tags"] li')].map((chip) =>
+        chip.textContent?.trim(),
+      );
+
+    expect(chips(cards[0])).toEqual(['#cold-war', '#treaties']);
+    expect(chips(cards[1])).toEqual(['#science']);
+    expect(cards[1].textContent).not.toContain('Category:');
+  });
 });
 
 /**
