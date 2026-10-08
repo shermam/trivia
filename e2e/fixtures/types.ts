@@ -53,7 +53,23 @@ export interface CustomQuestionSeed {
    * none.
    */
   tags?: string[];
+  /**
+   * The difficulty counters (`FEAT-023`) — how many times the question has
+   * been answered in a banked game, and how many of those answers were right.
+   * Only `recordGameResult` writes them in the app, on the Admin SDK, and no
+   * client may; seeding them is how a spec stands in for a question players
+   * have already answered.
+   */
+  answered?: number;
+  correct?: number;
 }
+
+/**
+ * A question's difficulty counters as stored (`FEAT-023`), or `null` for a
+ * question whose document does not exist — which is a different fact from one
+ * nobody has answered, where both counts are simply absent.
+ */
+export type QuestionCountersRecord = { answered?: unknown; correct?: unknown } | null;
 
 export interface VerifiedUserSeed {
   email: string;
