@@ -1,6 +1,7 @@
 /**
  * The decision behind `users/{uid}` — what a completed game does to a
- * player's lifetime totals, and what it leaves in their play history.
+ * player's lifetime totals, what it leaves in their play history, and what it
+ * adds to each community question's difficulty counters.
  *
  * Kept as a pure function, separate from the callable, for the reason
  * `role.ts` and `account-policy.ts` are: `CLAUDE.md` §4.6 requires a Cloud
@@ -14,6 +15,7 @@ import {
   isValidPlayAnswers,
   playRecordFrom,
 } from './play-history';
+import { type QuestionCounterIncrement, counterIncrementsFrom } from './question-counters';
 
 /** The most questions a single game can hold — the setup form's own maximum. */
 export const MAX_QUESTIONS_PER_GAME = 25;
@@ -95,6 +97,17 @@ export type StatsDecision =
        * transaction writes what the decision says rather than re-deriving it.
        */
       play: PlayRecord | null;
+      /**
+       * What this game adds to each bank question's difficulty counters
+       * (`FEAT-023`), one entry per question it named — empty for a game with
+       * no history, or one drawn wholly from Open Trivia DB.
+       *
+       * **Only an accepted decision carries any**, which is the whole of how a
+       * refused submission moves no counter: a duplicate or a rate-limited
+       * call returns before this exists, so there is nothing for the
+       * transaction to apply.
+       */
+      counters: QuestionCounterIncrement[];
     }
   | { accepted: false; reason: RejectionReason };
 
@@ -221,5 +234,10 @@ export function nextUserStats(
     // id, so the duplicate check above governs both: a retried call rewrites
     // nothing rather than appending a second copy of the round.
     play: playRecordFrom(submission.answers, nowMs),
+    // Counted from the same validated records rather than from a second list
+    // the payload would have to carry, and decided only past the duplicate and
+    // rate checks above — so the `lastGameId` that stops a retried call
+    // counting the game twice into the totals stops it counting twice here.
+    counters: counterIncrementsFrom(submission.answers),
   };
 }

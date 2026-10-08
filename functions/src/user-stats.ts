@@ -1,11 +1,13 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { type UserStats, nextUserStats } from './game-stats';
+import { applyGameResult } from './game-result';
 
 /**
  * Banks one completed game into the caller's lifetime totals at
- * `users/{uid}`, and the round itself into `users/{uid}/plays/{gameId}`.
+ * `users/{uid}`, the round itself into `users/{uid}/plays/{gameId}`, and each
+ * community question's outcome into that question's difficulty counters
+ * (`FEAT-023`).
  *
  * **A callable rather than a client write, and that is the whole design.**
  * `firestore.rules` gives `users/{uid}` no client write path at all, which is
@@ -60,31 +62,21 @@ export const recordGameResult = onCall(async (request) => {
     // A transaction, because the duplicate check and the increments have to be
     // atomic against each other. Two `/game-over` reloads racing would
     // otherwise both read "no such game id" and both bank it — which is
-    // precisely the case `lastGameId` exists to stop.
-    const outcome = await firestore.runTransaction(async (tx) => {
-      const snapshot = await tx.get(ref);
-      const current = snapshot.exists ? (snapshot.data() as UserStats) : null;
-
-      const decision = nextUserStats(current, request.data, Date.now());
-      if (!decision.accepted) {
-        return decision;
-      }
-
-      tx.set(ref, decision.stats);
-      // The play history, in the same transaction and under the same game id
-      // (`FEAT-049`). `lastGameId` *is* that id, so nothing here re-reads the
-      // payload — the decision already validated it, and the duplicate check
-      // that protects the totals therefore protects this document too.
-      //
-      // `null` whenever the submission carried no per-answer records: a
-      // pre-feature client, or a game restored from a save whose history could
-      // not be lined up with its questions. Those games bank their totals and
-      // leave no history, which is the right way round.
-      if (decision.play) {
-        tx.set(ref.collection('plays').doc(decision.stats.lastGameId), decision.play);
-      }
-      return decision;
-    });
+    // precisely the case `lastGameId` exists to stop. The question counters
+    // are inside it for the same reason: a game counted into a question by a
+    // call that was then refused as a duplicate would be counted twice.
+    const outcome = await firestore.runTransaction((tx) =>
+      applyGameResult(
+        tx,
+        {
+          user: ref,
+          play: (gameId) => ref.collection('plays').doc(gameId),
+          question: (questionId) => firestore.collection('custom_questions').doc(questionId),
+        },
+        request.data,
+        Date.now(),
+      ),
+    );
 
     if (!outcome.accepted) {
       // Not an error to the caller. A duplicate is the ordinary consequence of

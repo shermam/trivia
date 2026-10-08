@@ -408,3 +408,48 @@ test('accepts a game id that merely looks unusual', () => {
     assert.equal(accept(nextUserStats(null, submission({ gameId: good }), NOW)).lastGameId, good);
   }
 });
+
+// ---------------------------------------------------------------------------
+// The difficulty counters (`FEAT-023`). The arithmetic lives in
+// `question-counters.test.ts` and the transaction that applies it in
+// `game-result.test.ts`; what is pinned here is that the decision carries the
+// increments only when it accepts the game.
+// ---------------------------------------------------------------------------
+
+test('an accepted game carries one increment per bank question it named', () => {
+  const answers = [
+    playAnswer({ questionId: 'bank-a', correct: true }),
+    playAnswer({ questionId: undefined, correct: false }),
+  ];
+  const decision = nextUserStats(null, twoQuestionGame(answers), NOW);
+
+  assert.ok(decision.accepted);
+  assert.deepEqual(decision.counters, [{ questionId: 'bank-a', answered: 1, correct: 1 }]);
+});
+
+test('an accepted game with no history carries no increment', () => {
+  const decision = nextUserStats(null, submission(), NOW);
+
+  assert.ok(decision.accepted);
+  assert.deepEqual(decision.counters, []);
+});
+
+/**
+ * A refusal is a bare reason and nothing else — no totals, no play, no
+ * counters — which is what lets the transaction apply a decision without
+ * asking how it was reached. Pinned for both refusals that a real client meets:
+ * a reload of `/game-over` and a full window.
+ */
+test('a refused game carries no increment, whatever its answers named', () => {
+  const answers = [playAnswer({ questionId: 'bank-a' }), playAnswer({ questionId: 'bank-b' })];
+  const game = twoQuestionGame(answers);
+
+  assert.deepEqual(nextUserStats(stored({ lastGameId: game.gameId }), game, NOW), {
+    accepted: false,
+    reason: 'duplicate',
+  });
+  assert.deepEqual(nextUserStats(stored({ gamesInWindow: MAX_GAMES_PER_WINDOW }), game, NOW), {
+    accepted: false,
+    reason: 'rate-limited',
+  });
+});
