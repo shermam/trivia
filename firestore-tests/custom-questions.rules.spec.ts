@@ -1339,6 +1339,272 @@ describe('custom_questions: two to six answers, and questions up to 2,000 charac
   });
 });
 
+/**
+ * `answered` and `correct` (`FEAT-023`): how many times a question has been
+ * answered in a banked game, and how many of those answers were right. Written
+ * by `recordGameResult` on the Admin SDK and by nobody else — so the suite pins
+ * every client write path refusing them, and the accept half that a refusal-only
+ * suite cannot see: an Admin-SDK document carrying them is still a question its
+ * author can edit, a reviewer can moderate and a player can read.
+ *
+ * The bounds are reached through the author's edit, which validates the
+ * document it leaves behind with the counters still on it — so each bound is a
+ * pair of rows here, a document the Admin SDK could have written and one only a
+ * hand edit could, with the same edit applied to both.
+ */
+describe('custom_questions: the difficulty counters are the server’s (FEAT-023)', () => {
+  const AUTHOR = 'feat023-author';
+  /** Far enough in the past that `isNearRequestTime()` would refuse it on a create. */
+  const CREATED_AT = Date.now() - 30 * 24 * 3_600_000;
+  const PLAYED = { answered: 12, correct: 5 };
+
+  const create = (overrides: Record<string, unknown>) =>
+    submitQuestion(asPro(env, 'pro-user'), {
+      uid: 'pro-user',
+      payload: validQuestion('pro-user', overrides),
+    });
+
+  /** The author's question as the Admin SDK leaves it once players have answered it. */
+  async function seedPlayed(counters: Record<string, unknown>, status = 'approved') {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'played'),
+        validQuestion(AUTHOR, { status, createdAt: CREATED_AT, ...counters }),
+      );
+    });
+  }
+  const played = (ctx: RulesTestContext) => doc(ctx.firestore(), 'custom_questions', 'played');
+  const author = () => asVerifiedPassword(env, AUTHOR);
+
+  /**
+   * The edit the app makes (`FirebaseService.updateUserQuestion`): a patch
+   * naming the content and the status, and never the counters.
+   */
+  const appEdit = (extra: Record<string, unknown> = {}) =>
+    updateDoc(played(author()), { question: 'A reworded question?', status: 'pending', ...extra });
+
+  describe('no client may create a question carrying one', () => {
+    // The control: everything below differs from this create by the counters
+    // alone, so a refusal there is about them.
+    it('accepts the same create without them', async () => {
+      await assertSucceeds(create({}));
+    });
+
+    it('refuses a create carrying both counters, even at zero', async () => {
+      await assertFails(create({ answered: 0, correct: 0 }));
+    });
+
+    it('refuses a create carrying the answers alone', async () => {
+      await assertFails(create({ answered: 0 }));
+    });
+
+    // A right-answer count alone can pass the shape only at zero, so this is
+    // the one row that can see the create refusing `correct` on its own.
+    it('refuses a create carrying the right answers alone', async () => {
+      await assertFails(create({ correct: 0 }));
+    });
+
+    it('refuses a create carrying a count of answers already', async () => {
+      await assertFails(create({ answered: 7 }));
+    });
+
+    // What the refusal is for: a contributor starting their own question off
+    // at whatever difficulty they liked.
+    it('refuses a create claiming its question is already well answered', async () => {
+      await assertFails(create({ answered: 500, correct: 480 }));
+    });
+  });
+
+  describe("the author's edit leaves them exactly as stored", () => {
+    it('accepts the app edit of a question that has been played', async () => {
+      await seedPlayed(PLAYED);
+      await assertSucceeds(appEdit());
+    });
+
+    it('accepts a whole-document rewrite that carries the counters unchanged', async () => {
+      await seedPlayed(PLAYED);
+      await assertSucceeds(
+        setDoc(played(author()), {
+          ...validQuestion(AUTHOR, { status: 'pending', createdAt: CREATED_AT }),
+          question: 'A reworded question?',
+          ...PLAYED,
+        }),
+      );
+    });
+
+    // The legacy shape: every question in the bank before this shipped, and
+    // every question since that nobody has finished a signed-in game with.
+    it('accepts the app edit of a question nobody has played', async () => {
+      await seedPlayed({});
+      await assertSucceeds(appEdit());
+    });
+
+    it('refuses an edit that resets both counters', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(appEdit({ answered: 0, correct: 0 }));
+    });
+
+    it('refuses an edit that moves the answers alone', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(appEdit({ answered: 13 }));
+    });
+
+    it('refuses an edit that moves the right answers alone', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(appEdit({ correct: 12 }));
+    });
+
+    // Clearing them is the edit that would wipe the evidence a question is
+    // mislabelled, which is why the counters are kept, not cleared, the way the
+    // reviewer's note is.
+    it('refuses an edit that deletes the counters', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(appEdit({ answered: deleteField(), correct: deleteField() }));
+    });
+
+    it('refuses an edit that deletes the right answers alone', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(appEdit({ correct: deleteField() }));
+    });
+
+    // A full replace that leaves them out removes them, which is the same
+    // write as deleting them.
+    it('refuses a whole-document rewrite that leaves the counters out', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(
+        setDoc(played(author()), {
+          ...validQuestion(AUTHOR, { status: 'pending', createdAt: CREATED_AT }),
+          question: 'A reworded question?',
+        }),
+      );
+    });
+
+    it('refuses an edit that adds the counters to a question nobody has played', async () => {
+      await seedPlayed({});
+      await assertFails(appEdit({ answered: 0, correct: 0 }));
+    });
+
+    it('refuses an edit that adds the answers alone', async () => {
+      await seedPlayed({});
+      await assertFails(appEdit({ answered: 1 }));
+    });
+  });
+
+  describe("the shape bounds them, and the author's edit is where that is reached", () => {
+    it('accepts every answer right — as many right answers as answers', async () => {
+      await seedPlayed({ answered: 7, correct: 7 });
+      await assertSucceeds(appEdit());
+    });
+
+    it('accepts answers with none of them right', async () => {
+      await seedPlayed({ answered: 7, correct: 0 });
+      await assertSucceeds(appEdit());
+    });
+
+    // An absent counter reads as none, in the rules as in the callable.
+    it('accepts answers with no right-answer count beside them', async () => {
+      await seedPlayed({ answered: 3 });
+      await assertSucceeds(appEdit());
+    });
+
+    it('refuses more right answers than answers', async () => {
+      await seedPlayed({ answered: 3, correct: 4 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a right answer counted with no answers at all', async () => {
+      await seedPlayed({ correct: 1 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a negative count of answers', async () => {
+      await seedPlayed({ answered: -1 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a negative count of right answers', async () => {
+      await seedPlayed({ answered: 5, correct: -1 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a negative count of right answers beside no answers', async () => {
+      await seedPlayed({ answered: 0, correct: -5 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a fractional count of answers', async () => {
+      await seedPlayed({ answered: 2.5, correct: 1 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a fractional count of answers below one', async () => {
+      await seedPlayed({ answered: 0.5, correct: 0 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a fractional count of right answers', async () => {
+      await seedPlayed({ answered: 5, correct: 1.5 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a fractional count of right answers between whole ones', async () => {
+      await seedPlayed({ answered: 4, correct: 2.5 });
+      await assertFails(appEdit());
+    });
+
+    it('refuses a count that is not a number', async () => {
+      await seedPlayed({ answered: 'twelve', correct: 5 });
+      await assertFails(appEdit());
+    });
+  });
+
+  describe('everybody else is unaffected', () => {
+    it('lets a reviewer approve a question carrying counters', async () => {
+      await seedPlayed(PLAYED, 'pending');
+      await grantReviewer(env, 'feat023-reviewer');
+      await assertSucceeds(
+        updateDoc(played(asVerifiedPassword(env, 'feat023-reviewer')), { status: 'approved' }),
+      );
+    });
+
+    // `affectedKeys().hasOnly(['status', 'rejectionReason'])` already says so;
+    // pinned here so widening that list cannot hand a moderator the counts.
+    it('refuses a reviewer moving a counter alongside the status', async () => {
+      await seedPlayed(PLAYED, 'pending');
+      await grantReviewer(env, 'feat023-reviewer');
+      await assertFails(
+        updateDoc(played(asVerifiedPassword(env, 'feat023-reviewer')), {
+          status: 'approved',
+          answered: 0,
+        }),
+      );
+    });
+
+    it('refuses a reviewer resetting the counters without touching the status', async () => {
+      await seedPlayed(PLAYED, 'pending');
+      await grantReviewer(env, 'feat023-reviewer');
+      await assertFails(
+        updateDoc(played(asVerifiedPassword(env, 'feat023-reviewer')), {
+          answered: 0,
+          correct: 0,
+        }),
+      );
+    });
+
+    it('serves an approved question carrying counters to a signed-out player', async () => {
+      await seedPlayed(PLAYED);
+      await assertSucceeds(getDoc(played(asSignedOut(env))));
+    });
+
+    it('refuses a stranger moving the counters on somebody else question', async () => {
+      await seedPlayed(PLAYED);
+      await assertFails(
+        updateDoc(played(asPro(env, 'feat023-stranger')), { answered: 13, correct: 6 }),
+      );
+    });
+  });
+});
+
 describe('custom_questions: create — attribution cannot be spoofed', () => {
   it('rejects a createdBy naming someone else — the whole point of attribution', async () => {
     await assertFails(

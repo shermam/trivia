@@ -1,6 +1,7 @@
 /**
  * The decision behind `users/{uid}` — what a completed game does to a
- * player's lifetime totals, and what it leaves in their play history.
+ * player's lifetime totals, what it leaves in their play history, and what it
+ * adds to each community question's difficulty counters.
  *
  * Kept as a pure function, separate from the callable, for the reason
  * `role.ts` and `account-policy.ts` are: `CLAUDE.md` §4.6 requires a Cloud
@@ -11,9 +12,11 @@
 import {
   type PlayAnswer,
   type PlayRecord,
+  isSafeDocumentId,
   isValidPlayAnswers,
   playRecordFrom,
 } from './play-history';
+import { type QuestionCounterIncrement, counterIncrementsFrom } from './question-counters';
 
 /** The most questions a single game can hold — the setup form's own maximum. */
 export const MAX_QUESTIONS_PER_GAME = 25;
@@ -95,25 +98,22 @@ export type StatsDecision =
        * transaction writes what the decision says rather than re-deriving it.
        */
       play: PlayRecord | null;
+      /**
+       * What this game adds to each bank question's difficulty counters
+       * (`FEAT-023`), one entry per question it named — empty for a game with
+       * no history, or one drawn wholly from Open Trivia DB.
+       *
+       * **Only an accepted decision carries any**, which is the whole of how a
+       * refused submission moves no counter: a duplicate or a rate-limited
+       * call returns before this exists, so there is nothing for the
+       * transaction to apply.
+       */
+      counters: QuestionCounterIncrement[];
     }
   | { accepted: false; reason: RejectionReason };
 
 function isNonNegativeInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
-}
-
-/**
- * Whether a game id is safe to use as a Firestore document id, which it now has
- * to be: `FEAT-049` keys `users/{uid}/plays/{gameId}` on it.
- *
- * Every id the app mints is a `crypto.randomUUID()`, so nothing real is
- * affected — but the value arrives on the wire, and `collection.doc()` on a
- * path-shaped string either throws or resolves somewhere nobody intended.
- * Refusing it here means one rejected submission rather than an `internal`
- * error from inside a transaction.
- */
-function isSafeDocumentId(value: string): boolean {
-  return !value.includes('/') && value !== '.' && value !== '..' && !/^__.*__$/.test(value);
 }
 
 /**
@@ -137,6 +137,10 @@ export function isValidSubmission(submission: unknown): submission is GameResult
   if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > 128) {
     return false;
   }
+  // It names `users/{uid}/plays/{gameId}` (`FEAT-049`). Every id the app mints
+  // is a `crypto.randomUUID()`, so refusing a path-shaped one costs nothing
+  // real, and it means one rejected submission rather than an `internal` error
+  // from inside the transaction.
   if (!isSafeDocumentId(gameId)) {
     return false;
   }
@@ -221,5 +225,10 @@ export function nextUserStats(
     // id, so the duplicate check above governs both: a retried call rewrites
     // nothing rather than appending a second copy of the round.
     play: playRecordFrom(submission.answers, nowMs),
+    // Counted from the same validated records rather than from a second list
+    // the payload would have to carry, and decided only past the duplicate and
+    // rate checks above — so the `lastGameId` that stops a retried call
+    // counting the game twice into the totals stops it counting twice here.
+    counters: counterIncrementsFrom(submission.answers),
   };
 }

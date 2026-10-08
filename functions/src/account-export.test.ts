@@ -108,6 +108,23 @@ test('states what is deliberately not held, so gaps do not read as concealment',
 });
 
 /**
+ * The per-question difficulty counters (`FEAT-023`) are what play produces
+ * outside a player's own records, so "no analytics — none is collected" stopped
+ * being the whole truth the day they shipped. The line says what they are and
+ * why they are not in the file, as the Privacy Policy does, rather than
+ * claiming nothing is counted at all.
+ */
+test('accounts for the per-question counters rather than claiming nothing is counted', () => {
+  const line = buildAccountExport(base).notHeldHere.find((entry) => /analytics/i.test(entry));
+
+  assert.ok(line, 'the analytics line is still there');
+  assert.match(line, /about you — none is collected/);
+  assert.match(line, /how many times it has been answered and how many times correctly/);
+  assert.match(line, /record nothing about who answered/);
+  assert.doesNotMatch(line, /^Analytics or tracking data — none is collected\.$/);
+});
+
+/**
  * Finding G7 split one leaderboard into three, so an export has to answer for
  * all of them. A player holding a score on two boards and not the third is the
  * ordinary case, and it is the case that catches the tempting implementation:

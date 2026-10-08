@@ -516,12 +516,17 @@ service cloud.firestore {
     // in a clause of their own, so a bound here would be unreachable — and an
     // unreachable clause is one a mutation run cannot tell from a deleted one
     // (`CLAUDE.md` §4.6).
+    //
+    // `answered` and `correct` (`FEAT-023`) are the opposite case, and carry
+    // their bounds here for that reason: the author's edit must leave them
+    // **as stored** rather than absent, so it validates a document that still
+    // holds them — and that is where these bounds are reached.
     function isValidQuestionShape(data) {
       return data.keys().hasOnly(
                 ['category', 'type', 'difficulty', 'question', 'correct_answer',
                  'incorrect_answers', 'createdBy', 'createdAt', 'status',
                  'sourceUrl', 'sourceTitle', 'explanation', 'format', 'tags',
-                 'rejectionReason']
+                 'rejectionReason', 'answered', 'correct']
               )
             // The free-text category every question written before topics
             // replaced it carries (`FEAT-052`). **Optional, with the bounds it
@@ -625,6 +630,30 @@ service cloud.firestore {
             // question carries at least one is a condition on creating, so it
             // lives in `isValidCustomQuestion()` below.
             && (!('tags' in data) || areValidTags(data.tags))
+            // How many times the question has been answered in a banked game,
+            // and how many of those answers were right (`FEAT-023`) — two
+            // running counts `recordGameResult` keeps on the Admin SDK, from
+            // which the app derives a calibrated difficulty at read time.
+            // **Admin SDK only**: no client write path admits either — the
+            // create rule refuses both, and the author's edit must leave them
+            // exactly as stored.
+            //
+            // Optional, and absent means none, which is every question nobody
+            // has finished a game with yet — so widening the allowlist for them
+            // needed no backfill, the trade `format` and the citation fields
+            // made before them. When present each is an integer, and the right
+            // answers never outnumber the answers.
+            //
+            // `answered >= 0` is not written, because it cannot fail on its
+            // own: `correct` is at least zero by its clause and at most
+            // `answered` by the last one, so a negative `answered` is refused
+            // there, and a clause that only restates two others is one a
+            // mutation run cannot tell from a deleted one (`CLAUDE.md` §4.6).
+            // `get()` with a zero default reads an absent counter as no
+            // answers, the same reading the callable gives it.
+            && (!('answered' in data) || data.answered is int)
+            && (!('correct' in data) || (data.correct is int && data.correct >= 0))
+            && data.get('correct', 0) <= data.get('answered', 0)
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
             // click against `correct_answer` by text, so the wrong option
@@ -655,6 +684,12 @@ service cloud.firestore {
             // and refused here so the author cannot be the one who put it there
             // (`FEAT-007`).
             && !('rejectionReason' in data)
+            // Nor the difficulty counters (`FEAT-023`). A submission arrives
+            // answered by nobody, and a client that could write a count could
+            // start its own question off at whatever difficulty it liked. The
+            // shape above admits them because a document may hold them; this is
+            // what keeps the client from being the one that put them there.
+            && !data.keys().hasAny(['answered', 'correct'])
             // At least one topic (`FEAT-052`). Tags are the only topic a
             // question has since they replaced categories, and the topic
             // picker can reach a question only through them — the community
@@ -749,7 +784,22 @@ service cloud.firestore {
             // ...and the reviewer's note about the *previous* version goes with
             // it. Leaving it standing would show the author a rejection reason
             // for text they have since replaced.
-            && !('rejectionReason' in after);
+            && !('rejectionReason' in after)
+            // The difficulty counters are the server's (`FEAT-023`): an author
+            // may neither set, change nor remove one. `affectedKeys()` covers
+            // all three — a key added, a value moved and a key removed — so an
+            // edit that leaves them alone passes, which is what the app's edit
+            // does: its patch names the content fields and never these.
+            //
+            // **Kept, not cleared** the way the reviewer's note is. The note is
+            // about wording that has just been replaced; the counts are the
+            // record of how players did, and an author who could clear them
+            // could wipe the evidence that their question is mislabelled. A
+            // rewrite that changes the question substantially therefore inherits
+            // its counts, which is a cost of calibration rather than a hole in a
+            // boundary — and it is the shape that lets the author's edit
+            // validate the counters at all (`isValidQuestionShape()`, above).
+            && !after.diff(before).affectedKeys().hasAny(['answered', 'correct']);
     }
 
     // Moderation roles, granted by hand. Empty today: nothing reads it yet

@@ -151,7 +151,16 @@ export function buildAccountExport(input: {
     notHeldHere: [
       'Payment card details — held by Stripe, never received or stored by Trivimind.',
       'Your password — handled by Firebase Authentication and never visible to this application.',
-      'Analytics or tracking data — none is collected.',
+      // Not "none is collected" on its own any more (`FEAT-023`): a finished
+      // game adds to two counts on each community question it drew, and a
+      // reader of this file is owed the same account of them the Privacy
+      // Policy gives — what they are, and why their own answers are not in
+      // here. (A contributor's own questions come back whole above, counts
+      // included; what cannot come back is which answers were theirs.)
+      'Analytics or tracking data about you — none is collected. Your finished games do add to ' +
+        'two counts kept on each community question, how many times it has been answered and ' +
+        'how many times correctly, but the counts record nothing about who answered, so your ' +
+        'own answers cannot be picked out of them.',
       'Offline question cache and theme preference — stored only in your browser, not on any server.',
     ],
   };

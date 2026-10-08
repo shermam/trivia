@@ -232,6 +232,65 @@ describe('legal pages', () => {
   });
 
   /**
+   * **The per-question difficulty counters (`FEAT-023`).** A finished game adds
+   * to two counts on each community question it held, and that falsified two
+   * things the page said: "no analytics … of any kind", stated twice, and the
+   * list of what a published question exposes, which reads as exhaustive.
+   *
+   * Pinned on the claims the code has to keep — what a count is, that nothing
+   * in it says who answered, that deletion and export cannot reach a player's
+   * answers inside it, that guests add nothing, and that it is public with the
+   * question — and on the two sentences it had to change, in the negative as
+   * well as the positive, because the half-finished edit is to fix one of them.
+   */
+  it('discloses the per-question counts, and that nothing in them says who answered', async () => {
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+
+    expect(text).toContain(
+      'A game you finish signed in also adds to two counts kept on each community question it held',
+    );
+    expect(text).toContain(
+      'how many times that question has been answered, and how many of those answers were right',
+    );
+    expect(text).toContain('no link to who answered');
+    expect(text).toContain('no account identifier, no time and no game is stored beside them');
+    // What is stored, rather than a claim about what nobody could infer: the
+    // counts are public and move with every game, so an onlooker who knows
+    // when somebody played can see one of them tick.
+    expect(text).toContain(
+      'The counts are totals across every player: they carry no identifier and are not linked to the record of your games above',
+    );
+    expect(text).not.toContain('nothing can trace a count back to you');
+    expect(text).toContain('anyone who can read the question can read them');
+    expect(text).toContain('deleting your account cannot take your own answers back out of them');
+    expect(text).toContain('Anonymous play adds nothing to them');
+    // What outlives a game's twelve months: the counts, which say nothing about
+    // who answered — not "nothing of yours", since a player's answers are in them.
+    expect(text).toContain(
+      'the per-question counts described next, which record nothing about who answered',
+    );
+    // The lawful-basis row.
+    expect(text).toContain(
+      'Add each game you finish signed in to the counts kept on each community question',
+    );
+    // What a published question exposes, beside a list that reads as
+    // exhaustive — the quiet way `FEAT-022` showed one of these goes stale.
+    expect(text).toContain(
+      'how often it has been answered, and how often correctly — which are public along with it',
+    );
+
+    // "No analytics", made accurate rather than argued with: no analytics that
+    // watch the player, and the one count there is, named.
+    expect(text).toContain('no advertising and no analytics that watch what you do');
+    expect(text).toContain('no analytics service, no advertising');
+    expect(text).toContain(
+      'The only thing it counts beyond your own records is how often each community question has been answered',
+    );
+    expect(text).not.toContain('no analytics or advertising of any kind');
+    expect(text).not.toContain('no analytics, no advertising');
+  });
+
+  /**
    * The other half of the same claim: the page says outright that a profile is
    * built, so that "we do not build a profile of you" cannot creep back in
    * while the code goes on building one. Kept separate from the test below,

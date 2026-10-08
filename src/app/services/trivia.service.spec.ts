@@ -511,6 +511,39 @@ describe('TriviaService contributor attribution passes through the mapper', () =
     expect(question.explanation).toBe('Each molecule bonds two hydrogens to one oxygen.');
   });
 
+  /**
+   * The difficulty counters (`FEAT-023`) ride the question the draw already
+   * read, so the recap can derive a calibrated difficulty with no second read
+   * per question — and they are re-checked on the way in, the way the tags are,
+   * so a pair the rules would refuse never reaches a reader.
+   */
+  it('carries the difficulty counters a bank question holds', async () => {
+    configure([{ ...base, answered: 40, correct: 12 }]);
+
+    const [question] = await play();
+
+    expect(question.answered).toBe(40);
+    expect(question.correct).toBe(12);
+  });
+
+  it('leaves the counters absent on a question nobody has played', async () => {
+    configure([base]);
+
+    const [question] = await play();
+
+    expect('answered' in question).toBe(false);
+    expect('correct' in question).toBe(false);
+  });
+
+  it('drops a broken pair whole rather than carrying half of it', async () => {
+    configure([{ ...base, answered: 3, correct: 9 }]);
+
+    const [question] = await play();
+
+    expect('answered' in question).toBe(false);
+    expect('correct' in question).toBe(false);
+  });
+
   it('does not decode entities in a source title, the way it leaves every other Firestore field alone', async () => {
     configure([{ ...base, sourceTitle: 'Tom &amp; Jerry Quarterly' }]);
 

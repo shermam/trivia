@@ -18,6 +18,7 @@ import {
   RegionalLeaderboardEntryQuery,
   ProPriceSeed,
   ProSubscriptionSeed,
+  QuestionCountersRecord,
   QuestionReportRecord,
   QuestionReportSeed,
   QuestionVoteRecord,
@@ -94,6 +95,38 @@ export class FirebaseBackend {
         return this.firestore.collection('custom_questions').doc(docId).set(seeded);
       }),
     );
+  }
+
+  /**
+   * The difficulty counters on each of these questions (`FEAT-023`), keyed by
+   * id — or `null` for a question whose document is gone.
+   *
+   * Read through the Admin SDK because the counts are written by a callable
+   * that nothing in the DOM waits on: `recordGameResult` is fire-and-forget,
+   * so the only evidence it counted a game is the document. Scoped to ids the
+   * test seeded, so another worker's games never reach the assertion.
+   */
+  async getQuestionCounters(ids: string[]): Promise<Record<string, QuestionCountersRecord>> {
+    const snapshots = await this.firestore.getAll(
+      ...ids.map((id) => this.firestore.collection('custom_questions').doc(id)),
+    );
+    return Object.fromEntries(
+      snapshots.map((snapshot) => [
+        snapshot.id,
+        snapshot.exists
+          ? { answered: snapshot.get('answered'), correct: snapshot.get('correct') }
+          : null,
+      ]),
+    );
+  }
+
+  /**
+   * Deletes a seeded question outright, the way an author withdrawing it from
+   * `/my-questions` would — for the case where it goes between the draw and the
+   * end of the game.
+   */
+  async deleteCustomQuestion(id: string): Promise<void> {
+    await this.firestore.collection('custom_questions').doc(id).delete();
   }
 
   /**

@@ -1604,6 +1604,109 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     expect(chips(rows[1])).toEqual([]);
   });
 
+  /**
+   * `FEAT-023`. A community question's row shows the difficulty its players
+   * have measured — the band word alone, easy, medium or hard, in the pill its
+   * label used to occupy — derived from the counters the question carried when
+   * the game drew it, so nothing here reads anything. A question nobody has
+   * played reads its label, and an Open Trivia question keeps the label it
+   * arrived with.
+   */
+  describe('the measured difficulty (FEAT-023)', () => {
+    const pillOf = (row: HTMLElement) =>
+      row.querySelector<HTMLElement>('[data-cy="recap-difficulty"]');
+    const difficultyOf = (row: HTMLElement) => pillOf(row)?.textContent?.trim();
+
+    /** A medium question that ten players have all got right, on two options. */
+    const playedEasy = () => recapQuestion('q0', { answered: 10, correct: 10 });
+
+    it('shows the band its players have measured, not the label they disagree with', () => {
+      // Two options, a medium label, ten answers all right: the corrected
+      // accuracy is 1, so (10 × 0.5 + 10 × 0) / 20 = 0.25, which is easy.
+      const { queryAll, open } = render({
+        questions: [playedEasy()],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[0])).toBe('easy');
+    });
+
+    it('shows a community question nobody has played at its label', () => {
+      const { queryAll, open } = render({
+        questions: [q1],
+        answerHistory: [answeredWith('q1:wrong')],
+      });
+      open();
+
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[0])).toBe('medium');
+    });
+
+    // The word alone: the score behind it is for code to read, and a player
+    // is never shown it — not as text, and not tucked into an attribute.
+    it('keeps the score itself out of the page', () => {
+      const { queryAll, open } = render({
+        questions: [playedEasy()],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      const row = queryAll('[data-cy="recap-row"]')[0];
+      const pill = pillOf(row);
+      expect(pill?.textContent?.trim()).toBe('easy');
+      expect(pill?.children.length).toBe(0);
+      expect(pill?.getAttribute('title')).toBeNull();
+      expect(pill?.getAttribute('aria-label')).toBeNull();
+      expect(row.textContent).not.toMatch(/\d\.\d/);
+      expect(row.textContent).not.toContain('Difficulty');
+    });
+
+    // In the label's place, not beside it: two difficulties on one row would
+    // be two places for the same fact to disagree.
+    it('replaces the label rather than adding a second difficulty beside it', () => {
+      const { queryAll, open } = render({
+        questions: [playedEasy()],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      const row = queryAll('[data-cy="recap-row"]')[0];
+      const pills = [...row.querySelectorAll('p span.rounded-md')].map((pill) =>
+        pill.textContent?.trim(),
+      );
+      expect(pills).toEqual(['#history', 'easy']);
+    });
+
+    // There is no document behind an Open Trivia question to count against,
+    // so a measured band for one would only ever be its label in disguise —
+    // and counters that somehow reached one do not move it.
+    it('keeps an Open Trivia question on the label it arrived with', () => {
+      const openTrivia = recapQuestion('q0', { source: 'open_trivia', answered: 10, correct: 10 });
+      const { queryAll, open } = render({
+        questions: [openTrivia],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[0])).toBe('medium');
+    });
+
+    // The same box for both, by construction (`CLAUDE.md` §4.4): a measured
+    // band is a different word in the label's pill, never a different pill.
+    it('draws a measured band and a label in the same pill', () => {
+      const { queryAll, open } = render({
+        questions: [playedEasy(), recapQuestion('q1', { source: 'open_trivia' })],
+        answerHistory: [answeredWith('q0:right'), answeredWith('q1:right')],
+      });
+      open();
+
+      const [measured, labelled] = queryAll('[data-cy="recap-row"]').map((row) => pillOf(row));
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[0])).toBe('easy');
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[1])).toBe('medium');
+      expect(measured?.className).toBe(labelled?.className);
+    });
+  });
+
   // A correct answer shows what was picked and nothing else — repeating the
   // same string under "Correct answer" reads as a bug in the app.
   it('shows a correct answer once, with no second line', () => {

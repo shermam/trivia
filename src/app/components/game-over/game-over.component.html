@@ -829,9 +829,23 @@
                           >#{{ topic }}</span
                         >
                       }
+                      <!--
+                        The difficulty, as one word in one pill. A community
+                        question shows the band its players have measured
+                        (`FEAT-023`) — easy, medium or hard, the label shrunk
+                        towards how often it was answered right — and an Open
+                        Trivia question, which has no document to count
+                        against, the label it arrived with. The same box
+                        either way, so every row holds the same boxes whether
+                        or not anybody has played its question (`CLAUDE.md`
+                        §4.4); the score behind the band never reaches the
+                        page. A word in the same neutral pill as the topic:
+                        nothing about it is carried by colour (§4.5).
+                      -->
                       <span
+                        data-cy="recap-difficulty"
                         class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
-                        >{{ row.question.difficulty }}</span
+                        >{{ row.difficulty }}</span
                       >
                       @if (row.outcome === 'timedOut') {
                         <span
