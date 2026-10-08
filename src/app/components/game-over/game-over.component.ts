@@ -18,6 +18,7 @@ import {
   Answer,
   PickedAnswer,
   DEFAULT_TIME_LIMIT,
+  Difficulty,
   LeaderboardEntry,
   NewQuestionReportDoc,
   QuestionReportReason,
@@ -38,11 +39,7 @@ import { GameControllerService } from '../../services/game-controller.service';
 import { QuestionVoteService, describeVoteOutcome } from '../../services/question-vote.service';
 import { RegionService } from '../../services/region.service';
 import { topicTagsOf } from '../../utils/category-tags';
-import {
-  DifficultyRating,
-  difficultyRating,
-  difficultyScore,
-} from '../../utils/difficulty-score.util';
+import { difficultyBand, difficultyScore } from '../../utils/difficulty-score.util';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { buildPlayAnswers } from '../../utils/play-history.util';
 import { IconComponent } from '../icon/icon.component';
@@ -89,18 +86,20 @@ interface RecapRow {
    */
   topics: string[];
   /**
-   * The question's difficulty as players have found it (`FEAT-023`), for a
-   * community question; `null` for an Open Trivia one, whose row keeps showing
-   * the label it arrived with — there is no document behind it to count
-   * against, so a "calibrated" number would only ever be the label in
-   * disguise.
+   * The word the row's difficulty pill shows. For a community question it is
+   * the band its players have measured (`FEAT-023`) — the label shrunk towards
+   * how often it was answered right, named in the label's own three words; for
+   * an Open Trivia question it is the label it arrived with, since there is no
+   * document behind it to count against and a measured band would only ever
+   * be that label in disguise. One field and one pill either way, so every row
+   * holds the same box (`CLAUDE.md` §4.4).
    *
    * Derived from the counters the question carried when this game drew it —
    * the document the draw already read — so it costs no read, and it is the
    * difficulty the player was dealt rather than one this game's own answer has
    * since moved.
    */
-  difficulty: DifficultyRating | null;
+  difficulty: Difficulty;
 }
 
 /**
@@ -643,7 +642,9 @@ export class GameOverComponent implements OnInit {
         wasRight: picked?.isCorrect === true,
         topics: topicTagsOf(question),
         difficulty:
-          question.source === 'custom' ? difficultyRating(difficultyScore(question)) : null,
+          question.source === 'custom'
+            ? difficultyBand(difficultyScore(question))
+            : question.difficulty,
       });
     }
     return rows;

@@ -1,4 +1,4 @@
-import { Locator, Page } from '@playwright/test';
+import { Locator, Page, Response } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { CustomQuestionSeed, QuestionCountersRecord } from '../../fixtures/types';
@@ -25,8 +25,8 @@ const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
  * question would get wrong, each of which looks identical from the screen.
  *
  * **The recap.** Each community question's row shows the difficulty its players
- * have measured, derived from the counters the question carried when the game
- * drew it, in the pill its label used to occupy.
+ * have measured — the band word alone, in the pill its label used to occupy —
+ * derived from the counters the question carried when the game drew it.
  *
  * Under `authenticated/`, and therefore off the preview slice: the counters are
  * written by the real `recordGameResult`, which a preview channel shares with
@@ -86,7 +86,15 @@ test.describe('per-question difficulty (FEAT-023)', () => {
 
   /** Waits for the results screen's own call to the callable to come back. */
   function recordGameResultResponse(page: Page) {
-    return page.waitForResponse((response) => /\/recordGameResult(\?|$)/.test(response.url()));
+    return page.waitForResponse(
+      (response) =>
+        /\/recordGameResult(\?|$)/.test(response.url()) && response.request().method() === 'POST',
+    );
+  }
+
+  /** What the callable answered, out of the callable protocol's envelope. */
+  async function callableResult(response: Response): Promise<unknown> {
+    return ((await response.json()) as { result?: unknown }).result;
   }
 
   /**
@@ -119,7 +127,10 @@ test.describe('per-question difficulty (FEAT-023)', () => {
    * the other**, so the draw's order cannot decide which question is counted
    * right. The reload half waits on the callable's own response before reading,
    * because "still the same" read before the second call lands would pass
-   * against the very double count it exists to catch.
+   * against the very double count it exists to catch — and it starts listening
+   * only once the first call has answered, and checks the answer is the
+   * duplicate refusal, so the response it waits on cannot be the first game's
+   * still arriving.
    */
   test('adds a signed-in game to each bank question once, and a reload adds nothing', async ({
     page,
@@ -146,7 +157,9 @@ test.describe('per-question difficulty (FEAT-023)', () => {
 
     await signedInPlayer(page, firebase);
     await startTopicGame(page, { topics: [topic], found: 2, noTimeLimit: true });
+    const banked = recordGameResultResponse(page);
     await answerEveryQuestion(page, 2, 'Shared');
+    expect(await callableResult(await banked)).toEqual({ recorded: true });
 
     await expectCounters(firebase, {
       [playedBefore]: { answered: 5, correct: 2 },
@@ -156,7 +169,7 @@ test.describe('per-question difficulty (FEAT-023)', () => {
     const reloaded = recordGameResultResponse(page);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Game Over!', exact: true })).toBeVisible();
-    await reloaded;
+    expect(await callableResult(await reloaded)).toEqual({ recorded: false, reason: 'duplicate' });
 
     expect(
       await firebase.getQuestionCounters([playedBefore, fresh]),
@@ -216,7 +229,10 @@ test.describe('per-question difficulty (FEAT-023)', () => {
     const recorded = recordGameResultResponse(page);
     await answerEveryQuestion(page, 1, 'Right');
     await expect(page.getByText('Sign in to save this score to the leaderboard.')).toBeVisible();
-    await recorded;
+    expect(await callableResult(await recorded)).toEqual({
+      recorded: false,
+      reason: 'unsupported-provider',
+    });
 
     expect(await firebase.getQuestionCounters([id])).toEqual({
       [id]: { answered: 3, correct: 2 },
@@ -225,15 +241,19 @@ test.describe('per-question difficulty (FEAT-023)', () => {
 
   /**
    * The recap reads the difficulty off the counters the question carried when
-   * the game drew it: 4 answers, 1 right, on four options is exactly chance, so
-   * the observed difficulty is 1 and a hard label (0.75, worth ten answers)
-   * gives (10 × 0.75 + 4 × 1) / 14 = 0.82. A question nobody has played reads
-   * its label's value in the same words.
+   * the game drew it, and shows the band alone. The seed is chosen so that
+   * both halves of that sentence show: 7 answers, 2 right, on four options is
+   * barely above chance — a twenty-first of players knowing it — so a medium
+   * label (0.5, worth ten answers) gives (10 × 0.5 + 7 × 20/21) / 17 = 0.69,
+   * which is **hard**, not the medium it was labelled. And this game's right
+   * answer makes it 8 and 3, (10 × 0.5 + 8 × 5/6) / 18 = 0.65, which would be
+   * **medium** again — so a recap that re-read the question after the game
+   * would say so. A question nobody has played reads its label.
    *
-   * Not the counts this game has since added: the label is about the question
+   * Not the counts this game has since added: the band is about the question
    * the player was dealt.
    */
-  test("shows each community question's calibrated difficulty in the recap", async ({
+  test("shows each community question's measured difficulty in the recap", async ({
     page,
     firebase,
   }) => {
@@ -242,8 +262,8 @@ test.describe('per-question difficulty (FEAT-023)', () => {
     const calibrated = `difficulty-${runId}-calibrated`;
     const unplayed = `difficulty-${runId}-unplayed`;
     await firebase.seedCustomQuestions([
-      bankQuestion(calibrated, topic, { difficulty: 'hard', answered: 4, correct: 1 }),
-      bankQuestion(unplayed, topic),
+      bankQuestion(calibrated, topic, { difficulty: 'medium', answered: 7, correct: 2 }),
+      bankQuestion(unplayed, topic, { difficulty: 'easy' }),
     ]);
 
     await signedInPlayer(page, firebase);
@@ -252,31 +272,33 @@ test.describe('per-question difficulty (FEAT-023)', () => {
 
     const rows = await openRecap(page);
     await expect(rowFor(rows, wordingOf(calibrated)).getByTestId('recap-difficulty')).toHaveText(
-      'Difficulty: 0.82 • Hard',
+      'hard',
     );
     await expect(rowFor(rows, wordingOf(unplayed)).getByTestId('recap-difficulty')).toHaveText(
-      'Difficulty: 0.50 • Medium',
+      'easy',
     );
+    // The band alone: no score anywhere in the row.
+    await expect(rowFor(rows, wordingOf(calibrated))).not.toContainText(/\d\.\d/);
 
     // …and the counts the game has since added do not move it, reloaded or
     // not: the recap is rebuilt from the question as it was drawn.
     await expectCounters(firebase, {
-      [calibrated]: { answered: 5, correct: 2 },
+      [calibrated]: { answered: 8, correct: 3 },
       [unplayed]: { answered: 1, correct: 1 },
     });
     await page.reload();
     const reloadedRows = await openRecap(page);
     await expect(
       rowFor(reloadedRows, wordingOf(calibrated)).getByTestId('recap-difficulty'),
-    ).toHaveText('Difficulty: 0.82 • Hard');
+    ).toHaveText('hard');
   });
 
   /**
-   * **The row keeps its size** (`CLAUDE.md` §4.4). The calibrated difficulty
-   * takes the place of the label's pill rather than adding a line of its own,
-   * and a question nobody has played reads its label's value in the same box —
-   * so a calibrated row and an uncalibrated one with the same content are the
-   * same height, and the pill sits on the line the topic already occupies.
+   * **The row keeps its size** (`CLAUDE.md` §4.4). The measured band is shown
+   * in the label's own pill rather than on a line of its own, and a question
+   * nobody has played reads its label in the same box — so a calibrated row and
+   * an uncalibrated one with the same content are the same height, and the
+   * pill sits on the line the topic already occupies.
    *
    * Measured at a phone and a desktop width, because whether a row wraps is a
    * question about the width it is given; one viewport cannot answer it for
@@ -296,8 +318,8 @@ test.describe('per-question difficulty (FEAT-023)', () => {
         const topic = runTag('difficulty');
         const runId = unique();
         // The same wording, length for length, and the same answers: the rows
-        // differ in their counters and nothing else. Both calibrate to the
-        // same band, so the two pills hold the same words.
+        // differ in their counters and nothing else. Both land in the same
+        // band, so the two pills hold the same word.
         const calibrated = `difficulty-${runId}-a`;
         const unplayed = `difficulty-${runId}-b`;
         await firebase.seedCustomQuestions([
@@ -313,13 +335,9 @@ test.describe('per-question difficulty (FEAT-023)', () => {
         const calibratedRow = rowFor(rows, wordingOf(calibrated));
         const unplayedRow = rowFor(rows, wordingOf(unplayed));
         // Half right on four options is a third of players knowing it:
-        // (10 × 0.5 + 20 × 2/3) / 30 = 0.61.
-        await expect(calibratedRow.getByTestId('recap-difficulty')).toHaveText(
-          'Difficulty: 0.61 • Medium',
-        );
-        await expect(unplayedRow.getByTestId('recap-difficulty')).toHaveText(
-          'Difficulty: 0.50 • Medium',
-        );
+        // (10 × 0.5 + 20 × 2/3) / 30 = 0.61, which is medium.
+        await expect(calibratedRow.getByTestId('recap-difficulty')).toHaveText('medium');
+        await expect(unplayedRow.getByTestId('recap-difficulty')).toHaveText('medium');
 
         // The content of each row, inside its padding and border: the list's
         // last row has no bottom border, and which of the two comes last is

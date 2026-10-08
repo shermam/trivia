@@ -2,7 +2,7 @@ import {
   type DifficultyInputs,
   LABEL_DIFFICULTY,
   PRIOR_WEIGHT,
-  difficultyRating,
+  difficultyBand,
   difficultyScore,
   readCounters,
 } from './difficulty-score.util';
@@ -55,14 +55,14 @@ describe('difficultyScore', () => {
 
       // (10 × 0.5 + 3 × 0) / 13
       expect(score).toBeCloseTo(5 / 13, 10);
-      expect(difficultyRating(score).band).toBe('Medium');
+      expect(difficultyBand(score)).toBe('medium');
     });
 
     it('moves a question three hundred players have all got right almost all the way', () => {
       const score = difficultyScore(question(4, { answered: 300, correct: 300 }));
 
       expect(score).toBeCloseTo(5 / 310, 10);
-      expect(difficultyRating(score)).toEqual({ value: '0.02', band: 'Easy' });
+      expect(difficultyBand(score)).toBe('easy');
     });
 
     it('weighs the label as ten answers, no more and no less', () => {
@@ -215,35 +215,48 @@ describe('readCounters', () => {
   });
 });
 
-describe('difficultyRating', () => {
-  it('rates each label prior in its own band', () => {
-    expect(difficultyRating(LABEL_DIFFICULTY.easy)).toEqual({ value: '0.25', band: 'Easy' });
-    expect(difficultyRating(LABEL_DIFFICULTY.medium)).toEqual({ value: '0.50', band: 'Medium' });
-    expect(difficultyRating(LABEL_DIFFICULTY.hard)).toEqual({ value: '0.75', band: 'Hard' });
+describe('difficultyBand', () => {
+  it("puts each label's own value in that label's band", () => {
+    expect(difficultyBand(LABEL_DIFFICULTY.easy)).toBe('easy');
+    expect(difficultyBand(LABEL_DIFFICULTY.medium)).toBe('medium');
+    expect(difficultyBand(LABEL_DIFFICULTY.hard)).toBe('hard');
   });
 
-  it('draws the bands at the spec table, on the value as shown', () => {
-    expect(difficultyRating(0)).toEqual({ value: '0.00', band: 'Easy' });
-    expect(difficultyRating(0.33)).toEqual({ value: '0.33', band: 'Easy' });
-    expect(difficultyRating(0.34)).toEqual({ value: '0.34', band: 'Medium' });
-    expect(difficultyRating(0.66)).toEqual({ value: '0.66', band: 'Medium' });
-    expect(difficultyRating(0.67)).toEqual({ value: '0.67', band: 'Hard' });
-    expect(difficultyRating(1)).toEqual({ value: '1.00', band: 'Hard' });
+  it('draws the bands at the spec table', () => {
+    expect(difficultyBand(0)).toBe('easy');
+    expect(difficultyBand(0.33)).toBe('easy');
+    expect(difficultyBand(0.34)).toBe('medium');
+    expect(difficultyBand(0.66)).toBe('medium');
+    expect(difficultyBand(0.67)).toBe('hard');
+    expect(difficultyBand(1)).toBe('hard');
   });
 
   /**
-   * The band is read off the rounded value, so the label cannot say
-   * "0.34 • Easy": a raw 0.336 shows as 0.34, and 0.34 is Medium.
+   * The table is written in hundredths, so a score between two of its rows is
+   * read to two places: the edges are 0.335 and 0.665. Thirds would put both
+   * of the middle rows here in the other band.
    */
-  it('never lets the band disagree with the value it prints', () => {
-    expect(difficultyRating(0.336)).toEqual({ value: '0.34', band: 'Medium' });
-    expect(difficultyRating(0.334)).toEqual({ value: '0.33', band: 'Easy' });
-    expect(difficultyRating(0.666)).toEqual({ value: '0.67', band: 'Hard' });
+  it("reads a score between the table's rows on its value to two places", () => {
+    expect(difficultyBand(0.334)).toBe('easy');
+    expect(difficultyBand(0.336)).toBe('medium');
+    expect(difficultyBand(0.664)).toBe('medium');
+    expect(difficultyBand(0.666)).toBe('hard');
   });
 
-  it('always prints two decimals, so every rating is the same width', () => {
-    for (const score of [0, 0.05, 0.1, 0.5, 0.999, 1]) {
-      expect(difficultyRating(score).value).toMatch(/^[01]\.\d\d$/);
-    }
+  it('reads a score outside the scale as the band at that end', () => {
+    expect(difficultyBand(-0.2)).toBe('easy');
+    expect(difficultyBand(1.4)).toBe('hard');
+  });
+
+  // The recap shows a question's band rather than its score, so a question
+  // players have found harder than its author did has to land in a different
+  // word — the case the pill exists to show.
+  it('moves a question out of its label once enough players disagree with it', () => {
+    const labelledEasy = (answered: number, correct: number) =>
+      difficultyBand(difficultyScore(question(4, { answered, correct }, 'easy')));
+
+    expect(labelledEasy(3, 0)).toBe('medium');
+    expect(labelledEasy(30, 6)).toBe('hard');
+    expect(labelledEasy(30, 30)).toBe('easy');
   });
 });

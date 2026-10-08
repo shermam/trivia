@@ -130,8 +130,9 @@ function clampUnit(value: number): number {
  * The calibrated difficulty of a question, from 0 (easiest) to 1 (hardest).
  *
  * Returns the label's value **exactly** for a question with no usable counters
- * or none answered yet — not a value near it — so a recap of an uncalibrated
- * question reads `0.50` rather than something that rounds to it.
+ * or none answered yet — not a value near it — so an uncalibrated question
+ * reads as precisely what it was labelled, to the recap's band and to any
+ * later reader of the number alike.
  */
 export function difficultyScore(question: DifficultyInputs): number {
   const prior = labelValue(question.difficulty);
@@ -155,28 +156,24 @@ export function difficultyScore(question: DifficultyInputs): number {
   return (PRIOR_WEIGHT * prior + counters.answered * observed) / (PRIOR_WEIGHT + counters.answered);
 }
 
-/** The three bands the scale is read in, by `FEAT-023`'s table. */
-export type DifficultyBand = 'Easy' | 'Medium' | 'Hard';
-
-/** A score as the recap shows it: two decimals, and the band they fall in. */
-export interface DifficultyRating {
-  /** `"0.42"` — always two decimals, so every rating is the same width. */
-  value: string;
-  band: DifficultyBand;
-}
-
 /**
- * The score rounded to hundredths, and its band: `0.00`–`0.33` Easy,
- * `0.34`–`0.66` Medium, `0.67`–`1.00` Hard.
+ * The band a score falls in, named with the contributor's own three words —
+ * which is all a player is shown of it. `FEAT-023`'s table: `0.00`–`0.33`
+ * easy, `0.34`–`0.66` medium, `0.67`–`1.00` hard.
  *
- * **The band is read off the rounded value, not the raw one**, so the two
- * halves of the label can never disagree: a raw 0.335 shows as `0.34`, and
- * `0.34` is Medium — reading the band off 0.335 would print "0.34 • Easy".
+ * **The word, never the number.** The recap's pill reads exactly as the
+ * label's did, so a measured difficulty and a labelled one look the same and
+ * differ only in which word they say; the number stays in code, where
+ * `FEAT-029` and `FEAT-018` are meant to read it.
+ *
+ * **Read on the score rounded to hundredths**, the precision the table is
+ * written in: a raw 0.335 falls between its 0.33 and its 0.34, and to two
+ * places it is 0.34, which the table calls medium. So the edges sit at 0.335
+ * and 0.665, the same distance from either end of the scale, and each label's
+ * own value (0.25, 0.5, 0.75) lies inside its own band — a question nobody has
+ * played reads exactly as it was labelled.
  */
-export function difficultyRating(score: number): DifficultyRating {
-  const hundredths = Math.round(clampUnit(score) * 100);
-  return {
-    value: (hundredths / 100).toFixed(2),
-    band: hundredths <= 33 ? 'Easy' : hundredths <= 66 ? 'Medium' : 'Hard',
-  };
+export function difficultyBand(score: number): Difficulty {
+  const hundredths = Math.round(score * 100);
+  return hundredths <= 33 ? 'easy' : hundredths <= 66 ? 'medium' : 'hard';
 }

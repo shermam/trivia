@@ -830,33 +830,23 @@
                         >
                       }
                       <!--
-                        The difficulty. A community question shows the one its
-                        players have measured (`FEAT-023`) — "Difficulty: 0.42 •
-                        Medium", the label shrunk towards how often it was
-                        answered right — **in the pill the label occupies**, so
-                        the row holds the same boxes either way and a question
-                        nobody has played yet reads its label's value in the
-                        same form. Plain words and a number, the same neutral
-                        pill as the topic: nothing about it is carried by
-                        colour (`CLAUDE.md` §4.5). The bullet is decoration and
-                        hidden from assistive tech, which reads "Difficulty:
-                        0.42 Medium". An Open Trivia question has no document
-                        to count against, so its row keeps the label it
-                        arrived with.
+                        The difficulty, as one word in one pill. A community
+                        question shows the band its players have measured
+                        (`FEAT-023`) — easy, medium or hard, the label shrunk
+                        towards how often it was answered right — and an Open
+                        Trivia question, which has no document to count
+                        against, the label it arrived with. The same box
+                        either way, so every row holds the same boxes whether
+                        or not anybody has played its question (`CLAUDE.md`
+                        §4.4); the score behind the band never reaches the
+                        page. A word in the same neutral pill as the topic:
+                        nothing about it is carried by colour (§4.5).
                       -->
-                      @if (row.difficulty; as rating) {
-                        <span
-                          data-cy="recap-difficulty"
-                          class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 tabular-nums text-slate-600 dark:text-slate-300"
-                          >Difficulty: {{ rating.value }}<span aria-hidden="true"> •</span>
-                          {{ rating.band }}</span
-                        >
-                      } @else {
-                        <span
-                          class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
-                          >{{ row.question.difficulty }}</span
-                        >
-                      }
+                      <span
+                        data-cy="recap-difficulty"
+                        class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
+                        >{{ row.difficulty }}</span
+                      >
                       @if (row.outcome === 'timedOut') {
                         <span
                           class="flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 font-semibold text-amber-800 dark:text-amber-300"
