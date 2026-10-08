@@ -227,7 +227,14 @@ export const previewTarget: FirebaseTarget = {
         // time a signed-in account finishes a game. Without this the document
         // outlives the Auth user that owned it, orphaned and beyond the reach
         // of `deleteAccount`.
-        attempt(`users/${uid}`, firestore.doc(`users/${uid}`).delete()),
+        //
+        // **Recursive**, like `customers/{uid}` below and for the same reason:
+        // since `FEAT-049` the same callable writes a `plays` document per
+        // completed game underneath this one, and deleting a document in
+        // Firestore does not delete what hangs beneath it. A plain `delete()`
+        // here would leave a real player-history subcollection in the project
+        // on every preview run, with nothing able to find it again.
+        attempt(`users/${uid}`, firestore.recursiveDelete(firestore.doc(`users/${uid}`))),
         // The next two are keyed by uid and so are swept without being tracked
         // individually. No spec in the current slice writes either — both come
         // from specs the slice deliberately excludes — but a slice that grows

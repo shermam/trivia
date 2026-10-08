@@ -4,6 +4,7 @@ initializeApp();
 
 export { deleteAccount, exportAccountData } from './account';
 export { recordGameResult } from './user-stats';
+export { sweepPlayHistory } from './play-history-sweep';
 export { createCheckoutSession } from './checkout-sessions';
 export { createDonationSession } from './donation-sessions';
 export { createPortalSession } from './billing-portal';
