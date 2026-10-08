@@ -2,9 +2,24 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { App, deleteApp, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { FieldPath, Firestore, getFirestore } from 'firebase-admin/firestore';
 import { CreatedState, FirebaseTarget } from './firebase-target';
 import { LEADERBOARD_BOARDS } from './types';
+
+/**
+ * Deletes every vote cast under one uid (`FEAT-027`): the `question_votes`
+ * ids that start with `{uid}_`, read as the same range `deleteAccount` sweeps
+ * (`functions/src/question-votes.ts`). A vote is not under `users/{uid}`, so no
+ * delete keyed on the uid's own path reaches it.
+ */
+async function deleteVotesOf(firestore: Firestore, uid: string): Promise<void> {
+  const votes = await firestore
+    .collection('question_votes')
+    .where(FieldPath.documentId(), '>=', `${uid}_`)
+    .where(FieldPath.documentId(), '<', `${uid}\``)
+    .get();
+  await Promise.all(votes.docs.map((vote) => vote.ref.delete()));
+}
 
 /**
  * The **real** Firebase project a preview run writes to, as the other half of
@@ -228,12 +243,16 @@ export const previewTarget: FirebaseTarget = {
         // outlives the Auth user that owned it, orphaned and beyond the reach
         // of `deleteAccount`.
         attempt(`users/${uid}`, firestore.doc(`users/${uid}`).delete()),
-        // The next two are keyed by uid and so are swept without being tracked
-        // individually. No spec in the current slice writes either — both come
-        // from specs the slice deliberately excludes — but a slice that grows
-        // should not also have to remember to grow this list, and deleting a
-        // document that was never written costs one no-op write.
+        // The next three are keyed by uid and so are swept without being
+        // tracked individually. No spec in the current slice writes any of
+        // them — all three come from specs the slice deliberately excludes —
+        // but a slice that grows should not also have to remember to grow this
+        // list, and visiting what was never written costs one no-op write or,
+        // for the votes, one query that finds nothing.
         attempt(`user_roles/${uid}`, firestore.doc(`user_roles/${uid}`).delete()),
+        // Votes carry the uid at the front of their ids rather than in a path
+        // of their own (`FEAT-027`), so they are found as a range.
+        attempt(`question_votes/${uid}_*`, deleteVotesOf(firestore, uid)),
         // Recursive, because `customers/{uid}` carries a `subscriptions`
         // subcollection and deleting a document in Firestore does not delete
         // what hangs beneath it.
