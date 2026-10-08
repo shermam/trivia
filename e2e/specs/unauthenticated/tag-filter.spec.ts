@@ -385,6 +385,13 @@ test.describe('the setup screen topic picker', () => {
   });
 });
 
+/** Where the setup card and its Start button are — see {@link setupGeometry}. */
+interface SetupGeometry {
+  cardTop: number;
+  cardHeight: number;
+  startTop: number;
+}
+
 /**
  * Where the setup card and its Start button are, in document coordinates, read
  * in one call: two measurements a frame apart disagree for reasons that have
@@ -393,9 +400,7 @@ test.describe('the setup screen topic picker', () => {
  * coordinates, so a click that scrolls a control into view is not mistaken for
  * the layout moving.
  */
-function setupGeometry(
-  page: Page,
-): Promise<{ cardTop: number; cardHeight: number; startTop: number }> {
+function setupGeometry(page: Page): Promise<SetupGeometry> {
   return page.evaluate(() => {
     const card = document.querySelector('[data-cy="setup-card"]')!.getBoundingClientRect();
     const start = document
@@ -410,17 +415,44 @@ function setupGeometry(
 }
 
 /**
+ * {@link setupGeometry} once two consecutive readings agree — the baseline the
+ * geometry test compares against, read the way `settledHeight` in
+ * `support/layout.ts` reads one: a single read lands on whatever frame the
+ * page happened to be in (`CLAUDE.md` §4.6), and a baseline taken mid-layout
+ * would fail every comparison after it for a move nobody made.
+ */
+async function settledSetupGeometry(page: Page): Promise<SetupGeometry> {
+  let previous: SetupGeometry | null = null;
+  let settled: SetupGeometry | null = null;
+  await expect
+    .poll(
+      async () => {
+        const now = await setupGeometry(page);
+        const agrees =
+          previous !== null &&
+          drift(now.cardTop, previous.cardTop) === 0 &&
+          drift(now.cardHeight, previous.cardHeight) === 0 &&
+          drift(now.startTop, previous.startTop) === 0;
+        previous = now;
+        if (agrees) {
+          settled = now;
+        }
+        return agrees;
+      },
+      { message: 'the setup card settling at rest' },
+    )
+    .toBe(true);
+  return settled!;
+}
+
+/**
  * Fails unless the card and its Start button are exactly where they were at
  * rest, once whatever just changed has finished rendering. Polled, because the
  * render is not something the runner synchronises with; a move that reaches
  * the screen is not forgiven by polling, because the only value this can settle
  * to is the one it started at.
  */
-async function expectUnmovedSince(
-  page: Page,
-  atRest: { cardTop: number; cardHeight: number; startTop: number },
-  after: string,
-): Promise<void> {
+async function expectUnmovedSince(page: Page, atRest: SetupGeometry, after: string): Promise<void> {
   await expect
     .poll(
       async () => {
@@ -495,8 +527,10 @@ for (const viewport of [
       await page.goto('/');
       await setupAtRest(page);
 
-      expect(await centringSlack(page), 'the card has room to move').toBeGreaterThan(8);
-      const atRest = await setupGeometry(page);
+      await expect
+        .poll(() => centringSlack(page), { message: 'the card has room to move' })
+        .toBeGreaterThan(8);
+      const atRest = await settledSetupGeometry(page);
 
       const hint = page.getByTestId('filter-tag-hint');
       const feedback = page.getByTestId('filter-tag-feedback');
@@ -646,13 +680,17 @@ test.describe('the shortcut strip', () => {
     await expect(page.getByRole('button', { name: 'Start Game', exact: true })).toBeVisible();
     await expect(page.getByTestId('daily-allowance')).toContainText('free games left today');
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
-    expect(await centringSlack(page), 'the card has room to move').toBeGreaterThan(8);
+    await expect
+      .poll(() => centringSlack(page), { message: 'the card has room to move' })
+      .toBeGreaterThan(8);
 
     // Empty, and already its full height: the box is there before the chips are.
     await expect(chips).toHaveCount(0);
-    expect(
-      (await page.getByTestId('filter-tag-suggestions').boundingBox())!.height,
-    ).toBeGreaterThan(60);
+    await expect
+      .poll(async () => (await page.getByTestId('filter-tag-suggestions').boundingBox())?.height, {
+        message: 'the empty strip already at its full height',
+      })
+      .toBeGreaterThan(60);
 
     const call = <T>(name: string) =>
       page.evaluate((fn) => (window as unknown as Record<string, () => T>)[fn](), name);
