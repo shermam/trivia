@@ -1193,6 +1193,26 @@ describe('custom_questions: two to six answers, and questions up to 2,000 charac
     it('refuses a wrong answer that is a number', async () => {
       await assertFails(create({ correct_answer: 'Mars', incorrect_answers: ['Venus', 4] }));
     });
+
+    // The rows above put the bad answer in front of others everywhere but the
+    // fifth position, so none of them asks about a bad answer that is the
+    // *last* one — and the size guard in front of each position is exactly
+    // what decides whether the last one is read. A guard off by one
+    // (`size() < 2` where `< 1` is meant) skips a position only when nothing
+    // follows it, and passed every row above at the first and fourth
+    // positions; these end the list on the bad answer at every length short
+    // of five. The one-answer row is a two-option question's own shape.
+    for (const count of [1, 2, 3, 4]) {
+      it(`refuses an empty wrong answer as the last of ${count}`, async () => {
+        const answers = [...FIVE_WRONG.slice(0, count - 1), ''];
+        await assertFails(create({ correct_answer: 'Mars', incorrect_answers: answers }));
+      });
+
+      it(`refuses a 201-character wrong answer as the last of ${count}`, async () => {
+        const answers = [...FIVE_WRONG.slice(0, count - 1), 'w'.repeat(201)];
+        await assertFails(create({ correct_answer: 'Mars', incorrect_answers: answers }));
+      });
+    }
   });
 
   describe('every option is distinct', () => {
