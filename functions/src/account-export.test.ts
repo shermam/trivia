@@ -185,6 +185,37 @@ test('reports an explicit null, not an absent key, when no game has been finishe
 });
 
 /**
+ * The private likes and dislikes (`FEAT-027`). The Privacy Policy says the
+ * export returns them, and they are the one record of a player's own taste
+ * the app keeps — an export that dropped them would be the incomplete answer
+ * to a data-access request that nothing else would notice.
+ */
+test('includes every question vote the account has cast', () => {
+  const result = buildAccountExport({
+    ...base,
+    questionVotes: [
+      { id: 'user-1_q1', questionId: 'q1', value: 1, createdAt: 1_790_000_000_000 },
+      { id: 'user-1_q2', questionId: 'q2', value: -1, createdAt: 1_790_000_100_000 },
+    ],
+  });
+
+  assert.deepEqual(
+    result.questionVotes.map((vote) => [vote['questionId'], vote['value']]),
+    [
+      ['q1', 1],
+      ['q2', -1],
+    ],
+  );
+});
+
+test('states an account that never voted as an empty list rather than omitting it', () => {
+  const result = buildAccountExport(base);
+
+  assert.deepEqual(result.questionVotes, []);
+  assert.ok('questionVotes' in result, 'the key must be present so its emptiness is stated');
+});
+
+/**
  * Donations are billing records, and the Privacy Policy promises the export
  * returns those. An export that quietly omitted them would be the same kind of
  * misstatement `notHeldHere` exists to prevent — worse, because the money is

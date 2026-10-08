@@ -1559,3 +1559,174 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
     await expect(service.getGameplayStats('user-1')).rejects.toThrow();
   });
 });
+
+/**
+ * `FEAT-027`. The two halves a private vote needs: one bounded read of the
+ * caller's own votes for a game's questions, and a write whose *shape* depends
+ * on whether a vote is already stored — because `firestore.rules` lets a first
+ * vote carry all three fields and a changed one move `value` alone.
+ */
+describe('FirebaseService: question votes (FEAT-027)', () => {
+  const NOW = 1_790_000_000_000;
+
+  /**
+   * The rule depends on the document id, so Firestore serves this read only
+   * because it names the caller's own ids — rules are not filters. The
+   * assertions are on the wire, not on what came back: a scan that happened to
+   * return the right rows would pass a result-only test.
+   */
+  it('reads the caller’s own votes in one IN query naming their ids, with a limit', async () => {
+    const { service, queries } = setup([
+      { id: 'u1_q1', data: { questionId: 'q1', value: 1, createdAt: NOW } },
+      { id: 'u1_q2', data: { questionId: 'q2', value: -1, createdAt: NOW } },
+      { id: 'u2_q1', data: { questionId: 'q1', value: -1, createdAt: NOW } },
+      { id: 'u1_q3', data: { questionId: 'q3', value: 1, createdAt: NOW } },
+    ]);
+
+    const votes = await service.getOwnQuestionVotes('u1', ['q1', 'q2', 'q4']);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0].collectionPath).toBe('question_votes');
+    expect(queries[0].documentIds).toEqual(['u1_q1', 'u1_q2', 'u1_q4']);
+    expect(queries[0].wheres).toEqual([]);
+    expect(queries[0].limit).toBe(3);
+    expect([...votes]).toEqual([
+      ['q1', 1],
+      ['q2', -1],
+    ]);
+  });
+
+  /**
+   * Firestore refuses an `IN` past thirty values outright. Twenty-five is the
+   * longest game, so the clamp should never bite from the app — which is why
+   * it is here and not at a call site.
+   */
+  it('names at most 25 distinct ids, however many it is handed', async () => {
+    const { service, queries } = setup([]);
+    const ids = Array.from({ length: 40 }, (_, i) => `q${i % 30}`);
+
+    await service.getOwnQuestionVotes('u1', ids);
+
+    expect(queries[0].documentIds).toHaveLength(25);
+    expect(new Set(queries[0].documentIds).size).toBe(25);
+    expect(queries[0].limit).toBe(25);
+  });
+
+  it('sends nothing when there is nothing to ask about', async () => {
+    const { service, queries } = setup([]);
+
+    expect(await service.getOwnQuestionVotes('u1', [])).toEqual(new Map());
+    // An id that cannot address a document is dropped rather than sent: a
+    // `__name__` filter refuses it and would take the whole read down.
+    expect(await service.getOwnQuestionVotes('u1', ['', 'a/b'])).toEqual(new Map());
+    expect(queries).toHaveLength(0);
+  });
+
+  /**
+   * The reader is right regardless of the writer (`CLAUDE.md` §4.4): the
+   * question a row is about comes from the id the query asked for, and a value
+   * that is not a vote is not shown as one.
+   */
+  it('takes the question from the id it asked for and drops what is not a vote', async () => {
+    const { service } = setup([
+      { id: 'u1_q1', data: { questionId: 'somewhere-else', value: 1, createdAt: NOW } },
+      { id: 'u1_q2', data: { questionId: 'q2', value: 2, createdAt: NOW } },
+      { id: 'u1_q3', data: { questionId: 'q3', value: '1', createdAt: NOW } },
+    ]);
+
+    const votes = await service.getOwnQuestionVotes('u1', ['q1', 'q2', 'q3']);
+
+    expect([...votes]).toEqual([['q1', 1]]);
+  });
+
+  it('casts a first vote as a create carrying all three fields', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    const { service, attempts } = setup([]);
+
+    await service.setQuestionVote('u1', 'q1', 1, false);
+
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].method).toBe('PATCH');
+    expect(attempts[0].path).toBe('question_votes/u1_q1');
+    expect(attempts[0].mask).toEqual(['questionId', 'value', 'createdAt']);
+    expect(attempts[0].fields).toEqual({
+      questionId: { stringValue: 'q1' },
+      value: { integerValue: '1' },
+      createdAt: { integerValue: String(NOW) },
+    });
+  });
+
+  /**
+   * The update rule lets `value` move and nothing else — the time of the first
+   * vote stays where it was. A patch naming `value` alone is what keeps the
+   * other two fields exactly as stored.
+   */
+  it('changes a stored vote by patching its value alone', async () => {
+    const { service, attempts } = setup([]);
+
+    await service.setQuestionVote('u1', 'q1', -1, true);
+
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].mask).toEqual(['value']);
+    expect(attempts[0].fields).toEqual({ value: { integerValue: '-1' } });
+  });
+
+  it('removes a vote with a delete, whatever it held', async () => {
+    const { service, attempts } = setup([]);
+
+    await service.setQuestionVote('u1', 'q1', null, true);
+
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].method).toBe('DELETE');
+    expect(attempts[0].path).toBe('question_votes/u1_q1');
+  });
+
+  /**
+   * The caller's idea of whether a vote is stored can be stale — the read had
+   * not landed, or another tab voted since — and the rules refuse the wrong
+   * shape rather than storing it. So a refusal is answered with the other
+   * shape, once.
+   */
+  it('retries a refused create as an update of the value', async () => {
+    const { service, attempts, writes } = setup([], (_path, attempt) =>
+      attempt === 0 ? 'permission-denied' : 'ok',
+    );
+
+    await service.setQuestionVote('u1', 'q1', 1, false);
+
+    expect(attempts.map((attempt) => attempt.mask)).toEqual([
+      ['questionId', 'value', 'createdAt'],
+      ['value'],
+    ]);
+    expect(writes).toHaveLength(1);
+  });
+
+  it('retries a refused update as a create', async () => {
+    const { service, attempts } = setup([], (_path, attempt) =>
+      attempt === 0 ? 'permission-denied' : 'ok',
+    );
+
+    await service.setQuestionVote('u1', 'q1', 1, true);
+
+    expect(attempts.map((attempt) => attempt.mask)).toEqual([
+      ['value'],
+      ['questionId', 'value', 'createdAt'],
+    ]);
+  });
+
+  it('throws when both shapes are refused', async () => {
+    const { service, attempts } = setup([], () => 'permission-denied');
+
+    await expect(service.setQuestionVote('u1', 'q1', 1, false)).rejects.toThrow('refused');
+    expect(attempts).toHaveLength(2);
+  });
+
+  // Only a refusal says the guess was wrong. A server error says nothing about
+  // the shape, and trying the other one would be a second write for no reason.
+  it('does not retry a failure that is not a refusal', async () => {
+    const { service, attempts } = setup([], () => 'server-error');
+
+    await expect(service.setQuestionVote('u1', 'q1', 1, false)).rejects.toThrow('boom');
+    expect(attempts).toHaveLength(1);
+  });
+});

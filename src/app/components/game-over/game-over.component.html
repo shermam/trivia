@@ -964,6 +964,22 @@
                       [text]="row.question.explanation"
                       [format]="row.question.format"
                     />
+
+                    <!--
+                      Like or dislike (`FEAT-027`), on a community question —
+                      the same buttons the quiz offers for the two seconds
+                      after a reveal, here with no clock at all (WCAG 2.2.1).
+                      Last in the row, after everything that might change the
+                      player's mind about the question.
+                    -->
+                    @if (showsVote(row.question)) {
+                      <div class="mt-3" data-cy="recap-vote">
+                        <app-question-vote
+                          [questionId]="row.question.id"
+                          (voted)="vote(row.question.id, row.number, $event)"
+                        />
+                      </div>
+                    }
                   </div>
                 </div>
               </li>
@@ -972,6 +988,13 @@
         }
       </div>
     }
+
+    <!-- Permanent and outside the recap card, which renders its rows only
+         while it is open: a vote's write can settle after the card has
+         been collapsed (G3). -->
+    <p role="status" aria-live="polite" data-cy="recap-vote-status" class="sr-only">
+      {{ voteAnnouncement() }}
+    </p>
 
     @if (flaggedQuestions().length > 0 && !isReportDialogOpen()) {
       <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
