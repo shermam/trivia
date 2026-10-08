@@ -13,6 +13,7 @@ import {
   TriviaQuestion,
 } from '../models/question.model';
 import { firstSeedTag, openTriviaCategoryId, seedTagForCategoryName } from '../utils/category-tags';
+import { readCounters } from '../utils/difficulty-score.util';
 import { decodeHtmlEntities } from '../utils/html-entities.util';
 import { readTags } from '../utils/normalize-tag.util';
 import { seenKeyFor } from '../utils/seen-key.util';
@@ -508,6 +509,9 @@ export class TriviaService {
   ): TriviaQuestion {
     const { question, correct_answer, incorrect_answers } = raw;
     const tags = readTags(raw.tags);
+    // Only a bank document can carry counters — an Open Trivia question has no
+    // document to count against — and one with no `answered` has none.
+    const counters = 'answered' in raw ? readCounters(raw) : null;
 
     return {
       id,
@@ -557,6 +561,13 @@ export class TriviaService {
       // and the chips are rendered from what survives checking it — the same
       // stance `SourceLinkComponent` takes to a stored URL (`CLAUDE.md` §4.4).
       ...(tags ? { tags } : {}),
+      // The difficulty counters (`FEAT-023`), as this draw found them — the
+      // recap derives the question's calibrated difficulty from them without a
+      // second read. Read through `readCounters` for the reason the tags go
+      // through `readTags`: a console-written pair the rules would refuse is
+      // dropped here, whole, so no reader downstream meets it. Only a bank
+      // question can carry any; Open Trivia DB has no document to count against.
+      ...(counters ? { answered: counters.answered, correct: counters.correct } : {}),
     };
   }
 }

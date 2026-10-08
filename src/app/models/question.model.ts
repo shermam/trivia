@@ -162,6 +162,23 @@ export interface TriviaQuestion {
    * tag is a key the filter compares, not prose.
    */
   tags?: string[];
+  /**
+   * How many times this question has been answered in a banked game, and how
+   * many of those answers were right (`FEAT-023`) — the two counters
+   * `recordGameResult` keeps on a `custom_questions` document, carried exactly
+   * as the draw found them. `difficultyScore()` derives the question's
+   * calibrated difficulty from them; nothing else reads them.
+   *
+   * **A snapshot, not a live value**, and that is the point rather than a
+   * compromise: the recap shows the difficulty the question had when the
+   * player was dealt it, from the document the game already read, with no
+   * second read per question (`CLAUDE.md` §4.1). Absent on every Open Trivia
+   * question — there is no document to count against — and on any community
+   * question nobody has yet finished a signed-in game with, which scores
+   * exactly its label.
+   */
+  answered?: number;
+  correct?: number;
 }
 
 /**
@@ -386,6 +403,19 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
    * was about.
    */
   rejectionReason?: string;
+  /**
+   * The difficulty counters (`FEAT-023`): how many times the question has been
+   * answered in a banked game, and how many of those answers were right.
+   *
+   * **Read-only to every client, and deliberately absent from the write
+   * shapes below.** `recordGameResult` writes them on the Admin SDK and
+   * nothing else may: `firestore.rules` refuses either on a create, and the
+   * author's own edit must leave both exactly as stored — which
+   * `FirebaseService.updateUserQuestion` does by never naming them in its
+   * patch.
+   */
+  answered?: number;
+  correct?: number;
 }
 
 /**

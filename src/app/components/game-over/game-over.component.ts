@@ -38,6 +38,11 @@ import { GameControllerService } from '../../services/game-controller.service';
 import { QuestionVoteService, describeVoteOutcome } from '../../services/question-vote.service';
 import { RegionService } from '../../services/region.service';
 import { topicTagsOf } from '../../utils/category-tags';
+import {
+  DifficultyRating,
+  difficultyRating,
+  difficultyScore,
+} from '../../utils/difficulty-score.util';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { buildPlayAnswers } from '../../utils/play-history.util';
 import { IconComponent } from '../icon/icon.component';
@@ -83,6 +88,19 @@ interface RecapRow {
    * same tag twice in one row.
    */
   topics: string[];
+  /**
+   * The question's difficulty as players have found it (`FEAT-023`), for a
+   * community question; `null` for an Open Trivia one, whose row keeps showing
+   * the label it arrived with — there is no document behind it to count
+   * against, so a "calibrated" number would only ever be the label in
+   * disguise.
+   *
+   * Derived from the counters the question carried when this game drew it —
+   * the document the draw already read — so it costs no read, and it is the
+   * difficulty the player was dealt rather than one this game's own answer has
+   * since moved.
+   */
+  difficulty: DifficultyRating | null;
 }
 
 /**
@@ -624,6 +642,8 @@ export class GameOverComponent implements OnInit {
         outcome: outcome.kind,
         wasRight: picked?.isCorrect === true,
         topics: topicTagsOf(question),
+        difficulty:
+          question.source === 'custom' ? difficultyRating(difficultyScore(question)) : null,
       });
     }
     return rows;

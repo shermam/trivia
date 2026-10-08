@@ -1560,7 +1560,9 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
       false,
     ]);
     expect(rows[1].textContent).toContain('q1 text?');
-    expect(rows[1].textContent).toContain('medium');
+    // A community question's difficulty badge is the calibrated one
+    // (`FEAT-023`); unplayed, it reads its label's value.
+    expect(rows[1].textContent).toContain('Difficulty: 0.50 • Medium');
   });
 
   /**
@@ -1602,6 +1604,89 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
       [...row.querySelectorAll('[data-cy="question-tag"]')].map((chip) => chip.textContent?.trim());
     expect(chips(rows[0])).toEqual(['#world-war-2', '#treaties']);
     expect(chips(rows[1])).toEqual([]);
+  });
+
+  /**
+   * `FEAT-023`. A community question's row shows the difficulty its players
+   * have measured, in the pill its label used to occupy — derived from the
+   * counters the question carried when the game drew it, so nothing here reads
+   * anything. A question nobody has played reads its label's value in the same
+   * form, which is what lets every community row hold the same boxes.
+   */
+  describe('the calibrated difficulty (FEAT-023)', () => {
+    const difficultyOf = (row: HTMLElement) =>
+      row.querySelector('[data-cy="recap-difficulty"]')?.textContent?.replace(/\s+/g, ' ').trim();
+
+    it('rates a played community question from its counters', () => {
+      // Two options, a medium label, ten answers all right: the corrected
+      // accuracy is 1, so (10 × 0.5 + 10 × 0) / 20 = 0.25.
+      const played = recapQuestion('q0', { answered: 10, correct: 10 });
+      const { queryAll, open } = render({
+        questions: [played],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[0])).toBe('Difficulty: 0.25 • Easy');
+    });
+
+    it('rates a community question nobody has played at exactly its label', () => {
+      const { queryAll, open } = render({
+        questions: [q1],
+        answerHistory: [answeredWith('q1:wrong')],
+      });
+      open();
+
+      expect(difficultyOf(queryAll('[data-cy="recap-row"]')[0])).toBe('Difficulty: 0.50 • Medium');
+    });
+
+    // In the label's place, not beside it: two difficulties on one row would
+    // be two places for the same fact to disagree.
+    it('replaces the label rather than adding a second difficulty beside it', () => {
+      const played = recapQuestion('q0', { answered: 10, correct: 10 });
+      const { queryAll, open } = render({
+        questions: [played],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      const row = queryAll('[data-cy="recap-row"]')[0];
+      const pills = [...row.querySelectorAll('p span.rounded-md')].map((pill) =>
+        pill.textContent?.replace(/\s+/g, ' ').trim(),
+      );
+      expect(pills).toEqual(['#history', 'Difficulty: 0.25 • Easy']);
+    });
+
+    // There is no document behind an Open Trivia question to count against,
+    // so a "calibrated" number for one would only ever be its label in
+    // disguise.
+    it('keeps an Open Trivia question on the label it arrived with', () => {
+      const openTrivia = recapQuestion('q0', { source: 'open_trivia' });
+      const { queryAll, open } = render({
+        questions: [openTrivia],
+        answerHistory: [answeredWith('q0:right')],
+      });
+      open();
+
+      const row = queryAll('[data-cy="recap-row"]')[0];
+      expect(row.querySelector('[data-cy="recap-difficulty"]')).toBeNull();
+      expect(row.textContent).toContain('medium');
+      expect(row.textContent).not.toContain('Difficulty:');
+    });
+
+    // The bullet is decoration, and a screen reader announces it as "bullet";
+    // the words and the number carry everything (`CLAUDE.md` §4.5).
+    it('hides the separator from assistive technology', () => {
+      const { queryAll, open } = render({
+        questions: [q1],
+        answerHistory: [answeredWith('q1:wrong')],
+      });
+      open();
+
+      const label = queryAll('[data-cy="recap-difficulty"]')[0];
+      const hidden = [...label.querySelectorAll('[aria-hidden="true"]')];
+      expect(hidden.map((element) => element.textContent?.trim())).toEqual(['•']);
+    });
   });
 
   // A correct answer shows what was picked and nothing else — repeating the
