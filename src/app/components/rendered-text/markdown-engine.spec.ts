@@ -930,9 +930,9 @@ describe('markdown engine: KaTeX runs untrusted', () => {
    *
    * The depth is the deepest chain of superscripts the cap holds: `$`, then
    * `x^{` and `}` once per level, then `a` and `$` — four characters a level
-   * and three besides, so 499 levels in 1,999 characters. It moved with the
-   * cap, because a check against the old 500-character bound would say
-   * nothing about the formulas a question may carry now.
+   * and three besides, so 499 levels in 1,999 characters. Derived from the
+   * cap rather than written down, because a depth that fits a smaller bound
+   * says nothing about the formulas a question may actually carry.
    */
   it('compiles the deepest formula a 2,000-character question can hold, quickly', () => {
     const depth = Math.floor((2000 - 3) / 4);

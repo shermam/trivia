@@ -111,9 +111,10 @@ async function settleOnSource(
  * has a stack deep enough to swallow it, the tests below fail loudly on markup
  * they did not expect rather than quietly passing.
  *
- * Not reachable from a real document: `firestore.rules` caps a question at 500
- * characters, which is about 160 levels. What is being tested is the
- * component's promise, which is not conditional on the engines behaving.
+ * Not reachable from a real document: `firestore.rules` caps a question at
+ * 2,000 characters (`FEAT-051`), which is at most 499 levels — half the 1,000
+ * measured to compile. What is being tested is the component's promise, which
+ * is not conditional on the engines behaving.
  */
 const OVERFLOWING_FORMULA = `$${'x^{'.repeat(8000)}a${'}'.repeat(8000)}$`;
 
