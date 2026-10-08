@@ -192,6 +192,45 @@ describe('legal pages', () => {
   });
 
   /**
+   * The private like or dislike (`FEAT-027`) — a record of a player's own
+   * taste, which is the kind of data §4.0's second bullet is about, and the
+   * kind of disclosure a later feature most easily falsifies: one count shown
+   * beside a question, one reviewer reading a dislike, or one recommender
+   * acting on it, and these sentences stop being true with nothing going red.
+   *
+   * Pinned on each claim the code has to keep honouring — what is kept, that
+   * only the player reads it, that no count exists, how long it stays, and
+   * that deletion and export both reach it — and on the two sentences the
+   * feature had to change because it falsified them: "signing in is only
+   * needed to…" was an exhaustive list in both documents, and voting is a new
+   * entry on it.
+   */
+  it('discloses the private vote, who reads it, how long it is kept, and how it goes', async () => {
+    const privacy = collapse((await render(PrivacyPolicyComponent)).textContent);
+    const terms = collapse((await render(TermsOfServiceComponent)).textContent);
+
+    expect(privacy).toContain('Questions you like or dislike');
+    expect(privacy).toContain(
+      'which question it was, whether you liked or disliked it, and when you first voted on it',
+    );
+    expect(privacy).toContain('Only you can read your votes');
+    expect(privacy).toContain('no count of likes or dislikes is kept or shown anywhere');
+    expect(privacy).toContain('a dislike is not a report');
+    // Retention, deletion and export — the three promises the sweeps in
+    // `functions/src/question-votes.ts` keep.
+    expect(privacy).toContain('kept for as long as your account exists or until you remove them');
+    expect(privacy).toContain('deletes your likes and dislikes');
+    expect(privacy).toContain('every like or dislike you have given a question');
+    expect(privacy).toContain('Keep the likes and dislikes you give questions');
+
+    // The exhaustive "only needed to…" lists, in both documents.
+    expect(privacy).toContain('to save a score to the public leaderboard, to like or dislike');
+    expect(terms).toContain('to save a score to the public leaderboard, to like or dislike');
+    expect(privacy).not.toContain('only needed to save a score to the public leaderboard, or to');
+    expect(terms).not.toContain('only needed to save a score to the public leaderboard or to');
+  });
+
+  /**
    * `FEAT-022` falsified an enumeration rather than a claim, which is the
    * quieter way one of these documents goes stale. The policy listed what a
    * published question exposes — "its text, the answers, the category and the
