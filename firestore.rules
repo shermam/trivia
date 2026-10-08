@@ -537,18 +537,17 @@ service cloud.firestore {
             // clause is one a mutation run cannot tell from a deleted one
             // (`CLAUDE.md` §4.6).
             && (!('format' in data) || data.format in ['plain', 'markdown'])
-            // Free-form topic tags (`FEAT-021`). Optional, and zero tags is the
-            // normal case: every question in the bank predates the field, and
-            // an untagged question is still drawn by every unfiltered game.
+            // Free-form topic tags (`FEAT-021`) — since they replaced
+            // categories, a question's only topic (`FEAT-052`).
             //
             // Unlike the four optional fields above, something *does*
-            // dereference this one — the setup screen's filter adds an
-            // `array-contains-any` clause on it. That is what makes the filter
-            // strictly additive rather than a migration: a question with no
-            // `tags` array matches no such clause, so an untagged bank is
-            // invisible to tag-filtered play and perfectly visible to every
-            // other game. There is no backfill and no ordering hazard, because
-            // no existing query changes.
+            // dereference this one: the setup screen's topic picker adds an
+            // `array-contains-any` clause on it, and a question with no `tags`
+            // array matches no such clause — so a question nobody tagged is
+            // drawn by every unfiltered game and by no topic at all. That is
+            // why `scripts/backfill-category-tags.mjs` writes the tag each
+            // stored category derives onto the questions written before
+            // topics existed (`docs/data-model.md`).
             //
             // The bounds are `areValidTags()` above; they are stated there
             // rather than here because the per-element check needs eight
@@ -558,7 +557,7 @@ service cloud.firestore {
             // a new one: the bank still holds questions written before tags
             // existed, and their authors may still edit them. That a **new**
             // question carries at least one is a condition on creating, so it
-            // lives in `isValidCustomQuestion()` below (`FEAT-052`).
+            // lives in `isValidCustomQuestion()` below.
             && (!('tags' in data) || areValidTags(data.tags))
             // An answer that is both correct and incorrect is not a question,
             // it is a scoring bug waiting to happen: the quiz used to match a
