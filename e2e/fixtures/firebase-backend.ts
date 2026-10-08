@@ -1,6 +1,6 @@
 import { App } from 'firebase-admin/app';
 import { Auth, getAuth } from 'firebase-admin/auth';
-import { Firestore, getFirestore } from 'firebase-admin/firestore';
+import { FieldPath, Firestore, getFirestore } from 'firebase-admin/firestore';
 import { FirebaseTarget } from './firebase-target';
 import {
   AccountState,
@@ -20,6 +20,8 @@ import {
   ProSubscriptionSeed,
   QuestionReportRecord,
   QuestionReportSeed,
+  QuestionVoteRecord,
+  QuestionVoteSeed,
   ReviewerSeed,
   VerifiedUserSeed,
 } from './types';
@@ -137,6 +139,68 @@ export class FirebaseBackend {
       batch.set(this.firestore.collection('question_reports').doc(id), report);
     }
     await batch.commit();
+  }
+
+  /**
+   * Writes votes straight into `question_votes`, bypassing Firestore rules
+   * (`FEAT-027`).
+   *
+   * For the votes a test needs that no browser in it can cast: another
+   * account's above all, which is what proves the deletion sweep takes the
+   * departing account's range and nothing beside it.
+   */
+  async seedQuestionVotes(votes: QuestionVoteSeed[]): Promise<void> {
+    const batch = this.firestore.batch();
+    for (const vote of votes) {
+      batch.set(
+        this.firestore
+          .collection('question_votes')
+          .doc(vote.id ?? `${vote.uid}_${vote.questionId}`),
+        { questionId: vote.questionId, value: vote.value, createdAt: vote.createdAt ?? Date.now() },
+      );
+    }
+    await batch.commit();
+  }
+
+  /**
+   * One vote by its document id, or `null` when there is none.
+   *
+   * **Read here rather than off the screen**: the buttons show the player's
+   * vote only to that player, and only as a pressed state the client set
+   * optimistically before the write landed — so a pressed button proves the
+   * tap, not the write. This says what Firestore holds.
+   */
+  async getQuestionVote(id: string): Promise<QuestionVoteRecord | null> {
+    const snapshot = await this.firestore.collection('question_votes').doc(id).get();
+    return snapshot.exists ? ({ id, ...snapshot.data() } as QuestionVoteRecord) : null;
+  }
+
+  /**
+   * Every vote cast under one uid: the ids that start with `{uid}_`, read as
+   * the same range `deleteAccount` sweeps (`functions/src/question-votes.ts`).
+   * Scoped to one account by its id, so it is safe against the shared emulator.
+   */
+  async getQuestionVotesOf(uid: string): Promise<QuestionVoteRecord[]> {
+    const snapshot = await this.firestore
+      .collection('question_votes')
+      .where(FieldPath.documentId(), '>=', `${uid}_`)
+      .where(FieldPath.documentId(), '<', `${uid}\``)
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as QuestionVoteRecord);
+  }
+
+  /**
+   * Every vote on these questions, whoever cast it — the only way to say a
+   * guest's tap wrote *nothing*, since a guest's uid is not one the test
+   * chose. Question ids are unique per test, so filtering on them is the
+   * isolation.
+   */
+  async getQuestionVotesOn(questionIds: string[]): Promise<QuestionVoteRecord[]> {
+    const snapshot = await this.firestore
+      .collection('question_votes')
+      .where('questionId', 'in', questionIds)
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as QuestionVoteRecord);
   }
 
   /**

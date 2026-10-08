@@ -12,6 +12,12 @@ import {
   RegionalLeaderboardEntry,
 } from '../models/question.model';
 import {
+  QUESTION_VOTES_COLLECTION,
+  VoteValue,
+  isVoteValue,
+  questionVoteId,
+} from '../models/question-vote';
+import {
   DOCUMENT_ID_FIELD,
   FirestoreRestClient,
   RestFieldFilter,
@@ -153,6 +159,16 @@ export interface UserQuestionsPage {
  * `getQuestionsByIds` batches rather than assuming its caller stayed under it.
  */
 const QUESTION_ID_BATCH_SIZE = 30;
+
+/**
+ * The most questions one read of the caller's own votes may name (`FEAT-027`):
+ * the longest game the setup screen offers.
+ *
+ * One game is one query. Firestore refuses an `IN` of more than thirty values
+ * outright, so the read is clamped here rather than trusting every caller to
+ * stay under it — a caller is not the place a bound lives.
+ */
+export const MAX_VOTE_READ_IDS = 25;
 
 /**
  * Every `{window}-{slot}` document ID was refused. Usually that means the
@@ -765,6 +781,102 @@ export class FirebaseService {
     }
 
     throw new QuestionReportRejectedError();
+  }
+
+  /**
+   * The caller's own votes on these questions, keyed by question id
+   * (`FEAT-027`). A question with no entry has no vote.
+   *
+   * **One query, naming its documents.** The ids are `{uid}_{questionId}`, so
+   * the read is `where(documentId(), 'in', …)` over the caller's own ids for
+   * the game's questions, with a `limit` of the same size — bounded twice over,
+   * and never a scan of the collection (`CLAUDE.md` §4.1). Naming the ids is
+   * also what lets the read rule be proven at all: rules are not filters, and
+   * Firestore serves the query only because every id it could return is
+   * provably the caller's.
+   *
+   * The question each row is about is taken from the **document id** the
+   * query asked for rather than from its `questionId` field, and a value that
+   * is not a vote is dropped: the reader is right regardless of the writer
+   * (`CLAUDE.md` §4.4), and the console can write anything.
+   */
+  async getOwnQuestionVotes(
+    uid: string,
+    questionIds: readonly string[],
+  ): Promise<Map<string, VoteValue>> {
+    const questionByVoteId = new Map(
+      [...new Set(questionIds.filter(isDocumentId))]
+        .slice(0, MAX_VOTE_READ_IDS)
+        .map((questionId) => [questionVoteId(uid, questionId), questionId]),
+    );
+    const votes = new Map<string, VoteValue>();
+    if (questionByVoteId.size === 0) {
+      return votes;
+    }
+
+    const documents = await this.rest.runQuery(
+      {
+        collectionPath: QUESTION_VOTES_COLLECTION,
+        where: [{ field: DOCUMENT_ID_FIELD, op: 'IN', value: [...questionByVoteId.keys()] }],
+        limit: questionByVoteId.size,
+      },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
+    );
+    for (const document of documents) {
+      const questionId = questionByVoteId.get(document.id);
+      const value = document.data['value'];
+      if (questionId !== undefined && isVoteValue(value)) {
+        votes.set(questionId, value);
+      }
+    }
+    return votes;
+  }
+
+  /**
+   * Casts, changes or removes (`value === null`) the caller's vote on one
+   * question (`FEAT-027`).
+   *
+   * **A first vote and a changed one are different writes**, because
+   * `firestore.rules` treats them differently: a create carries all three
+   * fields with a fresh `createdAt`, and an update may move `value` and
+   * nothing else — the time of the first vote stays where it was. Which one to
+   * send depends on whether a vote is already stored, and `existing` is the
+   * caller's best knowledge of that. It can be wrong — the read that would
+   * have said so may not have landed, or another tab may have voted since —
+   * and a wrong guess is refused rather than mis-stored, so a refusal is
+   * answered by trying the other shape once. A refusal of both is a real one,
+   * and is thrown.
+   *
+   * Removal needs no guess: deleting a vote that is not there succeeds, so a
+   * retried removal does not report a failure for work already done.
+   */
+  async setQuestionVote(
+    uid: string,
+    questionId: string,
+    value: VoteValue | null,
+    existing: boolean,
+  ): Promise<void> {
+    const path = `${QUESTION_VOTES_COLLECTION}/${questionVoteId(uid, questionId)}`;
+    const options = { timeoutMs: FIRESTORE_TIMEOUT_MS };
+    if (value === null) {
+      await this.rest.deleteDocument(path, options);
+      return;
+    }
+
+    const create = () =>
+      this.rest.setDocument(path, { questionId, value, createdAt: Date.now() }, options);
+    // A patch naming `value` alone, so `questionId` and `createdAt` are left
+    // exactly as stored — which is what the update rule demands.
+    const update = () => this.rest.setDocument(path, { value }, options);
+    const [first, second] = existing ? [update, create] : [create, update];
+    try {
+      await first();
+    } catch (error) {
+      if (!isFirestorePermissionDenied(error)) {
+        throw error;
+      }
+      await second();
+    }
   }
 
   /**
