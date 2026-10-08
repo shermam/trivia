@@ -16,10 +16,14 @@ import { MAX_ANSWER_MS, MAX_QUESTION_ID_LENGTH, buildPlayAnswers } from './play-
  * refuses **whole** — the totals go with the history.
  */
 
+/**
+ * A question with no topic at all unless a test gives it one — no tags and no
+ * category — so the entries below carry `tags` only where a test is about
+ * them.
+ */
 function question(id: string, overrides: Partial<TriviaQuestion> = {}): TriviaQuestion {
   return {
     id,
-    category: 'Science',
     type: 'multiple',
     difficulty: 'medium',
     question: `Question ${id}?`,
@@ -190,6 +194,57 @@ describe('buildPlayAnswers', () => {
 
   it('omits the tags when a question has none', () => {
     const [entry] = buildPlayAnswers([bankQuestion('abc123')], [TIMED_OUT], [1_000]) ?? [];
+
+    expect('tags' in entry).toBe(false);
+  });
+
+  /**
+   * `FEAT-052`: a question written before topics replaced categories has a
+   * category and no tags, and it is recorded under the tag that category
+   * derives — the topic the card showed the player — through the same
+   * derivation every other reader uses, rather than as being about nothing.
+   */
+  it("records the tag a legacy question's category derives", () => {
+    const answers = buildPlayAnswers(
+      [bankQuestion('abc123', { category: 'World War 2' })],
+      [TIMED_OUT],
+      [1_000],
+    );
+
+    expect(answers?.[0].tags).toEqual(['world-war-2']);
+  });
+
+  /**
+   * An Open Trivia question carries its seed tag from the adapter, but one
+   * served from an offline pool filled before the change carries only its
+   * category — and records the same seed tag either way.
+   */
+  it("records an Open Trivia question's seed tag, whether stamped or derived", () => {
+    const answers = buildPlayAnswers(
+      [
+        question('q0', { category: 'Entertainment: Film', tags: ['film'] }),
+        question('q1', { category: 'Entertainment: Film' }),
+      ],
+      [TIMED_OUT, TIMED_OUT],
+      [1_000, 1_000],
+    );
+
+    expect(answers?.map((entry) => entry.tags)).toEqual([['film'], ['film']]);
+  });
+
+  it("prefers a question's own tags to the tag its category would derive", () => {
+    const answers = buildPlayAnswers(
+      [bankQuestion('abc123', { category: 'History', tags: ['treaties'] })],
+      [TIMED_OUT],
+      [1_000],
+    );
+
+    expect(answers?.[0].tags).toEqual(['treaties']);
+  });
+
+  it('omits the tags when the category derives nothing', () => {
+    const [entry] =
+      buildPlayAnswers([bankQuestion('abc123', { category: '!!' })], [TIMED_OUT], [1_000]) ?? [];
 
     expect('tags' in entry).toBe(false);
   });

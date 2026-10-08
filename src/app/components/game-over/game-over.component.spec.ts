@@ -1562,9 +1562,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
 
     const rows = queryAll('[data-cy="recap-row"]');
     const chips = (row: HTMLElement) =>
-      [...row.querySelectorAll('[data-cy="question-tag"]')].map((chip) =>
-        chip.textContent?.trim(),
-      );
+      [...row.querySelectorAll('[data-cy="question-tag"]')].map((chip) => chip.textContent?.trim());
     expect(chips(rows[0])).toEqual(['#world-war-2', '#treaties']);
     expect(chips(rows[1])).toEqual([]);
   });
@@ -2654,6 +2652,12 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
     return { recordGameResult };
   }
 
+  /**
+   * The fixture is a question written before topics replaced categories — a
+   * category and no tags — so each record carries the tag that category
+   * derives (`FEAT-052`): the topic the card showed, through the derivation
+   * every reader uses.
+   */
   it('submits one record per question beside the totals', () => {
     const { recordGameResult } = render({
       questions: [question('q0'), question('q1')],
@@ -2667,8 +2671,8 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
       correctAnswers: 1,
       bestStreak: 1,
       answers: [
-        { questionId: 'q0', correct: true, ms: 2_500, difficulty: 'easy' },
-        { questionId: 'q1', correct: false, ms: 15_000, difficulty: 'easy' },
+        { questionId: 'q0', correct: true, ms: 2_500, difficulty: 'easy', tags: ['science'] },
+        { questionId: 'q1', correct: false, ms: 15_000, difficulty: 'easy', tags: ['science'] },
       ],
     });
   });
