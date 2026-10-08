@@ -1,4 +1,10 @@
-import { AbstractControl, FormBuilder, ValidationErrors, Validators } from '@angular/forms';
+import {
+  AbstractControl,
+  FormBuilder,
+  FormControl,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
 import {
   CustomQuestionContent,
   CustomQuestionDoc,
@@ -21,6 +27,31 @@ import { normalizeTags } from '../../utils/normalize-tag.util';
  * once already — a control missing from the table blocked the submit while
  * naming nothing and focusing nothing (finding B4's symptom by another route).
  */
+
+/**
+ * The longest a question may be: `question` in `firestore.rules`. Long enough
+ * for a public-exam statement with a paragraph of setup (`FEAT-051`).
+ */
+export const MAX_QUESTION_LENGTH = 2000;
+
+/** The longest an answer may be — the correct one and every wrong one alike. */
+export const MAX_ANSWER_LENGTH = 200;
+
+/**
+ * The fewest wrong-answer rows a multiple-choice question keeps: one, so it has
+ * two options in all (`FEAT-051`). `firestore.rules` refuses an empty list.
+ */
+export const MIN_INCORRECT_ANSWERS = 1;
+
+/**
+ * The most: five, so six options in all — `maxIncorrectAnswers()` in
+ * `firestore.rules`. The two numbers move together, which is the principle
+ * finding B2 set: the rule accepts exactly what the form can produce.
+ */
+export const MAX_INCORRECT_ANSWERS = 5;
+
+/** What a new question starts on: three wrong answers, four options — the usual shape. */
+export const DEFAULT_INCORRECT_ANSWERS = 3;
 
 /**
  * Optional, but `https://` when present — the same rule `firestore.rules`
@@ -82,7 +113,7 @@ export function createQuestionForm(fb: FormBuilder) {
     tags: fb.nonNullable.control<string[]>([], Validators.required),
     difficulty: ['medium' as Difficulty, Validators.required],
     type: ['multiple' as QuestionType, Validators.required],
-    question: ['', [Validators.required, nonBlank, Validators.maxLength(500)]],
+    question: ['', [Validators.required, nonBlank, Validators.maxLength(MAX_QUESTION_LENGTH)]],
     // How the text above, the answers and the justification are meant to be
     // read (`FEAT-019`). Defaults to plain, so nothing about the existing flow
     // changes for a contributor who does not want Markdown — and so the field
@@ -93,7 +124,7 @@ export function createQuestionForm(fb: FormBuilder) {
     // makes that safe is that `firestore.rules` checks it anyway, which is
     // where the check belongs for a value the server has to be sure of.
     format: ['plain' as QuestionFormat],
-    correctAnswer: ['', [Validators.required, nonBlank, Validators.maxLength(200)]],
+    correctAnswer: ['', [Validators.required, nonBlank, Validators.maxLength(MAX_ANSWER_LENGTH)]],
     // Optional on purpose. Requiring a citation would push contributors toward
     // pasting *something*, and a bad citation is worse than none because it
     // looks checked. `https` only, matching `firestore.rules` — the CSP would
@@ -111,28 +142,38 @@ export function createQuestionForm(fb: FormBuilder) {
     sourceTitle: ['', [Validators.maxLength(200)]],
     // The "Justification" box, for a question whose answer is not obvious even
     // to somebody who knows the subject. Optional for the same reason the two
-    // above are, and bounded at 1000 to match `firestore.rules` — twice the
-    // question's own cap, because it has to explain the question, the right
-    // answer and the wrong ones.
+    // above are, and bounded at 1000 to match `firestore.rules`: it says why
+    // the right answer is right and the wrong ones wrong, and a longer
+    // statement does not lengthen that — so it stays at 1000 while the
+    // question itself may run to 2000 (`FEAT-051`).
     explanation: ['', [Validators.maxLength(1000)]],
-    // Required only for a "multiple" question — for a boolean one these three
-    // are irrelevant and hidden, and the opposite value is derived instead.
-    // The validators are therefore applied and cleared as `type` changes
-    // rather than checked by hand at submit time: that keeps `form.invalid` the
-    // single source of truth, which is what lets the template render per-field
-    // errors and the submit handler focus the first offending control.
-    incorrectAnswers: fb.nonNullable.array([
-      fb.nonNullable.control(''),
-      fb.nonNullable.control(''),
-      fb.nonNullable.control(''),
-    ]),
+    // The wrong answers, one row each (`FEAT-051`): three to start with — four
+    // options, the usual shape — and anywhere from one to five as the
+    // contributor adds and removes rows, so a question has two to six options
+    // in all. The rows are built and torn down by `addIncorrectAnswer`,
+    // `removeIncorrectAnswer` and `patchQuestionForm` below, never by a
+    // caller reaching into the array, so the bounds live in one place.
+    //
+    // Required only for a "multiple" question — for a boolean one the rows are
+    // irrelevant and hidden, and the opposite value is derived instead. The
+    // validators are therefore applied and cleared as `type` changes rather
+    // than checked by hand at submit time: that keeps `form.invalid` the single
+    // source of truth, which is what lets the template render per-field errors
+    // and the submit handler focus the first offending control.
+    incorrectAnswers: fb.nonNullable.array(
+      Array.from({ length: DEFAULT_INCORRECT_ANSWERS }, () => fb.nonNullable.control('')),
+    ),
   });
 }
 
 export function applyIncorrectAnswerValidators(form: QuestionForm, type: QuestionType): void {
   for (const control of form.controls.incorrectAnswers.controls) {
     if (type === 'multiple') {
-      control.setValidators([Validators.required, nonBlank, Validators.maxLength(200)]);
+      control.setValidators([
+        Validators.required,
+        nonBlank,
+        Validators.maxLength(MAX_ANSWER_LENGTH),
+      ]);
     } else {
       control.clearValidators();
     }
@@ -140,6 +181,79 @@ export function applyIncorrectAnswerValidators(form: QuestionForm, type: Questio
     // the same form, and re-emitting from here would re-enter it.
     control.updateValueAndValidity({ emitEvent: false });
   }
+}
+
+/** How many options the form's question has: the correct answer and every wrong-answer row. */
+export function optionCount(form: QuestionForm): number {
+  return form.controls.incorrectAnswers.length + 1;
+}
+
+/** Whether another wrong-answer row fits under the ceiling the rules set. */
+export function canAddIncorrectAnswer(form: QuestionForm): boolean {
+  return form.controls.incorrectAnswers.length < MAX_INCORRECT_ANSWERS;
+}
+
+/** Whether a row can go without leaving the question with a single option. */
+export function canRemoveIncorrectAnswer(form: QuestionForm): boolean {
+  return form.controls.incorrectAnswers.length > MIN_INCORRECT_ANSWERS;
+}
+
+/**
+ * Appends an empty wrong-answer row, and returns its index — or `null` when the
+ * question already has the six options the rules allow.
+ *
+ * The row takes the validators the current type calls for, so a row added to a
+ * multiple-choice question is as required as the ones that were already there.
+ */
+export function addIncorrectAnswer(form: QuestionForm): number | null {
+  if (!canAddIncorrectAnswer(form)) {
+    return null;
+  }
+  form.controls.incorrectAnswers.push(new FormControl('', { nonNullable: true }));
+  applyIncorrectAnswerValidators(form, form.controls.type.value);
+  return form.controls.incorrectAnswers.length - 1;
+}
+
+/**
+ * Removes one wrong-answer row, and reports whether it did — never below the one
+ * row that keeps a question at two options.
+ */
+export function removeIncorrectAnswer(form: QuestionForm, index: number): boolean {
+  const rows = form.controls.incorrectAnswers;
+  if (!canRemoveIncorrectAnswer(form) || index < 0 || index >= rows.length) {
+    return false;
+  }
+  rows.removeAt(index);
+  return true;
+}
+
+/**
+ * Replaces every wrong-answer row with one per value, validators included.
+ *
+ * Rebuilt rather than reset in place: `FormArray.reset()` keeps however many
+ * controls the array already has, and the whole point of the rows is that the
+ * count changes.
+ */
+function setIncorrectAnswerRows(form: QuestionForm, values: readonly string[]): void {
+  const rows = form.controls.incorrectAnswers;
+  rows.clear({ emitEvent: false });
+  for (const value of values) {
+    rows.push(new FormControl(value, { nonNullable: true }), { emitEvent: false });
+  }
+  applyIncorrectAnswerValidators(form, form.controls.type.value);
+}
+
+/**
+ * Puts the form back to a new question's shape, for "Add another": the
+ * defaults, and three empty wrong-answer rows however many the last question
+ * had.
+ */
+export function resetQuestionForm(form: QuestionForm): void {
+  form.reset({ difficulty: 'medium', type: 'multiple' });
+  setIncorrectAnswerRows(
+    form,
+    Array.from({ length: DEFAULT_INCORRECT_ANSWERS }, () => ''),
+  );
 }
 
 export interface QuestionField {
@@ -260,10 +374,12 @@ export function duplicateAnswerMessage(duplicate: string): string {
  * The form's values as `custom_questions` stores them.
  *
  * A boolean question's incorrect answer is *derived* — the opposite literal —
- * rather than typed, which is the one thing the three incorrect-answer controls
- * do not cover. Optional fields are omitted entirely when blank rather than
- * written as an empty string: `firestore.rules` refuses an empty `sourceTitle`
- * or `explanation`, and an absent key is the honest representation of "not
+ * rather than typed, which is the one thing the wrong-answer rows do not cover:
+ * however many rows a contributor left behind on switching to true/false, the
+ * question is written with exactly the one wrong answer the rules require.
+ * Optional fields are omitted entirely when blank rather than written as an
+ * empty string: `firestore.rules` refuses an empty `sourceTitle` or
+ * `explanation`, and an absent key is the honest representation of "not
  * given".
  */
 export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>): {
@@ -328,14 +444,27 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
 /**
  * Fills the form from a stored question, for the edit dialog.
  *
- * The three incorrect-answer controls are filled positionally and padded with
- * empty strings, because the stored list holds one entry for a boolean question
- * and up to three for a multiple-choice one. Padding rather than resizing keeps
- * the control array a fixed shape, which is what the label table and the
- * template's `@for` both assume.
+ * **The rows are built from the stored count** (`FEAT-051`): a five-option
+ * question opens on four wrong-answer rows, not on three padded or truncated
+ * ones. A boolean question stores its one derived wrong answer, which the form
+ * never shows, so it opens on a new question's three empty rows — what the
+ * author meets if they switch it to multiple choice.
+ *
+ * Every stored row is kept, even past the five the rules allow — a document
+ * written from the console could carry more — because silently dropping an
+ * answer the author wrote is worse than showing it: the remove buttons are
+ * right there, and the rules refuse the save until the count is back inside
+ * the bound.
  */
 export function patchQuestionForm(form: QuestionForm, question: CustomQuestionDoc): void {
-  const incorrect = question.type === 'boolean' ? [] : question.incorrect_answers;
+  const stored = Array.isArray(question.incorrect_answers) ? question.incorrect_answers : [];
+  const rows =
+    question.type === 'boolean'
+      ? Array.from({ length: DEFAULT_INCORRECT_ANSWERS }, () => '')
+      : stored.map((answer) => (typeof answer === 'string' ? answer : ''));
+  while (rows.length < MIN_INCORRECT_ANSWERS) {
+    rows.push('');
+  }
   form.reset({
     difficulty: question.difficulty,
     type: question.type,
@@ -358,7 +487,8 @@ export function patchQuestionForm(form: QuestionForm, question: CustomQuestionDo
     // loaded is a field the write deletes), and a legacy question's topic moves
     // from its category to its tags on the first save.
     tags: topicTagsOf(question),
-    incorrectAnswers: [0, 1, 2].map((index) => incorrect[index] ?? ''),
   });
-  applyIncorrectAnswerValidators(form, question.type);
+  // After the reset rather than through it: `reset()` fills the controls the
+  // array already has, and the count is what changes here.
+  setIncorrectAnswerRows(form, rows);
 }

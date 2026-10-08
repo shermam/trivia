@@ -7,6 +7,11 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { FirebaseService } from '../../services/firebase.service';
 import { SubscriptionService } from '../../services/subscription.service';
+import {
+  QuestionForm,
+  addIncorrectAnswer,
+  removeIncorrectAnswer,
+} from '../question-form/question-form';
 import { AddQuestionComponent } from './add-question.component';
 
 /**
@@ -470,6 +475,289 @@ describe('AddQuestionComponent topic tags', () => {
   });
 });
 
+/**
+ * `FEAT-051`: the wrong answers are rows a contributor adds and removes, from
+ * one to five — two to six options in all, what `firestore.rules` accepts —
+ * and the statement may run to 2,000 characters.
+ *
+ * Rendered, because every promise here is about the page rather than the form
+ * model: which buttons exist, where focus lands, what a screen reader hears.
+ * Focus after a removal is the one worth the most care — the button that was
+ * pressed lives in the row that has just gone, and focus asked to stay on a
+ * removed element drops to `<body>` without a word (`CLAUDE.md` §4.5). jsdom
+ * enforces that much, because a detached node genuinely cannot hold focus.
+ */
+describe('AddQuestionComponent answer rows (FEAT-051)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  function rendered() {
+    const harness = setup();
+    harness.fixture.detectChanges();
+    const host = harness.fixture.nativeElement as HTMLElement;
+    const form = harness.component.form as unknown as QuestionForm;
+    const rows = () =>
+      Array.from(host.querySelectorAll<HTMLInputElement>('input[id^="incorrect-answer-"]'));
+    const press = (selector: string) => {
+      host.querySelector<HTMLButtonElement>(selector)!.click();
+      harness.fixture.detectChanges();
+    };
+    const addButton = () => host.querySelector<HTMLButtonElement>('[data-cy="add-answer"]')!;
+    const removeButtons = () =>
+      Array.from(host.querySelectorAll<HTMLButtonElement>('[data-cy^="remove-incorrect-answer-"]'));
+    const status = () => host.querySelector('[data-cy="answer-rows-status"]')?.textContent?.trim();
+    return { ...harness, host, form, rows, press, addButton, removeButtons, status };
+  }
+
+  it('starts on four options: the correct answer and three wrong-answer rows', () => {
+    const { rows, addButton, removeButtons, host } = rendered();
+
+    expect(rows().map((row) => row.id)).toEqual([
+      'incorrect-answer-0',
+      'incorrect-answer-1',
+      'incorrect-answer-2',
+    ]);
+    expect(addButton().disabled).toBe(false);
+    expect(removeButtons()).toHaveLength(3);
+    // Each row is labelled, not merely hinted at by a placeholder that vanishes
+    // on the first keystroke, and the rows are one named group.
+    expect(host.querySelector('label[for="incorrect-answer-1"]')?.textContent?.trim()).toBe(
+      'Incorrect answer 2',
+    );
+    const group = host.querySelector('[data-cy="incorrect-answers"]')!;
+    expect(group.getAttribute('role')).toBe('group');
+    expect(host.querySelector(`#${group.getAttribute('aria-labelledby')}`)?.textContent).toContain(
+      'Incorrect Answers',
+    );
+  });
+
+  it('adds rows up to six options and no further', () => {
+    const { rows, press, addButton, form } = rendered();
+
+    press('[data-cy="add-answer"]');
+    press('[data-cy="add-answer"]');
+
+    expect(rows()).toHaveLength(5);
+    expect(addButton().disabled).toBe(true);
+    // The ceiling is the form's, not only the button's.
+    expect(addIncorrectAnswer(form)).toBeNull();
+    expect(form.controls.incorrectAnswers.length).toBe(5);
+  });
+
+  it('puts the cursor in the row it adds, and says how many answers there are', () => {
+    const { press, status } = rendered();
+
+    press('[data-cy="add-answer"]');
+
+    expect(document.activeElement?.id).toBe('incorrect-answer-3');
+    expect(status()).toBe('Incorrect answer 4 added. The question now has 5 answers.');
+
+    press('[data-cy="add-answer"]');
+    expect(status()).toBe(
+      'Incorrect answer 5 added. The question now has 6 answers. That is the most a question can have.',
+    );
+  });
+
+  it('removes rows down to two options and no further', () => {
+    const { rows, press, removeButtons, form } = rendered();
+
+    press('[data-cy="remove-incorrect-answer-2"]');
+    press('[data-cy="remove-incorrect-answer-1"]');
+
+    expect(rows()).toHaveLength(1);
+    expect(removeButtons()).toHaveLength(0);
+    expect(removeIncorrectAnswer(form, 0)).toBe(false);
+    expect(form.controls.incorrectAnswers.length).toBe(1);
+  });
+
+  it('keeps every answer with its own row when a middle one goes', () => {
+    const { rows, press, form, fillValidForm } = rendered();
+    fillValidForm(); // CO2, O2, NaCl
+    press('[data-cy="add-answer"]');
+    form.controls.incorrectAnswers.at(3).setValue('Fe');
+
+    press('[data-cy="remove-incorrect-answer-1"]');
+
+    expect(form.controls.incorrectAnswers.getRawValue()).toEqual(['CO2', 'NaCl', 'Fe']);
+    expect(rows().map((row) => row.value)).toEqual(['CO2', 'NaCl', 'Fe']);
+    expect(rows().map((row) => row.getAttribute('placeholder'))).toEqual([
+      'Incorrect answer 1',
+      'Incorrect answer 2',
+      'Incorrect answer 3',
+    ]);
+  });
+
+  it('moves focus to the row that takes a removed row’s place', () => {
+    const { press, fillValidForm, status } = rendered();
+    fillValidForm();
+
+    press('[data-cy="remove-incorrect-answer-0"]');
+
+    const focused = document.activeElement as HTMLInputElement;
+    expect(focused.id).toBe('incorrect-answer-0');
+    expect(focused.value).toBe('O2');
+    expect(status()).toBe('Incorrect answer 1 removed. The question now has 3 answers.');
+  });
+
+  it('moves focus to "Add an answer" when the last row goes, never to the body', () => {
+    const { press, addButton, status } = rendered();
+
+    press('[data-cy="remove-incorrect-answer-2"]');
+
+    expect(document.activeElement).toBe(addButton());
+    expect(document.activeElement).not.toBe(document.body);
+
+    press('[data-cy="remove-incorrect-answer-1"]');
+    expect(document.activeElement).toBe(addButton());
+    expect(status()).toBe(
+      'Incorrect answer 2 removed. The question now has 2 answers. That is the fewest a question can have.',
+    );
+  });
+
+  it('names and focuses an added row left empty', async () => {
+    const { component, press, fixture, fillValidForm, addCustomQuestion } = rendered();
+    fillValidForm();
+    press('[data-cy="add-answer"]');
+    (document.activeElement as HTMLElement).blur();
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+    expect(component.validationSummary()).toBe(
+      'Incorrect answer 4 needs your attention before this can be saved.',
+    );
+    expect(document.activeElement?.id).toBe('incorrect-answer-3');
+    expect(fixture.nativeElement.querySelector('#incorrect-answer-error-3')?.textContent).toMatch(
+      /Incorrect answer 4 is required/,
+    );
+  });
+
+  it('submits six options as five wrong answers, in row order', async () => {
+    const { component, press, form, fillValidForm, addCustomQuestion } = rendered();
+    fillValidForm();
+    press('[data-cy="add-answer"]');
+    press('[data-cy="add-answer"]');
+    form.controls.incorrectAnswers.at(3).setValue('Fe');
+    form.controls.incorrectAnswers.at(4).setValue(' He ');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].incorrect_answers).toEqual([
+      'CO2',
+      'O2',
+      'NaCl',
+      'Fe',
+      'He',
+    ]);
+  });
+
+  it('submits a two-option multiple-choice question', async () => {
+    const { component, press, fillValidForm, addCustomQuestion } = rendered();
+    fillValidForm();
+    press('[data-cy="remove-incorrect-answer-2"]');
+    press('[data-cy="remove-incorrect-answer-1"]');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0]).toMatchObject({
+      type: 'multiple',
+      incorrect_answers: ['CO2'],
+    });
+  });
+
+  // The rules require exactly one wrong answer on a true/false question, and
+  // the rows a contributor filled before switching are hidden, not deleted.
+  it('writes exactly one wrong answer for true/false, whatever rows were left behind', async () => {
+    const { component, press, form, fillValidForm, addCustomQuestion } = rendered();
+    fillValidForm();
+    press('[data-cy="add-answer"]');
+    form.controls.incorrectAnswers.at(3).setValue('Fe');
+    component.form.controls.type.setValue('boolean');
+    component.form.controls.correctAnswer.setValue('True');
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].incorrect_answers).toEqual(['False']);
+  });
+
+  it('starts the next question on four options again after "Add another"', async () => {
+    const { component, press, form, fillValidForm, rows, fixture } = rendered();
+    fillValidForm();
+    press('[data-cy="add-answer"]');
+    form.controls.incorrectAnswers.at(3).setValue('Fe');
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    (component as unknown as { addAnother(): void }).addAnother();
+    fixture.detectChanges();
+
+    expect(rows().map((row) => row.value)).toEqual(['', '', '']);
+    expect(form.controls.incorrectAnswers.length).toBe(3);
+    // Required again, like the three it started with — not silently optional.
+    expect(form.controls.incorrectAnswers.at(2).hasError('required')).toBe(true);
+  });
+});
+
+/**
+ * `FEAT-051`: a statement may run to 2,000 characters — `question` in
+ * `firestore.rules` — and the counter under the field says how much of that is
+ * used, from first paint.
+ */
+describe('AddQuestionComponent question length (FEAT-051)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('accepts a 2,000-character question', async () => {
+    const { component, addCustomQuestion, fillValidForm } = setup();
+    fillValidForm();
+    component.form.controls.question.setValue('q'.repeat(2000));
+
+    await component.onSubmit();
+
+    expect(addCustomQuestion.mock.calls[0][0].question).toHaveLength(2000);
+  });
+
+  it('refuses 2,001 characters before the rules do, naming the limit', async () => {
+    const { component, addCustomQuestion, fillValidForm, fixture } = setup();
+    fixture.detectChanges();
+    fillValidForm();
+    component.form.controls.question.setValue('q'.repeat(2001));
+
+    await component.onSubmit();
+    fixture.detectChanges();
+
+    expect(addCustomQuestion).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('#question-error')?.textContent).toMatch(
+      /Question must be 2000 characters or fewer/,
+    );
+    expect(document.activeElement?.id).toBe('question');
+  });
+
+  it('counts the characters used against the limit, and describes the field with it', () => {
+    const { fixture } = setup();
+    fixture.detectChanges();
+    const counter = () =>
+      fixture.nativeElement.querySelector('[data-cy="question-count"]')?.textContent?.trim();
+    const field: HTMLElement = fixture.nativeElement.querySelector('#question');
+
+    expect(counter()).toBe('0 of 2000 characters');
+    expect(field.getAttribute('aria-describedby')).toBe('question-count');
+    // Described, never live: a live counter would read the count back after
+    // every keystroke. The description is read when the field is reached.
+    expect(
+      fixture.nativeElement
+        .querySelector('[data-cy="question-count"]')
+        ?.closest('[aria-live], [role="status"], [role="alert"], [role="log"]'),
+    ).toBeNull();
+
+    // Typed into the real element rather than set on the control: the input
+    // event is what a person produces, and what the counter has to follow.
+    (field as HTMLTextAreaElement).value = 'Which planet?';
+    field.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(counter()).toBe('13 of 2000 characters');
+  });
+});
+
 describe('AddQuestionComponent submit failures', () => {
   afterEach(() => TestBed.resetTestingModule());
 
@@ -540,7 +828,9 @@ describe('AddQuestionComponent rendered feedback', () => {
 
     const input: HTMLElement | null = fixture.nativeElement.querySelector('#question');
     expect(input?.getAttribute('aria-invalid')).toBe('true');
-    expect(input?.getAttribute('aria-describedby')).toBe('question-error');
+    // The error first, then the character counter the field always carries
+    // (`FEAT-051`): the error is the part a screen-reader user needs.
+    expect(input?.getAttribute('aria-describedby')).toBe('question-error question-count');
   });
 
   /**

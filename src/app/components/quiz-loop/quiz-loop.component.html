@@ -234,7 +234,21 @@
           </p>
         }
 
-        <div class="grid gap-2.5 sm:grid-cols-2">
+        <!--
+          Two to a row from `sm` up for four options or fewer, one column for
+          five or six at every width (`FEAT-051`): a fifth option in a
+          two-column grid leaves an orphan cell, and the questions that carry
+          five or six are exam questions whose options read better at full
+          width. Phones are one column throughout.
+
+          An eliminated option keeps its cell (`FEAT-002`), so the count this
+          is decided by never changes within a question.
+        -->
+        <div
+          class="grid gap-2.5"
+          [class.sm:grid-cols-2]="twoColumnOptions()"
+          data-cy="answer-options"
+        >
           @for (answer of question.all_answers; track answer.id; let i = $index) {
             <button
               type="button"
@@ -286,7 +300,13 @@
             isn't there. That is safe precisely because it cannot change during
             the game: the limit is fixed before question 1. 50/50 gets the
             opposite treatment for the mirror-image reason — whether a question
-            is true/false varies question to question, so it is disabled.
+            has only two options varies question to question, so it is
+            disabled.
+
+          50/50's names follow its rule rather than the four-option case
+          (`FEAT-051`): it removes every wrong answer but one whatever the
+          count, and it is unavailable on any question with two options — a
+          two-option multiple choice as much as a true-or-false one.
 
           `aria-disabled` is not used in place of `disabled`: there is no reason
           to keep a spent lifeline focusable, and `disabled` is what actually
@@ -306,8 +326,8 @@
             [attr.aria-label]="
               lifelines().fiftyFifty
                 ? canUseFiftyFifty()
-                  ? 'Fifty-fifty: remove two wrong answers. One use per game.'
-                  : 'Fifty-fifty is unavailable on a true or false question.'
+                  ? 'Fifty-fifty: remove every wrong answer but one. One use per game.'
+                  : 'Fifty-fifty is unavailable on a question with two options.'
                 : 'Fifty-fifty already used.'
             "
             [ngClass]="lifelineClass(lifelines().fiftyFifty && canUseFiftyFifty())"
