@@ -254,6 +254,13 @@ describe('legal pages', () => {
     );
     expect(text).toContain('no link to who answered');
     expect(text).toContain('no account identifier, no time and no game is stored beside them');
+    // What is stored, rather than a claim about what nobody could infer: the
+    // counts are public and move with every game, so an onlooker who knows
+    // when somebody played can see one of them tick.
+    expect(text).toContain(
+      'The counts are totals across every player: they carry no identifier and are not linked to the record of your games above',
+    );
+    expect(text).not.toContain('nothing can trace a count back to you');
     expect(text).toContain('anyone who can read the question can read them');
     expect(text).toContain('deleting your account cannot take your own answers back out of them');
     expect(text).toContain('Anonymous play adds nothing to them');
