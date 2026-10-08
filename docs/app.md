@@ -248,7 +248,7 @@ Firestore collection `custom_questions` acts as a first-party question bank alon
 
 ### 1.5 Authentication & the leaderboard
 
-Every visitor gets a **Firebase Anonymous Auth** uid shortly after the app loads (`AuthService.ensureSignedIn()`, started once from the root `App` component, on the first idle moment after first paint — `FEAT-017` §3.2, and §1.8 below for what else rides that callback) — there's no sign-in wall before playing. Signing in with a real provider is optional and only needed to save a score to the leaderboard, or to like or dislike a question (§1.14).
+Every visitor gets a **Firebase Anonymous Auth** uid shortly after the app loads (`AuthService.ensureSignedIn()`, started once from the root `App` component, on the first idle moment after first paint — `FEAT-017` §3.2, and §1.8 below for what else rides that callback) — there's no sign-in wall before playing. Signing in with a real provider is optional and only needed to save a score to the leaderboard, to keep lifetime totals and a play history (§1.10), or to like or dislike a question (§1.14).
 
 Because that bootstrap is no longer part of boot, **anything that needs auth sooner starts it itself**. `AuthService.getAuth()` is memoised and lazy, so `whenAuthStateReady()`, `getIdToken()` and `whenProStatusReady()` all pull it forward at no cost when it has already run.
 

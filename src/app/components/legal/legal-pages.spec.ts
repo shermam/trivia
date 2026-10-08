@@ -224,6 +224,11 @@ describe('legal pages', () => {
     // `exportAccountData` have to go on keeping.
     expect(text).toContain('deletes your gameplay totals and your whole play history');
     expect(text).toContain('your play history — every game we still hold, question by question');
+    // What outlives the twelve months is the totals and nothing else: no
+    // summary of preferences is derived from the plays, because nothing reads
+    // them yet. Announcing one before it exists is what `CLAUDE.md` §4.0
+    // forbids; the recommender's own PR adds the sentence with the practice.
+    expect(text).not.toContain('general picture of your preferences');
   });
 
   /**
@@ -292,11 +297,21 @@ describe('legal pages', () => {
       'The likes and dislikes you give questions are kept for you alone, and nothing about you is inferred from them',
     );
 
-    // The exhaustive "only needed to…" lists, in both documents.
-    expect(privacy).toContain('to save a score to the public leaderboard, to like or dislike');
-    expect(terms).toContain('to save a score to the public leaderboard, to like or dislike');
+    // The exhaustive "only needed to…" lists, in both documents — whole, since
+    // each entry is a thing that really does need an account: the totals and
+    // the play history are banked only for one (`recordGameResult`'s provider
+    // allowlist), and a list without them said they were not.
+    const signInList =
+      'only needed to save a score to the public leaderboard, to keep your gameplay totals and play history, to like or dislike a question, or to subscribe to Pro';
+    expect(privacy).toContain(signInList);
+    expect(terms).toContain(signInList);
+    expect(privacy).toContain(
+      'An email address is only required if you want to save a score, keep your gameplay totals and play history, like or dislike a question, or subscribe',
+    );
     expect(privacy).not.toContain('only needed to save a score to the public leaderboard, or to');
     expect(terms).not.toContain('only needed to save a score to the public leaderboard or to');
+    expect(privacy).not.toContain('to save a score to the public leaderboard, to like or dislike');
+    expect(terms).not.toContain('to save a score to the public leaderboard, to like or dislike');
   });
 
   /**
