@@ -40,6 +40,16 @@ const OWNER = 'owner';
 const OTHER = 'other';
 const ANON = 'anon';
 const UNVERIFIED = 'unverified';
+/**
+ * Another account whose uid **begins with OWNER's**. `OTHER` shares no prefix
+ * with `OWNER`, so it cannot tell `isOwnQuestionVoteId()` comparing
+ * `uid + '_'` from comparing the bare uid — and only the first keeps `owner`
+ * out of the votes of `owner2`, whose ids all start with `owner`. Firebase
+ * mints uids of one length, which is why this never arises in practice, but
+ * nothing in the rules leans on that: the underscore is the whole boundary,
+ * and the rows that use this uid are what fail if it is dropped.
+ */
+const OWNER_PREFIXED = `${OWNER}2`;
 
 const QUESTION_ID = 'voted-question';
 const SECOND_QUESTION_ID = 'second-question';
@@ -404,6 +414,16 @@ describe('question_votes: update — changing one’s mind', () => {
     );
   });
 
+  it('rejects an account changing the vote of one whose uid begins with its own', async () => {
+    await seedVote(OWNER_PREFIXED, QUESTION_ID);
+    await assertFails(
+      updateDoc(
+        voteRef(asVerifiedPassword(env, OWNER), questionVoteId(OWNER_PREFIXED, QUESTION_ID)),
+        { value: -1 },
+      ),
+    );
+  });
+
   // Seeded under the anonymous uid, so the only thing standing between the
   // session and the write is the real-account gate.
   it('rejects an anonymous session changing a vote under its own uid', async () => {
@@ -457,6 +477,15 @@ describe('question_votes: delete — tapping it again', () => {
   it("rejects another account removing a vote of somebody else's that was never cast", async () => {
     await assertFails(
       deleteDoc(voteRef(asVerifiedPassword(env, OTHER), questionVoteId(OWNER, SECOND_QUESTION_ID))),
+    );
+  });
+
+  it('rejects an account removing the vote of one whose uid begins with its own', async () => {
+    await seedVote(OWNER_PREFIXED, QUESTION_ID);
+    await assertFails(
+      deleteDoc(
+        voteRef(asVerifiedPassword(env, OWNER), questionVoteId(OWNER_PREFIXED, QUESTION_ID)),
+      ),
     );
   });
 
@@ -581,6 +610,27 @@ describe('question_votes: read — the owner, and nobody else', () => {
   it("refuses another account reading somebody else's vote", async () => {
     await assertFails(
       getDoc(voteRef(asVerifiedPassword(env, OTHER), questionVoteId(OWNER, QUESTION_ID))),
+    );
+  });
+
+  it('refuses an account reading the vote of one whose uid begins with its own', async () => {
+    await seedVote(OWNER_PREFIXED, QUESTION_ID);
+    await assertFails(
+      getDoc(voteRef(asVerifiedPassword(env, OWNER), questionVoteId(OWNER_PREFIXED, QUESTION_ID))),
+    );
+  });
+
+  // The same boundary in the shape the app reads with, so a query cannot
+  // reach what a `get` cannot.
+  it('refuses an IN query that names the vote of one whose uid begins with the caller’s', async () => {
+    await seedVote(OWNER_PREFIXED, QUESTION_ID);
+    await assertFails(
+      getDocs(
+        ownVotesQuery(asVerifiedPassword(env, OWNER), [
+          questionVoteId(OWNER, QUESTION_ID),
+          questionVoteId(OWNER_PREFIXED, QUESTION_ID),
+        ]),
+      ),
     );
   });
 

@@ -34,6 +34,14 @@ interface Filter {
   value: string;
 }
 
+/**
+ * The most writes one `WriteBatch` may commit — the same limit
+ * `account.ts`'s question anonymisation batches under. Enforced by the fake
+ * rather than read off `VOTE_SWEEP_PAGE_SIZE`, so a page size raised past it
+ * fails here instead of every paging test quietly scaling with it.
+ */
+const WRITE_BATCH_LIMIT = 500;
+
 function fakeStore(ids: string[]) {
   const docs = new Map(
     ids.map((id) => [id, { questionId: id.slice(id.indexOf('_') + 1), value: 1, createdAt: 1 }]),
@@ -71,6 +79,10 @@ function fakeStore(ids: string[]) {
           pending.push((ref as { id: string }).id);
         },
         commit() {
+          assert.ok(
+            pending.length <= WRITE_BATCH_LIMIT,
+            `a batch of ${pending.length} deletes is over the ${WRITE_BATCH_LIMIT}-write limit`,
+          );
           commits.push([...pending]);
           for (const id of pending) {
             docs.delete(id);
