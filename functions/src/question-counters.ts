@@ -25,10 +25,10 @@
  *
  * **Bounded, not attested** — audit decision `A1` once more. The outcomes are
  * client-supplied, so somebody can skew a question's difficulty by lying about
- * their own round. What bounds it is one game's worth per call
- * (below), one call per game id, and sixty games an hour per account
- * (`game-stats.ts`). That is calibration, not a security boundary: the report
- * channel catches a bad question; this catches a badly labelled one.
+ * their own round. What bounds it is one game's worth per call (below), one
+ * call per game id, and sixty games an hour per account (`game-stats.ts`).
+ * That is calibration, not a security boundary: the report channel catches a
+ * bad question; this catches a badly labelled one.
  */
 import type { PlayAnswer } from './play-history';
 
@@ -51,13 +51,14 @@ export interface QuestionCounters {
  * The increments one game's per-answer records produce: one per bank question
  * named, in the order the game asked them.
  *
- * **A question is counted once per game, however many entries name it.** A real
- * game never holds the same bank question twice — the draw reads each document
- * once — so for every honest payload this is exactly one increment per entry. What it changes is the forged payload that
- * names one question twenty-five times: without it, a single call would move
- * that question's counters by twenty-five answers, where `FEAT-023`'s bound is
- * one honest game's worth per call. The first entry is the one counted; which
- * one is arbitrary, because only a forged payload can disagree with itself.
+ * **A question is counted once per game, however many entries name it.** A
+ * real game never holds the same bank question twice — the draw reads each
+ * document once — so for every honest payload this is exactly one increment
+ * per entry. What it changes is the forged payload that names one question
+ * twenty-five times: without it, a single call would move that question's
+ * counters by twenty-five answers, where `FEAT-023`'s bound is one honest
+ * game's worth per call. The first entry is the one counted; which one is
+ * arbitrary, because only a forged payload can disagree with itself.
  *
  * **`correct` is derived from the same entry as `answered`**, so an increment
  * can never claim a right answer to a question it did not count as answered —
