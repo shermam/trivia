@@ -45,33 +45,40 @@ describe('the seed-tag table', () => {
    * The spec's table, verbatim, so an edit to either side has to be made to
    * both. The three the e2e fixture used to stub — 9, 21 and 23 — are among
    * them and agree.
+   *
+   * **The names are pinned as well as the tags**, because the rule above cannot
+   * see a name drift in case or spacing — `Entertainment: Video games` still
+   * derives `video-games` — while the adapter matches a fetched question's
+   * decoded category against the name exactly. A name that drifted would pass
+   * every rule check and leave every question in that category served with no
+   * topic at all.
    */
   it('matches the FEAT-052 table row for row', () => {
-    expect(OPEN_TRIVIA_CATEGORIES.map((row) => [row.id, row.tag])).toEqual([
-      [9, 'general-knowledge'],
-      [10, 'books'],
-      [11, 'film'],
-      [12, 'music'],
-      [13, 'musicals-theatres'],
-      [14, 'television'],
-      [15, 'video-games'],
-      [16, 'board-games'],
-      [17, 'science-nature'],
-      [18, 'computers'],
-      [19, 'mathematics'],
-      [20, 'mythology'],
-      [21, 'sports'],
-      [22, 'geography'],
-      [23, 'history'],
-      [24, 'politics'],
-      [25, 'art'],
-      [26, 'celebrities'],
-      [27, 'animals'],
-      [28, 'vehicles'],
-      [29, 'comics'],
-      [30, 'gadgets'],
-      [31, 'japanese-anime-manga'],
-      [32, 'cartoon-animations'],
+    expect(OPEN_TRIVIA_CATEGORIES.map((row) => [row.id, row.name, row.tag])).toEqual([
+      [9, 'General Knowledge', 'general-knowledge'],
+      [10, 'Entertainment: Books', 'books'],
+      [11, 'Entertainment: Film', 'film'],
+      [12, 'Entertainment: Music', 'music'],
+      [13, 'Entertainment: Musicals & Theatres', 'musicals-theatres'],
+      [14, 'Entertainment: Television', 'television'],
+      [15, 'Entertainment: Video Games', 'video-games'],
+      [16, 'Entertainment: Board Games', 'board-games'],
+      [17, 'Science & Nature', 'science-nature'],
+      [18, 'Science: Computers', 'computers'],
+      [19, 'Science: Mathematics', 'mathematics'],
+      [20, 'Mythology', 'mythology'],
+      [21, 'Sports', 'sports'],
+      [22, 'Geography', 'geography'],
+      [23, 'History', 'history'],
+      [24, 'Politics', 'politics'],
+      [25, 'Art', 'art'],
+      [26, 'Celebrities', 'celebrities'],
+      [27, 'Animals', 'animals'],
+      [28, 'Vehicles', 'vehicles'],
+      [29, 'Entertainment: Comics', 'comics'],
+      [30, 'Science: Gadgets', 'gadgets'],
+      [31, 'Entertainment: Japanese Anime & Manga', 'japanese-anime-manga'],
+      [32, 'Entertainment: Cartoon & Animations', 'cartoon-animations'],
     ]);
   });
 });
