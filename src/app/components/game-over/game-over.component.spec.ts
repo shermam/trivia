@@ -2784,6 +2784,11 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
             saveHighScore: vi.fn(),
             getLeaderboardEntry: () => Promise.resolve(null),
             getTopScores: () => of([]),
+            // The recap reads a signed-in player's own votes on the round's
+            // community questions (`FEAT-027`), through the real
+            // `QuestionVoteService` here — so the stub answers that read too,
+            // rather than letting it throw into the service's catch.
+            getOwnQuestionVotes: vi.fn().mockResolvedValue(new Map()),
           },
         },
         { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
