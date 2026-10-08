@@ -520,6 +520,97 @@ describe('MyQuestionsComponent editing', () => {
     expect(component.form.getRawValue().format).toBe('plain');
   });
 
+  /**
+   * `FEAT-051`. The dialog builds the rows the stored question has — four
+   * wrong answers open as four rows — rather than padding to three or cutting
+   * to three, and the save writes back exactly what the rows hold. The owner's
+   * edit rewrites the whole document, so a row the dialog did not build is an
+   * answer the save would delete.
+   */
+  it('round-trips a five-option question through the edit dialog', async () => {
+    const { component, updateUserQuestion } = setup({
+      questions: [
+        myQuestion('q1', {
+          tags: ['astronomy'],
+          correct_answer: 'Mars',
+          incorrect_answers: ['Venus', 'Mercury', 'Saturn', 'Neptune'],
+        }),
+      ],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+
+    expect(component.form.controls.incorrectAnswers.length).toBe(4);
+    expect(component.form.getRawValue().incorrectAnswers).toEqual([
+      'Venus',
+      'Mercury',
+      'Saturn',
+      'Neptune',
+    ]);
+
+    await component.saveEdit();
+
+    expect(updateUserQuestion).toHaveBeenCalledWith(
+      'q1',
+      expect.objectContaining({
+        correct_answer: 'Mars',
+        incorrect_answers: ['Venus', 'Mercury', 'Saturn', 'Neptune'],
+      }),
+    );
+  });
+
+  it('opens a two-option question on its one wrong-answer row', async () => {
+    const { component } = setup({
+      questions: [myQuestion('q1', { incorrect_answers: ['B'] })],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+
+    expect(component.form.getRawValue().incorrectAnswers).toEqual(['B']);
+  });
+
+  /**
+   * A true/false question stores the one wrong answer the form derives, which
+   * the dialog never shows — so it opens on a new question's three empty rows,
+   * what the author meets if they switch it to multiple choice, rather than on
+   * one row holding "False".
+   */
+  it('opens a true/false question on a new question’s three empty rows', async () => {
+    const { component } = setup({
+      questions: [
+        myQuestion('q1', { type: 'boolean', correct_answer: 'True', incorrect_answers: ['False'] }),
+      ],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+
+    expect(component.form.getRawValue().incorrectAnswers).toEqual(['', '', '']);
+  });
+
+  /**
+   * Opening a second question must not inherit the first one's row count: the
+   * dialog's form is one instance, refilled per question.
+   */
+  it('rebuilds the rows for each question it opens', async () => {
+    const { component } = setup({
+      questions: [
+        myQuestion('q1', { incorrect_answers: ['B', 'C', 'D', 'E', 'F'] }),
+        myQuestion('q2', { incorrect_answers: ['B', 'C'] }),
+      ],
+    });
+    await settle();
+
+    component.openEdit(component.questions()[0], clickOn());
+    expect(component.form.controls.incorrectAnswers.length).toBe(5);
+    component.closeDialog();
+
+    component.openEdit(component.questions()[1], clickOn());
+    expect(component.form.getRawValue().incorrectAnswers).toEqual(['B', 'C']);
+  });
+
   it('refuses to save an invalid form and says which field is wrong', async () => {
     const { component, updateUserQuestion } = setup();
     await settle();
@@ -705,6 +796,35 @@ describe('MyQuestionsComponent rendered', () => {
     // control.
     expect(query('#edit-question')).not.toBeNull();
     expect(query('#edit-correctAnswer')).not.toBeNull();
+  });
+
+  /**
+   * `FEAT-051`, in the dialog: the stored rows, under the dialog's own id
+   * prefix — which is what focus after adding a row looks up, so a prefix that
+   * did not reach it would put the cursor nowhere.
+   */
+  it('shows a five-option question’s four wrong answers as rows, and adds a sixth', async () => {
+    const { query, click } = await render({
+      questions: [
+        myQuestion('q1', {
+          correct_answer: 'Mars',
+          incorrect_answers: ['Venus', 'Mercury', 'Saturn', 'Neptune'],
+        }),
+      ],
+    });
+    await click('[data-cy="edit-question"]');
+
+    const rows = () =>
+      Array.from(
+        document.querySelectorAll<HTMLInputElement>('input[id^="edit-incorrect-answer-"]'),
+      );
+    expect(rows().map((row) => row.value)).toEqual(['Venus', 'Mercury', 'Saturn', 'Neptune']);
+
+    await click('[data-cy="edit-add-answer"]');
+
+    expect(rows()).toHaveLength(5);
+    expect(document.activeElement?.id).toBe('edit-incorrect-answer-4');
+    expect((query('[data-cy="edit-add-answer"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('says "Remove from the app", never "delete permanently"', async () => {

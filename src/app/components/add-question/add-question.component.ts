@@ -17,6 +17,7 @@ import {
   duplicateAnswerMessage,
   focusFirstInvalidControl,
   questionFields,
+  resetQuestionForm,
   toQuestionContent,
 } from '../question-form/question-form';
 
@@ -190,7 +191,9 @@ export class AddQuestionComponent {
   protected addAnother(): void {
     this.hasSubmitted.set(false);
     this.submitError.set(null);
-    this.form.reset({ difficulty: 'medium', type: 'multiple' });
+    // Back to a new question's shape, rows included: the last question may have
+    // had six options or two, and the next one starts on four (`FEAT-051`).
+    resetQuestionForm(this.form);
   }
 
   protected backToGame(): void {
