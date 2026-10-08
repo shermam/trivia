@@ -257,6 +257,11 @@ describe('legal pages', () => {
     expect(text).toContain('anyone who can read the question can read them');
     expect(text).toContain('deleting your account cannot take your own answers back out of them');
     expect(text).toContain('Anonymous play adds nothing to them');
+    // What outlives a game's twelve months: the counts, which say nothing about
+    // who answered — not "nothing of yours", since a player's answers are in them.
+    expect(text).toContain(
+      'the per-question counts described next, which record nothing about who answered',
+    );
     // The lawful-basis row.
     expect(text).toContain(
       'Add each game you finish signed in to the counts kept on each community question',
