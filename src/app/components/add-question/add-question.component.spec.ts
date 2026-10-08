@@ -741,6 +741,13 @@ describe('AddQuestionComponent question length (FEAT-051)', () => {
 
     expect(counter()).toBe('0 of 2000 characters');
     expect(field.getAttribute('aria-describedby')).toBe('question-count');
+    // Described, never live: a live counter would read the count back after
+    // every keystroke. The description is read when the field is reached.
+    expect(
+      fixture.nativeElement
+        .querySelector('[data-cy="question-count"]')
+        ?.closest('[aria-live], [role="status"], [role="alert"], [role="log"]'),
+    ).toBeNull();
 
     // Typed into the real element rather than set on the control: the input
     // event is what a person produces, and what the counter has to follow.

@@ -827,6 +827,28 @@ describe('MyQuestionsComponent rendered', () => {
     expect((query('[data-cy="edit-add-answer"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  /**
+   * More wrong answers than the rules allow can only come from a document
+   * written outside the app — the console, an Admin SDK script. The dialog
+   * keeps every one rather than dropping an answer its author wrote: the
+   * remove buttons are how the count comes back inside the bound, and "Add an
+   * answer" stays unavailable until it does.
+   */
+  it('keeps every stored row past five, with a remove button on each and no room to add', async () => {
+    const { query, click } = await render({
+      questions: [myQuestion('q1', { incorrect_answers: ['B', 'C', 'D', 'E', 'F', 'G'] })],
+    });
+    await click('[data-cy="edit-question"]');
+
+    expect(
+      Array.from(
+        document.querySelectorAll<HTMLInputElement>('input[id^="edit-incorrect-answer-"]'),
+      ).map((row) => row.value),
+    ).toEqual(['B', 'C', 'D', 'E', 'F', 'G']);
+    expect(document.querySelectorAll('[data-cy^="edit-remove-incorrect-answer-"]')).toHaveLength(6);
+    expect((query('[data-cy="edit-add-answer"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('says "Remove from the app", never "delete permanently"', async () => {
     const { query, click } = await render();
 
