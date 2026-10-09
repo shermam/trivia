@@ -4,8 +4,8 @@ import { type SweepLogger, type SweepPass, runSweepPasses } from './sweep-passes
 
 /**
  * The daily job's two passes are unrelated promises (`daily-sweep.ts`): twelve
- * months of play history, and a report's reporter removed once its question is
- * decided. What is pinned here is that one failing cannot cost the other its
+ * months of play history, and a report's reporter removed thirty days after it
+ * is filed. What is pinned here is that one failing cannot cost the other its
  * run, and that a failure still fails the run rather than vanishing into a log
  * line nobody reads.
  */

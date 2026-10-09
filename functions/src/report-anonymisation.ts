@@ -1,5 +1,12 @@
-import { FieldPath } from 'firebase-admin/firestore';
+import {
+  EXPIRED_REPORTS_ORDER,
+  QUESTION_REPORTS_COLLECTION,
+  REPORT_FILED_AT_FIELD,
+  REPORT_REPORTER_FIELD,
+} from './report-query';
 import { REPORTER_RETENTION_MS } from './report-retention';
+
+export { QUESTION_REPORTS_COLLECTION } from './report-query';
 
 /**
  * When a `question_reports` document stops naming the account that filed it,
@@ -14,8 +21,8 @@ import { REPORTER_RETENTION_MS } from './report-retention';
  * a rule keyed on the question's decision would strip nearly every report
  * within a day of filing, before anybody had read it. **An account that is
  * deleted loses its identity from every report at once**, however recent.
- * Either way the report itself stays: it is moderation evidence about a
- * question, and it must not vanish because the person who filed it left.
+ * Either way the report itself is kept: it is the record that something needed
+ * looking at, and it must not vanish because the person who filed it left.
  *
  * **Anonymising is a copy and a delete, not a field edit.** A report's id is
  * `{window}-{slot}-{uid}` — the volume cap (finding A3) lives in the id — so
@@ -23,15 +30,13 @@ import { REPORTER_RETENTION_MS } from './report-retention';
  * readable by every reviewer and the console. The copy goes to a fresh
  * auto-id, which no client create can produce (`firestore.rules` demands both
  * the `{window}-{slot}-{uid}` id and `reportedBy`), and carries only the four
- * content keys below.
+ * content keys below — `createdAt` cut to the day ({@link startOfUtcDay}).
  *
  * Structural over the Admin SDK rather than tied to it, so the queries and the
  * batching are unit-tested against a fake that applies the filters literally
  * (`report-anonymisation.test.ts`) — the reasoning `question-votes.ts` gives
  * for the same shape.
  */
-
-export const QUESTION_REPORTS_COLLECTION = 'question_reports';
 
 /**
  * How many reports one page reads and one batch commits.
@@ -43,27 +48,29 @@ export const QUESTION_REPORTS_COLLECTION = 'question_reports';
 export const REPORT_SWEEP_PAGE_SIZE = 250;
 
 /**
- * A ceiling on pages per daily run, so one invocation cannot run until the
- * platform kills it: 5,000 reports read.
+ * A ceiling on pages per call, so one invocation cannot run until the platform
+ * kills it: 5,000 reports.
  *
- * **Reaching it is a failure, not a pause** — the difference from the
- * play-history pass, and the reason is the anonymised copies. A copy keeps its
- * original's `createdAt` (the reviewers' queue orders by it), so every copy
- * stays inside the expired range the pass reads, and the next run starts from
- * the oldest again: a run that stopped at the ceiling would stop at the same
- * place tomorrow. So the pass reports it ({@link ReportSweepIncompleteError})
- * rather than leaving the rest to a run that will never reach it.
+ * What reaching it means differs between the two passes. **The daily pass
+ * pauses**: every page it anonymises leaves the set it reads, so tomorrow's
+ * run starts where today's stopped, and nothing is lost — the anonymisation is
+ * merely a day later, as with the play-history sweep. **The leaver's pass
+ * fails** ({@link LeaverReportSweepIncompleteError}), because `deleteAccount`
+ * has no tomorrow: it stops before the account is deleted, and the caller
+ * retries, which continues where this stopped.
  */
-export const REPORT_SWEEP_MAX_PASSES = 20;
+export const REPORT_SWEEP_MAX_PAGES = 20;
 
 /**
  * The keys an anonymised copy carries: what was complained about, why, in the
- * reporter's words, and when. **An allowlist, so the copy is rebuilt rather
- * than passed through** — `reportedBy` stays behind with the original, and so
- * does any key a console edit added, since nothing says an unknown key is not
- * another way of naming somebody.
+ * reporter's words, and the day it was filed. **An allowlist, so the copy is
+ * rebuilt rather than passed through** — `reportedBy` stays behind with the
+ * original, and so does any key a console edit added, since nothing says an
+ * unknown key is not another way of naming somebody.
  */
 export const ANONYMISED_REPORT_KEYS = ['questionId', 'reason', 'detail', 'createdAt'] as const;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The instant before which a report has outlived {@link REPORTER_RETENTION_MS}. */
 export function reporterRetentionCutoff(nowMs: number): number {
@@ -71,27 +78,37 @@ export function reporterRetentionCutoff(nowMs: number): number {
 }
 
 /**
- * **The decision this feature turns on**: given a report's `createdAt`, may it
- * still say who filed it?
+ * The start of the UTC day `ms` falls in, which is all an anonymised copy keeps
+ * of when its report was filed (administrator decision, 9 October 2026).
  *
- * Yes until it is strictly older than the retention period — so a report
- * exactly thirty days old keeps its reporter for one more run — and yes for a
- * `createdAt` that is not a number at all. The second is the daily query's
- * reading, stated rather than left implicit: `createdAt < cutoff` matches
- * numbers only, and a predicate that disagreed with the query would describe a
- * rule the code does not have. The create rule requires a number near the time
- * of filing, so only a console edit can produce anything else.
+ * **The millisecond is itself a way of naming somebody.** The game-over screen
+ * files a report and saves the player's score in the same session, and the
+ * score's public leaderboard entry carries the uid and its own `createdAt` —
+ * so a copy stamped to the millisecond could be matched to its reporter by
+ * time by anybody able to read both, which every reviewer is. The day is what
+ * the reviewers' queue needs to order by, and it is shared by every report
+ * filed that day; reports from one day tie, and the queue's document-id
+ * tiebreaker orders them.
  */
-export function isStillAttributable(createdAt: unknown, nowMs: number): boolean {
-  return !(typeof createdAt === 'number' && createdAt < reporterRetentionCutoff(nowMs));
+export function startOfUtcDay(ms: number): number {
+  return Math.floor(ms / DAY_MS) * DAY_MS;
 }
 
-/** The anonymised copy of a report: its content keys, and nothing else. */
+/**
+ * The anonymised copy of a report: its content keys and nothing else, with
+ * `createdAt` cut to the start of its UTC day.
+ *
+ * A `createdAt` that is not a number is copied as it is: the create rule
+ * requires a number, so only a console edit can store anything else, and there
+ * is no day to cut it to.
+ */
 export function anonymisedReport(data: Record<string, unknown>): Record<string, unknown> {
   const copy: Record<string, unknown> = {};
   for (const key of ANONYMISED_REPORT_KEYS) {
-    if (data[key] !== undefined) {
-      copy[key] = data[key];
+    const value = data[key];
+    if (value !== undefined) {
+      copy[key] =
+        key === REPORT_FILED_AT_FIELD && typeof value === 'number' ? startOfUtcDay(value) : value;
     }
   }
   return copy;
@@ -112,8 +129,7 @@ export interface ReportStore {
 
 export interface ReportQuery {
   where(field: string, op: '==' | '<', value: string | number): ReportQuery;
-  orderBy(field: string | FieldPath): ReportQuery;
-  startAfter(snapshot: ReportSnapshot): ReportQuery;
+  orderBy(field: string): ReportQuery;
   limit(count: number): ReportQuery;
   get(): Promise<{ docs: ReportSnapshot[] }>;
 }
@@ -138,13 +154,9 @@ export interface ReportBatch {
   commit(): Promise<unknown>;
 }
 
-/** Whether a report still names somebody — an anonymised copy never does. */
-const namesReporter = (report: ReportSnapshot): boolean =>
-  report.data()['reportedBy'] !== undefined;
-
 /**
- * Adds one anonymisation to a batch: the copy at a fresh auto-id, and the
- * delete of the original.
+ * Anonymises one page of reports in one batch: each copied to a fresh auto-id,
+ * each original deleted.
  *
  * **The delete demands that the original still exists**, and that is what
  * makes a re-run harmless rather than merely unlikely to repeat itself. The
@@ -153,113 +165,127 @@ const namesReporter = (report: ReportSnapshot): boolean =>
  * batch is atomic its copy is refused along with its delete. Without the
  * precondition both would commit, and the report would exist twice.
  */
-function anonymiseInto(batch: ReportBatch, store: ReportStore, report: ReportSnapshot): void {
-  batch.create(
-    store.collection(QUESTION_REPORTS_COLLECTION).doc(),
-    anonymisedReport(report.data()),
-  );
-  batch.delete(report.ref, { exists: true });
+async function anonymisePage(store: ReportStore, page: ReportSnapshot[]): Promise<void> {
+  const batch = store.batch();
+  for (const report of page) {
+    batch.create(
+      store.collection(QUESTION_REPORTS_COLLECTION).doc(),
+      anonymisedReport(report.data()),
+    );
+    batch.delete(report.ref, { exists: true });
+  }
+  await batch.commit();
 }
 
 /** What one daily run did. */
 export interface ReportSweepResult {
-  /** Reports read, all of them filed before the cutoff. */
-  examined: number;
-  /** Of those, how many still named their reporter and were copied without it. */
+  /** Reports copied without their reporter, their originals deleted. */
   anonymised: number;
-  /** Of those, how many were anonymised copies already, and were left alone. */
-  alreadyAnonymous: number;
+  /**
+   * Whether the run used every page it may and its last one was full. Not an
+   * error: whatever is left is the next run's.
+   */
+  stoppedAtCeiling: boolean;
 }
 
 /**
- * The daily pass ran out of pages with reports past the cutoff still unread,
- * so some report older than the retention period may still name its reporter.
- * Thrown after everything the run could do has been committed.
+ * Firestore refused the daily pass's query because its composite index is not
+ * serving yet — the `(createdAt ASC, reportedBy ASC)` index on
+ * `question_reports` that `firestore.indexes.json` declares.
+ *
+ * Expected exactly once: the merge deploy ships the index and the function
+ * together, an index takes a while to build, and a run that lands in between is
+ * refused with `FAILED_PRECONDITION`. Named so the log says which of the two it
+ * is — the next run succeeding, or a deploy that never shipped the index.
  */
-export class ReportSweepIncompleteError extends Error {
-  constructor(readonly result: ReportSweepResult) {
+export class ReportSweepIndexNotReadyError extends Error {
+  constructor(cause: unknown) {
     super(
-      `report anonymisation read ${result.examined} report(s) — its ceiling — and stopped with ` +
-        `older ones still unread (${result.anonymised} anonymised this run). Every run starts ` +
-        `from the oldest, so it will stop at the same place tomorrow: the reports past the ` +
-        `cutoff have outgrown one run.`,
+      'report anonymisation was refused its query with FAILED_PRECONDITION: the ' +
+        '(createdAt ASC, reportedBy ASC) index on question_reports is not serving. A run ' +
+        'before the index has finished building fails this way and the next run succeeds; ' +
+        'if it persists, firestore.indexes.json was not deployed.',
+      { cause },
     );
-    this.name = 'ReportSweepIncompleteError';
+    this.name = 'ReportSweepIndexNotReadyError';
   }
 }
 
 /**
- * The daily pass: copies every report filed more than thirty days ago that
- * still names its reporter, without the reporter, and deletes the original.
+ * Whether a query was refused for want of an index. The Admin SDK reports it
+ * as gRPC status 9, `FAILED_PRECONDITION`, with a message that begins with the
+ * status's name.
+ */
+export function isIndexNotReady(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (
+    code === 9 ||
+    code === 'failed-precondition' ||
+    (typeof message === 'string' && message.includes('FAILED_PRECONDITION'))
+  );
+}
+
+/**
+ * The daily pass: copies every report filed more than thirty days ago without
+ * its reporter, and deletes the original.
  *
- * **One range, on `createdAt`**: `where('createdAt', '<', cutoff)`, ordered by
- * `createdAt` and then the document id, `REPORT_SWEEP_PAGE_SIZE` to a page,
- * paged on a cursor within the run. That rides the automatic single-field
- * index on `createdAt` — the one the reviewers' queue already orders by — and
- * `firestore-tests/indexes.spec.ts` pins that nothing takes it away.
+ * **One query, re-sent from the start for every page**:
+ * `where('createdAt', '<', cutoff)`, ordered by `createdAt` and then
+ * `reportedBy` (`report-query.ts`), `REPORT_SWEEP_PAGE_SIZE` at a time. The
+ * ordering on `reportedBy` leaves out every anonymised copy, because an
+ * ordering filters for its field's existence and a copy has none — so a copy
+ * is never read, however many accumulate, and every page anonymised leaves the
+ * set. That is what makes re-querying from the start correct, makes the pass
+ * idempotent (a re-run finds nothing it already did), and makes stopping at
+ * the ceiling a pause rather than a failure: tomorrow's run starts where
+ * today's stopped. A page whose commit failed changed nothing and is read
+ * again next time.
  *
- * **The anonymised copies are read and skipped.** A copy keeps `createdAt`, so
- * it stays in the range; it names nobody, so there is nothing to do with it.
- * That is also what makes the pass idempotent: a re-run finds only copies
- * where it anonymised, and a page whose commit failed changed nothing and is
- * read again. The cost is that a run reads every report older than the
- * cutoff, copies included — see {@link REPORT_SWEEP_MAX_PASSES} for where that
- * stops scaling and what happens when it does.
+ * It needs the `(createdAt ASC, reportedBy ASC)` composite index, which
+ * `firestore-tests/indexes.spec.ts` derives from the same constants and
+ * requires `firestore.indexes.json` to declare. Until it serves, the query is
+ * refused, and the run fails as {@link ReportSweepIndexNotReadyError}.
  */
 export async function anonymiseExpiredReports(
   store: ReportStore,
   nowMs: number,
 ): Promise<ReportSweepResult> {
   const cutoff = reporterRetentionCutoff(nowMs);
-  const result: ReportSweepResult = { examined: 0, anonymised: 0, alreadyAnonymous: 0 };
-  let after: ReportSnapshot | undefined;
+  let anonymised = 0;
 
-  const expired = (limit: number) => {
-    const query = store
-      .collection(QUESTION_REPORTS_COLLECTION)
-      .where('createdAt', '<', cutoff)
-      .orderBy('createdAt')
-      .orderBy(FieldPath.documentId());
-    return (after === undefined ? query : query.startAfter(after)).limit(limit).get();
-  };
-
-  for (let pass = 0; pass < REPORT_SWEEP_MAX_PASSES; pass += 1) {
-    const page = await expired(REPORT_SWEEP_PAGE_SIZE);
-
-    const batch = store.batch();
-    let anonymised = 0;
-    for (const report of page.docs) {
-      if (namesReporter(report)) {
-        anonymiseInto(batch, store, report);
-        anonymised += 1;
-      } else {
-        result.alreadyAnonymous += 1;
-      }
+  for (let page = 0; page < REPORT_SWEEP_MAX_PAGES; page += 1) {
+    const { docs } = await expiredReports(store, cutoff);
+    if (docs.length > 0) {
+      await anonymisePage(store, docs);
+      anonymised += docs.length;
     }
-    if (anonymised > 0) {
-      await batch.commit();
-    }
-    result.examined += page.docs.length;
-    result.anonymised += anonymised;
-
     // A short page is the end of the range: the query asked for a full one.
-    if (page.docs.length < REPORT_SWEEP_PAGE_SIZE) {
-      return result;
+    if (docs.length < REPORT_SWEEP_PAGE_SIZE) {
+      return { anonymised, stoppedAtCeiling: false };
     }
-    after = page.docs[page.docs.length - 1];
   }
+  return { anonymised, stoppedAtCeiling: true };
+}
 
-  // At the ceiling with a full last page, one more read says whether anything
-  // is left, so a range of exactly the ceiling's size is not reported as a
-  // failure. It reads a page rather than one document because the copies this
-  // run wrote keep their originals' `createdAt`, and an auto-id can sort after
-  // the cursor: the last original's copy may be the next document, naming
-  // nobody, with nothing behind it.
-  const rest = await expired(REPORT_SWEEP_PAGE_SIZE);
-  if (rest.docs.length < REPORT_SWEEP_PAGE_SIZE && !rest.docs.some(namesReporter)) {
-    return result;
+/** One page of reports filed before `cutoff` that still name their reporter. */
+async function expiredReports(
+  store: ReportStore,
+  cutoff: number,
+): Promise<{ docs: ReportSnapshot[] }> {
+  let query = store
+    .collection(QUESTION_REPORTS_COLLECTION)
+    .where(REPORT_FILED_AT_FIELD, '<', cutoff);
+  for (const field of EXPIRED_REPORTS_ORDER) {
+    query = query.orderBy(field);
   }
-  throw new ReportSweepIncompleteError(result);
+  try {
+    return await query.limit(REPORT_SWEEP_PAGE_SIZE).get();
+  } catch (error) {
+    throw isIndexNotReady(error) ? new ReportSweepIndexNotReadyError(error) : error;
+  }
 }
 
 /** What `deleteAccount` did with the leaver's reports. */
@@ -267,9 +293,28 @@ export interface LeaverReportResult {
   anonymised: number;
 }
 
+/**
+ * The leaver's pass used every page it may, the last of them full, so reports
+ * may still name the account. Thrown after everything it did was committed, so
+ * `deleteAccount` stops before the account is deleted and the caller can retry
+ * — which carries on where this stopped, because every report anonymised has
+ * left the set. (A leaver with exactly the ceiling's worth is told to retry
+ * once, and the retry finds nothing left.)
+ */
+export class LeaverReportSweepIncompleteError extends Error {
+  constructor(readonly anonymised: number) {
+    super(
+      `the leaver's report pass anonymised ${anonymised} report(s) and stopped at its ` +
+        `ceiling of ${REPORT_SWEEP_MAX_PAGES} pages, so more may still name the account; ` +
+        `deleteAccount stops here, and a retry continues where this stopped.`,
+    );
+    this.name = 'LeaverReportSweepIncompleteError';
+  }
+}
+
 /** The reports that still name `uid`: the one equality the automatic index on `reportedBy` serves. */
 function reportsBy(store: ReportStore, uid: string): ReportQuery {
-  return store.collection(QUESTION_REPORTS_COLLECTION).where('reportedBy', '==', uid);
+  return store.collection(QUESTION_REPORTS_COLLECTION).where(REPORT_REPORTER_FIELD, '==', uid);
 }
 
 /**
@@ -285,31 +330,27 @@ function reportsBy(store: ReportStore, uid: string): ReportQuery {
  * filed, because the create rule requires it. Paged and batched, and
  * re-queried from the start each time, because every report a page reads
  * leaves the result set — so there is no cursor to carry, and a short page is
- * the end.
+ * the end. **Bounded by {@link REPORT_SWEEP_MAX_PAGES}**, past which it throws
+ * rather than loop: a page that failed to leave the set would otherwise be
+ * read for ever.
  */
 export async function sweepLeaverReports(
   store: ReportStore,
   uid: string,
 ): Promise<LeaverReportResult> {
-  const result: LeaverReportResult = { anonymised: 0 };
+  let anonymised = 0;
 
-  for (;;) {
-    const page = await reportsBy(store, uid).limit(REPORT_SWEEP_PAGE_SIZE).get();
-    if (page.docs.length === 0) {
-      return result;
+  for (let page = 0; page < REPORT_SWEEP_MAX_PAGES; page += 1) {
+    const { docs } = await reportsBy(store, uid).limit(REPORT_SWEEP_PAGE_SIZE).get();
+    if (docs.length > 0) {
+      await anonymisePage(store, docs);
+      anonymised += docs.length;
     }
-
-    const batch = store.batch();
-    for (const report of page.docs) {
-      anonymiseInto(batch, store, report);
-    }
-    await batch.commit();
-    result.anonymised += page.docs.length;
-
-    if (page.docs.length < REPORT_SWEEP_PAGE_SIZE) {
-      return result;
+    if (docs.length < REPORT_SWEEP_PAGE_SIZE) {
+      return { anonymised };
     }
   }
+  throw new LeaverReportSweepIncompleteError(anonymised);
 }
 
 /**

@@ -159,6 +159,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "question_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "reportedBy",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [

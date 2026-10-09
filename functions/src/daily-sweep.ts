@@ -7,7 +7,12 @@ import {
   playRetentionCutoff,
   sweepExpiredPlays,
 } from './play-retention';
-import { anonymiseExpiredReports, reporterRetentionCutoff } from './report-anonymisation';
+import {
+  REPORT_SWEEP_MAX_PAGES,
+  REPORT_SWEEP_PAGE_SIZE,
+  anonymiseExpiredReports,
+  reporterRetentionCutoff,
+} from './report-anonymisation';
 import { runSweepPasses } from './sweep-passes';
 
 /**
@@ -45,8 +50,8 @@ export const sweepPlayHistory = onSchedule(
     // The default is 60 seconds, and a first run facing a year's accumulation
     // has up to 20 batched deletes to get through, and the report pass up to
     // 20 pages more. Nine minutes is generous rather than necessary — each
-    // pass stops itself at its own ceiling (`play-retention.ts`,
-    // `report-anonymisation.ts` say what each does there).
+    // pass stops itself at its own ceiling and leaves the rest to the next
+    // run (`play-retention.ts`, `report-anonymisation.ts`).
     timeoutSeconds: 540,
     // One job, one instance. Two overlapping runs would both read the same
     // page and both act on it; for the plays the second delete is a no-op,
@@ -72,17 +77,19 @@ export const sweepPlayHistory = onSchedule(
         },
         {
           name: 'report anonymisation',
+          // A run refused its query for want of the composite index fails as
+          // `ReportSweepIndexNotReadyError`, which `runSweepPasses` logs under
+          // that name like any other failure: the first run after the deploy
+          // that ships the index can land before it has finished building.
           run: async () => {
             const now = Date.now();
-            const { examined, anonymised, alreadyAnonymous } = await anonymiseExpiredReports(
-              firestore,
-              now,
-            );
-            return (
-              `sweepPlayHistory read ${examined} report(s) filed before ` +
-              `${new Date(reporterRetentionCutoff(now)).toISOString()}: ${anonymised} anonymised, ` +
-              `${alreadyAnonymous} already naming nobody.`
-            );
+            const { anonymised, stoppedAtCeiling } = await anonymiseExpiredReports(firestore, now);
+            const filedBefore = new Date(reporterRetentionCutoff(now)).toISOString();
+            return stoppedAtCeiling
+              ? `sweepPlayHistory anonymised ${anonymised} report(s) filed before ${filedBefore} ` +
+                  `and stopped at its ceiling of ${REPORT_SWEEP_MAX_PAGES} pages of ` +
+                  `${REPORT_SWEEP_PAGE_SIZE}; any still naming a reporter are the next run's.`
+              : `sweepPlayHistory anonymised ${anonymised} report(s) filed before ${filedBefore}.`;
           },
         },
       ],

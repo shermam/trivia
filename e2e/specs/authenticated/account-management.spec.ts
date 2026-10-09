@@ -264,8 +264,8 @@ test.describe('account management: export and deletion', () => {
       createdAt: Date.now(),
       ...extra,
     });
-    // Each a distinct `createdAt`, so the copies below can be matched to their
-    // originals by sorting on it.
+    // Each about a different question, so every copy below is distinguishable
+    // by its content alone once its `createdAt` is cut to the day.
     const now = Date.now();
     const mine = [
       report(uid, 0, ids.approved, { createdAt: now }),
@@ -315,16 +315,22 @@ test.describe('account management: export and deletion', () => {
     ).toEqual([...theirs].sort((a, b) => a.id.localeCompare(b.id)));
     // All four of the account's stayed, as complaints naming nobody: deletion
     // anonymises a report, it never removes one, whatever its age or its
-    // question's state.
-    const contentOf = ({ questionId, reason, detail, createdAt }: QuestionReportSeed) => ({
-      questionId,
-      reason,
-      ...(detail === undefined ? {} : { detail }),
-      createdAt,
-    });
+    // question's state. Each copy keeps the UTC day its report was filed and
+    // not the moment (`startOfUtcDay` in `report-anonymisation.ts`), so two
+    // filed the same day can tie: compared as sets, not in createdAt order.
+    const startOfUtcDay = (ms: number) => Math.floor(ms / day) * day;
+    const contentOf = ({ questionId, reason, detail, createdAt }: QuestionReportSeed) =>
+      JSON.stringify({
+        questionId,
+        reason,
+        ...(detail === undefined ? {} : { detail }),
+        createdAt,
+      });
     const anonymised = after.filter((stored) => !('reportedBy' in stored));
-    expect(anonymised.map(contentOf).sort((a, b) => a.createdAt - b.createdAt)).toEqual(
-      mine.map(contentOf).sort((a, b) => a.createdAt - b.createdAt),
+    expect(anonymised.map(contentOf).sort()).toEqual(
+      mine
+        .map((filed) => contentOf({ ...filed, createdAt: startOfUtcDay(filed.createdAt) }))
+        .sort(),
     );
     for (const stored of anonymised) {
       expect(Object.keys(stored).sort()).toEqual(

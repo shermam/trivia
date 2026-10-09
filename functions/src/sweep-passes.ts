@@ -2,8 +2,8 @@
  * Runs the daily job's passes in turn, each on its own terms (`daily-sweep.ts`).
  *
  * The job carries two unrelated promises the Privacy Policy makes — twelve
- * months of play history, and a report's reporter removed once its question is
- * decided — so a pass that fails must not cost the other its run. Each is
+ * months of play history, and a report's reporter removed thirty days after it
+ * is filed — so a pass that fails must not cost the other its run. Each is
  * awaited in its own `try` and its outcome logged either way, and the run
  * still fails if any pass did: a broken pass is an error in the logs and a
  * failed invocation, never a silence, because a sweep that stops quietly is a

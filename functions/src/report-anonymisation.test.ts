@@ -1,22 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FieldPath } from 'firebase-admin/firestore';
 import {
   ANONYMISED_REPORT_KEYS,
+  LeaverReportSweepIncompleteError,
   QUESTION_REPORTS_COLLECTION,
-  REPORT_SWEEP_MAX_PASSES,
+  REPORT_SWEEP_MAX_PAGES,
   REPORT_SWEEP_PAGE_SIZE,
-  ReportSweepIncompleteError,
+  ReportSweepIndexNotReadyError,
   anonymiseExpiredReports,
   anonymisedReport,
-  isStillAttributable,
+  isIndexNotReady,
   questionReportsFor,
   reporterRetentionCutoff,
+  startOfUtcDay,
   sweepLeaverReports,
   type ReportQuery,
   type ReportSnapshot,
   type ReportStore,
 } from './report-anonymisation';
+import { EXPIRED_REPORTS_ORDER } from './report-query';
 import { REPORTER_RETENTION_DAYS, REPORTER_RETENTION_MS } from './report-retention';
 
 /**
@@ -32,12 +34,12 @@ import { REPORTER_RETENTION_DAYS, REPORTER_RETENTION_MS } from './report-retenti
  *
  * Driven against a fake rather than the emulator, because the decisions being
  * pinned are which documents are read and what is written. The fake applies
- * the filters, the orderings and the cursor literally — numbers as numbers, a
- * range matching numbers only, as Firestore's does — refuses an oversized
- * batch and an empty one, and honours a delete's precondition the way a real
- * batch does, atomically for every write in it. The e2e suite runs the
- * leaver's pass and the export against the emulator
- * (`account-management.spec.ts`).
+ * the filters and the orderings literally — numbers as numbers, a range
+ * matching numbers only, and an ordering on a field leaving out every document
+ * that lacks it, all as Firestore's do — refuses an oversized batch and an
+ * empty one, and honours a delete's precondition the way a real batch does,
+ * atomically for every write in it. The e2e suite runs the leaver's pass and
+ * the export against the emulator (`account-management.spec.ts`).
  */
 
 /**
@@ -46,6 +48,16 @@ import { REPORTER_RETENTION_DAYS, REPORTER_RETENTION_MS } from './report-retenti
  * batch can hold fails here rather than every batching test scaling with it.
  */
 const WRITE_BATCH_LIMIT = 500;
+
+/**
+ * The most queries one fake answers. Every pass here stops itself — the daily
+ * one pauses at its ceiling, the leaver's throws — and the longest test sends
+ * two runs' worth of pages. A pass that lost its bound would otherwise loop for
+ * as long as the suite let it: a per-test timeout marks such a test failed but
+ * cannot stop the loop, which keeps the process alive and the suite hanging.
+ * Refusing the query past this budget fails it fast instead.
+ */
+const QUERY_BUDGET = 100;
 
 type Doc = Record<string, unknown>;
 
@@ -59,11 +71,6 @@ interface Filter {
   op: '==' | '<';
   value: string | number;
 }
-
-type Order = string | FieldPath;
-
-const isDocumentId = (order: Order): boolean =>
-  order instanceof FieldPath && order.isEqual(FieldPath.documentId());
 
 /** Firestore's order within one type: numbers by value, strings by code point. */
 function compareValues(x: unknown, y: unknown): number {
@@ -87,20 +94,16 @@ function compareKeys(a: unknown[], b: unknown[]): number {
 interface QueryRecord {
   filters: Filter[];
   orders: string[];
-  cursor: boolean;
   limit?: number;
+  /** How many documents the query came back with. */
+  returned: number;
 }
 
-/**
- * A `question_reports` collection, faked to the depth the sweeps use it.
- *
- * `autoIdPrefix` decides where a copy's fresh id sorts against the `{window}-…`
- * ids reports are filed under: before them by default, which keeps the page
- * arithmetic below readable, or after them, which is the case where a copy can
- * come back on the page after the one that wrote it. Real auto-ids land on
- * either side.
- */
-function fakeFirestore(seed: ({ id: string } & Doc)[], { autoIdPrefix = '0' } = {}) {
+/** A `question_reports` collection, faked to the depth the sweeps use it. */
+function fakeFirestore(
+  seed: ({ id: string } & Doc)[],
+  { failQueriesWith }: { failQueriesWith?: unknown } = {},
+) {
   const reports = new Map<string, Doc>(seed.map(({ id, ...data }) => [id, { ...data }]));
   const commits: { creates: string[]; deletes: string[] }[] = [];
   const queries: QueryRecord[] = [];
@@ -125,21 +128,17 @@ function fakeFirestore(seed: ({ id: string } & Doc)[], { autoIdPrefix = '0' } = 
   const queryOver = (
     path: string,
     filters: Filter[],
-    orders: Order[],
-    cursor?: ReportSnapshot,
+    orders: string[],
     max?: number,
   ): ReportQuery => ({
     where(field, op, value) {
-      return queryOver(path, [...filters, { field, op, value }], orders, cursor, max);
+      return queryOver(path, [...filters, { field, op, value }], orders, max);
     },
     orderBy(field) {
-      return queryOver(path, filters, [...orders, field], cursor, max);
-    },
-    startAfter(snapshot) {
-      return queryOver(path, filters, orders, snapshot, max);
+      return queryOver(path, filters, [...orders, field], max);
     },
     limit(count) {
-      return queryOver(path, filters, orders, cursor, count);
+      return queryOver(path, filters, orders, count);
     },
     get() {
       assert.equal(path, QUESTION_REPORTS_COLLECTION, 'only reports are queried');
@@ -148,32 +147,28 @@ function fakeFirestore(seed: ({ id: string } & Doc)[], { autoIdPrefix = '0' } = 
       if (range !== undefined && orders.length > 0) {
         assert.equal(orders[0], range.field, 'a range filter is ordered on its own field first');
       }
-      queries.push({
-        filters,
-        orders: orders.map((order) => (isDocumentId(order) ? '__name__' : String(order))),
-        cursor: cursor !== undefined,
-        limit: max,
-      });
+      if (failQueriesWith !== undefined) {
+        return Promise.reject(failQueriesWith);
+      }
+      assert.ok(
+        queries.length < QUERY_BUDGET,
+        `a pass sent more than ${QUERY_BUDGET} queries: it is not stopping`,
+      );
 
       // The document id is always the last ordering, as it is in Firestore.
-      const keys = [...orders, FieldPath.documentId()];
-      const keyOf = (id: string, data: Doc) =>
-        keys.map((key) => (isDocumentId(key) ? id : data[key as string]));
-
-      let rows = [...reports.entries()]
+      const keyOf = (id: string, data: Doc) => [...orders.map((field) => data[field]), id];
+      const rows = [...reports.entries()]
         .filter(([, data]) => filters.every((filter) => matches(data, filter)))
         // An ordering on a field leaves out every document that lacks it.
-        .filter(([, data]) =>
-          orders.every((order) => isDocumentId(order) || (order as string) in data),
-        )
-        .sort(([idA, a], [idB, b]) => compareKeys(keyOf(idA, a), keyOf(idB, b)));
-      if (cursor !== undefined) {
-        const after = keyOf(cursor.id, cursor.data());
-        rows = rows.filter(([id, data]) => compareKeys(keyOf(id, data), after) > 0);
-      }
-      return Promise.resolve({
-        docs: rows.slice(0, max).map(([id, data]) => snapshotOf(id, data)),
-      });
+        .filter(([, data]) => orders.every((field) => field in data))
+        .sort(([idA, a], [idB, b]) => compareKeys(keyOf(idA, a), keyOf(idB, b)))
+        .slice(0, max);
+      queries.push({ filters, orders, limit: max, returned: rows.length });
+      // Answered on a later turn of the event loop, as a real read is, so that
+      // a pass that never stops reading still lets the test's timeout fire
+      // rather than starving every timer in the process.
+      const docs = rows.map(([id, data]) => snapshotOf(id, data));
+      return new Promise((resolve) => setImmediate(() => resolve({ docs })));
     },
   });
 
@@ -184,7 +179,7 @@ function fakeFirestore(seed: ({ id: string } & Doc)[], { autoIdPrefix = '0' } = 
         doc(id?: string): Ref {
           if (id === undefined) {
             nextAutoId += 1;
-            const auto = `${autoIdPrefix}auto${String(nextAutoId).padStart(15, '0')}`;
+            const auto = `auto${String(nextAutoId).padStart(16, '0')}`;
             return { path: `${path}/${auto}`, id: auto };
           }
           return { path: `${path}/${id}`, id };
@@ -257,6 +252,7 @@ function fakeFirestore(seed: ({ id: string } & Doc)[], { autoIdPrefix = '0' } = 
   };
 }
 
+/** 2025-09-15T01:33:20Z — an hour and a half into its UTC day, so the day is visible. */
 const NOW = 1_757_900_000_000;
 const DAY = 24 * 60 * 60 * 1000;
 const WINDOW = 5_859_666;
@@ -276,14 +272,25 @@ function report(uid: string, daysAgo: number, slot = 0, overrides: Doc = {}) {
   };
 }
 
-/** The four content keys of a report, which is what an anonymised copy must still carry. */
+/** What an anonymised copy of a report filed `daysAgo` days back must carry as `createdAt`. */
+const dayOf = (daysAgo: number) => startOfUtcDay(NOW - daysAgo * DAY);
+
+/** The content keys of a document, which is what an anonymised copy must still carry. */
 const contentOf = ({ id: _id, reportedBy: _by, ...content }: { id: string } & Doc) => content;
 
 const byCreatedAt = (a: Doc, b: Doc) => compareValues(a['createdAt'], b['createdAt']);
 
+/** The query the daily pass sends, as the fake records it. */
+const dailyQuery = {
+  filters: [{ field: 'createdAt', op: '<', value: reporterRetentionCutoff(NOW) }],
+  orders: ['createdAt', 'reportedBy'],
+  limit: REPORT_SWEEP_PAGE_SIZE,
+};
+
+const shapeOf = ({ returned: _returned, ...shape }: QueryRecord) => shape;
+
 // ---------------------------------------------------------------------------
-// The decision. Both sides of the boundary, because a predicate that answered
-// "expired" to everything would satisfy a suite of nothing but expired cases.
+// The period, and the day a copy keeps.
 // ---------------------------------------------------------------------------
 
 test('a report keeps its reporter for thirty days', () => {
@@ -292,44 +299,25 @@ test('a report keeps its reporter for thirty days', () => {
   assert.equal(reporterRetentionCutoff(NOW), NOW - 30 * DAY);
 });
 
-test('a report filed a moment ago, or a day inside the period, still names its reporter', () => {
-  assert.equal(isStillAttributable(NOW, NOW), true);
-  assert.equal(isStillAttributable(NOW - DAY, NOW), true);
-  assert.equal(isStillAttributable(reporterRetentionCutoff(NOW) + DAY, NOW), true);
-});
-
 /**
- * Exactly thirty days old is **not** expired, and the direction is pinned
- * rather than left to whichever comparison somebody writes next: the daily
- * query is `where('createdAt', '<', cutoff)`, and a predicate disagreeing with
- * it would describe a boundary the code does not have.
+ * The start of the UTC day, from both sides of a boundary: the last
+ * millisecond of a day belongs to it, and the first of the next starts it.
  */
-test('a report exactly thirty days old keeps its reporter for one more run', () => {
-  assert.equal(isStillAttributable(reporterRetentionCutoff(NOW), NOW), true);
-});
+test('a copy keeps the UTC day a report was filed, not the moment', () => {
+  const midnight = Date.UTC(2025, 8, 15);
 
-test('a millisecond older than that, it does not', () => {
-  assert.equal(isStillAttributable(reporterRetentionCutoff(NOW) - 1, NOW), false);
-  assert.equal(isStillAttributable(NOW - 60 * DAY, NOW), false);
-});
-
-/**
- * The query's reading of a `createdAt` that is not a number: `<` against a
- * number matches numbers only, so such a report is never read and keeps its
- * reporter. Only a console edit can write one — the create rule requires a
- * number near the time of filing — and the predicate says what the code does.
- */
-test('a createdAt that is not a number is never expired', () => {
-  for (const createdAt of [undefined, null, '1700000000000', { seconds: 1 }]) {
-    assert.equal(isStillAttributable(createdAt, NOW), true, `createdAt ${String(createdAt)}`);
-  }
+  assert.equal(startOfUtcDay(midnight), midnight);
+  assert.equal(startOfUtcDay(midnight + 1), midnight);
+  assert.equal(startOfUtcDay(midnight + DAY - 1), midnight);
+  assert.equal(startOfUtcDay(midnight + DAY), midnight + DAY);
+  assert.equal(startOfUtcDay(NOW), midnight);
 });
 
 // ---------------------------------------------------------------------------
 // The copy.
 // ---------------------------------------------------------------------------
 
-test('the copy keeps what was complained about and drops who complained', () => {
+test('the copy keeps what was complained about and when, to the day, and drops who complained', () => {
   assert.deepEqual(
     anonymisedReport({
       questionId: 'q1',
@@ -338,8 +326,36 @@ test('the copy keeps what was complained about and drops who complained', () => 
       reportedBy: 'alice',
       createdAt: NOW,
     }),
-    { questionId: 'q1', reason: 'spam', detail: 'Same question three times.', createdAt: NOW },
+    {
+      questionId: 'q1',
+      reason: 'spam',
+      detail: 'Same question three times.',
+      createdAt: Date.UTC(2025, 8, 15),
+    },
   );
+});
+
+/**
+ * The millisecond is the thing being removed: a report and a score saved in the
+ * same session carry `createdAt`s a few seconds apart, and the score's public
+ * leaderboard entry names its player.
+ */
+test('two reports filed hours apart on one day are copied with the same createdAt', () => {
+  const morning = anonymisedReport({ questionId: 'q1', reason: 'spam', createdAt: NOW });
+  const evening = anonymisedReport({
+    questionId: 'q2',
+    reason: 'other',
+    createdAt: NOW + 20 * 60 * 60 * 1000,
+  });
+
+  assert.equal(morning['createdAt'], evening['createdAt']);
+});
+
+/** Only a console edit can store a `createdAt` that is not a number, and there is no day to cut it to. */
+test('a createdAt that is not a number is copied as it is', () => {
+  const copy = anonymisedReport({ questionId: 'q1', reason: 'spam', createdAt: '2025-09-15' });
+
+  assert.equal(copy['createdAt'], '2025-09-15');
 });
 
 test('the copy is rebuilt from the allowlist, so an unknown key stays behind as well', () => {
@@ -373,24 +389,30 @@ test('the allowlist is exactly the four content keys a report is filed with', ()
 // The daily pass.
 // ---------------------------------------------------------------------------
 
+/**
+ * Both sides of the boundary, because a pass that anonymised everything would
+ * satisfy a suite of nothing but expired cases: a report exactly thirty days
+ * old keeps its reporter for one more run, a millisecond older it does not.
+ */
 test('anonymises every report older than thirty days and leaves the younger ones alone', async () => {
   const fake = fakeFirestore([
     report('alice', 40, 0, { detail: 'The answer is misspelled.' }),
     report('bob', 31, 0, { reason: 'inappropriate', questionId: 'q2' }),
+    report('erin', 0, 0, { createdAt: reporterRetentionCutoff(NOW) - 1 }),
     report('carol', 5),
     report('dave', 30),
   ]);
 
   const result = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(result, { examined: 2, anonymised: 2, alreadyAnonymous: 0 });
+  assert.deepEqual(result, { anonymised: 3, stoppedAtCeiling: false });
   const left = fake.remaining();
   // The young one, and the one exactly thirty days old, are exactly where they were.
   assert.deepEqual(
     left.filter((doc) => 'reportedBy' in doc),
     [report('carol', 5), report('dave', 30)].sort((a, b) => (a.id < b.id ? -1 : 1)),
   );
-  // The other two are copies carrying their content and nothing else.
+  // The other three are copies carrying their content, to the day, and nothing else.
   assert.deepEqual(
     left
       .filter((doc) => !('reportedBy' in doc))
@@ -401,9 +423,10 @@ test('anonymises every report older than thirty days and leaves the younger ones
         questionId: 'q1',
         reason: 'incorrect',
         detail: 'The answer is misspelled.',
-        createdAt: NOW - 40 * DAY,
+        createdAt: dayOf(40),
       },
-      { questionId: 'q2', reason: 'inappropriate', createdAt: NOW - 31 * DAY },
+      { questionId: 'q2', reason: 'inappropriate', createdAt: dayOf(31) },
+      { questionId: 'q1', reason: 'incorrect', createdAt: dayOf(30) },
     ],
   );
 });
@@ -430,37 +453,55 @@ test('leaves no document whose id names a reporter whose report has expired', as
   );
 });
 
-test('is idempotent: a second run reads the copies and writes nothing', async () => {
+/** `n` anonymised copies filed `daysAgo` days back, as the pass writes them. */
+const copiesFiled = (daysAgo: number, n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `copy${String(i).padStart(16, '0')}`,
+    questionId: 'q1',
+    reason: 'other',
+    createdAt: dayOf(daysAgo),
+  }));
+
+/**
+ * **The copies are never read.** Every copy keeps a `createdAt` older than the
+ * cutoff, so a range on `createdAt` alone would read them — first, since they
+ * are the oldest — and a run would spend its whole ceiling on them and reach
+ * nothing behind them, every day; anybody can file ten reports per five
+ * minutes from a fresh anonymous session, so that state is reachable on
+ * purpose. The ordering on `reportedBy` leaves every copy out of the query.
+ */
+test('never reads an anonymised copy, however many lie in the range', async () => {
+  const copies = copiesFiled(90, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PAGES + 300);
+  const fake = fakeFirestore([
+    ...copies,
+    report('alice', 40),
+    report('bob', 35, 1),
+    report('carol', 31, 2),
+  ]);
+
+  const result = await anonymiseExpiredReports(fake.store, NOW);
+
+  assert.deepEqual(result, { anonymised: 3, stoppedAtCeiling: false });
+  assert.deepEqual(
+    fake.queries.map((query) => query.returned),
+    [3],
+    'one query, which came back with the three originals and none of the copies',
+  );
+  assert.equal(fake.remaining().length, copies.length + 3);
+  assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
+});
+
+test('is idempotent: a second run reads nothing and writes nothing', async () => {
   const fake = fakeFirestore([report('alice', 40), report('bob', 3)]);
 
   await anonymiseExpiredReports(fake.store, NOW);
   const afterFirst = fake.remaining();
   const second = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(second, { examined: 1, anonymised: 0, alreadyAnonymous: 1 });
+  assert.deepEqual(second, { anonymised: 0, stoppedAtCeiling: false });
   assert.deepEqual(fake.remaining(), afterFirst);
   assert.equal(fake.commits.length, 1, 'only the first run committed anything');
-});
-
-/**
- * A copy keeps its original's `createdAt`, so it stays in the range the pass
- * reads — and it names nobody, so there is nothing to do with it. Leaving it
- * alone is the whole of the work.
- */
-test('reads an anonymised copy and leaves it alone', async () => {
-  const anonymised = {
-    id: 'Xq3vL9aT2bRk8mNc4PdE',
-    questionId: 'q1',
-    reason: 'other',
-    createdAt: NOW - 90 * DAY,
-  };
-  const fake = fakeFirestore([anonymised]);
-
-  const result = await anonymiseExpiredReports(fake.store, NOW);
-
-  assert.deepEqual(result, { examined: 1, anonymised: 0, alreadyAnonymous: 1 });
-  assert.deepEqual(fake.remaining(), [anonymised]);
-  assert.deepEqual(fake.commits, []);
+  assert.equal(fake.queries.at(-1)?.returned, 0, 'and the second run’s one query found nothing');
 });
 
 test('copies and deletes in the same batch, the copy at a fresh id', async () => {
@@ -496,28 +537,25 @@ test('a report removed before the batch lands fails the batch, and nothing is co
   );
 });
 
-test('every read is bounded: a range on createdAt, ordered for its cursor, limited', async () => {
+/**
+ * The query the composite index is declared for, built from the constants
+ * `firestore-tests/indexes.spec.ts` derives that index from.
+ */
+test('every read is the same bounded query: a range on createdAt, ordered by it and the reporter', async () => {
   const fake = fakeFirestore([report('alice', 40), report('bob', 2)]);
 
   await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(fake.queries, [
-    {
-      filters: [{ field: 'createdAt', op: '<', value: reporterRetentionCutoff(NOW) }],
-      orders: ['createdAt', '__name__'],
-      cursor: false,
-      limit: REPORT_SWEEP_PAGE_SIZE,
-    },
-  ]);
+  assert.deepEqual(fake.queries.map(shapeOf), [dailyQuery]);
+  assert.deepEqual(dailyQuery.orders, [...EXPIRED_REPORTS_ORDER]);
 });
 
 test('an empty collection costs one query and writes nothing', async () => {
   const fake = fakeFirestore([]);
 
   assert.deepEqual(await anonymiseExpiredReports(fake.store, NOW), {
-    examined: 0,
     anonymised: 0,
-    alreadyAnonymous: 0,
+    stoppedAtCeiling: false,
   });
   assert.equal(fake.queries.length, 1);
   assert.deepEqual(fake.commits, []);
@@ -530,49 +568,30 @@ const reportsFiled = (daysAgo: number, n: number, prefix: string) =>
     createdAt: NOW - daysAgo * DAY + i,
   }));
 
-/** `n` anonymised copies filed `daysAgo` days back. */
-const copiesFiled = (daysAgo: number, n: number) =>
-  Array.from({ length: n }, (_, i) => ({
-    id: `copy${String(i).padStart(16, '0')}`,
-    questionId: 'q1',
-    reason: 'other',
-    createdAt: NOW - daysAgo * DAY + i,
-  }));
-
 /**
- * **The batching.** 600 anonymisations are 1,200 writes, which cannot go in one
- * `WriteBatch`: the pass has to page, 250 reports — 500 writes — at a time,
- * and a full page has to be followed by another query rather than taken as the
- * end of the run.
+ * **The batching, and the re-query.** 600 anonymisations are 1,200 writes,
+ * which cannot go in one `WriteBatch`: the pass has to page, 250 reports — 500
+ * writes — at a time. Each page it anonymises leaves the set, so every page is
+ * the same query sent again from the start, with no cursor to carry.
  */
-test('pages a backlog larger than one batch, 250 reports and 500 writes at a time', async () => {
+test('pages a backlog larger than one batch, re-sending the same query from the start', async () => {
   const fake = fakeFirestore(reportsFiled(40, 600, 'u'));
 
   const result = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(result, { examined: 600, anonymised: 600, alreadyAnonymous: 0 });
+  assert.deepEqual(result, { anonymised: 600, stoppedAtCeiling: false });
   assert.deepEqual(
     fake.commits.map(({ creates, deletes }) => creates.length + deletes.length),
     [500, 500, 200],
   );
-  assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
-});
-
-/**
- * **The cursor.** The copies older reports left behind stay in the range and
- * sort first, so a pass that re-read from the top would read the same page of
- * them on every query and never reach the expired reports behind it.
- */
-test('pages past a full page of copies to the expired reports behind them', async () => {
-  const fake = fakeFirestore([...copiesFiled(90, 300), ...reportsFiled(40, 5, 'z')]);
-
-  const result = await anonymiseExpiredReports(fake.store, NOW);
-
-  assert.deepEqual(result, { examined: 305, anonymised: 5, alreadyAnonymous: 300 });
   assert.deepEqual(
-    fake.queries.map((query) => query.cursor),
-    [false, true],
+    fake.queries.map((query) => query.returned),
+    [250, 250, 100],
   );
+  assert.ok(
+    fake.queries.every((query) => JSON.stringify(shapeOf(query)) === JSON.stringify(dailyQuery)),
+  );
+  assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
 });
 
 /**
@@ -589,87 +608,107 @@ test('asks once more after a page that is exactly full', async () => {
 });
 
 /**
- * **The ceiling is a failure, not a pause.** Every run starts from the oldest
- * report, and the copies keep their place in the range, so a run that stopped
- * at the ceiling would stop at the same place the next day, with the reports
- * behind it still naming their reporters — a published thirty days quietly not
- * kept. So it says so, after committing what it could: the first run here
- * anonymises 5,000 and fails, and the second reads those 5,000 copies, reaches
- * nothing new and fails again.
+ * **The ceiling is a pause, not a failure.** Every page anonymised leaves the
+ * set, so a run that stops at its ceiling leaves exactly the rest for the next
+ * run, which starts where this one stopped. Nothing throws: the run did all it
+ * may, and says so.
  */
-test('fails loudly at the ceiling, and again the next day, rather than stopping quietly', async () => {
-  const backlog = REPORT_SWEEP_PAGE_SIZE * (REPORT_SWEEP_MAX_PASSES + 2);
+test('stops at its ceiling and leaves the rest to the next run, which finishes it', async () => {
+  const backlog = REPORT_SWEEP_PAGE_SIZE * (REPORT_SWEEP_MAX_PAGES + 2);
   const fake = fakeFirestore(reportsFiled(40, backlog, 'u'));
 
-  await assert.rejects(anonymiseExpiredReports(fake.store, NOW), (error: unknown) => {
-    assert.ok(error instanceof ReportSweepIncompleteError);
-    assert.deepEqual(error.result, {
-      examined: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES,
-      anonymised: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES,
-      alreadyAnonymous: 0,
-    });
-    assert.match(error.message, /outgrown one run/);
-    return true;
+  const first = await anonymiseExpiredReports(fake.store, NOW);
+
+  assert.deepEqual(first, {
+    anonymised: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PAGES,
+    stoppedAtCeiling: true,
   });
+  assert.equal(fake.queries.length, REPORT_SWEEP_MAX_PAGES, 'no read past the ceiling');
   assert.equal(
     fake.remaining().filter((doc) => 'reportedBy' in doc).length,
     REPORT_SWEEP_PAGE_SIZE * 2,
   );
 
+  const second = await anonymiseExpiredReports(fake.store, NOW);
+
+  assert.deepEqual(second, { anonymised: REPORT_SWEEP_PAGE_SIZE * 2, stoppedAtCeiling: false });
+  assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
+  assert.equal(fake.remaining().length, backlog, 'one copy per report, and no original left');
+});
+
+/**
+ * A run that ends on a full last page cannot tell that it has finished, so it
+ * says it stopped at the ceiling; the next run's one empty read is all that
+ * costs.
+ */
+test('a range of exactly the ceiling’s size reads as a pause, and the next run finds nothing', async () => {
+  const fake = fakeFirestore(
+    reportsFiled(40, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PAGES, 'u'),
+  );
+
+  assert.deepEqual(await anonymiseExpiredReports(fake.store, NOW), {
+    anonymised: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PAGES,
+    stoppedAtCeiling: true,
+  });
+  const commits = fake.commits.length;
+
+  assert.deepEqual(await anonymiseExpiredReports(fake.store, NOW), {
+    anonymised: 0,
+    stoppedAtCeiling: false,
+  });
+  assert.equal(fake.commits.length, commits, 'and writes nothing');
+});
+
+// ---------------------------------------------------------------------------
+// The index the daily query needs.
+// ---------------------------------------------------------------------------
+
+/** What the Admin SDK rejects a query with when its composite index is not serving. */
+const indexNotServing = Object.assign(
+  new Error(
+    '9 FAILED_PRECONDITION: The query requires an index. That index is currently building ' +
+      'and cannot be used yet.',
+  ),
+  { code: 9 },
+);
+
+/**
+ * The deploy that ships the composite index ships the function too, and an
+ * index takes a while to build: a run in between is refused. It fails — the
+ * next run succeeds — under a name that says which failure it is.
+ */
+test('a query refused for want of its index fails the run by name, with the refusal as its cause', async () => {
+  const fake = fakeFirestore([report('alice', 40)], { failQueriesWith: indexNotServing });
+
   await assert.rejects(anonymiseExpiredReports(fake.store, NOW), (error: unknown) => {
-    assert.ok(error instanceof ReportSweepIncompleteError);
-    assert.equal(error.result.anonymised, 0);
+    assert.ok(error instanceof ReportSweepIndexNotReadyError);
+    assert.equal(error.name, 'ReportSweepIndexNotReadyError');
+    assert.equal(error.cause, indexNotServing);
+    assert.match(error.message, /\(createdAt ASC, reportedBy ASC\) index on question_reports/);
+    return true;
+  });
+  assert.deepEqual(fake.commits, []);
+});
+
+test('any other refusal is passed on as it came', async () => {
+  const unavailable = Object.assign(new Error('14 UNAVAILABLE: try again'), { code: 14 });
+  const fake = fakeFirestore([report('alice', 40)], { failQueriesWith: unavailable });
+
+  await assert.rejects(anonymiseExpiredReports(fake.store, NOW), (error: unknown) => {
+    assert.equal(error, unavailable);
     return true;
   });
 });
 
-test('a range of exactly the ceiling’s size is finished, not failed', async () => {
-  const fake = fakeFirestore(
-    reportsFiled(40, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES, 'u'),
-  );
+test('recognises the index refusal by its status, numeric or named, and nothing else', () => {
+  assert.equal(isIndexNotReady(indexNotServing), true);
+  assert.equal(isIndexNotReady({ code: 'failed-precondition' }), true);
+  assert.equal(isIndexNotReady(new Error('9 FAILED_PRECONDITION: requires an index')), true);
 
-  const result = await anonymiseExpiredReports(fake.store, NOW);
-
-  assert.equal(result.anonymised, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES);
-  assert.equal(fake.queries.length, REPORT_SWEEP_MAX_PASSES + 1, 'one read past the ceiling');
-  assert.equal(fake.commits.length, REPORT_SWEEP_MAX_PASSES, 'and nothing written by it');
-});
-
-/**
- * …even when the last original's copy sorts after the cursor and is the one
- * document that read finds: it names nobody, and nothing is behind it. With
- * copies sorting after their originals, every page after the first spends one
- * slot re-reading the previous page's last copy, so twenty full pages finish
- * 250 + 19 × 249 reports exactly.
- */
-test('the read past the ceiling is not fooled by the copy of the last original', async () => {
-  const exactly =
-    REPORT_SWEEP_PAGE_SIZE + (REPORT_SWEEP_MAX_PASSES - 1) * (REPORT_SWEEP_PAGE_SIZE - 1);
-  const fake = fakeFirestore(reportsFiled(40, exactly, 'u'), { autoIdPrefix: 'z' });
-
-  const result = await anonymiseExpiredReports(fake.store, NOW);
-
-  assert.deepEqual(result, {
-    examined: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES,
-    anonymised: exactly,
-    alreadyAnonymous: REPORT_SWEEP_MAX_PASSES - 1,
-  });
-  assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
-});
-
-/**
- * A copy shares its original's `createdAt`, and a fresh auto-id can sort after
- * the original's id — so the copy of a page's last report can turn up first on
- * the next page. It names nobody, so it is counted and left alone: read twice,
- * copied once.
- */
-test('a copy that turns up again on the next page is left alone, not copied twice', async () => {
-  const fake = fakeFirestore(reportsFiled(40, 300, 'u'), { autoIdPrefix: 'z' });
-
-  const result = await anonymiseExpiredReports(fake.store, NOW);
-
-  assert.deepEqual(result, { examined: 301, anonymised: 300, alreadyAnonymous: 1 });
-  assert.equal(fake.remaining().length, 300, 'one copy per report, and no original left');
+  assert.equal(isIndexNotReady({ code: 5, message: '5 NOT_FOUND: no entity' }), false);
+  assert.equal(isIndexNotReady(new Error('14 UNAVAILABLE')), false);
+  assert.equal(isIndexNotReady('FAILED_PRECONDITION'), false);
+  assert.equal(isIndexNotReady(null), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -704,21 +743,21 @@ test('anonymises every report the leaver filed, however recent, and deletes none
     left.filter((doc) => 'reportedBy' in doc),
     [report('bob', 1), report('carol', 20)],
   );
-  // The leaver's three survive as complaints, content intact.
+  // The leaver's three survive as complaints, content intact and the day kept.
   assert.deepEqual(
     left
       .filter((doc) => !('reportedBy' in doc))
       .map(contentOf)
       .sort(byCreatedAt),
     [
-      { questionId: 'q1', reason: 'other', createdAt: NOW - 29 * DAY },
+      { questionId: 'q1', reason: 'other', createdAt: dayOf(29) },
       {
         questionId: 'q1',
         reason: 'incorrect',
         detail: 'Two answers are right.',
-        createdAt: NOW - 12 * DAY,
+        createdAt: dayOf(12),
       },
-      { questionId: 'q1', reason: 'incorrect', createdAt: NOW },
+      { questionId: 'q1', reason: 'incorrect', createdAt: dayOf(0) },
     ],
   );
 });
@@ -728,11 +767,10 @@ test('finds the leaver’s reports by an equality on the reporter, a page at a t
 
   await sweepLeaverReports(fake.store, 'leaver');
 
-  assert.deepEqual(fake.queries, [
+  assert.deepEqual(fake.queries.map(shapeOf), [
     {
       filters: [{ field: 'reportedBy', op: '==', value: 'leaver' }],
       orders: [],
-      cursor: false,
       limit: REPORT_SWEEP_PAGE_SIZE,
     },
   ]);
@@ -760,7 +798,7 @@ test('pages through more reports than one batch can hold, re-querying from the s
     fake.commits.map(({ creates, deletes }) => creates.length + deletes.length),
     [500, 500, 200],
   );
-  assert.ok(fake.queries.every((query) => !query.cursor));
+  assert.equal(new Set(fake.queries.map((query) => JSON.stringify(shapeOf(query)))).size, 1);
   assert.deepEqual(
     fake.remaining().filter((doc) => 'reportedBy' in doc),
     [report('bob', 1)],
@@ -775,6 +813,30 @@ test('a full last page reads once more and commits nothing further', async () =>
   });
   assert.equal(fake.queries.length, 2);
   assert.equal(fake.commits.length, 1);
+});
+
+/**
+ * **Bounded, and failing rather than pausing at the bound**: `deleteAccount`
+ * has no tomorrow, so the pass throws after committing what it did, the
+ * account is not deleted, and a retry carries on where this stopped — and
+ * finishes. A pass with no bound loops for ever on a page that never leaves
+ * the set.
+ */
+test('throws at its ceiling after committing what it did, and a retry finishes the rest', async () => {
+  const total = REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PAGES + 100;
+  const fake = fakeFirestore(leaverReports(total));
+
+  await assert.rejects(sweepLeaverReports(fake.store, 'leaver'), (error: unknown) => {
+    assert.ok(error instanceof LeaverReportSweepIncompleteError);
+    assert.equal(error.anonymised, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PAGES);
+    return true;
+  });
+  assert.equal(fake.queries.length, REPORT_SWEEP_MAX_PAGES);
+  assert.equal(fake.remaining().filter((doc) => 'reportedBy' in doc).length, 100);
+
+  assert.deepEqual(await sweepLeaverReports(fake.store, 'leaver'), { anonymised: 100 });
+  assert.equal(fake.remaining().length, total, 'nothing deleted outright, across both calls');
+  assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
 });
 
 test('an account that never reported anything costs one query and writes nothing', async () => {
@@ -798,7 +860,7 @@ test('export returns every report that still names the account, whole, and nothi
     report('alice', 3, 0, { detail: 'Wrong year.' }),
     report('alice', 31, 1),
     report('bob', 3),
-    { id: 'Xq3vL9aT2bRk8mNc4PdE', questionId: 'q1', reason: 'spam', createdAt: NOW - 40 * DAY },
+    { id: 'Xq3vL9aT2bRk8mNc4PdE', questionId: 'q1', reason: 'spam', createdAt: dayOf(40) },
   ]);
 
   assert.deepEqual(await questionReportsFor(fake.store, 'alice'), [

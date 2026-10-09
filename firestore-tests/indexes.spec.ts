@@ -5,6 +5,12 @@ import {
   CONTRIBUTIONS_COLLECTION,
   CONTRIBUTIONS_ORDER,
 } from '../src/app/models/contributions-query';
+import {
+  EXPIRED_REPORTS_ORDER,
+  QUESTION_REPORTS_COLLECTION,
+  REPORT_FILED_AT_FIELD,
+  REPORT_REPORTER_FIELD,
+} from '../functions/src/report-query';
 
 /**
  * Guards `firestore.indexes.json` against the one mistake that breaks the
@@ -244,20 +250,59 @@ describe('firestore.indexes.json', () => {
   });
 
   /**
-   * The report sweeps' queries (`FEAT-042`), each on one field and each served
-   * by a single-field index Firestore creates on its own — so nothing needs
-   * declaring, and that is exactly why these pin that nothing takes either
-   * away. A `fieldOverrides` entry *replaces* automatic indexing for its field,
-   * and the emulator enforces no index configuration at all, so every local
-   * suite would stay green while the sweep failed in production with
-   * `FAILED_PRECONDITION` — and reporters stayed named.
+   * The daily report pass's index (`FEAT-042`). `anonymiseExpiredReports`
+   * sends `where('createdAt', '<', cutoff)` ordered by `createdAt` and then
+   * `reportedBy` — the second ordering being what leaves the anonymised copies
+   * out, since an ordering filters for its field's existence and a copy has no
+   * `reportedBy`. A range on one field ordered by another is exactly what the
+   * automatic single-field indexes cannot serve.
    *
-   * - **`createdAt`**: the daily pass reads `where('createdAt', '<', cutoff)`,
-   *   ordered by `createdAt` and then the document id, from a cursor — and the
-   *   reviewers' queue already orders by the same field, descending.
+   * **Derived from the query rather than restated**, the way the contributions
+   * index above is: the expected index is built from the constants the sweep
+   * builds its query from (`functions/src/report-query.ts`), each ordering
+   * field ascending, less the `__name__` tiebreaker Firestore appends itself.
+   * A query that dropped the reporter ordering — and with it the exclusion — or
+   * gained another, or an index that lost a field, fails here instead of in
+   * production, where the emulator's silence about indexes would have hidden
+   * it until the sweep was refused with `FAILED_PRECONDITION` every day and
+   * reporters stayed named.
+   */
+  it('declares the index the daily report query rides, as the query actually sends it', () => {
+    const expected: IndexField[] = EXPIRED_REPORTS_ORDER.map((field) => ({
+      fieldPath: field,
+      order: 'ASCENDING' as const,
+    }));
+
+    const matching = spec.indexes.filter(
+      (index) =>
+        index.collectionGroup === QUESTION_REPORTS_COLLECTION &&
+        JSON.stringify(index.fields) === JSON.stringify(expected),
+    );
+    expect(matching, JSON.stringify(expected)).toHaveLength(1);
+    expect(expected).toEqual([
+      { fieldPath: 'createdAt', order: 'ASCENDING' },
+      { fieldPath: 'reportedBy', order: 'ASCENDING' },
+    ]);
+    // Firestore's rule for a range: its field is the first ordering. And the
+    // reporter has to be among the orderings, or the copies are read.
+    expect(EXPIRED_REPORTS_ORDER[0]).toBe(REPORT_FILED_AT_FIELD);
+    expect(EXPIRED_REPORTS_ORDER).toContain(REPORT_REPORTER_FIELD);
+  });
+
+  /**
+   * The report reads that need no declared index, each served by a
+   * single-field index Firestore creates on its own — which is exactly why
+   * these pin that nothing takes either away. A `fieldOverrides` entry
+   * *replaces* automatic indexing for its field, and the emulator enforces no
+   * index configuration at all, so every local suite would stay green while
+   * production refused the read with `FAILED_PRECONDITION`.
+   *
+   * - **`createdAt`**: the reviewers' queue orders by it, descending, with the
+   *   document id breaking ties.
    * - **`reportedBy`**: `deleteAccount` and `exportAccountData` find one
    *   account's reports with an equality on it. Nothing queried the field
-   *   before this feature, so exempting it would have looked free.
+   *   before `FEAT-042`, so exempting it would have looked free — and a leaver
+   *   would have been left named in every report they filed.
    */
   it('leaves question_reports.createdAt to its automatic single-field index', () => {
     const override = spec.fieldOverrides.find(
