@@ -12,6 +12,40 @@ import { gamesBankedOn, nextDailyGames, utcDay } from './daily-ceiling';
  * test that exists to notice.
  */
 
+/**
+ * Runs `check` with the process's time zone set to `zone`, then puts it back.
+ *
+ * **The rows below that do not use it pass on any machine that keeps UTC,
+ * whatever the code does** — this one and CI both do — so a `utcDay` rewritten
+ * with local date parts would pass every one of them. Node applies a change to
+ * `process.env.TZ` at run time, so the rollover is checked again with the
+ * server's clock moved far either side of UTC, where a local day and the UTC
+ * day disagree for most of the hours around midnight UTC.
+ */
+function inTimeZone(zone: string, check: () => void): void {
+  const previous = process.env['TZ'];
+  process.env['TZ'] = zone;
+  try {
+    // The zone really moved the local clock, or the row would check nothing.
+    assert.notEqual(new Date(MIDNIGHT).getTimezoneOffset(), 0, `${zone} is not UTC`);
+    check();
+  } finally {
+    if (previous === undefined) {
+      delete process.env['TZ'];
+    } else {
+      process.env['TZ'] = previous;
+    }
+  }
+}
+
+/** Fourteen hours ahead of UTC to eleven behind, either side of the date line. */
+const FAR_ZONES = [
+  'Pacific/Kiritimati',
+  'Pacific/Auckland',
+  'America/Los_Angeles',
+  'Pacific/Pago_Pago',
+];
+
 /** Midday, 9 October 2026, UTC. */
 const NOON = Date.UTC(2026, 9, 9, 12, 0, 0);
 /** The last millisecond of 9 October 2026, UTC. */
@@ -33,6 +67,34 @@ describe('utcDay', () => {
     assert.equal(utcDay(Date.UTC(2026, 9, 9, 23, 59, 59)), '2026-10-09');
     assert.equal(utcDay(LAST_MOMENT), '2026-10-09');
     assert.equal(utcDay(MIDNIGHT), '2026-10-10');
+  });
+});
+
+describe('the UTC day, whatever time zone the server keeps', () => {
+  it('changes day between 23:59:59.999 and 00:00:00.000 UTC in every zone', () => {
+    for (const zone of FAR_ZONES) {
+      inTimeZone(zone, () => {
+        assert.equal(utcDay(LAST_MOMENT), '2026-10-09', zone);
+        assert.equal(utcDay(MIDNIGHT), '2026-10-10', zone);
+        assert.equal(utcDay(NOON), '2026-10-09', zone);
+      });
+    }
+  });
+
+  it('refuses up to midnight UTC and counts again from it, in every zone', () => {
+    const full = { day: '2026-10-09', count: 200 };
+
+    for (const zone of FAR_ZONES) {
+      inTimeZone(zone, () => {
+        assert.equal(nextDailyGames(full, LAST_MOMENT), null, zone);
+        assert.deepEqual(nextDailyGames(full, MIDNIGHT), { day: '2026-10-10', count: 1 }, zone);
+        assert.deepEqual(
+          nextDailyGames({ day: '2026-10-09', count: 199 }, LAST_MOMENT),
+          { day: '2026-10-09', count: 200 },
+          zone,
+        );
+      });
+    }
   });
 });
 

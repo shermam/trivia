@@ -345,6 +345,40 @@ test('counts again from midnight UTC, whatever the day before reached', () => {
 });
 
 /**
+ * The same rollover with the server's clock in zones far either side of UTC,
+ * where a day counted in local time would start hours from midnight UTC. Node
+ * applies `process.env.TZ` at run time; this machine and CI keep UTC, so
+ * without these the row above would pass a local-time day too.
+ */
+test('counts the UTC day, whatever time zone the server keeps', () => {
+  const full = stored({ dailyGames: { day: TODAY, count: 200 } });
+  const previous = process.env['TZ'];
+  try {
+    for (const zone of ['Pacific/Kiritimati', 'America/Los_Angeles']) {
+      process.env['TZ'] = zone;
+      assert.notEqual(new Date(NEXT_MIDNIGHT).getTimezoneOffset(), 0, `${zone} is not UTC`);
+
+      assert.deepEqual(
+        nextUserStats(full, submission(), NEXT_MIDNIGHT - 1),
+        { accepted: false, reason: 'daily-limit' },
+        zone,
+      );
+      assert.deepEqual(
+        accept(nextUserStats(full, submission(), NEXT_MIDNIGHT)).dailyGames,
+        { day: '2025-08-28', count: 1 },
+        zone,
+      );
+    }
+  } finally {
+    if (previous === undefined) {
+      delete process.env['TZ'];
+    } else {
+      process.env['TZ'] = previous;
+    }
+  }
+});
+
+/**
  * **A reload of `/game-over` after the day's last game is still a duplicate.**
  * The ring is checked before the ceiling, so the 200th game's results screen
  * reloaded reads as banked — `daily-limit` there would have `/profile` tell
