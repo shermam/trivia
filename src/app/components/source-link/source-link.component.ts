@@ -28,7 +28,10 @@ import { IconComponent } from '../icon/icon.component';
  *    `sr-only` "(opens in a new tab)" so the behaviour is announced rather
  *    than merely happening, and a visible external-link glyph so a sighted
  *    reader gets the same warning. Losing any one of them in a copy-paste is
- *    invisible in review.
+ *    invisible in review. The glyph carries meaning the words do not, so it
+ *    is a graphic WCAG 1.4.11 holds to 3:1: it takes the line's one colour,
+ *    set on the paragraph, rather than a lighter shade of its own — one step
+ *    lighter is 2.6:1 on the light card.
  *
  * 3. **A title can lie about where the link goes, so the reviewer is shown
  *    the host.** The label is the contributor's `sourceTitle` — arbitrary
@@ -72,13 +75,12 @@ import { IconComponent } from '../icon/icon.component';
   imports: [IconComponent],
   template: `
     @if (safeHref(); as href) {
-      <p class="mt-1 flex items-start gap-1.5 text-xs" data-cy="question-source">
-        <app-icon
-          name="external-link"
-          [size]="13"
-          class="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500"
-        />
-        <span class="text-slate-500 dark:text-slate-400">
+      <p
+        class="mt-1 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+        data-cy="question-source"
+      >
+        <app-icon name="external-link" [size]="13" class="mt-0.5 shrink-0" />
+        <span>
           @if (machineGenerated()) {
             <span data-cy="question-source-generated">Machine-generated from </span>
           } @else {

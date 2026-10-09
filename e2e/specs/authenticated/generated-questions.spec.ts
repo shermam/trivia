@@ -229,7 +229,9 @@ test.describe('a machine-generated question', () => {
    * (`docs/ci-cd.md` §4.4), and every generated question carries a
    * justification and a source, so the card's justification heading, its
    * source's host and its Approve button — each once under its minimum — are
-   * on every one of them, and the heading is on the recap row as well.
+   * on every one of them, and the heading is on the recap row as well. The
+   * glyph beside the source, which axe cannot judge, is pinned to its link's
+   * colour on both.
    *
    * The theme is the browser's: with nothing stored, `public/theme-init.js`
    * follows `prefers-color-scheme` before the app boots, and the root's `dark`
@@ -264,6 +266,7 @@ test.describe('a machine-generated question', () => {
         const tabs = page.getByTestId('review-tabs');
         await expect(tabs.locator('[aria-checked="true"]')).toHaveText('Pending');
         await expectNoAxeViolations(generated, `the generated card, ${colorScheme}`);
+        await expectGlyphInLinkColour(generated.getByTestId('question-source'));
         await expectNoAxeViolations(tabs, `the review tabs, ${colorScheme}`);
 
         // Approved, so the round below can serve it.
@@ -287,12 +290,37 @@ test.describe('a machine-generated question', () => {
           await expect(row.getByTestId('question-justification')).toBeVisible();
           await expect(row.getByTestId('question-source-generated')).toBeVisible();
           await expectNoAxeViolations(row, `the generated question's recap row, ${colorScheme}`);
+          await expectGlyphInLinkColour(row.getByTestId('question-source'));
         } finally {
           firebase.trackAuthUids(tracker.take());
           await context.close();
         }
       });
     });
+  }
+
+  /**
+   * The source line's external-link glyph is drawn in the link's own colour.
+   *
+   * The glyph says the link leaves the app, which the words do not, so it is a
+   * graphic WCAG 1.4.11 holds to 3:1 — and axe's contrast rule reads text
+   * only, so it cannot judge it. Pinned to the link's computed colour instead,
+   * on the same line and the same card, the glyph is exactly as readable as
+   * the link text axe has just passed at 4.5:1. A glyph a shade lighter than
+   * its link is what this catches.
+   */
+  async function expectGlyphInLinkColour(line: Locator): Promise<void> {
+    await expect
+      .poll(
+        () =>
+          line.evaluate((node) => {
+            const glyph = getComputedStyle(node.querySelector('app-icon svg')!).stroke;
+            const link = getComputedStyle(node.querySelector('a')!).color;
+            return glyph === link ? 'the same' : `glyph ${glyph}, link ${link}`;
+          }),
+        { message: 'the external-link glyph is drawn in the link’s colour' },
+      )
+      .toBe('the same');
   }
 
   /** The page is in the theme the test asked the browser for, from its first frame. */
