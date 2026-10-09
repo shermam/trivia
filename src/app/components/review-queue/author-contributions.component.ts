@@ -59,6 +59,16 @@ const LONGEST_OUTCOME = describeOutcome(1, AUTHOR_PAGE_SIZE).replace(
 );
 
 /**
+ * The reason box's two errors. Named here rather than in the template because
+ * the template reserves a line for whichever is longer — invisible copies of
+ * both, stacked in the cell the showing one lands in — so the Reject button
+ * under them and every row below stay put when one appears or clears
+ * (`CLAUDE.md` §4.4).
+ */
+const REASON_MISSING = 'Give a reason — it is shown to the author on every question this rejects.';
+const REASON_TOO_LONG = `A reason must be ${MAX_REJECTION_REASON_LENGTH} characters or fewer.`;
+
+/**
  * A rejected question is not selectable: the action this view offers is
  * rejecting, and a question already rejected has nothing left to reject.
  * Re-rejecting it would only overwrite whatever note a reviewer already left
@@ -149,6 +159,8 @@ export class AuthorContributionsComponent implements OnInit {
   protected readonly pageSize = AUTHOR_PAGE_SIZE;
   protected readonly maxReasonLength = MAX_REJECTION_REASON_LENGTH;
   protected readonly longestOutcome = LONGEST_OUTCOME;
+  protected readonly reasonMissing = REASON_MISSING;
+  protected readonly reasonTooLong = REASON_TOO_LONG;
 
   protected readonly rows = signal<ReviewQuestion[]>([]);
   private readonly pageStarts = signal<PageStarts>([undefined]);
@@ -230,10 +242,10 @@ export class AuthorContributionsComponent implements OnInit {
   protected readonly reasonError = computed(() => {
     const length = this.reason().trim().length;
     if (length > MAX_REJECTION_REASON_LENGTH) {
-      return `A reason must be ${MAX_REJECTION_REASON_LENGTH} characters or fewer.`;
+      return REASON_TOO_LONG;
     }
     if (this.attempted() && length === 0) {
-      return 'Give a reason — it is shown to the author on every question this rejects.';
+      return REASON_MISSING;
     }
     return null;
   });

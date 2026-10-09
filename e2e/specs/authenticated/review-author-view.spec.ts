@@ -231,21 +231,38 @@ test.describe('everything one account contributed, as a reviewer', () => {
     ).toBeDisabled();
 
     // No reason, no write: the field says so, is marked invalid, and has focus.
+    // The error lands in a line reserved for it from the first frame, so the
+    // button just pressed and the rows under it stay put (`CLAUDE.md` §4.4).
     const reject = page.getByTestId('bulk-reject');
     const reason = page.getByTestId('bulk-reason');
+    const beforeRefusal = {
+      reject: await settledBox(reject, 'the Reject button before a refused submit'),
+      first: await settledBox(rows.nth(0), 'the first row before a refused submit'),
+    };
     await reject.click();
     await expect(page.getByTestId('bulk-reason-error')).toHaveText(
       'Give a reason — it is shown to the author on every question this rejects.',
     );
     await expect(reason).toHaveAttribute('aria-invalid', 'true');
     await expect(reason).toBeFocused();
+    await expectBoxUnmoved(
+      reject,
+      beforeRefusal.reject,
+      'the Reject button when the error appears',
+    );
+    await expectBoxUnmoved(
+      rows.nth(0),
+      beforeRefusal.first,
+      'the first row when the error appears',
+    );
     expect([...writes.keys()]).toEqual([]);
 
-    // Typing the reason clears the error before the measured action, so what
-    // is measured below is the action landing and nothing else.
+    // Typing the reason clears the error, in place, before the measured
+    // action, so what is measured below is the action landing and nothing else.
     const note = `This account is posting spam (${tag}).`;
     await reason.fill(note);
     await expect(page.getByTestId('bulk-reason-error')).toHaveCount(0);
+    await expectBoxUnmoved(reject, beforeRefusal.reject, 'the Reject button when the error clears');
     const boxes = {
       bar: page.getByTestId('bulk-bar'),
       first: rows.nth(0),

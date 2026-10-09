@@ -224,15 +224,27 @@
       <p id="author-bulk-reason-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
         Shown to the author on every question this rejects.
       </p>
-      @if (reasonError(); as error) {
-        <p
-          id="author-bulk-reason-error"
-          data-cy="bulk-reason-error"
-          class="mt-1.5 text-sm text-red-700 dark:text-red-300"
-        >
-          {{ error }}
-        </p>
-      }
+      <!--
+        The box's error lands in a line held for it from the first frame — the
+        same cell as invisible copies of both its messages, so the line is as
+        tall as the longer of them — because the Reject button under it is the
+        control the reviewer has just pressed, and an error pushing it and
+        every row below down a line, then pulling them back on the first
+        keystroke, is the jump `CLAUDE.md` §4.4 forbids.
+      -->
+      <div data-cy="bulk-reason-error-line" class="grid mt-1.5 text-sm">
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonMissing }}</p>
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonTooLong }}</p>
+        @if (reasonError(); as error) {
+          <p
+            id="author-bulk-reason-error"
+            data-cy="bulk-reason-error"
+            class="col-start-1 row-start-1 text-red-700 dark:text-red-300"
+          >
+            {{ error }}
+          </p>
+        }
+      </div>
 
       <!--
         `aria-disabled` rather than `disabled` while the writes are out: the

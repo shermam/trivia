@@ -353,6 +353,39 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     expect(view.reasonError()).toBe('A reason must be 500 characters or fewer.');
   });
 
+  /**
+   * The reason box's error lands in a line held from the first frame, the
+   * selection line's technique one control down: invisible copies of both
+   * messages share the cell the showing one lands in, so the line is as tall
+   * as the longer of them before either is said, and the Reject button under
+   * it — the control just pressed — does not move when one appears or clears
+   * (`CLAUDE.md` §4.4). `review-author-view.spec.ts` measures the button.
+   */
+  it('holds the reason error’s line from the first frame, at the longer message', async () => {
+    const { view, host, settle } = await rendered({ pages: [page()] });
+
+    const line = face(host, 'bulk-reason-error-line');
+    const sizers = [...line.children].filter((cell) => cell.getAttribute('aria-hidden') === 'true');
+    expect(sizers.map((cell) => cell.textContent?.trim())).toEqual([
+      'Give a reason — it is shown to the author on every question this rejects.',
+      'A reason must be 500 characters or fewer.',
+    ]);
+    for (const cell of sizers) {
+      expect(cell.className).toContain('col-start-1 row-start-1');
+      expect(cell.classList.contains('invisible')).toBe(true);
+    }
+    expect(host.querySelector('[data-cy="bulk-reason-error"]')).toBeNull();
+
+    view.toggleAll();
+    await view.rejectSelected();
+    await settle();
+
+    const error = face(host, 'bulk-reason-error');
+    expect(error.parentElement).toBe(line);
+    expect(error.className).toContain('col-start-1 row-start-1');
+    expect(error.textContent?.trim()).toBe(view.reasonError());
+  });
+
   it('sends the selection with the one trimmed reason', async () => {
     const { view, rejectQuestions } = await rendered({ pages: [page()] });
     view.toggleAll();
