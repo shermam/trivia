@@ -15,6 +15,8 @@
  * public surface.
  */
 
+import { readXp } from './xp';
+
 /** The XP one level step is worth: level L is reached at `50 × L × (L + 1)`. */
 const XP_PER_STEP = 50;
 
@@ -24,9 +26,7 @@ export function xpForLevel(level: number): number {
 }
 
 /** The XP a stored value means: a whole, non-negative count, or 0 for anything else. */
-export function readXp(value: unknown): number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
+export { readXp };
 
 /**
  * The level `xp` has reached: the largest L with `xpForLevel(L) <= xp`.

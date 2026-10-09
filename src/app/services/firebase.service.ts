@@ -22,7 +22,7 @@ import {
   CONTRIBUTIONS_COLLECTION,
   CONTRIBUTIONS_ORDER,
 } from '../models/contributions-query';
-import { readXp } from '../models/levels';
+import { readXp } from '../models/xp';
 import { QUIZZES_COLLECTION, QUIZ_MAX_QUESTIONS } from '../models/quiz.model';
 import { isDocumentReference } from '../utils/quiz-definition.util';
 import {
