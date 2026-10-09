@@ -109,21 +109,24 @@
     detail box, when you filed it, and your account identifier. Reports are readable by us and by
     the small number of players we have appointed as reviewers, who read them in the app in order to
     act on what they say — that is how a report reaches somebody who can do something about the
-    question. No other player can read them. The review screen does not show who filed a report, and
-    your account identifier stays on a report only while the question it names is waiting for a
-    reviewer's decision.
+    question. No other player can read them. The review screen does not show who filed a report,
+    though your account identifier is part of the record a reviewer's access reaches for as long as
+    the report carries it.
   </p>
   <p>
-    <strong>Once that question has been approved or rejected, your identifier is removed.</strong>
-    A job that runs once a day copies the report without it and deletes the original: the question,
-    the reason, your words and the time stay, and nothing saying who filed it does. It is a copy
-    rather than an edit because your identifier is also part of the original report's own reference,
-    so only deleting the original removes it. Only approved questions are served in games, so a
-    question you report has nearly always been decided already, and your identifier comes off at the
-    next daily run; it stays longer only on a report about a question that is back under review
-    &mdash; one its author has edited since, for instance &mdash; and then only until a reviewer
-    decides it. An anonymised report holds nothing that ties it to you, which is why &ldquo;Export
-    my data&rdquo; no longer includes it and why deleting your account does not remove it.
+    <strong
+      >We keep who filed a report for 30 days, so that we and our reviewers can follow it up while
+      it is fresh, and then remove it.</strong
+    >
+    A job that runs once a day copies each report older than that without your identifier and
+    deletes the original: the question, the reason, your words and the time stay, and nothing saying
+    who filed it does. It is a copy rather than an edit because your identifier is also part of the
+    original report's own reference, so only deleting the original removes it. If you delete your
+    account, your identifier is removed from every report you filed at once, however recent. The
+    report itself stays until the question it is about has been decided and we clear it from the
+    review queue &mdash; nothing in the app deletes a report automatically &mdash; and once it no
+    longer carries your identifier it holds nothing that ties it to you, which is why &ldquo;Export
+    my data&rdquo; includes only the reports that still do.
   </p>
 
   <h2>Information created by using the app</h2>
@@ -640,14 +643,13 @@
       <a routerLink="/terms">the Terms</a>.
     </li>
     <li>
-      <strong>Reports you file about a question</strong> keep your account identifier only until the
-      question they name has been approved or rejected, and the job that runs once a day then
-      removes it, as described above. The report itself &mdash; the question, the reason and
-      anything you typed &mdash; is kept indefinitely after that, naming nobody, because it is the
-      record that something needed looking at. If you delete your account, a report that still
-      carries your identifier is deleted outright when its question has been decided, and kept
-      without the identifier when the question is still awaiting review, because a reviewer has yet
-      to act on it.
+      <strong>Reports you file about a question</strong> keep your account identifier for
+      <strong>30 days</strong> from the day you file them, so that a report can be followed up; the
+      job that runs once a day then removes it, as described above, and deleting your account
+      removes it from every report you filed at once. The report itself &mdash; the question, the
+      reason and anything you typed &mdash; stays, naming nobody, until the question has been
+      decided and we clear it from the review queue; nothing deletes a report automatically, because
+      it is the record that something needed looking at.
     </li>
     <li>
       <strong>The country your IP address maps to</strong> is not kept for any length of time,
@@ -658,10 +660,10 @@
     </li>
     <li>
       <strong>Anonymous accounts</strong> that are never signed in to hold no personal information.
-      Two records can point at one: a report it filed, which keeps the account's identifier only
-      until the question it names is decided, and the scratch document a donation passes through on
-      its way to Stripe, which expires as described above. Firebase deletes anonymous accounts
-      automatically after 30 days without activity.
+      Two records can point at one: a report it filed, which keeps the account's identifier for 30
+      days, and the scratch document a donation passes through on its way to Stripe, which expires
+      as described above. Firebase deletes anonymous accounts automatically after 30 days without
+      activity.
     </li>
   </ul>
 
@@ -683,9 +685,9 @@
       <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
       record and the payment methods stored against it, deletes your leaderboard entries on every
       board, <strong>country boards included</strong>, deletes your gameplay totals and your whole
-      play history, deletes your likes and dislikes, deletes the reports you filed that still carry
-      your identifier &mdash; except one about a question still awaiting review, which is kept with
-      the identifier removed &mdash; deletes your billing records, and deletes your sign-in account
+      play history, deletes your likes and dislikes, removes your account identifier from every
+      report you have filed &mdash; the reports themselves stay, naming nobody, because a reviewer
+      may still need them &mdash; deletes your billing records, and deletes your sign-in account
       itself.
       <strong
         >Questions you contributed are kept, with your authorship replaced by a
