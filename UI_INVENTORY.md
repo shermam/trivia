@@ -129,12 +129,13 @@ A hairline-bordered bar below `<main>`, hidden with the top bar in embed mode.
 
 ## 1. Route: `/` — Game Setup (`GameSetupComponent`)
 
-Full-screen centered card on an indigo/purple gradient background.
+Full-screen centered card on an emerald-to-amber gradient background.
 
 ### Hierarchy
 
-- **Title**: "Trivimind" (large, bold, indigo, centered)
+- **Title**: "Trivimind" (large, bold, emerald, centered)
 - **Subtitle**: "Configure your quiz and test your knowledge" (centered, grey)
+- **Resume banner** (emerald tint: `emerald-50` fill, `emerald-200` border, `emerald-800` text; `emerald-500/10` and `emerald-300` in the dark theme) — only while a game is in progress and unfinished: "You have a game in progress — question {n} of {total}.", a **Resume** button in the CTA fill (`emerald-700`, white text, `emerald-800` on hover — 5.4:1 in both themes) and an outlined **Discard**. While a start is in flight it holds exactly what it said when Start was pressed, so it neither appears for the game being started nor changes under a player starting another
 - **Inline error banner** (red) — only if a previous game-start attempt failed: shows the game controller's load-error message (e.g. no questions found for the filters, network failure)
 - **Form**
   - **Field: "Number of Questions"** — `<select>` labeled "Number of Questions"; options: `5`, `10`, `15`, `20`, `25` (default 10)
@@ -143,7 +144,7 @@ Full-screen centered card on an indigo/purple gradient background.
     - "Open Trivia" (default selected)
     - "Custom"
     - "Mixed"
-    - Selected segment is visually distinguished (indigo border + light indigo fill)
+    - Selected segment is visually distinguished (`emerald-100` fill, `emerald-700` text)
   - **Field: "Topics" (optional)** — the shared tag picker (`FEAT-021`), the game's only topic choice (`FEAT-052`), below the source picker and above the time limit. Nothing chosen plays every topic, for every source.
     - A helper line saying what the selection does for the source in play, reserved at the height of the tallest of them all — one Mixed variant per suggested topic — so changing the source or the selection swaps the words without rewrapping the line and moving everything below it:
       - Open Trivia: "Pick one of the suggested topics, or none to play every topic."
@@ -158,8 +159,9 @@ Full-screen centered card on an indigo/purple gradient background.
     - **For an Open Trivia game it is a single choice of the suggested topics**: picking another replaces the one chosen ("Replaced {old} with {new}." from the live region), and a typed topic outside them is refused with the reason above and left in the box. **Switching into Open Trivia** keeps the first suggested topic and removes the rest, and says so in the feedback line — "Open Trivia plays one suggested topic, so the others were removed." or, with none to keep, "Open Trivia plays only the suggested topics, so yours were removed." — while the live region names them ("Open Trivia plays one suggested topic. Kept #history; removed #my-topic and #sports.")
     - Usable offline, where the selection is a preference over the saved pool
 
+  - **Daily allowance row** (small grey line, one line in every wording): "Unlimited games with Pro." / "{n} of 5 free games left today." / "No free games left today."
   - **Short-draw notice** (amber, `role="status"`) — shown after Start when a topic-filtered draw came back short: "Only {found} of the {asked} questions you asked for match those topics. Start again to play the {found} we found."
-  - **Submit button**, full width, indigo:
+  - **Submit button**, full width, `emerald-700` with white text — or, once the day's free games are spent and no start is in flight, the amber Pro offer in its place (`role="status"`: "That's your 5 free games for today." · "They reset at midnight. Pro removes the limit entirely." · **See Pro** → `/pricing`):
     - Default label: "Start Game"
     - After a short filtered draw: "Play {found} Questions"
     - While loading questions: "Loading Questions…" (disabled)
@@ -181,7 +183,7 @@ Read from the route snapshot at construction, so the banner is part of the first
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Initial load                                         | Form usable immediately; no request is made before Start or before the curated quizzes below are scrolled to, and the suggestion chips land on the first idle moment |
 | Form submitted while invalid                         | Validation errors marked (all fields touched); no navigation                                                                                                         |
-| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"                                                                                                                 |
+| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"; the resume banner and the Pro offer stay exactly as they were when Start was pressed, until the route changes  |
 | Game start failed — no questions matched the filters | Red inline error: "No questions were found for the selected options. Try a different topic, difficulty, or source."                                                  |
 | Game start failed — network/fetch error              | Red inline error: "Failed to load questions. Please check your connection and try again."                                                                            |
 | Success                                              | Navigates to `/play`                                                                                                                                                 |
@@ -272,8 +274,8 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 - **Header card**: amber-gradient trophy icon badge, "Game Over!" (large, bold, dark, centered), subtitle "Here's how you did" (centered, grey)
 - **Score summary** (four stat blocks in a 2×2 grid, on their own light-slate sub-cards; all four render in every state):
   - "**{{ score }}**" — label "Score", caption "points". The multiplied total, so it can exceed the question count
-  - "**{{ percentage }}%**" — label "Accuracy", plus a derived performance label/color: "Outstanding!" (green, ≥90%) / "Great job!" (indigo, ≥70%) / "Good effort!" (amber, ≥50%) / "Keep practicing!" (red, <50%). Never multiplied, so never above 100%
-  - "**{{ correctAnswers }}** / **{{ totalQuestions }}**" — label "Correct", caption "correct answers"
+  - "**{{ percentage }}%**" — label "Accuracy", plus a derived performance label/color: "Outstanding!" (≥90%) and "Great job!" (≥70%) in `emerald-700` / "Good effort!" (≥50%) in `amber-700` / "Keep practicing!" (<50%) in `red-700` — the `-400` of each in the dark theme. The figure and its 12px label share the colour, so every tier clears 4.5:1 on the tile. Never multiplied, so never above 100%
+  - "**{{ correctAnswers }}** / **{{ totalQuestions }}**" — label "Correct", caption "correct answers"; the "/ {{ totalQuestions }}" is smaller and muted, in the caption's `slate-500` (`slate-400` dark): 4.55:1 and 6.1:1 on the tile
   - flame icon + "**{{ maxStreak }}**" — label "Best streak", caption "in a row"
 - **Save-score area** — content depends on auth state, or on the game being a curated quiz (see States below)
 - **Section heading**: "Top 10 — {{ boardLabel }} games" (with a medal icon), and under it a second, always-present line naming the population being ranked: "Worldwide", "In {{ country }}", or "Your country" when the Regional tab is selected with none set. Two lines by construction, so the header keeps one height across the toggle — the combined form wraps at 390px and not at 1024px

@@ -538,10 +538,19 @@ export class GameOverComponent implements OnInit {
     return 'Keep practicing!';
   });
 
+  /**
+   * The accuracy tile's colour, which its 12px label wears as well as its
+   * 36px figure — so every tier has to reach 4.5:1 against the tile, not just
+   * the large-text 3:1 the figure alone would owe. That is why "Great job!"
+   * shares emerald-700 with "Outstanding!": the brand emerald-600 it would
+   * otherwise take is 3.5:1 on the light tile. In the dark theme the two
+   * already shared emerald-400. The words carry the tier; the colour only
+   * reinforces it (WCAG 1.4.1). `color-contrast.spec.ts` plays a round in that
+   * tier and measures both themes, since Lighthouse never loads this screen.
+   */
   protected readonly performanceColorClass = computed(() => {
     const percentage = this.gameController.percentage();
-    if (percentage >= 90) return 'text-emerald-700 dark:text-emerald-400';
-    if (percentage >= 70) return 'text-emerald-600 dark:text-emerald-400';
+    if (percentage >= 70) return 'text-emerald-700 dark:text-emerald-400';
     if (percentage >= 50) return 'text-amber-700 dark:text-amber-400';
     return 'text-red-700 dark:text-red-400';
   });
