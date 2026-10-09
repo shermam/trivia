@@ -255,10 +255,10 @@ export interface ReportSweepResult {
  *
  * **It reads from the reports' side.** The work is the set of reports that
  * still name somebody — `reportedBy` present, which an anonymised copy never
- * has — and that set is bounded by what has been filed since the last run
- * plus the few about questions under review. Walking the decided *questions*
- * instead would read the whole approved bank every day to find the handful of
- * reports that changed.
+ * has — and that set is bounded by what has been filed or decided since the
+ * last run plus the few about questions under review. Walking the decided
+ * *questions* instead would read the whole approved bank every day to find
+ * the handful of reports that changed.
  *
  * **It pages on a cursor**, `(reportedBy, document id)`, because the reports
  * it keeps stay in the set: a page made entirely of reports about undecided
@@ -381,8 +381,8 @@ export async function sweepLeaverReports(
  * is held. Once anonymised a report is nobody's, and is not here.
  *
  * One query rather than pages: the reports that still name an account are the
- * ones filed since the last daily run — ten per five minutes at most, the
- * volume cap in the id — plus those about questions under review.
+ * ones about a question under review, and those filed or decided since the
+ * last daily run — filing is capped at ten per five minutes by the id.
  */
 export async function questionReportsFor(
   store: ReportStore,

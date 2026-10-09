@@ -70,10 +70,10 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // ids put the uid first (`question-votes.ts`).
     await deleteQuestionVotes(firestore, uid);
     // The reports the account filed that still name it (`FEAT-042`). The daily
-    // sweep has already taken the identity off every report whose question was
-    // decided before today, so what is left is recent or still under review:
-    // a report about a decided question goes with its author, one a reviewer
-    // has yet to act on stays without them. Either way none names the uid
+    // sweep has already taken the identity off every report whose question it
+    // found decided, so what is left was filed or decided since its last run,
+    // or is still under review: a report about a decided question goes with its
+    // author, one a reviewer has yet to act on stays without them. Either way none names the uid
     // afterwards — not in `reportedBy`, and not in a document id, which is
     // where `{window}-{slot}-{uid}` would otherwise leave it.
     await sweepLeaverReports(firestore, uid);

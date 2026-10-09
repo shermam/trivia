@@ -73,8 +73,9 @@ export interface AccountExport {
    * "Still names it" is the whole of the selection. A report keeps its reporter
    * while the question it is about is under review, and loses it at the first
    * daily run that finds the question decided — copied without the identity
-   * to a new id, the original deleted — so this holds the reports filed since
-   * the last run and the ones about questions still undecided. A report that has
+   * to a new id, the original deleted — so this holds the reports about a
+   * question still undecided, and those filed or decided since the last run.
+   * A report that has
    * been anonymised holds nothing tying it to this account and is not here,
    * for the same reason it is not deleted with it. An empty list for an
    * account that has no such report.
