@@ -50,10 +50,15 @@ export async function expectRadiosAreGrouped(page: Page): Promise<void> {
     const labelledBy = await group.getAttribute('aria-labelledby');
     expect(labelledBy, `radiogroup around "${name}" has aria-labelledby`).toBeTruthy();
 
-    // The id has to resolve to something with text, or the group is labelled by
-    // nothing — which reads exactly like having no label at all.
-    const label = page.locator(`#${labelledBy}`);
-    await expect(label, `#${labelledBy} exists`).toHaveCount(1);
-    await expect(label, `#${labelledBy} is not empty`).not.toHaveText('');
+    // Every id has to resolve to something with text, or the group is labelled
+    // by nothing — which reads exactly like having no label at all. The
+    // attribute is a list of ids, and a group can be named by more than one:
+    // the avatar picker names each set's rows by the set's heading and the
+    // row's label together ("Bold Shape"), so each is checked on its own.
+    for (const id of (labelledBy ?? '').split(/\s+/).filter(Boolean)) {
+      const label = page.locator(`[id="${id}"]`);
+      await expect(label, `#${id} exists`).toHaveCount(1);
+      await expect(label, `#${id} is not empty`).not.toHaveText('');
+    }
   }
 }

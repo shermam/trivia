@@ -101,7 +101,9 @@ test.describe('the caller gate on the callables that write about a player', () =
       });
       expect(recorded.status, JSON.stringify(recorded)).toBe(200);
       if (row.refusal === null) {
-        expect(recorded.result).toEqual({ recorded: true });
+        // No per-answer records in this payload, so the game earns no XP
+        // (`FEAT-041`) — but the answer still says what the total came to.
+        expect(recorded.result).toEqual({ recorded: true, xp: 0, xpGained: 0 });
       } else {
         // The reason, not just the refusal: the client says nothing about a
         // guest's refused game and reports anything else, so the two must not

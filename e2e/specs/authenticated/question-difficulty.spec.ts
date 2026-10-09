@@ -159,7 +159,9 @@ test.describe('per-question difficulty (FEAT-023)', () => {
     await startTopicGame(page, { topics: [topic], found: 2, noTimeLimit: true });
     const banked = recordGameResultResponse(page);
     await answerEveryQuestion(page, 2, 'Shared');
-    expect(await callableResult(await banked)).toEqual({ recorded: true });
+    // One medium question right, priced on its label — four answers are too
+    // few to price it on — and a run of one: 15 + 2 XP (`FEAT-041`).
+    expect(await callableResult(await banked)).toEqual({ recorded: true, xp: 17, xpGained: 17 });
 
     await expectCounters(firebase, {
       [playedBefore]: { answered: 5, correct: 2 },
