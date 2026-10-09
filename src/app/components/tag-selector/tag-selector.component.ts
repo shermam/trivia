@@ -15,6 +15,7 @@ import {
   MAX_TAGS_PER_QUESTION,
   MAX_TAG_LENGTH,
   MIN_TAG_LENGTH,
+  foldTag,
   normalizeTag,
 } from '../../utils/normalize-tag.util';
 import { QUESTION_TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
@@ -279,6 +280,14 @@ export class TagSelectorComponent implements ControlValueAccessor {
     () => this.draft().trim().length > 0 && this.draftPreview() === null,
   );
 
+  /**
+   * Which bound a rejected draft hit, judged on the **folded** text. Folding can
+   * lengthen it — `ß` is `ss` once folded — so a draft typed inside the cap can
+   * still fold past it, and measuring what was typed would tell its writer
+   * their tag had too few letters (`CLAUDE.md` §4.4).
+   */
+  protected readonly draftTooLong = computed(() => foldTag(this.draft()).length > MAX_TAG_LENGTH);
+
   /** The draft is a well-formed tag the caller does not offer here. */
   protected readonly draftNotAllowed = computed(() => {
     const preview = this.draftPreview();
@@ -445,7 +454,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
     const tag = normalizeTag(raw);
     if (!tag) {
       this.announcement.set(
-        raw.length > MAX_TAG_LENGTH
+        this.draftTooLong()
           ? `"${raw}" is too long — a tag is at most ${MAX_TAG_LENGTH} characters.`
           : `"${raw}" has no tag in it — a tag needs at least ${MIN_TAG_LENGTH} letters or digits.`,
       );

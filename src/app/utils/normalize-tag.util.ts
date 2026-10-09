@@ -50,8 +50,54 @@ export const MAX_TAG_LENGTH = 32;
  */
 const TAG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** Combining marks left behind by an NFD decomposition. */
+/**
+ * Symbols — `™`, `©`, `€`, `+`, `´`, an emoji — removed before anything is
+ * decomposed.
+ *
+ * None of them is a letter, and none would survive the alphabet filter below.
+ * What removing them *first* prevents is the decomposition turning one into
+ * something that does survive: NFKD spells `™` as the letters `TM`, and a
+ * spacing accent as a space followed by the accent. Without this, `Pokémon™`
+ * would be `pokemontm`, and `McDonald´s` — the acute accent typed as an
+ * apostrophe, which a dead-key keyboard layout produces — `mcdonald-s`; neither
+ * is the tag anybody typing the same name without the symbol gets.
+ */
+const SYMBOLS = /\p{S}/gu;
+
+/** Combining marks left behind once a letter is decomposed. */
 const COMBINING_MARKS = /[\u0300-\u036f]/g;
+
+/**
+ * The letters no Unicode decomposition reaches, folded the way the languages
+ * that write them spell them in ASCII.
+ *
+ * NFKD takes the accent off `á` and splits `ﬁ` into `fi`, but `æ`, `ø`, `ß` and
+ * the rest of this table are letters in their own right rather than a letter
+ * plus a mark, so there is nothing for it to split — and the alphabet filter
+ * would delete them, turning `Straße` into `strae` and `Ærøskøbing` into
+ * `rskbing`. A letter outside the table with no decomposition is still dropped.
+ *
+ * **Keys are lower-case only**, because the normaliser lower-cases before it
+ * looks a letter up: that is what brings `Æ`, `Ø`, `ẞ`, `Œ`, `Ł`, `Đ`, `Þ`,
+ * `Ð`, `Ŧ`, `Ħ` and `Ŋ` here. The capital of the dotless `ı` is the ASCII `I`.
+ */
+const UNDECOMPOSABLE_LETTERS: Readonly<Record<string, string>> = {
+  æ: 'ae',
+  ø: 'o',
+  ß: 'ss',
+  œ: 'oe',
+  ł: 'l',
+  đ: 'd',
+  þ: 'th',
+  ð: 'd',
+  ı: 'i',
+  ŧ: 't',
+  ħ: 'h',
+  ŋ: 'ng',
+};
+
+/** Any letter {@link UNDECOMPOSABLE_LETTERS} folds — built from its keys, so the two cannot drift. */
+const UNDECOMPOSABLE = new RegExp(`[${Object.keys(UNDECOMPOSABLE_LETTERS).join('')}]`, 'g');
 
 /** Whitespace and underscores, which both mean "word boundary" to a writer. */
 const WORD_SEPARATORS = /[\s_]+/g;
@@ -79,36 +125,58 @@ export function isNormalizedTag(value: unknown): value is string {
 }
 
 /**
- * One writer's text as a stored tag, or `null` when there is no tag in it.
+ * The writer's text in the tag alphabet: every step of {@link normalizeTag}
+ * except its two rejections, so the result may be empty, or longer than
+ * {@link MAX_TAG_LENGTH}.
  *
- * The steps, in order: strip diacritics, lower-case, turn whitespace and
- * underscores into hyphens, drop everything outside `[a-z0-9-]`, collapse
- * repeated hyphens, trim the hyphens off both ends. Then two rejections —
- * shorter than {@link MIN_TAG_LENGTH}, or longer than {@link MAX_TAG_LENGTH}.
- *
- * **Diacritics are folded rather than dropped**, and that is the one place this
- * goes beyond "keep `[a-z0-9-]`". Dropping the character outright turns
- * `matemática` into `matemtica` — a tag nobody will ever type a second time,
- * which is the precise failure a normaliser exists to prevent. Folding it turns
- * it into `matematica`, which the next contributor writing `matematica` will
- * match. The stored shape is identical either way; only the coherence differs.
- *
- * **Too long is `null` rather than truncated.** A truncated tag is a different
- * tag, silently — and the caller can tell the two rejections apart by measuring
- * the input, which is what the selector does to say *why* a chip was refused
- * instead of just refusing it.
+ * Exported for the caller that has to say *why* a draft was refused. Folding
+ * can lengthen text — `ß` is `ss` and `ﬃ` is `ffi` once folded — so a draft
+ * that fits the cap as typed can still fold past it, and only the folded length
+ * tells "too long" from "nothing in it".
  */
-export function normalizeTag(input: string): string | null {
-  const normalized = input
-    .normalize('NFD')
+export function foldTag(input: string): string {
+  return input
+    .replace(SYMBOLS, '')
+    .normalize('NFKD')
     .replace(COMBINING_MARKS, '')
     .toLowerCase()
+    .replace(UNDECOMPOSABLE, (letter) => UNDECOMPOSABLE_LETTERS[letter])
     .replace(WORD_SEPARATORS, '-')
     .replace(DISALLOWED, '')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
 
-  return isNormalizedTag(normalized) ? normalized : null;
+/**
+ * One writer's text as a stored tag, or `null` when there is no tag in it.
+ *
+ * The steps, in order: remove symbols, decompose (NFKD) and strip the combining
+ * marks that leaves, lower-case, fold the letters no decomposition reaches,
+ * turn whitespace and underscores into hyphens, drop everything outside
+ * `[a-z0-9-]`, collapse repeated hyphens, trim the hyphens off both ends — which
+ * is {@link foldTag}. Then two rejections — shorter than {@link MIN_TAG_LENGTH},
+ * or longer than {@link MAX_TAG_LENGTH}.
+ *
+ * **Letters are folded rather than dropped**, and that is the one place this
+ * goes beyond "keep `[a-z0-9-]`". Dropping the character outright turns
+ * `matemática` into `matemtica` and `Straße` into `strae` — tags nobody will
+ * ever type a second time, which is the precise failure a normaliser exists to
+ * prevent. Folding turns them into `matematica` and `strasse`, which the next
+ * contributor writing the word without its accent or its `ß` will match. The
+ * stored shape is identical either way; only the coherence differs. The
+ * decomposition is NFKD rather than NFD because it also splits compatibility
+ * forms — the ligature `ﬁ` into `fi`, full-width `Ｆｕｌｌ` into `Full`, `x²`
+ * into `x2` — which NFD leaves whole for the alphabet filter to delete.
+ *
+ * **Too long is `null` rather than truncated.** A truncated tag is a different
+ * tag, silently — and the caller can tell the two rejections apart by measuring
+ * {@link foldTag}'s output, which is what the selector does to say *why* a chip
+ * was refused instead of just refusing it. Measuring the input would not do:
+ * folding can lengthen it.
+ */
+export function normalizeTag(input: string): string | null {
+  const folded = foldTag(input);
+  return isNormalizedTag(folded) ? folded : null;
 }
 
 /**

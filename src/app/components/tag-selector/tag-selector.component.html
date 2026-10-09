@@ -167,7 +167,7 @@
       [class.dark:text-slate-400]="!draftRejected() && !draftNotAllowed()"
     >
       @if (draftRejected()) {
-        @if (draft().trim().length > maxTagLength) {
+        @if (draftTooLong()) {
           Too long — a tag is at most {{ maxTagLength }} characters.
         } @else {
           A tag needs at least {{ minTagLength }} letters or digits.
