@@ -249,6 +249,15 @@ export interface LeaderboardSeed {
 }
 
 /**
+ * One account's avatar choice (`FEAT-038`), written where `setAvatar` writes
+ * it — the `avatar` field of `users/{uid}`, beside any totals.
+ */
+export interface AvatarSeed {
+  uid: string;
+  avatar: { kind: 'initials' | 'photo' | 'built'; seed?: string; showPublicly: boolean };
+}
+
+/**
  * Lifetime totals as the `recordGameResult` callable would have banked them.
  *
  * Writing `users/{uid}` directly is the Admin SDK's privilege — the collection
@@ -258,15 +267,6 @@ export interface LeaderboardSeed {
  * A spec whose subject is the callable plays the game: see
  * `lifetime-stats.spec.ts`.
  */
-/**
- * One account's avatar choice (`FEAT-038`), written where `setAvatar` writes
- * it — the `avatar` field of `users/{uid}`, beside any totals.
- */
-export interface AvatarSeed {
-  uid: string;
-  avatar: { kind: 'initials' | 'photo' | 'built'; seed?: string; showPublicly: boolean };
-}
-
 export interface GameplayStatsSeed {
   uid: string;
   gamesPlayed: number;

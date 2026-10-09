@@ -37,13 +37,25 @@ type PickerView = 'loading' | 'signedOut' | 'unverified' | 'failed' | 'ready';
 
 /** The line under the heading — the view, refined by a save in progress or just finished. */
 type PickerLine =
-  Exclude<PickerView, 'ready'> | 'idle' | 'saving' | 'saved' | 'unavailable' | 'saveFailed';
+  | Exclude<PickerView, 'ready'>
+  | 'idle'
+  | 'saving'
+  | 'saved'
+  | 'unavailable'
+  | 'saveFailed'
+  | 'unconfirmed';
 
 interface KindOption {
   kind: AvatarKind;
   label: string;
   /** What the option draws — built once per draft, so the binding is stable. */
   preview: AvatarChoice;
+  /**
+   * Whether this account can choose it. Only the photo can be unavailable, and
+   * then its cell is still laid out — invisible, with no radio — so the grid
+   * keeps three cells whatever the account has.
+   */
+  available: boolean;
 }
 
 interface BuiltOption {
@@ -58,6 +70,7 @@ const ANNOUNCEMENTS: Record<AvatarSaveOutcome, string> = {
   saved: 'Avatar saved.',
   unavailable: 'Avatars cannot be saved on this deployment yet.',
   failed: 'Could not save your avatar.',
+  unconfirmed: 'Your avatar could not be confirmed as saved.',
 };
 
 const CORE = BUILT_AVATAR_SETS[DEFAULT_BUILT_SET];
@@ -164,6 +177,8 @@ export class AvatarPickerComponent {
         return 'unavailable';
       case 'failed':
         return 'saveFailed';
+      case 'unconfirmed':
+        return 'unconfirmed';
       default:
         return 'idle';
     }
@@ -212,17 +227,21 @@ export class AvatarPickerComponent {
    * object on every check — and fail Angular's dev-mode check for it.
    */
   protected readonly kindOptions = computed<KindOption[]>(() => [
-    { kind: 'initials', label: 'Initials', preview: INITIALS_PREVIEW },
+    { kind: 'initials', label: 'Initials', preview: INITIALS_PREVIEW, available: true },
     // Offered only to an account that has a photo on the one host the CSP
     // admits: a choice that can only ever resolve to initials is worse than
-    // no choice (`FEAT-038` §1).
-    ...(this.photoUrl() === null
-      ? []
-      : [{ kind: 'photo' as const, label: 'Google photo', preview: PHOTO_PREVIEW }]),
+    // no choice (`FEAT-038` §1). Its cell stays either way — see the template.
+    {
+      kind: 'photo',
+      label: 'Google photo',
+      preview: PHOTO_PREVIEW,
+      available: this.photoUrl() !== null,
+    },
     {
       kind: 'built',
       label: 'Build your own',
       preview: { kind: 'built', seed: this.draftSeed(), showPublicly: false },
+      available: true,
     },
   ]);
 

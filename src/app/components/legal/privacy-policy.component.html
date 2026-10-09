@@ -53,9 +53,9 @@
       gives us your email address, your display name, an account identifier and, if your account
       with them has one, the web address of your profile picture. We request nothing beyond that and
       never receive your password. Your browser only contacts the provider at the moment you click
-      one of these buttons — not on page load — unless you choose your Google profile picture as
-      your avatar, described below, which your browser then loads from Google whenever the app shows
-      it.
+      one of these buttons — not on page load. The one exception is a Google profile picture, which
+      your browser loads from Google when you open the avatar picker on your stats page and wherever
+      the app shows your avatar if you chose that picture, as described below.
     </li>
     <li>
       <strong>Display name.</strong> Optional and set by you. If you save a score, this name is
@@ -152,7 +152,7 @@
     <strong>Only you can read it.</strong> It is never shown to other players and never appears on a
     leaderboard. No totals are kept until you finish your first game while signed in, and
     <strong>nothing is kept for anonymous play</strong>. Deleting your account deletes it, and
-    &ldquo;Export my data&rdquo; returns it in full. Apart from the play history described next, a
+    &ldquo;Download my data&rdquo; returns it in full. Apart from the play history described next, a
     record naming a question you were shown exists only where you chose to make one: a report about
     it, described above, or a like or dislike, described after the play history.
   </p>
@@ -170,11 +170,15 @@
     >. No screen in the app shows your avatar to anyone but you, whichever way that setting is.
   </p>
   <p>
-    <strong>We do not store your profile picture, or its address.</strong> If you choose it, your
-    browser reads the address from your sign-in account each time and loads the picture straight
-    from Google &mdash; see &ldquo;Who else your browser contacts&rdquo; below. A drawn avatar is
-    made by your browser and loads nothing from anywhere. Nothing is stored for anonymous play,
-    deleting your account deletes the choice, and &ldquo;Export my data&rdquo; returns it.
+    <strong>Your profile picture is not copied into anything of ours.</strong> Firebase
+    Authentication holds the address the provider supplies, as part of your sign-in account; the app
+    copies it into no document of its own, and &ldquo;Download my data&rdquo; leaves it out. Your
+    browser reads the address from your sign-in account and loads the picture straight from Google
+    in two places only: the avatar picker on your stats page, which shows it as one of the choices
+    if your Google account has one, and wherever the app shows your avatar if you chose it &mdash;
+    see &ldquo;Who else your browser contacts&rdquo; below. A drawn avatar is made by your browser
+    and loads nothing from anywhere. Nothing is stored for anonymous play, deleting your account
+    deletes the choice, and &ldquo;Download my data&rdquo; returns it.
   </p>
 
   <h3>Your play history &mdash; also private to you</h3>
@@ -204,9 +208,9 @@
     signed in. A game older than <strong>twelve months</strong> is deleted automatically; what
     outlives it is the running totals above, which are a summary rather than a record of individual
     rounds, and the per-question counts described next, which record nothing about who answered.
-    Deleting your account deletes all of it, and &ldquo;Export my data&rdquo; returns every game we
-    still hold, question by question &mdash; which is where you can read the whole of it, since the
-    app itself has no screen that shows it back to you.
+    Deleting your account deletes all of it, and &ldquo;Download my data&rdquo; returns every game
+    we still hold, question by question &mdash; which is where you can read the whole of it, since
+    the app itself has no screen that shows it back to you.
   </p>
   <p>
     <strong
@@ -220,9 +224,9 @@
     question really is, which the end-of-game review of your answers shows beside each community
     question. They are stored on the question itself, so anyone who can read the question can read
     them, and they are kept for as long as the question is. Because nothing in them says who
-    answered, deleting your account cannot take your own answers back out of them, and &ldquo;Export
-    my data&rdquo; cannot pick them out. Anonymous play adds nothing to them, and neither do
-    questions from Open Trivia DB.
+    answered, deleting your account cannot take your own answers back out of them, and
+    &ldquo;Download my data&rdquo; cannot pick them out. Anonymous play adds nothing to them, and
+    neither do questions from Open Trivia DB.
   </p>
 
   <h3>Questions you like or dislike — these are private to you</h3>
@@ -240,7 +244,7 @@
     report — nobody reviews it, and it does nothing to the question. The app uses a vote for one
     thing: when that question is in front of you again, its button shows the choice you made. Your
     votes are kept for as long as your account exists or until you remove them; deleting your
-    account deletes them, and &ldquo;Export my data&rdquo; returns them in full.
+    account deletes them, and &ldquo;Download my data&rdquo; returns them in full.
   </p>
 
   <h3>Subscription records</h3>
@@ -270,7 +274,7 @@
   </p>
   <p>
     Only you can read your own donation records; they are never shown to other players. Deleting
-    your account deletes them, and &ldquo;Export my data&rdquo; returns them in full.
+    your account deletes them, and &ldquo;Download my data&rdquo; returns them in full.
   </p>
 
   <h3>Which country you are in &mdash; to fill in two things you can change</h3>
@@ -429,8 +433,8 @@
       </tr>
       <tr>
         <td>
-          Keep the avatar you chose, and load your Google profile picture from Google if that is
-          what you chose
+          Keep the avatar you chose, and load your Google profile picture from Google to offer it in
+          the avatar picker and to show it if you chose it
         </td>
         <td>You asked us to, and the app shows your choice back to you</td>
         <td>Performance of a contract</td>
@@ -456,7 +460,7 @@
     &mdash; nothing in the app reads that record yet &mdash; and when something does, the most it
     will ever decide is the subject and difficulty of a quiz question. It will not change what you
     pay, what you can do here, or anything you could be refused. It is shown to nobody else, never
-    shared or sold, and used for nothing but this. You can read the whole of it with &ldquo;Export
+    shared or sold, and used for nothing but this. You can read the whole of it with &ldquo;Download
     my data&rdquo;, delete it by deleting your account, or avoid it entirely by playing without
     signing in, in which case nothing about your play is recorded at all. Nothing else here is used
     to categorise you or to predict anything about you.
@@ -512,6 +516,13 @@
       hours, and is discarded when you sign out or when a newer one replaces it. It is stored where
       every tab can see it deliberately: Stripe allows one checkout page open at a time, so a second
       tab that could not see this one would replace it and break the first.
+    </li>
+    <li>
+      <strong>Local storage, while you are signed in</strong> — a copy of your avatar choice as our
+      servers last returned it (which of the three kinds, the drawn avatar's short code, and the
+      yes-or-no setting), so your account button can draw it before the servers answer, including
+      when you are offline. It is replaced when your choice changes and removed when you sign out,
+      and it never holds a picture or a picture's address.
     </li>
     <li>
       <strong>IndexedDB</strong> — up to 200 trivia questions you have already been served, so a
@@ -587,16 +598,19 @@
           which page asked
         </td>
         <td>
-          Only if you chose your Google profile picture as your avatar, whenever the app shows it
+          When you open the avatar picker on your stats page, if your Google account has a picture
+          &mdash; it is shown there as one of the choices &mdash; and wherever the app shows your
+          avatar if you chose that picture. Nowhere else
         </td>
       </tr>
     </tbody>
   </table>
   <p>
-    Fonts, scripts, styles and images are all served from Trivimind's own domain, with one exception
-    that only you can switch on: your Google profile picture, if you choose it as your avatar.
-    Nothing else is loaded from a third-party CDN, so no font or asset request tells anyone else
-    that you visited.
+    Fonts, scripts, styles and images are all served from Trivimind's own domain, with one
+    exception: your Google profile picture, which your browser loads from Google when you open the
+    avatar picker on your stats page and wherever the app shows your avatar if you chose that
+    picture. Nothing else is loaded from a third-party CDN, so no font or asset request tells anyone
+    else that you visited.
   </p>
 
   <h2>What we do not do</h2>

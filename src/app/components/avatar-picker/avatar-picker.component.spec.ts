@@ -253,6 +253,34 @@ describe('AvatarPickerComponent', () => {
       expect(h.q('avatar-kind-photo')!.closest('label')!.textContent).toContain('Google photo');
     });
 
+    /**
+     * Three cells at every width, whatever the account has — so a photo
+     * arriving with auth cannot add a tile, wrap the row and grow the card
+     * (`CLAUDE.md` §4.4). An account with no photo keeps the photo's cell,
+     * invisible and empty of anything focusable; `avatar-choice.spec.ts`
+     * measures the card in a browser.
+     */
+    it('keeps the photo tile’s cell, invisible and inert, for an account with no photo', () => {
+      const h = render({ photoUrl: null });
+
+      const group = h.q('avatar-kind')!;
+      expect(group.className).toContain('grid-cols-3');
+      expect(group.children).toHaveLength(3);
+      const reserved = h.q('avatar-kind-photo-reserved')!;
+      expect(reserved.classList.contains('invisible')).toBe(true);
+      expect(reserved.getAttribute('aria-hidden')).toBe('true');
+      expect(reserved.querySelector('input, button, a, [tabindex]')).toBeNull();
+      expect(reserved.querySelector('img')).toBeNull();
+    });
+
+    it('fills the same cell with the photo tile for an account that has one', () => {
+      const h = render({ photoUrl: 'https://lh3.googleusercontent.com/a/x' });
+
+      expect(h.q('avatar-kind')!.children).toHaveLength(3);
+      expect(h.q('avatar-kind-photo-reserved')).toBeNull();
+      expect(h.q('avatar-kind-photo')).not.toBeNull();
+    });
+
     it('shows initials as chosen when a stored photo has no photo to show', () => {
       const h = render({ choice: { kind: 'photo', showPublicly: false }, photoUrl: null });
 
@@ -416,6 +444,18 @@ describe('AvatarPickerComponent', () => {
       h.finishSave('unavailable');
       await h.settle();
       expect(h.line()).toEqual(['avatar-unavailable']);
+    });
+
+    it('says a timed-out save could not be confirmed, not that it was not saved', async () => {
+      const h = render();
+      h.q('avatar-save')!.click();
+      await h.settle();
+      h.finishSave('unconfirmed');
+      await h.settle();
+
+      expect(h.line()).toEqual(['avatar-unconfirmed']);
+      expect(h.q('avatar-unconfirmed')!.textContent).toContain('could not be confirmed');
+      expect(h.announced.at(-1)).toBe('Your avatar could not be confirmed as saved.');
     });
 
     it('clears a finished save’s message once the choice is edited again', async () => {

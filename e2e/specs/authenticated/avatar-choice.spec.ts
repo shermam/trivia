@@ -475,6 +475,50 @@ test.describe('avatar choice', () => {
   });
 
   /**
+   * **Where Google's image server is contacted, counted** — the claim the
+   * Privacy Policy makes about it, and the one a later change is most likely
+   * to falsify (`CLAUDE.md` §4.0). For an account with a Google photo that has
+   * never chosen it: nothing on `/`, where the chip draws initials, and one
+   * request on `/profile`, where the picker previews the photo as a choice it
+   * offers. The read of the stored choice is awaited first, so "none" means
+   * the chip had its answer and drew no photo, not that it had not looked yet.
+   */
+  test('loads the Google photo only where it is offered or chosen', async ({ page, firebase }) => {
+    const email = uniqueEmail();
+    await firebase.createVerifiedUser({
+      email,
+      password,
+      displayName: 'Ada',
+      photoURL: PHOTO_URL,
+    });
+    const served = await servePhoto(page);
+
+    await page.goto('/');
+    const choiceRead = page.waitForResponse((response) => isAvatarRead(response.request()));
+    await signInViaUi(page, email, password);
+    await choiceRead;
+    await expect(page.getByTestId('auth-menu-avatar')).toHaveAttribute('data-avatar', 'initials');
+    await page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    );
+    expect(served.requests, 'requests to Google’s image host on /').toHaveLength(0);
+
+    await page.goto('/profile');
+    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    const preview = optionLabel(page, page.getByTestId('avatar-kind-photo')).locator('app-avatar');
+    await expect(preview).toHaveAttribute('data-avatar', 'photo');
+    await expect
+      .poll(() => served.requests.length, {
+        message: 'requests to Google’s image host on /profile',
+      })
+      .toBe(1);
+    // The header and the chip draw the stored choice, which is not the photo.
+    await expect(page.getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'initials');
+    await expect(page.getByTestId('auth-menu-avatar')).toHaveAttribute('data-avatar', 'initials');
+    expect(served.requests).toHaveLength(1);
+  });
+
+  /**
    * The photo is offered only to an account that has one, and the label says
    * whose it is.
    */
@@ -544,6 +588,43 @@ test.describe('avatar choice', () => {
       card,
       signedOut,
       'the avatar card once the picker replaces the sign-in prompt',
+    );
+  });
+
+  /**
+   * The same measurement for an account with a Google photo, whose picker has
+   * a photo tile the other one does not. The tiles are a fixed three-column
+   * grid with the photo's cell kept for every account, so the tile arriving
+   * with auth cannot wrap the row and grow the card — which a wrapping row
+   * does, by 66px at this width.
+   */
+  test('keeps the avatar card one height for an account with a Google photo', async ({
+    page,
+    firebase,
+  }) => {
+    const email = uniqueEmail();
+    await firebase.createVerifiedUser({
+      email,
+      password,
+      displayName: 'Ada',
+      photoURL: PHOTO_URL,
+    });
+    await servePhoto(page);
+
+    await page.setViewportSize({ width: 390, height: 1000 });
+    await page.goto('/profile');
+    await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    const card = page.getByTestId('avatar-card');
+    const signedOut = await settledHeight(card, 'the avatar card, signed out');
+
+    await signInViaUi(page, email, password);
+
+    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    await expect(page.getByTestId('avatar-kind-photo')).toHaveCount(1);
+    await expectSameHeight(
+      card,
+      signedOut,
+      'the avatar card once a picker with a photo tile replaces the sign-in prompt',
     );
   });
 });

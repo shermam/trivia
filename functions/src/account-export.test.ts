@@ -199,7 +199,7 @@ test('includes lifetime gameplay totals when the account has them', () => {
  * and the export carries that document whole — so the choice reaches the
  * person who asked for their data without a section of its own. Pinned
  * because the obvious tidy-up, rebuilding `gameplayStats` from the five
- * totals, would drop it silently: the Privacy Policy says "Export my data"
+ * totals, would drop it silently: the Privacy Policy says "Download my data"
  * returns it, and nothing else would notice that it had stopped.
  */
 test('carries the avatar choice stored beside the totals', () => {

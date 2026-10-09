@@ -375,19 +375,24 @@ describe('legal pages', () => {
   });
 
   /**
-   * **The avatar choice (`FEAT-038`)** is a field on `users/{uid}` and, for a
-   * player who picks their Google photo, a fourth host their browser talks to.
-   * Both are things `CLAUDE.md` §4.0 says ship with the policy edit in the same
-   * PR, and the second falsified three sentences at once: the host table read
-   * as exhaustive without it, "nothing is loaded from a third-party CDN" stopped
-   * being true for that player, and so did "your browser only contacts the
-   * provider at the moment you click".
+   * **The avatar choice (`FEAT-038`)** is a field on `users/{uid}` and, for an
+   * account with a Google photo, a fourth host its browser talks to. Both are
+   * things `CLAUDE.md` §4.0 says ship with the policy edit in the same PR, and
+   * the second touches three sentences at once: the host table reads as
+   * exhaustive, "nothing is loaded from a third-party CDN" has an exception,
+   * and so does "your browser only contacts the provider at the moment you
+   * click".
    *
-   * Pinned on the claims the code has to keep: what is stored (a kind, a seed,
-   * a switch that starts off), what is **not** (the photo's address — read from
-   * the sign-in account at render time), that the host is listed with what it
-   * is for, and the account-lifecycle promises `deleteAccount` and
-   * `exportAccountData` keep by carrying the whole document.
+   * **When the host is contacted is pinned exactly**, because "only if you
+   * chose it" would be false: the picker's own preview tile loads the photo for
+   * every account that has one — one request on `/profile`, none on `/`, as
+   * `avatar-choice.spec.ts` counts. The
+   * claims the code has to keep: what is stored (a kind, a seed, a switch that
+   * starts off), what is **not** (the photo's address, which Firebase
+   * Authentication holds and the app copies nowhere), when the host is
+   * contacted and nowhere else, the device copy and when it goes, and the
+   * account-lifecycle promises `deleteAccount` and `exportAccountData` keep by
+   * carrying the whole document.
    */
   it('discloses the avatar choice and the image host a Google photo is loaded from', async () => {
     const page = await render(PrivacyPolicyComponent);
@@ -398,7 +403,10 @@ describe('legal pages', () => {
       'which of the three you picked, a short code naming the shape and colour if you built one, and a yes-or-no setting, off unless you turn it on, for whether your avatar may be shown to other players',
     );
     expect(privacy).toContain('No screen in the app shows your avatar to anyone but you');
-    expect(privacy).toContain('We do not store your profile picture, or its address.');
+    expect(privacy).toContain(
+      'Firebase Authentication holds the address the provider supplies, as part of your sign-in account; the app copies it into no document of its own, and “Download my data” leaves it out.',
+    );
+    expect(privacy).not.toContain('We do not store your profile picture, or its address.');
 
     // The host row, read off the table it belongs to: a sentence elsewhere on
     // the page naming the host would satisfy a page-wide search and leave the
@@ -410,15 +418,33 @@ describe('legal pages', () => {
     const imageHost = hostRows.find((row) => row.includes('lh3.googleusercontent.com'));
     expect(imageHost, 'the host table lists Google’s image server').toBeDefined();
     expect(imageHost).toContain('Serves your Google profile picture');
-    expect(imageHost).toContain('Only if you chose your Google profile picture as your avatar');
+    expect(imageHost).toContain(
+      'When you open the avatar picker on your stats page, if your Google account has a picture',
+    );
+    expect(imageHost).toContain(
+      'wherever the app shows your avatar if you chose that picture. Nowhere else',
+    );
+    expect(imageHost).not.toContain('Only if you chose');
 
     // The three sentences the photo would otherwise have falsified.
     expect(privacy).not.toContain(
       'Nothing is loaded from a third-party CDN, so no font or asset request tells anyone else',
     );
-    expect(privacy).toContain('with one exception that only you can switch on');
-    expect(privacy).toContain('unless you choose your Google profile picture as your avatar');
+    expect(privacy).not.toContain('only you can switch on');
+    expect(privacy).toContain(
+      'your browser loads from Google when you open the avatar picker on your stats page and wherever the app shows your avatar if you chose that picture',
+    );
+    expect(privacy).not.toContain('unless you choose your Google profile picture as your avatar');
+    expect(privacy).toContain(
+      'The one exception is a Google profile picture, which your browser loads from Google when you open the avatar picker on your stats page',
+    );
     expect(privacy).toContain('the web address of your profile picture');
+    // The copy this device keeps, so the chip can draw the choice offline.
+    expect(privacy).toContain('Local storage, while you are signed in');
+    expect(privacy).toContain('removed when you sign out');
+    expect(privacy).toContain("it never holds a picture or a picture's address");
+    // The button is "Download my data", and the policy names it that way.
+    expect(privacy).not.toContain('Export my data');
     // The totals record can now exist before a first game, holding only this.
     expect(privacy).not.toContain('Nothing is kept at all until you finish your first game');
     expect(privacy).toContain('No totals are kept until you finish your first game');

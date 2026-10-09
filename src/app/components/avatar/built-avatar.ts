@@ -10,7 +10,7 @@
  * the CSP would drop while leaving it in the markup (`CLAUDE.md` §4.4).
  *
  * **A seed names a variant**: `<set>-<shape digit><colour digit>`, so
- * `core-35` is the `core` set's square on night blue. Sets are what `FEAT-041`
+ * `core-35` is the `core` set's square on mint. Sets are what `FEAT-041`
  * will lock and unlock by name, with no change to the stored field; which sets
  * a player may use is a later rule, not this table's business. **A shipped set
  * is frozen** — a stored seed is a reference into it, so a new shape or colour

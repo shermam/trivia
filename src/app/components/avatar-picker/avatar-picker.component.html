@@ -80,6 +80,19 @@
     >
       Could not save your avatar. Please try again.
     </p>
+    <!--
+      A save whose answer never came. The callable's timeout stops waiting and
+      cancels nothing, so the write may have landed or may yet — and the stored
+      choice did not show it when it was read back. Saying "not saved" here
+      would narrate a cause nobody verified (`CLAUDE.md` §4.4).
+    -->
+    <p
+      class="col-start-1 row-start-1 text-sm text-amber-700 dark:text-amber-300"
+      [class.invisible]="line() !== 'unconfirmed'"
+      data-cy="avatar-unconfirmed"
+    >
+      Your avatar could not be confirmed as saved. Reload in a moment to check.
+    </p>
   </div>
 
   <!--
@@ -102,45 +115,65 @@
       class="block mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
       >Show as</span
     >
+    <!--
+      Three columns at every width, whatever this account can choose from. The
+      photo tile's cell is there from the first paint and kept invisible —
+      space reserved, nothing focusable — for an account with no photo, so the
+      row is the same three cells either way and cannot wrap. A row that
+      gained a tile when a photo arrived with auth would wrap and grow the card
+      66px at 390px (`CLAUDE.md` §4.4). The placeholder is the tile's own markup
+      minus the radio, so it is the same height by construction.
+    -->
     <div
       role="radiogroup"
       aria-labelledby="avatar-kind-label"
       data-cy="avatar-kind"
-      class="flex flex-wrap gap-2"
+      class="grid grid-cols-3 gap-2"
     >
       @for (option of kindOptions(); track option.kind) {
-        <label
-          class="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
-          [class.border-emerald-600]="draftKind() === option.kind"
-          [class.bg-emerald-50]="draftKind() === option.kind"
-          [class.dark:bg-emerald-500/10]="draftKind() === option.kind"
-          [class.text-emerald-800]="draftKind() === option.kind"
-          [class.dark:text-emerald-300]="draftKind() === option.kind"
-          [class.border-slate-900/10]="draftKind() !== option.kind"
-          [class.dark:border-white/10]="draftKind() !== option.kind"
-          [class.text-slate-700]="draftKind() !== option.kind"
-          [class.dark:text-slate-300]="draftKind() !== option.kind"
-        >
-          <input
-            type="radio"
-            name="avatar-kind"
-            class="sr-only"
-            [attr.data-cy]="'avatar-kind-' + option.kind"
-            [attr.value]="option.kind"
-            [checked]="draftKind() === option.kind"
-            [attr.aria-disabled]="saving() ? 'true' : null"
-            (click)="holdWhileSaving($event)"
-            (keydown)="holdKeysWhileSaving($event)"
-            (change)="chooseKind(option.kind)"
-          />
-          <app-avatar
-            size="md"
-            [letter]="letter()"
-            [choice]="option.preview"
-            [photoUrl]="photoUrl()"
-          />
-          {{ option.label }}
-        </label>
+        @if (option.available) {
+          <label
+            class="flex flex-col items-center gap-1.5 rounded-xl border px-1.5 py-2.5 text-center text-xs sm:text-sm font-semibold cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+            [class.border-emerald-600]="draftKind() === option.kind"
+            [class.bg-emerald-50]="draftKind() === option.kind"
+            [class.dark:bg-emerald-500/10]="draftKind() === option.kind"
+            [class.text-emerald-800]="draftKind() === option.kind"
+            [class.dark:text-emerald-300]="draftKind() === option.kind"
+            [class.border-slate-900/10]="draftKind() !== option.kind"
+            [class.dark:border-white/10]="draftKind() !== option.kind"
+            [class.text-slate-700]="draftKind() !== option.kind"
+            [class.dark:text-slate-300]="draftKind() !== option.kind"
+          >
+            <input
+              type="radio"
+              name="avatar-kind"
+              class="sr-only"
+              [attr.data-cy]="'avatar-kind-' + option.kind"
+              [attr.value]="option.kind"
+              [checked]="draftKind() === option.kind"
+              [attr.aria-disabled]="saving() ? 'true' : null"
+              (click)="holdWhileSaving($event)"
+              (keydown)="holdKeysWhileSaving($event)"
+              (change)="chooseKind(option.kind)"
+            />
+            <app-avatar
+              size="md"
+              [letter]="letter()"
+              [choice]="option.preview"
+              [photoUrl]="photoUrl()"
+            />
+            {{ option.label }}
+          </label>
+        } @else {
+          <div
+            aria-hidden="true"
+            [attr.data-cy]="'avatar-kind-' + option.kind + '-reserved'"
+            class="invisible flex flex-col items-center gap-1.5 rounded-xl border border-slate-900/10 px-1.5 py-2.5 text-center text-xs sm:text-sm font-semibold"
+          >
+            <app-avatar size="md" [letter]="letter()" />
+            {{ option.label }}
+          </div>
+        }
       }
     </div>
 

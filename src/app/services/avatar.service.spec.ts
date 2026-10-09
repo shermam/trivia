@@ -57,9 +57,18 @@ const document = (data: Record<string, unknown>): RestDocument => ({
   data,
 });
 
-beforeEach(() => vi.spyOn(console, 'error').mockImplementation(() => undefined));
+/** Where the device keeps its copy — `AvatarService`'s `CACHE_KEY`. */
+const CACHE_KEY = 'trivia-avatar';
+
+beforeEach(() => {
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  // Spec files share a jsdom between them (`--isolate` is off), so the copy is
+  // cleared on the way in as well as on the way out.
+  localStorage.removeItem(CACHE_KEY);
+});
 afterEach(() => {
   vi.restoreAllMocks();
+  localStorage.removeItem(CACHE_KEY);
   TestBed.resetTestingModule();
 });
 
@@ -197,6 +206,117 @@ describe('AvatarService', () => {
     expect(service.photoUrl()).toBeNull();
   });
 
+  /**
+   * The device's copy (`FEAT-038`): offline, and on every load before the read
+   * lands, a built avatar is drawn from it rather than initials — because the
+   * spec wants a built avatar rendered from bundled assets offline. It is UX,
+   * never authority: shown only for the account it names, replaced by the
+   * server's answer, and never what the picker opens on (`status` stays
+   * `loading` until the server answers).
+   */
+  describe('the copy on this device', () => {
+    const built = { kind: 'built', seed: 'core-35', showPublicly: false } as const;
+    const store = (uid: string, choice: unknown) =>
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, choice }));
+
+    it('draws the copy until the server answers, then the server’s answer', async () => {
+      store('player-1', built);
+      let release!: (value: RestDocument | null) => void;
+      const { service, batchGetDocument } = setup({ user: account() });
+      batchGetDocument.mockImplementation(
+        () => new Promise<RestDocument | null>((resolve) => (release = resolve)),
+      );
+      await settle();
+
+      expect(service.choice()).toEqual(built);
+      expect(service.status()).toBe('loading');
+
+      release(document({ avatar: { kind: 'initials', showPublicly: true } }));
+      await settle();
+
+      expect(service.choice()).toEqual({ kind: 'initials', showPublicly: true });
+      expect(service.status()).toBe('ready');
+      // ...and the copy now says what the server said.
+      expect(JSON.parse(localStorage.getItem(CACHE_KEY)!)).toEqual({
+        uid: 'player-1',
+        choice: { kind: 'initials', showPublicly: true },
+      });
+    });
+
+    it('keeps drawing the copy when the read fails, as it does offline', async () => {
+      store('player-1', built);
+      const { service } = setup({ user: account(), fails: true });
+      await settle();
+
+      expect(service.status()).toBe('failed');
+      expect(service.choice()).toEqual(built);
+    });
+
+    it('never draws one account’s copy for another', async () => {
+      store('somebody-else', built);
+      const { service } = setup({ user: account(), fails: true });
+      await settle();
+
+      expect(service.choice()).toBeNull();
+    });
+
+    it('writes the copy when the server answers', async () => {
+      setup({
+        user: account(),
+        document: document({ avatar: { kind: 'built', seed: 'core-12', showPublicly: false } }),
+      });
+      await settle();
+
+      expect(JSON.parse(localStorage.getItem(CACHE_KEY)!)).toEqual({
+        uid: 'player-1',
+        choice: { kind: 'built', seed: 'core-12', showPublicly: false },
+      });
+    });
+
+    /**
+     * The next person at this browser is never drawn as the last one. The
+     * frames before auth has restored a session are "nobody yet", not a
+     * sign-out, so they leave the copy alone — or it would never be drawn.
+     */
+    it('removes the copy on sign-out, and only on sign-out', async () => {
+      store('player-1', built);
+      const { service, userSignal } = setup({ user: null, fails: true });
+      await settle();
+      expect(localStorage.getItem(CACHE_KEY)).not.toBeNull();
+
+      userSignal.set(account());
+      await settle();
+      expect(service.choice()).toEqual(built);
+
+      userSignal.set(null);
+      await settle();
+      expect(localStorage.getItem(CACHE_KEY)).toBeNull();
+      expect(service.choice()).toBeNull();
+    });
+
+    it('reads a copy someone has edited the way it reads the server', async () => {
+      store('player-1', { kind: 'built', seed: '../x.png', showPublicly: 'yes' });
+      const { service } = setup({ user: account(), fails: true });
+      await settle();
+
+      expect(service.choice()).toEqual({ kind: 'initials', showPublicly: false });
+    });
+
+    it('carries on without one when storage cannot be read', async () => {
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new Error('blocked');
+      });
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new Error('blocked');
+      });
+      const { service } = setup({ user: account(), document: null });
+      await settle();
+
+      expect(service.status()).toBe('ready');
+      expect(service.choice()).toEqual({ kind: 'initials', showPublicly: false });
+    });
+  });
+
   describe('save', () => {
     it('stores the choice and shows what the callable kept, without reading again', async () => {
       const { service, setAvatar, batchGetDocument } = setup({ user: account(), document: null });
@@ -229,6 +349,43 @@ describe('AvatarService', () => {
 
       // A failed save leaves what was stored alone.
       expect(service.choice()).toEqual({ kind: 'initials', showPublicly: false });
+    });
+
+    /**
+     * **A timeout is not a failure.** The callable SDK's `timeout` stops
+     * waiting and cancels nothing — `@firebase/functions` races a timer against
+     * a `fetch` it gives no abort signal — so a timed-out write may have
+     * landed. The stored choice is read back before anything is said.
+     */
+    it('reads the choice back after a timeout, and reports the save if it landed', async () => {
+      const { service, setAvatar, batchGetDocument } = setup({ user: account(), document: null });
+      await settle();
+      const choice: AvatarChoice = { kind: 'built', seed: 'core-41', showPublicly: false };
+
+      setAvatar.mockRejectedValueOnce(
+        new Error('slow', { cause: { code: 'functions/deadline-exceeded' } }),
+      );
+      batchGetDocument.mockResolvedValueOnce(document({ avatar: choice }));
+
+      expect(await service.save(choice)).toBe('saved');
+      expect(batchGetDocument).toHaveBeenCalledTimes(2);
+      expect(service.choice()).toEqual(choice);
+    });
+
+    it('reports a timed-out save as unconfirmed — never as not saved — when it has not landed', async () => {
+      const { service, setAvatar, batchGetDocument } = setup({ user: account(), document: null });
+      await settle();
+      const timeout = () => new Error('slow', { cause: { code: 'functions/deadline-exceeded' } });
+
+      setAvatar.mockRejectedValueOnce(timeout());
+      expect(await service.save({ kind: 'photo', showPublicly: false })).toBe('unconfirmed');
+      // What is shown stays what the server holds, so the picker keeps the
+      // reader's choice for another try.
+      expect(service.choice()).toEqual({ kind: 'initials', showPublicly: false });
+
+      setAvatar.mockRejectedValueOnce(timeout());
+      batchGetDocument.mockRejectedValueOnce(new Error('offline'));
+      expect(await service.save({ kind: 'photo', showPublicly: false })).toBe('unconfirmed');
     });
 
     it('refuses to save for nobody', async () => {
