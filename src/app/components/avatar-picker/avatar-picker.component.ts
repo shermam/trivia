@@ -64,26 +64,39 @@ interface BuiltOption {
   id: string;
   index: number;
   label: string;
+  /** The avatar the tile draws, which is exactly the one choosing it builds. */
   preview: AvatarChoice;
+  /** The seed of that avatar — what picking the tile drafts. */
+  seed: string;
+  /**
+   * Whether it can be chosen now: every tile of an open or unlocked set, and
+   * the stored avatar's own two tiles whatever its set's state, because
+   * `setAvatar` accepts the seed already stored at any level. `aria-disabled`,
+   * dimmed and inert to input when not.
+   */
+  choosable: boolean;
 }
 
 /**
  * What `/profile` knows of the player's XP (`FEAT-041`), which decides the
- * sets above level 0: still being read, not known — a read that failed, or
- * nobody signed in — or known.
+ * sets above level 0: not read yet — in flight, or nobody signed in to read
+ * it for, when the picker cannot be used anyway — a read that failed, or
+ * known.
  */
 export type XpKnowledge =
   | { readonly state: 'checking' }
-  | { readonly state: 'unknown' }
+  | { readonly state: 'failed' }
   | { readonly state: 'known'; readonly xp: number };
 
 /**
  * Where one set stands for this player. `open` is a set every level has
- * (`core`), and says nothing; `checking` is the XP still being read, and
- * holds the set's tiles still rather than guessing either way
- * (`CLAUDE.md` §4.4).
+ * (`core`), and says nothing. `checking` (the XP still being read) and
+ * `unchecked` (a read that failed) are the two answers that are not answers,
+ * and neither guesses: each holds the set's tiles still, says which it is, and
+ * draws no lock — a lock on a set the player may well have is the alarming
+ * guess (`CLAUDE.md` §4.4). Only a known XP below the threshold is `locked`.
  */
-type SetStatus = 'open' | 'checking' | 'locked' | 'unlocked';
+type SetStatus = 'open' | 'checking' | 'unchecked' | 'locked' | 'unlocked';
 
 /** One set's two rows, and where the set stands. */
 interface SetBlock {
@@ -91,10 +104,25 @@ interface SetBlock {
   label: string;
   unlockLevel: number;
   status: SetStatus;
-  /** Whether its tiles can be chosen — `aria-disabled` and inert to input when not. */
+  /** Whether the set's tiles can be chosen — all but the stored avatar's are held when not. */
   choosable: boolean;
   shapes: BuiltOption[];
   palettes: BuiltOption[];
+}
+
+/** A set's status from what the page knows of the XP. */
+function setStatus(set: string, unlockLevel: number, knowledge: XpKnowledge): SetStatus {
+  if (unlockLevel === 0) {
+    return 'open';
+  }
+  switch (knowledge.state) {
+    case 'checking':
+      return 'checking';
+    case 'failed':
+      return 'unchecked';
+    case 'known':
+      return isSetUnlocked(set, knowledge.xp) ? 'unlocked' : 'locked';
+  }
 }
 
 /** What the page's live region says when a save ends — shorter than the visible line. */
@@ -148,8 +176,17 @@ const labelFor = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
  * height either way. The rule is `isSetUnlocked`, the app's copy of the one
  * `setAvatar` enforces, applied to the XP `/profile` read — never broader than
  * the server, which reads the same field at least as late (`CLAUDE.md` §4.2).
- * A seed already stored stays checked whatever its set's threshold, because
- * `setAvatar` accepts it again: what was granted is never re-locked.
+ *
+ * **Only a known XP locks anything.** While the read is out, or after it
+ * failed, a set above level 0 says so — "Checking your level…", "Could not
+ * check your level" — and holds its tiles without a lock, because the player
+ * reading it may be level 40 (`CLAUDE.md` §4.4). Held, not opened: the server
+ * would refuse a seed the read had not yet shown to be theirs.
+ *
+ * **The stored avatar is never held**, in any state: its two tiles stay
+ * choosable and build exactly it, and a save sends it again, because
+ * `setAvatar` accepts the seed already stored whatever its set's threshold —
+ * what was granted is never re-locked.
  */
 @Component({
   selector: 'app-avatar-picker',
@@ -166,10 +203,11 @@ export class AvatarPickerComponent {
 
   /**
    * What the page knows of the player's XP — the same value its progress card
-   * draws, so the card and the locks cannot disagree. `unknown` until the page
-   * says otherwise, which holds every set above level 0 locked.
+   * draws, so the card and the locks cannot disagree. `checking` until the page
+   * says otherwise, which holds every set above level 0 still without calling
+   * it locked.
    */
-  readonly xp = input<XpKnowledge>({ state: 'unknown' });
+  readonly xp = input<XpKnowledge>({ state: 'checking' });
 
   /**
    * Text for the page's live region: empty when a save starts, the outcome
@@ -260,6 +298,12 @@ export class AvatarPickerComponent {
   /** The built variant the draft remembers, whichever kind is chosen. */
   protected readonly draftBuilt = computed(() => builtAvatar(this.draftSeed()));
 
+  /** The built variant stored on the account, or `null` when it holds another kind. */
+  private readonly storedBuilt = computed(() => {
+    const stored = this.stored();
+    return stored.kind === 'built' ? builtAvatar(stored.seed) : null;
+  });
+
   /**
    * The shape and colour the radios show as checked — only while building.
    * With another kind chosen no shape *is* chosen, and a shape left checked
@@ -295,51 +339,56 @@ export class AvatarPickerComponent {
   ]);
 
   /**
-   * Every set, as one block of two rows. A set's shapes are drawn in the
-   * draft's colour and its colours with the draft's shape when the draft is
-   * from that set, and on the set's first otherwise — so a tile shows exactly
-   * the avatar choosing it would build.
+   * Every set, as one block of two rows, and every tile as the avatar choosing
+   * it would build — drawn, and drafted by a pick, from one value.
+   *
+   * A set's shapes are drawn in the draft's colour and its colours with the
+   * draft's shape when the draft is from that set, and on the set's first
+   * otherwise. A set that cannot be chosen from is drawn around the stored
+   * avatar instead, when that is from the set: its two tiles are the stored
+   * avatar exactly, which is the one seed in it `setAvatar` will take.
    */
   protected readonly setBlocks = computed<SetBlock[]>(() => {
     const draft = this.draftBuilt();
+    const stored = this.storedBuilt();
     const knowledge = this.xp();
     return Object.entries(BUILT_AVATAR_SETS).map(([set, table]) => {
       const unlockLevel = AVATAR_SET_UNLOCK_LEVELS[set];
-      const status: SetStatus =
-        unlockLevel === 0
-          ? 'open'
-          : knowledge.state === 'checking'
-            ? 'checking'
-            : knowledge.state === 'known' && isSetUnlocked(set, knowledge.xp)
-              ? 'unlocked'
-              : 'locked';
-      const shapeIndex = draft?.set === set ? draft.shapeIndex : 0;
-      const paletteIndex = draft?.set === set ? draft.paletteIndex : 0;
+      const status = setStatus(set, unlockLevel, knowledge);
+      const choosable = status === 'open' || status === 'unlocked';
+      const keep = stored?.set === set ? stored : null;
+      const base = choosable ? (draft?.set === set ? draft : null) : keep;
+      const shapeIndex = base?.shapeIndex ?? 0;
+      const paletteIndex = base?.paletteIndex ?? 0;
       return {
         set,
         label: labelFor(set),
         unlockLevel,
         status,
-        choosable: status === 'open' || status === 'unlocked',
+        choosable,
         shapes: table.shapes.map((shape, index) => ({
           id: shape.id,
           index,
           label: labelFor(shape.id),
           preview: builtChoice(set, index, paletteIndex),
+          seed: builtSeed(set, index, paletteIndex),
+          choosable: choosable || keep?.shapeIndex === index,
         })),
         palettes: table.palettes.map((palette, index) => ({
           id: palette.id,
           index,
           label: labelFor(palette.id),
           preview: builtChoice(set, shapeIndex, index),
+          seed: builtSeed(set, shapeIndex, index),
+          choosable: choosable || keep?.paletteIndex === index,
         })),
       };
     });
   });
 
-  /** Whether a set's tiles can be chosen right now — the template's lock, checked again here. */
-  private choosable(set: string): boolean {
-    return this.setBlocks().some((block) => block.set === set && block.choosable);
+  /** One tile as the blocks stand now — the template's lock, checked again here. */
+  private tile(set: string, row: 'shapes' | 'palettes', index: number): BuiltOption | undefined {
+    return this.setBlocks().find((block) => block.set === set)?.[row][index];
   }
 
   protected chooseKind(kind: AvatarKind): void {
@@ -351,26 +400,23 @@ export class AvatarPickerComponent {
   }
 
   /**
-   * Picking a shape or a colour is building one, so it selects `built` too.
-   * The other half of the variant is kept when the draft is already from this
-   * set and is the set's first otherwise — what the tile was drawn with.
+   * Picking a shape or a colour is building one, so it selects `built` too —
+   * and builds the avatar the tile was drawn as (`setBlocks`), the other half
+   * of the variant included.
    */
   protected chooseShape(set: string, shapeIndex: number): void {
-    if (this.saving() || !this.choosable(set)) {
-      return;
-    }
-    const draft = this.draftBuilt();
-    this.draftSeed.set(builtSeed(set, shapeIndex, draft?.set === set ? draft.paletteIndex : 0));
-    this.draftKind.set('built');
-    this.outcome.set(null);
+    this.chooseTile(this.tile(set, 'shapes', shapeIndex));
   }
 
   protected choosePalette(set: string, paletteIndex: number): void {
-    if (this.saving() || !this.choosable(set)) {
+    this.chooseTile(this.tile(set, 'palettes', paletteIndex));
+  }
+
+  private chooseTile(option: BuiltOption | undefined): void {
+    if (this.saving() || !option?.choosable) {
       return;
     }
-    const draft = this.draftBuilt();
-    this.draftSeed.set(builtSeed(set, draft?.set === set ? draft.shapeIndex : 0, paletteIndex));
+    this.draftSeed.set(option.seed);
     this.draftKind.set('built');
     this.outcome.set(null);
   }
@@ -403,18 +449,21 @@ export class AvatarPickerComponent {
 
   /**
    * A built tile's two holds: a save in flight, as every control has, and a
-   * set the player has not unlocked. Cancelling the `click` reverts the radio,
-   * and cancelling the arrow keys and Space stops one being checked by
-   * keyboard — so a locked tile can be reached, read and never chosen.
+   * tile that cannot be chosen now. Cancelling the `click` reverts the radio,
+   * and cancelling Space stops one being checked by keyboard — so a held tile
+   * can be reached, read and never chosen. The arrow keys are held across the
+   * whole of a set that cannot be chosen from, the stored avatar's tiles
+   * included: an arrow checks the next radio in the row, which is held.
    */
-  protected holdBuiltClick(event: Event, block: SetBlock): void {
-    if (this.saving() || !block.choosable) {
+  protected holdBuiltClick(event: Event, option: BuiltOption): void {
+    if (this.saving() || !option.choosable) {
       event.preventDefault();
     }
   }
 
-  protected holdBuiltKeys(event: KeyboardEvent, block: SetBlock): void {
-    if (!block.choosable && (event.key.startsWith('Arrow') || event.key === ' ')) {
+  protected holdBuiltKeys(event: KeyboardEvent, block: SetBlock, option: BuiltOption): void {
+    const arrow = event.key.startsWith('Arrow');
+    if ((arrow && !block.choosable) || (event.key === ' ' && !option.choosable)) {
       event.preventDefault();
       return;
     }

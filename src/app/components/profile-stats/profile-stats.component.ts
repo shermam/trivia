@@ -44,7 +44,7 @@ type StatsLine = ProfileView | 'notBanked';
 
 /** The picker's two answers for a player whose XP is not a number yet. */
 const CHECKING_XP: XpKnowledge = { state: 'checking' };
-const UNKNOWN_XP: XpKnowledge = { state: 'unknown' };
+const FAILED_XP: XpKnowledge = { state: 'failed' };
 
 /** One number on the card. `id` is the `@for` track key, never the label (`CLAUDE.md` §4.4). */
 interface StatTile {
@@ -258,13 +258,18 @@ export class ProfileStatsComponent {
     return reached > levelFor(banked.xp - banked.gained) ? reached : null;
   });
 
-  /** What the picker knows of the XP: still being read, known, or — signed out or failed — not. */
+  /**
+   * What the picker knows of the XP: known, a read that failed, or not read
+   * yet — which is also what it is told for a visitor who is not signed in,
+   * since the picker cannot be used then and holding still is the right
+   * default for whoever signs in next (`CLAUDE.md` §4.4).
+   */
   protected readonly xpKnowledge = computed<XpKnowledge>(() => {
     const xp = this.progressXp();
     if (xp !== null) {
       return { state: 'known', xp };
     }
-    return this.view() === 'loading' ? CHECKING_XP : UNKNOWN_XP;
+    return this.view() === 'failed' ? FAILED_XP : CHECKING_XP;
   });
 
   /**

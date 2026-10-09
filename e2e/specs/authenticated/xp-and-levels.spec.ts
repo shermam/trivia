@@ -323,7 +323,7 @@ test.describe('XP and levels', () => {
 
     try {
       // Shown and its siblings hidden, for the reason the progress card's test
-      // gives: the three lines share one cell, and "Checking your level…"
+      // gives: the four lines share one cell, and "Checking your level…"
       // until `/profile`'s read lands.
       await expect(locked.page.getByTestId('avatar-set-bold-locked')).toBeVisible();
       await expect(locked.page.getByTestId('avatar-set-bold-checking')).toBeHidden();
@@ -379,6 +379,133 @@ test.describe('XP and levels', () => {
       await locked.done();
       await open.done();
     }
+  });
+
+  /**
+   * **Only an answer locks anything** (`CLAUDE.md` §4.4). A level-5 player
+   * wearing a bold avatar, with `/profile`'s read held open, then loaded, then
+   * refused after a reload. While the XP is unknown neither card draws a lock
+   * or says "unlock": the progress card names the level the set opens at, and
+   * the picker says it is checking, or could not check — and the avatar the
+   * player is wearing stays theirs to choose and to save. Both cards are
+   * measured in every state, at both widths, against the held state.
+   */
+  test('guesses no lock while the XP is unknown, and keeps the stored avatar choosable', async ({
+    page,
+    firebase,
+  }) => {
+    const email = uniqueEmail();
+    const { uid } = await firebase.createVerifiedUser({ email, password, displayName: 'Ada' });
+    await firebase.seedGameplayStats({
+      uid,
+      gamesPlayed: 40,
+      questionsAnswered: 200,
+      correctAnswers: 150,
+      bestStreak: 12,
+      statsSince: Date.UTC(2026, 0, 15),
+      xp: 1_600,
+    });
+    const wearing = { kind: 'built' as const, seed: 'bold-21', showPublicly: false };
+    await firebase.seedAvatar({ uid, avatar: wearing });
+
+    const card = page.getByTestId('progress-card');
+    const picker = page.getByTestId('avatar-card');
+    const heights = new Map<string, number>();
+    /** Both cards at both widths: the first state measured sets the height every later one keeps. */
+    const measure = async (state: string) => {
+      for (const viewport of VIEWPORTS) {
+        await page.setViewportSize(viewport);
+        for (const [name, box] of [
+          ['the progress card', card],
+          ['the avatar card', picker],
+        ] as const) {
+          const key = `${name} at ${viewport.width}px`;
+          const height = heights.get(key);
+          if (height === undefined) {
+            heights.set(key, await settledHeight(box, `${key}, ${state}`));
+          } else {
+            await expectSameHeight(box, height, `${key}, ${state}`);
+          }
+        }
+      }
+    };
+    /** Neither card guesses: no lock, no "unlock", and the stored avatar's tiles open. */
+    const expectNoGuess = async (pickerLine: 'checking' | 'unchecked') => {
+      await expect(page.getByTestId('progress-unlock-opens')).toBeVisible();
+      await expect(page.getByTestId('progress-unlock-locked')).toBeHidden();
+      await expect(page.getByTestId('progress-unlock-opens')).toHaveText('Opens at level 3');
+      await expect(page.getByTestId('progress-unlock-lock')).toBeHidden();
+      await expect(page.getByTestId(`avatar-set-bold-${pickerLine}`)).toBeVisible();
+      await expect(page.getByTestId('avatar-set-bold-locked')).toBeHidden();
+      await expect(page.getByTestId('avatar-shape-heart')).toBeChecked();
+      await expect(page.getByTestId('avatar-colour-amber')).toBeChecked();
+      for (const own of ['avatar-shape-heart', 'avatar-colour-amber']) {
+        await expect(page.getByTestId(own)).not.toHaveAttribute('aria-disabled');
+      }
+      await expect(
+        page.locator(
+          '[data-cy="avatar-set-bold-shapes"] input[aria-disabled="true"], [data-cy="avatar-set-bold-colours"] input[aria-disabled="true"]',
+        ),
+      ).toHaveCount(10);
+    };
+
+    await page.goto('/profile');
+    const read = await controlStatsRead(page);
+    read.control.mode = 'hold';
+    await signInViaUi(page, email, password);
+    await expect.poll(() => read.control.held, { message: 'the read was held' }).toBe(1);
+    await expect(page.getByTestId('progress-loading')).toBeVisible();
+    await expect(page.getByTestId('progress-signed-out')).toBeHidden();
+    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    await expect(page.getByTestId('avatar-loading')).toBeHidden();
+    await expectNoGuess('checking');
+    await expect(page.getByTestId('avatar-set-bold-checking')).toHaveText('Checking your level…');
+    await measure('while the read is held');
+
+    read.control.mode = 'pass';
+    read.release();
+    await expect(page.getByTestId('progress-level')).toHaveText('5');
+    await expect(page.getByTestId('progress-unlock-unlocked')).toBeVisible();
+    await expect(page.getByTestId('progress-unlock-opens')).toBeHidden();
+    await expect(page.getByTestId('avatar-set-bold-unlocked')).toBeVisible();
+    await expect(page.getByTestId('avatar-set-bold-checking')).toBeHidden();
+    await measure('once the XP arrives');
+
+    read.control.mode = 'fail';
+    await page.reload();
+    await expect.poll(() => read.control.refused, { message: 'the read was refused' }).toBe(1);
+    await expect(page.getByTestId('progress-failed')).toBeVisible();
+    await expect(page.getByTestId('progress-loading')).toBeHidden();
+    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    await expect(page.getByTestId('avatar-loading')).toBeHidden();
+    await expectNoGuess('unchecked');
+    await expect(page.getByTestId('avatar-set-bold-unchecked')).toHaveText(
+      'Could not check your level',
+    );
+    await measure('after a failed read');
+    await expectNoAxeViolations(card, 'the progress card after a failed read');
+    await expectNoAxeViolations(picker, 'the avatar card after a failed read');
+
+    // Away to the open set, then back by the stored avatar's own tile — a
+    // person's click on the label — and saved through the real `setAvatar`.
+    await page
+      .locator('label')
+      .filter({ has: page.getByTestId('avatar-shape-dot') })
+      .click();
+    await expect(page.getByTestId('avatar-shape-dot')).toBeChecked();
+    await expect(page.getByTestId('avatar-shape-heart')).not.toBeChecked();
+    await page
+      .locator('label')
+      .filter({ has: page.getByTestId('avatar-colour-amber') })
+      .click();
+    await expect(page.getByTestId('avatar-shape-heart')).toBeChecked();
+    await expect(page.getByTestId('avatar-colour-amber')).toBeChecked();
+    await page.getByTestId('avatar-public').click();
+    await page.getByTestId('avatar-save').click();
+    await expect(page.getByTestId('avatar-saved')).toBeVisible();
+    await expect
+      .poll(async () => (await firebase.inspectAccountState({ uid })).gameplayStats?.['avatar'])
+      .toEqual({ ...wearing, showPublicly: true });
   });
 
   /**

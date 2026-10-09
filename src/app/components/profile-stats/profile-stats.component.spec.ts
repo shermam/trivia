@@ -472,20 +472,25 @@ describe('ProfileStatsComponent — level and XP', () => {
     expect(component.xpKnowledge()).toEqual({ state: 'checking' });
   });
 
+  /**
+   * A failed read is told to the picker as one, so its sets can say so rather
+   * than call themselves locked; a visitor who is not signed in cannot use
+   * the picker, and is told the neutral answer the picker starts from.
+   */
   it('shows no XP to a visitor who is not signed in, or after a failed read', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const signedOut = setup({ user: { uid: 'anon', isAnonymous: true } });
     await settle();
     expect(signedOut.component.progressState()).toBe('signedOut');
     expect(signedOut.component.progressXp()).toBeNull();
-    expect(signedOut.component.xpKnowledge()).toEqual({ state: 'unknown' });
+    expect(signedOut.component.xpKnowledge()).toEqual({ state: 'checking' });
     TestBed.resetTestingModule();
 
     const failed = setup({ fails: true });
     await settle();
     expect(failed.component.progressState()).toBe('failed');
     expect(failed.component.progressXp()).toBeNull();
-    expect(failed.component.xpKnowledge()).toEqual({ state: 'unknown' });
+    expect(failed.component.xpKnowledge()).toEqual({ state: 'failed' });
   });
 
   /**

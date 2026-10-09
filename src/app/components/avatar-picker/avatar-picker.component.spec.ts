@@ -5,6 +5,7 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { AvatarSaveOutcome, AvatarService, AvatarStatus } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
+import { builtAvatar } from '../avatar/built-avatar';
 import { AvatarPickerComponent, XpKnowledge } from './avatar-picker.component';
 
 /**
@@ -489,9 +490,11 @@ describe('AvatarPickerComponent', () => {
    * `FEAT-041`: the `bold` set opens at level 3 (600 XP). A locked set is
    * shown locked, never hidden — every tile on the page, `aria-disabled`,
    * described by the line that names the level — and cannot be chosen by
-   * pointer or keyboard. jsdom cannot measure, so that the card is one height
-   * locked or not is `xp-and-levels.spec.ts`'s, in Chromium; what is pinned
-   * here is that the two states are the same markup.
+   * pointer or keyboard. Only a known XP locks: while it is read, or after the
+   * read failed, the set says which and holds its tiles without a lock. jsdom
+   * cannot measure, so that the card is one height in every state is
+   * `xp-and-levels.spec.ts`'s, in Chromium; what is pinned here is that the
+   * states are the same markup.
    */
   describe('a set the player has not unlocked', () => {
     const LOCKED: XpKnowledge = { state: 'known', xp: 120 };
@@ -505,6 +508,11 @@ describe('AvatarPickerComponent', () => {
       [...h.host.querySelectorAll(`[data-cy="avatar-set-${set}-status"] > p`)]
         .filter((p) => !p.classList.contains('invisible'))
         .map((p) => p.textContent?.trim());
+    /** Whether the lock is drawn — it lives in the locked sentence, and only there. */
+    const lockShown = (h: ReturnType<typeof render>) =>
+      [...h.host.querySelectorAll('[data-cy="avatar-set-bold-status"] app-icon')].some(
+        (icon) => !icon.closest('p')!.classList.contains('invisible'),
+      );
 
     it('renders every tile of the locked set, aria-disabled and described by its level', () => {
       const h = render({ xp: LOCKED });
@@ -518,18 +526,26 @@ describe('AvatarPickerComponent', () => {
         expect(tile.closest('label')!.classList.contains('opacity-50')).toBe(true);
       }
       expect(statusLine(h, 'bold')).toEqual(['Unlocks at level 3']);
+      expect(lockShown(h)).toBe(true);
       // The set every level has stays open, and says nothing about levels.
       expect(h.q('avatar-shape-dot')!.hasAttribute('aria-disabled')).toBe(false);
       expect(h.q('avatar-set-core-status')).toBeNull();
     });
 
-    it('treats an XP the page could not read as locked', () => {
-      const h = render({ xp: { state: 'unknown' } });
+    /**
+     * A failed read is not a level. The player may be level 40, so the set
+     * says the read failed rather than that it is locked, and draws no lock —
+     * and still holds its tiles, because the server would refuse a seed the
+     * read never showed to be theirs (`CLAUDE.md` §4.4).
+     */
+    it('says it could not check after a failed read, and draws no lock', () => {
+      const h = render({ xp: { state: 'failed' } });
 
+      expect(statusLine(h, 'bold')).toEqual(['Could not check your level']);
+      expect(lockShown(h)).toBe(false);
       expect(boldTiles(h).every((tile) => tile.getAttribute('aria-disabled') === 'true')).toBe(
         true,
       );
-      expect(statusLine(h, 'bold')).toEqual(['Unlocks at level 3']);
     });
 
     /** While the XP is read, neither answer is guessed: the tiles hold still and say so. */
@@ -537,9 +553,109 @@ describe('AvatarPickerComponent', () => {
       const h = render({ xp: { state: 'checking' } });
 
       expect(statusLine(h, 'bold')).toEqual(['Checking your level…']);
+      expect(lockShown(h)).toBe(false);
       expect(boldTiles(h).every((tile) => tile.getAttribute('aria-disabled') === 'true')).toBe(
         true,
       );
+    });
+
+    /** Until the page says otherwise, the picker is checking — never locked. */
+    it('starts out checking when the page has said nothing yet', () => {
+      const h = render();
+
+      expect(statusLine(h, 'bold')).toEqual(['Checking your level…']);
+      expect(lockShown(h)).toBe(false);
+    });
+
+    /**
+     * The avatar a player is wearing is theirs whatever the read says, since
+     * `setAvatar` takes the seed already stored at any level — so while the XP
+     * is unknown its two tiles stay choosable, drawn as exactly it, and the
+     * rest of the set holds still.
+     */
+    for (const xp of [{ state: 'checking' }, { state: 'failed' }] as const) {
+      it(`keeps the stored avatar choosable while ${xp.state}`, async () => {
+        const h = render({ xp, choice: { kind: 'built', seed: 'bold-21', showPublicly: false } });
+
+        const held = boldTiles(h)
+          .filter((tile) => tile.getAttribute('aria-disabled') === 'true')
+          .map((tile) => tile.value);
+        expect(held).toHaveLength(10);
+        expect(held).not.toContain('heart');
+        expect(held).not.toContain('amber');
+        expect(h.q('avatar-shape-heart')!.closest('label')!.classList).not.toContain('opacity-50');
+        expect(h.q('avatar-set-bold-shapes')!.querySelector('app-avatar')).not.toBeNull();
+
+        // Away to the open set, and back by the stored avatar's own tile.
+        h.q('avatar-shape-dot')!.click();
+        await h.settle();
+        expect(h.q<HTMLInputElement>('avatar-shape-heart')!.checked).toBe(false);
+        h.q('avatar-colour-amber')!.click();
+        await h.settle();
+        expect(h.q<HTMLInputElement>('avatar-shape-heart')!.checked).toBe(true);
+        expect(h.q<HTMLInputElement>('avatar-colour-amber')!.checked).toBe(true);
+
+        // Any other tile of the set is held, by pointer and by Space.
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+        h.q('avatar-shape-moon')!.dispatchEvent(click);
+        expect(click.defaultPrevented).toBe(true);
+        const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+        h.q('avatar-shape-moon')!.dispatchEvent(space);
+        expect(space.defaultPrevented).toBe(true);
+        // Space on the stored tile is the reader's to press; an arrow from it
+        // would check a held neighbour, so it is held.
+        const ownSpace = new KeyboardEvent('keydown', {
+          key: ' ',
+          bubbles: true,
+          cancelable: true,
+        });
+        h.q('avatar-shape-heart')!.dispatchEvent(ownSpace);
+        expect(ownSpace.defaultPrevented).toBe(false);
+        const arrow = new KeyboardEvent('keydown', {
+          key: 'ArrowRight',
+          bubbles: true,
+          cancelable: true,
+        });
+        h.q('avatar-shape-heart')!.dispatchEvent(arrow);
+        expect(arrow.defaultPrevented).toBe(true);
+
+        h.q('avatar-save')!.click();
+        await h.settle();
+        expect(h.save).toHaveBeenCalledWith({
+          kind: 'built',
+          seed: 'bold-21',
+          showPublicly: false,
+        });
+      });
+    }
+
+    /**
+     * The stored tiles are drawn as the stored avatar — the shape row in its
+     * colour, the colour row in its shape — so a tile shows what choosing it
+     * builds even while the draft is somewhere else.
+     */
+    it('draws a held set around the stored avatar, so its tiles are what they build', async () => {
+      const h = render({
+        xp: { state: 'failed' },
+        choice: { kind: 'built', seed: 'bold-21', showPublicly: false },
+      });
+
+      h.q('avatar-kind-initials')!.click();
+      await h.settle();
+
+      // A drawn avatar is its shape's path on its palette's background.
+      const drawn = (cy: string) => {
+        const svg = h.q(cy)!.closest('label')!.querySelector('app-avatar svg')!;
+        const d = svg.querySelector('path')!.getAttribute('d');
+        return `${d} on ${svg.querySelector('circle')!.getAttribute('fill')}`;
+      };
+      const looksLike = (seed: string) => {
+        const variant = builtAvatar(seed)!;
+        return `${variant.shape.d} on ${variant.palette.background}`;
+      };
+      expect(drawn('avatar-shape-heart')).toBe(looksLike('bold-21'));
+      expect(drawn('avatar-colour-amber')).toBe(looksLike('bold-21'));
+      expect(drawn('avatar-shape-star')).toBe(looksLike('bold-01'));
     });
 
     it('cannot be chosen by a click, and the save sends what it sent before', async () => {
@@ -629,6 +745,7 @@ describe('AvatarPickerComponent', () => {
       expect(h.q<HTMLInputElement>('avatar-kind-built')!.checked).toBe(true);
       expect(h.q<HTMLInputElement>('avatar-shape-heart')!.checked).toBe(true);
       expect(h.q<HTMLInputElement>('avatar-colour-amber')!.checked).toBe(true);
+      expect(h.q('avatar-shape-heart')!.hasAttribute('aria-disabled')).toBe(false);
       expect(h.q('avatar-shape-moon')!.getAttribute('aria-disabled')).toBe('true');
 
       h.q('avatar-public')!.click();
@@ -654,6 +771,7 @@ describe('AvatarPickerComponent', () => {
 
       expect(shape(LOCKED)).toBe(shape(OPEN));
       expect(shape({ state: 'checking' })).toBe(shape(OPEN));
+      expect(shape({ state: 'failed' })).toBe(shape(OPEN));
     });
   });
 });

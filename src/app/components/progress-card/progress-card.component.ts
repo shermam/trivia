@@ -20,6 +20,13 @@ export type ProgressState = 'loading' | 'signedOut' | 'failed' | 'ready';
 /** The sentence under the heading — the state, or the level the last game reached. */
 type ProgressLine = Exclude<ProgressState, 'ready'> | 'ready' | 'levelUp';
 
+/**
+ * What the unlock row says of the featured set: the level it opens at, as a
+ * fact about the set (`opensAt`), or — once there is an answer — whether it is
+ * this reader's (`locked`, `unlocked`).
+ */
+type UnlockLine = 'opensAt' | 'locked' | 'unlocked';
+
 /** What a box shows before there is a number, as on the totals card: the absence of a fact. */
 const UNKNOWN = '—';
 
@@ -58,6 +65,13 @@ const LAST_SET = Object.keys(AVATAR_SET_UNLOCK_LEVELS).at(-1) ?? 'core';
  * an empty track hidden from assistive tech, because the sentence above it is
  * what says why there is no number, and an indeterminate bar would announce a
  * wait that is not happening.
+ *
+ * **Only an answer draws the lock.** While the read is out, or after it
+ * failed, the unlock row says the level the set opens at and nothing about
+ * whether it is the reader's — the reader may be level 40, and "unlock at
+ * level 3" under a lock is the alarming guess (`CLAUDE.md` §4.4). A visitor
+ * who is not signed in is an answer: a guest earns no XP, so the set is not
+ * theirs, and the row says what would open it.
  *
  * **Nothing here is shown to anyone else.** The XP is bounded, not attested
  * (audit decision A1), which is why a level unlocks a cosmetic and appears on
@@ -150,10 +164,20 @@ export class ProgressCardComponent {
 
   protected readonly featuredLevel = computed(() => AVATAR_SET_UNLOCK_LEVELS[this.featuredSet()]);
 
-  /** Whether the featured set is this player's — known only when the XP is. */
-  protected readonly featuredUnlocked = computed(() => {
+  /**
+   * Whether the featured set is this reader's: an answer once the XP is known,
+   * or for a guest, who has none — and neither while the read is out or after
+   * it failed.
+   */
+  protected readonly unlockLine = computed<UnlockLine>(() => {
+    if (this.state() === 'signedOut') {
+      return 'locked';
+    }
     const progress = this.progress();
-    return progress !== null && isSetUnlocked(this.featuredSet(), progress.xp);
+    if (progress === null) {
+      return 'opensAt';
+    }
+    return isSetUnlocked(this.featuredSet(), progress.xp) ? 'unlocked' : 'locked';
   });
 
   /** The featured set's first avatar, which the row previews. */

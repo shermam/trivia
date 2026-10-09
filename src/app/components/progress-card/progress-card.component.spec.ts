@@ -33,7 +33,13 @@ function render(inputs: Inputs) {
     [...host.querySelectorAll('[data-cy="progress-status"] > p')]
       .filter((p) => !p.classList.contains('invisible'))
       .map((p) => p.getAttribute('data-cy'));
-  return { fixture, host, q, text, line };
+  /** The unlock row's sentences not hidden — exactly one in every state. */
+  const unlockLine = () =>
+    [...host.querySelectorAll('[data-cy="progress-unlock"] p[data-cy]')]
+      .filter((p) => !p.classList.contains('invisible'))
+      .map((p) => p.getAttribute('data-cy'));
+  const lockShown = () => !q('progress-unlock-lock')!.classList.contains('invisible');
+  return { fixture, host, q, text, line, unlockLine, lockShown };
 }
 
 afterEach(() => TestBed.resetTestingModule());
@@ -57,9 +63,10 @@ describe('ProgressCardComponent', () => {
       expect(h.text('progress-xp')).toBe('— XP');
       expect(h.text('progress-next')).toBe('—');
       expect(h.q('progress-unlock-preview')!.getAttribute('data-avatar')).toBe('guest');
-      // What the next unlock is, which is true whoever is reading.
+      // What the next unlock is — and a guest, who earns no XP, does not have it.
       expect(h.text('progress-unlock')).toContain('Bold avatars');
-      expect(h.q('progress-unlock-locked')!.classList.contains('invisible')).toBe(false);
+      expect(h.unlockLine()).toEqual(['progress-unlock-locked']);
+      expect(h.lockShown()).toBe(true);
     });
 
     /**
@@ -80,20 +87,30 @@ describe('ProgressCardComponent', () => {
       }
     });
 
-    it('waits while the read is in flight, showing no number', () => {
+    /**
+     * The reader may be level 40: until the read answers, the unlock row says
+     * the level the set opens at and nothing about whether it is theirs — no
+     * "unlock at", and no lock (`CLAUDE.md` §4.4).
+     */
+    it('waits while the read is in flight, showing no number and guessing no lock', () => {
       const h = render({ state: 'loading', letter: 'A' });
 
       expect(h.line()).toEqual(['progress-loading']);
       expect(h.text('progress-level')).toBe('—');
       // The signed-in player's preview is drawn already: its box is the same.
       expect(h.q('progress-unlock-preview')!.getAttribute('data-avatar')).toBe('built');
+      expect(h.unlockLine()).toEqual(['progress-unlock-opens']);
+      expect(h.text('progress-unlock-opens')).toBe('Opens at level 3');
+      expect(h.lockShown()).toBe(false);
     });
 
-    it('says a failed read failed, and shows no number', () => {
-      const h = render({ state: 'failed', xp: null });
+    it('says a failed read failed, shows no number, and guesses no lock', () => {
+      const h = render({ state: 'failed', xp: null, letter: 'A' });
 
       expect(h.line()).toEqual(['progress-failed']);
       expect(h.text('progress-xp')).toBe('— XP');
+      expect(h.unlockLine()).toEqual(['progress-unlock-opens']);
+      expect(h.lockShown()).toBe(false);
     });
   });
 
@@ -129,8 +146,8 @@ describe('ProgressCardComponent', () => {
 
       expect(h.text('progress-unlock')).toContain('Bold avatars');
       expect(h.text('progress-unlock-locked')).toBe('Unlock at level 3');
-      expect(h.q('progress-unlock-locked')!.classList.contains('invisible')).toBe(false);
-      expect(h.q('progress-unlock-unlocked')!.classList.contains('invisible')).toBe(true);
+      expect(h.unlockLine()).toEqual(['progress-unlock-locked']);
+      expect(h.lockShown()).toBe(true);
     });
 
     it('says the set is the player’s once its level is reached', () => {
@@ -139,8 +156,8 @@ describe('ProgressCardComponent', () => {
       expect(h.text('progress-level')).toBe('3');
       expect(h.text('progress-next')).toBe('350 XP to level 4');
       expect(h.text('progress-unlock')).toContain('Bold avatars');
-      expect(h.q('progress-unlock-unlocked')!.classList.contains('invisible')).toBe(false);
-      expect(h.q('progress-unlock-locked')!.classList.contains('invisible')).toBe(true);
+      expect(h.unlockLine()).toEqual(['progress-unlock-unlocked']);
+      expect(h.lockShown()).toBe(false);
     });
 
     it('formats large totals in the reader’s own locale', () => {

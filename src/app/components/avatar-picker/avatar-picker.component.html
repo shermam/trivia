@@ -181,15 +181,17 @@
     <!--
       One block per set (`FEAT-041`): a heading, and the set's shapes and
       colours as two radiogroups named by both — "Core Shape", "Bold Colour".
-      A set the player's level has not reached is drawn exactly as an open one
-      is, its tiles `aria-disabled`, dimmed and described by the line beside
-      the heading, so locked or not the block is one height by construction
-      (`CLAUDE.md` §4.4). The line's three sentences share one grid cell for
-      the same reason; `core` is open from the start and has none.
+      A set that cannot be chosen from — locked, or the XP not known — is
+      drawn exactly as an open one is, its tiles `aria-disabled`, dimmed and
+      described by the line beside the heading, so the block is one height in
+      every state by construction (`CLAUDE.md` §4.4). The line's four
+      sentences share one grid cell for the same reason; only a known XP below
+      the threshold draws the lock. `core` is open from the start and has none.
 
-      A locked tile stays reachable by Tab — that is how a keyboard user finds
+      A held tile stays reachable by Tab — that is how a keyboard user finds
       out the set exists and what opens it — while its click, Space and arrow
-      keys are held (`holdBuiltClick`, `holdBuiltKeys`).
+      keys are held (`holdBuiltClick`, `holdBuiltKeys`). The stored avatar's
+      own two tiles are never held: `setAvatar` takes that seed at any level.
     -->
     @for (block of setBlocks(); track block.set) {
       <div class="mt-5" [attr.data-cy]="'avatar-set-' + block.set">
@@ -212,6 +214,13 @@
                 [attr.data-cy]="'avatar-set-' + block.set + '-checking'"
               >
                 Checking your level&hellip;
+              </p>
+              <p
+                class="col-start-1 row-start-1"
+                [class.invisible]="block.status !== 'unchecked'"
+                [attr.data-cy]="'avatar-set-' + block.set + '-unchecked'"
+              >
+                Could not check your level
               </p>
               <p
                 class="col-start-1 row-start-1 inline-flex items-center justify-end gap-1"
@@ -248,9 +257,9 @@
           @for (option of block.shapes; track option.id) {
             <label
               class="flex rounded-full border-2 p-0.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
-              [class.cursor-pointer]="block.choosable"
-              [class.cursor-not-allowed]="!block.choosable"
-              [class.opacity-50]="!block.choosable"
+              [class.cursor-pointer]="option.choosable"
+              [class.cursor-not-allowed]="!option.choosable"
+              [class.opacity-50]="!option.choosable"
               [class.border-emerald-600]="
                 builtSelection()?.set === block.set && builtSelection()?.shapeIndex === option.index
               "
@@ -268,12 +277,12 @@
                   builtSelection()?.set === block.set &&
                   builtSelection()?.shapeIndex === option.index
                 "
-                [attr.aria-disabled]="saving() || !block.choosable ? 'true' : null"
+                [attr.aria-disabled]="saving() || !option.choosable ? 'true' : null"
                 [attr.aria-describedby]="
                   block.status === 'open' ? null : 'avatar-set-' + block.set + '-status'
                 "
-                (click)="holdBuiltClick($event, block)"
-                (keydown)="holdBuiltKeys($event, block)"
+                (click)="holdBuiltClick($event, option)"
+                (keydown)="holdBuiltKeys($event, block, option)"
                 (change)="chooseShape(block.set, option.index)"
               />
               <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
@@ -298,9 +307,9 @@
           @for (option of block.palettes; track option.id) {
             <label
               class="flex rounded-full border-2 p-0.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
-              [class.cursor-pointer]="block.choosable"
-              [class.cursor-not-allowed]="!block.choosable"
-              [class.opacity-50]="!block.choosable"
+              [class.cursor-pointer]="option.choosable"
+              [class.cursor-not-allowed]="!option.choosable"
+              [class.opacity-50]="!option.choosable"
               [class.border-emerald-600]="
                 builtSelection()?.set === block.set &&
                 builtSelection()?.paletteIndex === option.index
@@ -320,12 +329,12 @@
                   builtSelection()?.set === block.set &&
                   builtSelection()?.paletteIndex === option.index
                 "
-                [attr.aria-disabled]="saving() || !block.choosable ? 'true' : null"
+                [attr.aria-disabled]="saving() || !option.choosable ? 'true' : null"
                 [attr.aria-describedby]="
                   block.status === 'open' ? null : 'avatar-set-' + block.set + '-status'
                 "
-                (click)="holdBuiltClick($event, block)"
-                (keydown)="holdBuiltKeys($event, block)"
+                (click)="holdBuiltClick($event, option)"
+                (keydown)="holdBuiltKeys($event, block, option)"
                 (change)="choosePalette(block.set, option.index)"
               />
               <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />

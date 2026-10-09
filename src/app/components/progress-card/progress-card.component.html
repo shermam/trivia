@@ -105,9 +105,9 @@
   <!--
     What the next unlock is. The avatar is the reserved box `AvatarComponent`
     guarantees: the neutral face until somebody is signed in, then the set's
-    first avatar drawn over their initial — the same box either way. The two
+    first avatar drawn over their initial — the same box either way. The three
     sentences under the name share one grid cell, and the lock keeps its space
-    when it is not drawn.
+    when it is not drawn — which is whenever there is no answer yet.
   -->
   <div
     data-cy="progress-unlock"
@@ -126,14 +126,21 @@
       <div class="grid text-xs text-slate-500 dark:text-slate-400">
         <p
           class="col-start-1 row-start-1"
-          [class.invisible]="featuredUnlocked()"
+          [class.invisible]="unlockLine() !== 'opensAt'"
+          data-cy="progress-unlock-opens"
+        >
+          Opens at level {{ featuredLevel() }}
+        </p>
+        <p
+          class="col-start-1 row-start-1"
+          [class.invisible]="unlockLine() !== 'locked'"
           data-cy="progress-unlock-locked"
         >
           Unlock at level {{ featuredLevel() }}
         </p>
         <p
           class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
-          [class.invisible]="!featuredUnlocked()"
+          [class.invisible]="unlockLine() !== 'unlocked'"
           data-cy="progress-unlock-unlocked"
         >
           Unlocked — choose one below
@@ -143,8 +150,9 @@
     <app-icon
       name="lock"
       [size]="16"
+      data-cy="progress-unlock-lock"
       class="shrink-0 text-slate-400 dark:text-slate-500"
-      [class.invisible]="featuredUnlocked()"
+      [class.invisible]="unlockLine() !== 'locked'"
     />
   </div>
 </section>
