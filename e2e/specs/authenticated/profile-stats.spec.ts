@@ -5,6 +5,7 @@ import { answerQuestion, startNewGame } from '../../support/game';
 import { waitForGameplayStats } from '../../support/gameplay-stats';
 import { expectSameHeight, settledHeight } from '../../support/layout';
 import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { expectShownAlone } from '../../support/states';
 
 const password = 'Str0ngPassw0rd!';
 
@@ -82,8 +83,15 @@ test.describe('profile — lifetime stats', () => {
 
     // No document exists for an account that has never finished a game, and
     // that is a different thing from a read that failed — the screen has to
-    // say so rather than show zeroes it did not read.
-    await expect(page.getByTestId('stats-empty')).toBeVisible();
+    // say so rather than show zeroes it did not read. Read at one moment with
+    // the siblings it rules out, because the sentences share one grid cell
+    // (`docs/ci-cd.md` §4.3).
+    await expectShownAlone(
+      page.getByTestId('stats-status'),
+      'stats-empty',
+      ['stats-loading', 'stats-failed'],
+      'the stats card, nothing banked',
+    );
     await expect(page.getByTestId('stat-games-played')).toHaveText('—');
 
     await page.goto('/');
@@ -96,7 +104,12 @@ test.describe('profile — lifetime stats', () => {
     await waitForGameplayStats(firebase, uid);
 
     await page.goto('/profile');
-    await expect(page.getByTestId('stats-since')).toBeVisible();
+    await expectShownAlone(
+      page.getByTestId('stats-status'),
+      'stats-since',
+      ['stats-loading'],
+      'the stats card, loaded',
+    );
     await expect(page.getByTestId('stat-games-played')).toHaveText('1');
     await expect(page.getByTestId('stat-questions-answered')).toHaveText('5');
     await expect(page.getByTestId('stat-correct-answers')).toHaveText('5');
@@ -152,15 +165,20 @@ test.describe('profile — lifetime stats', () => {
     // "loading" before auth has answered, which is not the state under test.
     // The intercept is load-bearing: one that silently stopped matching would
     // leave this measuring the loaded state twice and passing by luck
-    // (`CLAUDE.md` §4.6). The state is asserted by its sentence shown **and** a
-    // sibling hidden, because before the card's first binding pass every
-    // sentence in its one grid cell reads as visible (`docs/ci-cd.md` §4.3).
+    // (`CLAUDE.md` §4.6). The state is its sentence shown and a sibling hidden,
+    // read at one moment: the app aborts a held read after ten seconds, and
+    // two matchers retrying apart can each pass on a different side of that
+    // (`docs/ci-cd.md` §4.3).
     const card = page.getByTestId('stats-card');
     await expect
       .poll(() => stats.held.reads, { message: 'stats reads held open by the intercept' })
       .toBeGreaterThan(0);
-    await expect(page.getByTestId('stats-loading')).toBeVisible();
-    await expect(page.getByTestId('stats-signed-out')).toBeHidden();
+    await expectShownAlone(
+      page.getByTestId('stats-status'),
+      'stats-loading',
+      ['stats-signed-out'],
+      'the stats card while the read is held',
+    );
     const whileLoading = await settledHeight(card, 'the stats card while the read is in flight');
 
     stats.release();
@@ -203,11 +221,15 @@ test.describe('profile — lifetime stats', () => {
     const stats = await breakStatsRead(page);
     await page.goto('/profile');
 
-    await expect(page.getByTestId('stats-failed')).toBeVisible();
-    await expect(page.getByTestId('stats-retry')).toBeVisible();
     // The account has totals. Saying "nothing banked yet" here would be a
     // cause nobody verified, told to somebody whose numbers are fine.
-    await expect(page.getByTestId('stats-empty')).toBeHidden();
+    await expectShownAlone(
+      page.getByTestId('stats-status'),
+      'stats-failed',
+      ['stats-loading', 'stats-empty'],
+      'the stats card after a failed read',
+    );
+    await expect(page.getByTestId('stats-retry')).toBeVisible();
     await expect(page.getByTestId('stat-games-played')).toHaveText('—');
 
     const retry = page.getByTestId('stats-retry');
@@ -239,15 +261,18 @@ test.describe('profile — lifetime stats', () => {
   test('explains itself to an anonymous visitor, and offers the way out', async ({ page }) => {
     await page.goto('/profile');
 
-    await expect(page.getByTestId('stats-signed-out')).toBeVisible();
-    await expect(page.getByTestId('stat-games-played')).toHaveText('—');
-    await expect(page.getByTestId('stat-accuracy')).toHaveText('—');
-
     // The states are stacked in one grid cell, so every message is in the
     // document at all times and only `visibility` separates them — an
-    // existence check would pass against any of them (`CLAUDE.md` §4.6).
-    await expect(page.getByTestId('stats-empty')).toBeHidden();
-    await expect(page.getByTestId('stats-failed')).toBeHidden();
+    // existence check would pass against any of them (`CLAUDE.md` §4.6), and
+    // the shown one and the hidden ones are read at one moment.
+    await expectShownAlone(
+      page.getByTestId('stats-status'),
+      'stats-signed-out',
+      ['stats-loading', 'stats-empty', 'stats-failed'],
+      'the stats card, signed out',
+    );
+    await expect(page.getByTestId('stat-games-played')).toHaveText('—');
+    await expect(page.getByTestId('stat-accuracy')).toHaveText('—');
 
     await page.getByTestId('stats-sign-in').click();
     await expect(authMenu(page)).toBeVisible();

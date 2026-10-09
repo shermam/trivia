@@ -174,10 +174,12 @@
                     <!-- The reporter's own words, kept as they typed them:
                        interpolation escapes the text, and `pre-line` keeps
                        their line breaks without an [innerHTML] that would
-                       parse it. -->
+                       parse it. `break-words` wraps a word too long for the
+                       card — the rules allow 500 characters of one — rather
+                       than letting it widen the page. -->
                     <p
                       data-cy="report-detail"
-                      class="mt-2 text-sm text-slate-600 dark:text-slate-300 whitespace-pre-line"
+                      class="mt-2 text-sm text-slate-600 dark:text-slate-300 whitespace-pre-line break-words"
                     >
                       {{ row.report.detail }}
                     </p>
@@ -489,14 +491,18 @@
   <div class="flex gap-2 mt-4">
     <!-- Approve wears the CTA fill, as every solid button with white text
          does: white on the brand `emerald-600` is 3.65:1, under the 4.5:1 its
-         14px label needs (`BRAND_DESIGN_SYSTEM.md` §1). -->
+         14px label needs (`BRAND_DESIGN_SYSTEM.md` §1). Its hover goes a step
+         darker in the light theme only. Against the dark card `emerald-800`
+         is 2.34:1, under the 3:1 a control's fill needs there, and a step
+         lighter puts the label back at 3.65:1, so the dark theme keeps the
+         rest fill on hover: 5.36:1 for the label, 3.32:1 for the fill. -->
     @if (status !== 'approved') {
       <button
         type="button"
         data-cy="approve-question"
         [disabled]="pendingActionId() === question.id"
         (click)="decide(question, 'approved')"
-        class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50"
+        class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 dark:hover:bg-emerald-700 disabled:opacity-50"
       >
         Approve
       </button>

@@ -4,6 +4,7 @@ import { CustomQuestionSeed } from '../../fixtures/types';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
 import { expectBoxUnmoved, settledBox } from '../../support/layout';
+import { expectShownAlone } from '../../support/states';
 
 /**
  * Everything one account contributed, for a reviewer (`FEAT-006`), end to end.
@@ -186,11 +187,15 @@ test.describe('everything one account contributed, as a reviewer', () => {
     await seen;
     const heading = page.getByTestId('author-view-heading');
     await expect(heading).toBeFocused();
-    // The loading sentence shown **and** a sibling hidden: the view is created
-    // by this click, and before its first binding pass every sentence in the
-    // status block's one grid cell reads as visible (`docs/ci-cd.md` §4.3).
-    await expect(page.getByTestId('author-loading')).toBeVisible();
-    await expect(page.getByTestId('author-empty')).toBeHidden();
+    // The loading sentence shown and a sibling hidden, read at one moment: the
+    // view is created by this click, its sentences share one grid cell, and
+    // the app aborts the held read after ten seconds (`docs/ci-cd.md` §4.3).
+    await expectShownAlone(
+      page.getByTestId('author-status'),
+      'author-loading',
+      ['author-empty'],
+      'the author view while its read is held',
+    );
     await expect(page.getByTestId('review-queue-body')).toBeHidden();
     const status = page.getByTestId('author-status');
     const statusWhileLoading = await settledBox(status, 'the status block while loading');

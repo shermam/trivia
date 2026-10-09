@@ -114,9 +114,11 @@ test.describe('the review queue', () => {
    * two rows of two — and what a reader meets when they are not is the whole
    * page scrolling sideways, so that is what is measured: the document's width
    * against the window's, polled rather than read once (`CLAUDE.md` §4.6), on
-   * a page anchored on this test's own row having rendered. The tabs are
-   * measured across all four choices too, because choosing one must not
-   * resize the control just pressed (`CLAUDE.md` §4.4) — at 1280 as well,
+   * every tab, each anchored on a row of this test's own having rendered. The
+   * Reports tab carries a report whose detail is one unbroken 500-character
+   * word, the longest the rules allow, which has to wrap inside its card. The
+   * tabs are measured across all four choices too, because choosing one must
+   * not resize the control just pressed (`CLAUDE.md` §4.4) — at 1280 as well,
    * where they are one row sized by their labels and a state that changed a
    * label's width would move its neighbours.
    *
@@ -133,33 +135,57 @@ test.describe('the review queue', () => {
       page,
       firebase,
     }) => {
+      const rejectedText = `Was this question turned down? (${tag})`;
+      await firebase.seedCustomQuestions([
+        {
+          id: `rejected-${tag}`,
+          tags: [topic],
+          type: 'multiple',
+          difficulty: 'easy',
+          question: rejectedText,
+          correct_answer: 'Yes',
+          incorrect_answers: ['No', 'Maybe', 'Unsure'],
+          createdBy: 'someone-else',
+          createdAt: Date.now(),
+          status: 'rejected',
+        },
+      ]);
+      // The ID keeps the `{window}-{slot}-{uid}` shape, in the current window,
+      // so the report sorts onto the tab's first page.
+      const now = Date.now();
+      await firebase.seedQuestionReports([
+        {
+          id: `${Math.floor(now / 300_000)}-00-${tag}`,
+          questionId: `pending-${tag}`,
+          reason: 'other',
+          detail: 'Unbrokenreportdetail'.repeat(25),
+          reportedBy: `seed-${tag}`,
+          createdAt: now,
+        },
+      ]);
+
       await signInAsReviewer(page, firebase);
       await page.setViewportSize(viewport);
       await page.goto('/review');
       await expect(myRows(page)).toHaveCount(1);
       await expect(reviewTab(page, 'pending')).toHaveAttribute('aria-checked', 'true');
-      await expectNoSidewaysScroll(page, `/review at ${viewport.width}px`);
+      await expectNoSidewaysScroll(page, `/review's Pending tab at ${viewport.width}px`);
 
+      const anchors = {
+        approved: myRows(page).filter({ hasText: approvedText }),
+        rejected: myRows(page).filter({ hasText: rejectedText }),
+        reports: page.getByTestId('review-report').filter({ hasText: pendingText }),
+        pending: myRows(page).filter({ hasText: pendingText }),
+      };
       const tabs = page.getByTestId('review-tabs');
       const box = await settledBox(tabs, `the tabs at ${viewport.width}px`);
       for (const view of ['approved', 'rejected', 'reports', 'pending'] as const) {
         await reviewTab(page, view).click();
         await expect(reviewTab(page, view)).toHaveAttribute('aria-checked', 'true');
+        await expect(anchors[view]).toHaveCount(1);
+        await expectNoSidewaysScroll(page, `/review's ${view} tab at ${viewport.width}px`);
         await expectBoxUnmoved(tabs, box, `the tabs with ${view} chosen, at ${viewport.width}px`);
-        await expect
-          .poll(
-            () =>
-              tabs.evaluate((node) => {
-                const rect = node.getBoundingClientRect();
-                const left = rect.left + window.scrollX;
-                return Math.max(-left, left + rect.width - window.innerWidth);
-              }),
-            { message: `the tabs past the window's edge with ${view} chosen, in pixels` },
-          )
-          .toBeLessThanOrEqual(0);
       }
-      await expect(myRows(page)).toHaveCount(1);
-      await expectNoSidewaysScroll(page, `/review back on Pending at ${viewport.width}px`);
     });
   }
 
