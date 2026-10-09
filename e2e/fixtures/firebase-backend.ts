@@ -6,6 +6,8 @@ import {
   AccountState,
   AccountStateQuery,
   AvatarSeed,
+  CallableAnswer,
+  CallerIdentity,
   CheckoutSessionRecord,
   CustomQuestionSeed,
   DonationPriceSeed,
@@ -26,8 +28,23 @@ import {
   QuestionVoteSeed,
   QuizSeed,
   ReviewerSeed,
+  SignedInCaller,
   VerifiedUserSeed,
 } from './types';
+
+/**
+ * The Functions emulator, where `firebase.json` puts it — the same address
+ * `AccountService` connects the app to under `useEmulators`. Only the
+ * emulator-only operations below use it.
+ */
+const FUNCTIONS_EMULATOR_HOST = '127.0.0.1:5001';
+
+/**
+ * The key the app's emulator config sends (`FirebaseAppService`). The Auth
+ * emulator accepts any value; one is sent because the REST API requires the
+ * parameter.
+ */
+const EMULATOR_API_KEY = 'demo-api-key';
 
 /**
  * Admin-SDK seeding, as the `firebase` test fixture exposes it.
@@ -654,24 +671,127 @@ export class FirebaseBackend {
   }
 
   /**
-   * The two operations above are **emulator-only**, and the host is read back
-   * from the variable `createAdminApp()` set rather than restated here, so
-   * there is one answer to "which Auth is this" rather than two that can
-   * disagree. Against a real project there is nothing to read: `oobCodes` is a
-   * testing endpoint with no real-Auth equivalent short of a live mailbox,
-   * which is also why `sign-up-verify` is permanently outside the preview
-   * slice (`docs/ci-cd.md` §4.3). Throwing says that, where an undefined host
-   * would produce a fetch to `http://undefined/…`.
+   * A session for one kind of account, signed by the Auth emulator over its
+   * REST API, with the ID token a callable would carry
+   * (`caller-gate.spec.ts`).
+   *
+   * **Emulator-only, and that is what makes it possible at all.** The
+   * emulator's `signInWithIdp` takes a fake `id_token` of plain JSON claims for
+   * any provider id, and signs a token whose `firebase.sign_in_provider` is
+   * that id — so one spec holds a GitHub session, an Apple one and a provider
+   * the app does not offer, without driving an OAuth popup or owning an
+   * account anywhere. A real project accepts no such token.
+   *
+   * Every account is unique to the call, and tracked for the sweep like any
+   * other this fixture creates.
    */
-  private async fetchOobCodes(): Promise<OobCode[]> {
+  async signInAs(identity: CallerIdentity): Promise<SignedInCaller> {
+    const host = this.authEmulatorHost('signing in with a fake provider token');
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const email = `caller-${unique}@example.com`;
+    const password = 'Str0ngPassw0rd!';
+
+    const call = async (method: string, body: object): Promise<SignedInCaller> => {
+      const response = await fetch(
+        `http://${host}/identitytoolkit.googleapis.com/v1/accounts:${method}?key=${EMULATOR_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, returnSecureToken: true }),
+        },
+      );
+      const answer = (await response.json()) as {
+        localId?: string;
+        idToken?: string;
+        error?: unknown;
+      };
+      if (!response.ok || !answer.localId || !answer.idToken) {
+        throw new Error(`The Auth emulator refused ${method}: ${JSON.stringify(answer)}`);
+      }
+      return { uid: answer.localId, idToken: answer.idToken };
+    };
+
+    let caller: SignedInCaller;
+    switch (identity.kind) {
+      case 'anonymous':
+        caller = await call('signUp', {});
+        break;
+      case 'password':
+        // Verified through the Admin SDK, then signed in like the app signs in,
+        // so the token carries `email_verified: true`; an unverified one is a
+        // plain sign-up, which is what the app's own sign-up form produces.
+        if (identity.emailVerified) {
+          await this.createVerifiedUser({ email, password });
+          caller = await call('signInWithPassword', { email, password });
+        } else {
+          caller = await call('signUp', { email, password });
+        }
+        break;
+      case 'oauth':
+        caller = await call('signInWithIdp', {
+          requestUri: 'http://localhost',
+          returnIdpCredential: true,
+          postBody: new URLSearchParams({
+            providerId: identity.providerId,
+            id_token: JSON.stringify({ sub: unique, email, email_verified: true }),
+          }).toString(),
+        });
+        break;
+    }
+    this.authUids.add(caller.uid);
+    return caller;
+  }
+
+  /**
+   * Invokes a callable on the Functions emulator the way `httpsCallable` does
+   * — a POST of `{ data }`, the ID token as a bearer — and returns its answer
+   * whole, the HTTP status included, so a refusal can be asserted by its code.
+   *
+   * Awaited to the end, unlike the app's fire-and-forget `recordGameResult`:
+   * the answer arrives after the function's transaction has committed, so one
+   * Admin read afterwards sees what it wrote, with no polling.
+   */
+  async invokeCallable(name: string, idToken: string, data: unknown): Promise<CallableAnswer> {
+    this.authEmulatorHost(`invoking ${name} on the Functions emulator`);
+    const response = await fetch(
+      `http://${FUNCTIONS_EMULATOR_HOST}/${this.target.projectId}/us-central1/${name}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ data }),
+      },
+    );
+    const body = (await response.json()) as Omit<CallableAnswer, 'status'>;
+    return { status: response.status, ...body };
+  }
+
+  /**
+   * The Auth emulator's address, for the operations here that exist only
+   * against it — out-of-band codes, fake provider tokens and the Functions
+   * emulator beside it.
+   *
+   * Read back from the variable `createAdminApp()` set rather than restated
+   * here, so there is one answer to "which Auth is this" rather than two that
+   * can disagree. Against a real project there is nothing to read: `oobCodes`
+   * is a testing endpoint with no real-Auth equivalent short of a live
+   * mailbox, which is also why `sign-up-verify` is permanently outside the
+   * preview slice (`docs/ci-cd.md` §4.3), and a real project signs no token
+   * for a fake provider. Throwing says that, where an undefined host would
+   * produce a fetch to `http://undefined/…`.
+   */
+  private authEmulatorHost(operation: string): string {
     const host = process.env['FIREBASE_AUTH_EMULATOR_HOST'];
     if (!host) {
       throw new Error(
-        'No Auth emulator is configured (FIREBASE_AUTH_EMULATOR_HOST is unset). Out-of-band ' +
-          'action codes are a testing-only endpoint of the Auth emulator; there is no equivalent ' +
-          'on a real project.',
+        `No Auth emulator is configured (FIREBASE_AUTH_EMULATOR_HOST is unset), and ${operation} ` +
+          'is a testing-only operation of the emulators; there is no equivalent on a real project.',
       );
     }
+    return host;
+  }
+
+  private async fetchOobCodes(): Promise<OobCode[]> {
+    const host = this.authEmulatorHost('reading out-of-band action codes');
     const response = await fetch(
       `http://${host}/emulator/v1/projects/${this.target.projectId}/oobCodes`,
     );
