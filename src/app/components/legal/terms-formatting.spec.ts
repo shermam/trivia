@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // nothing under `src/app` imports it, so it never reaches a bundle.
 import contract from '../../../../render-contract.json';
 import { renderMarkdown } from '../rendered-text/markdown-engine';
+import { renderMath } from '../rendered-text/math-engine';
 import { TermsOfServiceComponent } from './terms-of-service.component';
 
 /**
@@ -25,9 +26,10 @@ import { TermsOfServiceComponent } from './terms-of-service.component';
  * list, and stays a matter for review.
  *
  * The same section says HTML a contributor types is shown as typed, which is
- * true of markup and not of a character reference — the renderer decodes
- * `&amp;` to `&` — so the second test asks the renderer, and holds the page to
- * saying so for as long as it does.
+ * true of markup and not of a character reference outside code and formulas —
+ * the renderer decodes `&amp;` to `&` there, and shows it as typed in a code
+ * span or inside a formula — so the second test asks the renderer both ways,
+ * and holds the page to saying exactly that for as long as it does.
  *
  * Unlike `legal-pages.spec.ts`, this does pin copy, because the copy *is* the
  * claim: rewording a phrase means rewording its entry here, on purpose.
@@ -92,15 +94,21 @@ describe('/terms: the formatting a contribution may use', () => {
     expect(section, 'MathML').toContain('formulas');
   });
 
-  it('says a character reference is shown as its character, because the renderer decodes one', async () => {
-    // What a contributed `&amp;` becomes, through the instance a source with
-    // no formula in it renders with.
-    const host = document.createElement('div');
-    host.innerHTML = renderMarkdown('&amp;');
-    expect(host.textContent?.trim()).toBe('&');
+  it('says a character reference outside code and formulas is shown as its character, because the renderer decodes one only there', async () => {
+    // What a contributed `&amp;` becomes: the character in prose, through the
+    // instance a source with no formula renders with; itself in a code span,
+    // and itself inside a formula, through the instance with KaTeX.
+    const shown = (source: string, options: { renderMath?: typeof renderMath } = {}) => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(source, options);
+      return host.textContent?.trim();
+    };
+    expect(shown('&amp;')).toBe('&');
+    expect(shown('`&amp;`')).toBe('&amp;');
+    expect(shown('$x &amp; y$', { renderMath })).toContain('&amp;');
 
     expect(await formattingSection()).toContain(
-      'a character reference such as &amp; is shown as the character it stands for',
+      'outside code and formulas, a character reference such as &amp; is shown as the character it stands for',
     );
   });
 });
