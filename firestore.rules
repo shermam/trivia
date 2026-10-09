@@ -1346,6 +1346,39 @@ service cloud.firestore {
       }
     }
 
+    // Curated quizzes (`FEAT-024`): a title, a description and an ordered list
+    // of `custom_questions` ids, played as a unit from `/quiz/{quizId}`.
+    //
+    // **No client write path at all**, exactly as `user_roles` has none. A quiz
+    // is written from the Firebase console or by `scripts/seed-quiz.mjs` on the
+    // Admin SDK, both of which bypass these rules — so there is no exact-key
+    // `hasOnly()` allowlist, no field bounds, no ownership check and no volume
+    // cap here, because §4.1 of `CLAUDE.md` asks for those on a *client-
+    // writable* collection and there is nothing for any of them to guard. The
+    // schema can therefore grow a field (`tags`, `language`, `sponsorId`, an
+    // owner for `FEAT-020` §C) without a rules deploy, and the bounds a quiz is
+    // written within live in the script's validator
+    // (`src/app/utils/quiz-definition.util.ts`), its only writer that checks.
+    //
+    // **`isPublished` is the whole of the read rule**: it is how a quiz is
+    // drafted in the console and then turned on, and an unpublished quiz is
+    // invisible to every client — there is no author to show a draft to. Rules
+    // are not filters, so the list on `/` must carry
+    // `where('isPublished','==',true)` to be served at all.
+    //
+    // `== true` is written out for the reader rather than load-bearing: the
+    // rules language does not coerce, so a bare `resource.data.isPublished`
+    // also refuses the string `'true'` or the number `1` (a non-boolean
+    // condition errors, and an erroring rule denies) — the mutation sweep
+    // recorded that as the one change no test can see. A quiz that does not
+    // exist is refused rather than reported missing, for the same reason —
+    // `resource` is null and reading `.data` from it errors — which is what
+    // keeps a stranger from telling a draft's id from one never written.
+    match /quizzes/{quizId} {
+      allow read: if resource.data.isPublished == true;
+      allow create, update, delete: if false;
+    }
+
     // Product/price catalog `stripeWebhook` mirrors from the Stripe
     // Dashboard — public so the pricing page and checkout-session creation
     // can read the current Pro price without any secrets.

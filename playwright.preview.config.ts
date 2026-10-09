@@ -44,7 +44,7 @@ export default defineConfig<object, E2EWorkerOptions>({
 
   /**
    * The slice that is safe against a real, persistent, publicly-readable
-   * project: all of `unauthenticated/` bar the five below, plus the two
+   * project: all of `unauthenticated/` bar the seven below, plus the two
    * authenticated specs whose entire footprint is accounts and rows the sweep
    * can delete.
    *
@@ -164,6 +164,20 @@ export default defineConfig<object, E2EWorkerOptions>({
      * `service-worker-precache.spec.ts`, which belongs here and only here.
      */
     '**/unauthenticated/offline-play.spec.ts',
+    /*
+     * Not yet runnable here, and for a reason about the project rather than the
+     * specs: rules are per project and a channel is Hosting only, so a preview
+     * runs whatever `firestore.rules` `main` last deployed to `trivimind-dev`
+     * (`docs/ci-cd.md` §4.2a) — and until `FEAT-024` has merged and
+     * `deploy-dev` has shipped its rules, that is a rule set with no `quizzes`
+     * block, under which every quiz read is refused. Their footprint is
+     * otherwise safe here: every quiz and question they seed is tracked by id
+     * and swept. They belong back in the slice once the rules are deployed —
+     * the list's `(isPublished, createdAt)` query is the only place its
+     * composite index meets a real query engine (`D3`).
+     */
+    '**/unauthenticated/curated-quiz.spec.ts',
+    '**/unauthenticated/quiz-list.spec.ts',
   ],
 
   use: {

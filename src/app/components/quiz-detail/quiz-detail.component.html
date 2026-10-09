@@ -1,0 +1,291 @@
+<div class="min-h-screen bg-slate-50 dark:bg-slate-950 px-4 sm:px-6 py-10 sm:py-14">
+  <div class="max-w-xl mx-auto">
+    <a
+      routerLink="/"
+      data-cy="quiz-back"
+      class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
+    >
+      <app-icon name="arrow-left" [size]="15" />
+      Back to game
+    </a>
+
+    <!--
+      Permanent and empty until the read lands, so the region exists before it
+      has anything to say (G3) — everything on this card arrives after a round
+      trip, which is otherwise silent to assistive tech (`CLAUDE.md` §4.5).
+    -->
+    <p role="status" class="sr-only" data-cy="quiz-status">{{ announcement() }}</p>
+
+    <!--
+      **What can move, and what cannot** (`CLAUDE.md` §4.4). The link above and
+      the top of this card are fixed from first paint. The card's contents are
+      the quiz's own text, which is not known until the read lands, so the card
+      grows once when it does — and **the controls arrive with it**: nothing
+      that can be pressed exists before the quiz does, so nothing pressable is
+      ever moved under a pointer. After that nothing changes size: the line
+      under the time limit is reserved at the tallest of its variants, and
+      Start keeps its box while it says "Starting…". `curated-quiz.spec.ts`
+      measures all three in a real browser.
+    -->
+    <div
+      class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg px-6 sm:px-8 py-8"
+      data-cy="quiz-card"
+    >
+      <p
+        class="text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 mb-2"
+      >
+        Curated quiz
+      </p>
+      <!--
+        The heading in every state — "Loading quiz…", "Quiz not found", the
+        quiz's own title — so the page has one from first paint, and `retry()`
+        has somewhere visible to put focus when the button it was called from
+        goes away.
+      -->
+      <h1
+        #heading
+        tabindex="-1"
+        data-cy="quiz-title"
+        class="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight break-words focus:outline-none"
+      >
+        {{ title() }}
+      </h1>
+
+      @switch (view()) {
+        @case ('notFound') {
+          <p class="mt-3 text-slate-600 dark:text-slate-400" data-cy="quiz-not-found">
+            There is no published quiz at this address. It may have been taken down, or the link may
+            be incomplete.
+          </p>
+          <a
+            routerLink="/"
+            class="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 font-bold text-white shadow-cta transition-colors"
+          >
+            Play a random game
+          </a>
+        }
+        @case ('failed') {
+          <p class="mt-3 text-slate-600 dark:text-slate-400" data-cy="quiz-load-failed">
+            @if (connectivity.isOnline()) {
+              Something went wrong while reading it. Please try again.
+            } @else {
+              You're offline, and a quiz needs a connection to load its questions.
+            }
+          </p>
+          <button
+            type="button"
+            data-cy="quiz-retry"
+            (click)="retry()"
+            class="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 font-bold text-white shadow-cta transition-colors"
+          >
+            <app-icon name="rotate-ccw" [size]="16" />
+            Try again
+          </button>
+        }
+        @case ('empty') {
+          @if (quiz()?.description; as description) {
+            <p
+              class="mt-3 text-slate-600 dark:text-slate-400 break-words"
+              data-cy="quiz-description"
+            >
+              {{ description }}
+            </p>
+          }
+          <p
+            class="mt-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+            data-cy="quiz-empty"
+          >
+            <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
+            None of this quiz's questions can be played right now, so it cannot start. Try another
+            quiz, or a random game.
+          </p>
+          <a
+            routerLink="/"
+            class="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 font-bold text-white shadow-cta transition-colors"
+          >
+            Play a random game
+          </a>
+        }
+        @case ('ready') {
+          @if (quiz()?.description; as description) {
+            <p
+              class="mt-3 text-slate-600 dark:text-slate-400 break-words"
+              data-cy="quiz-description"
+            >
+              {{ description }}
+            </p>
+          }
+          <p
+            class="mt-4 text-sm font-semibold text-slate-700 dark:text-slate-300"
+            data-cy="quiz-question-count"
+          >
+            {{ countLabel(playableCount()) }}, in the order they were chosen
+          </p>
+          <!--
+            Said before Start, not discovered after it. A question that was
+            deleted, withdrawn or is no longer approved is skipped and the quiz
+            plays what remains (administrator decision, 8 October 2026) — and a
+            quiz that promised ten and quietly played eight would have misled
+            the player by omission.
+          -->
+          @if (unavailable(); as missing) {
+            <p class="mt-1 text-sm text-amber-800 dark:text-amber-300" data-cy="quiz-unavailable">
+              {{ missing.count }} of its {{ missing.total }} questions cannot be played right now,
+              so it plays the other {{ playableCount() }}.
+            </p>
+          }
+          @if (replacesGame()) {
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400" data-cy="quiz-replaces-game">
+              Starting this quiz replaces the game you have in progress.
+            </p>
+          }
+
+          <div class="mt-6">
+            <span
+              id="quiz-time-limit-label"
+              class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
+              >Time per Question</span
+            >
+            @if (suggestion(); as suggested) {
+              <p
+                class="-mt-1 mb-1.5 text-xs text-slate-500 dark:text-slate-400"
+                data-cy="quiz-suggested-limit"
+              >
+                Suggested for this quiz: {{ suggested }}.
+              </p>
+            }
+            <!--
+              The setup screen's picker contract (G4): real radios hidden with
+              `sr-only`, in a `role="radiogroup"` labelled by the caption above,
+              so each option is announced natively and the group by its name.
+
+              **The quiz's suggestion pre-selects; it never locks** (`FEAT-024`,
+              WCAG 2.2.1). Every option, "No limit" included, is always
+              selectable — a countdown the player cannot turn off is the
+              failure audit G7 fixed. The focus ring is on the label, because
+              the radio itself is a clipped 1px box nobody could see one on.
+            -->
+            <div
+              role="radiogroup"
+              aria-labelledby="quiz-time-limit-label"
+              class="flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+            >
+              @for (choice of timeLimitChoices; track choice.value) {
+                <label
+                  class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+                  [class.bg-emerald-100]="timeLimit() === choice.value"
+                  [class.dark:bg-emerald-500/20]="timeLimit() === choice.value"
+                  [class.text-emerald-700]="timeLimit() === choice.value"
+                  [class.dark:text-emerald-400]="timeLimit() === choice.value"
+                  [class.text-slate-600]="timeLimit() !== choice.value"
+                  [class.dark:text-slate-400]="timeLimit() !== choice.value"
+                >
+                  <input
+                    type="radio"
+                    name="quiz-time-limit"
+                    class="sr-only"
+                    [attr.data-cy]="'quiz-time-limit-' + choice.value"
+                    [value]="choice.value"
+                    [checked]="timeLimit() === choice.value"
+                    (change)="chooseTimeLimit(choice.value)"
+                  />
+                  {{ choice.label }}
+                </label>
+              }
+            </div>
+            <!--
+              Every variant in one grid cell, so the line is as tall as the
+              tallest of them and switching the limit moves nothing below it.
+            -->
+            <div class="grid mt-1.5" data-cy="quiz-time-limit-note">
+              @for (note of timeLimitNotes; track note.value) {
+                <p
+                  class="col-start-1 row-start-1 text-xs text-slate-500 dark:text-slate-400"
+                  [class.invisible]="timeLimit() !== note.value"
+                >
+                  {{ note.text }}
+                </p>
+              }
+            </div>
+          </div>
+
+          <!--
+            The setup screen's allowance row and offer, for the same reasons: a
+            quiz is a game like any other on the free tier, so it spends one,
+            and the row is rendered whatever it says so the button below never
+            moves when the count resolves (`docs/app.md` §1.8).
+          -->
+          <p
+            class="mt-6 mb-3 text-center text-xs text-slate-500 dark:text-slate-400"
+            data-cy="quiz-daily-allowance"
+          >
+            @if (dailyLimit.isUnlimited()) {
+              Unlimited games with Pro.
+            } @else if (dailyLimit.remaining() > 0) {
+              {{ dailyLimit.remaining() }} of {{ dailyGameLimit }} free games left today.
+            } @else {
+              No free games left today.
+            }
+          </p>
+
+          <!--
+            Not while a start is in flight. Start spends the day's last free
+            game before `/play`'s chunk has loaded, so the allowance reads zero
+            while Start still says "Starting…" — and the offer, a far taller
+            box, took Start's place under the pointer for as long as that chunk
+            took (`CLAUDE.md` §4.4). A start the allowance refuses clears
+            `isLoading` with `limitReached` set, so the offer still arrives.
+          -->
+          @if (
+            !gameController.isLoading() &&
+            (gameController.limitReached() || !dailyLimit.hasGamesLeft())
+          ) {
+            <div
+              role="status"
+              data-cy="quiz-daily-limit-reached"
+              class="rounded-xl border-[1.5px] border-amber-300 bg-amber-50 px-4 py-3.5 text-center dark:border-amber-500/40 dark:bg-amber-500/10"
+            >
+              <p class="font-semibold text-slate-900 dark:text-slate-50">
+                That's your {{ dailyGameLimit }} free games for today.
+              </p>
+              <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                They reset at midnight. Pro removes the limit entirely.
+              </p>
+              <a
+                routerLink="/pricing"
+                (mouseenter)="subscriptionService.primePricing()"
+                (focus)="subscriptionService.primePricing()"
+                class="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-2.5 font-bold text-white shadow-cta transition-colors hover:bg-emerald-800"
+              >
+                <app-icon name="sparkles" [size]="16" />
+                See Pro
+              </a>
+            </div>
+          } @else {
+            <button
+              type="button"
+              data-cy="start-quiz"
+              (click)="start()"
+              [disabled]="gameController.isLoading()"
+              class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-colors"
+            >
+              @if (gameController.isLoading()) {
+                Starting&hellip;
+              } @else {
+                <app-icon name="sparkles" [size]="16" />
+                Start quiz
+              }
+            </button>
+          }
+          <p
+            role="status"
+            class="mt-2 text-center text-sm text-red-700 dark:text-red-300"
+            data-cy="quiz-start-error"
+          >
+            {{ startError() }}
+          </p>
+        }
+      }
+    </div>
+  </div>
+</div>

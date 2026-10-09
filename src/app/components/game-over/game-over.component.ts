@@ -103,14 +103,17 @@ interface RecapRow {
 }
 
 /**
- * The five faces of the card between the score summary and the leaderboard.
+ * The six faces of the card between the score summary and the leaderboard.
  *
- * They are enumerated rather than derived in the template because all five are
+ * They are enumerated rather than derived in the template because all six are
  * laid out together in one grid cell — see the template — so "which one is
  * showing" and "which ones reserve the height" are separate questions, and only
  * the first is a decision.
+ *
+ * `quiz` is the curated quiz's (`FEAT-024`): a quiz game makes no leaderboard
+ * entry, so its face says so in place of every other.
  */
-type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save';
+type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save' | 'quiz';
 
 /** Which of the two boards the reader is looking at (`FEAT-028`). */
 type BoardScope = 'global' | 'regional';
@@ -162,6 +165,24 @@ export class GameOverComponent implements OnInit {
   protected readonly boardLabel = computed(() =>
     this.board() === 'unlimited' ? 'no-limit' : `${this.board()}-second`,
   );
+
+  /**
+   * Whether this was a curated quiz rather than a drawn game (`FEAT-024`) —
+   * and therefore a game with **no leaderboard entry**.
+   *
+   * A quiz is the same questions in the same order for everybody, so its score
+   * is a different kind of number from a draw's: a player who has played it
+   * once knows every answer the second time. It is not ranked, and no board of
+   * its own exists either (`FEAT-024` §0.2). Everything else about the screen
+   * is the same game's — the four tiles, the recap and its votes, the reports,
+   * and `recordGameResult`, so a quiz still counts towards the player's totals
+   * and play history.
+   *
+   * Known from the first frame: the quiz context is restored with the rest of
+   * the game before this route activates, so the card never shows a save form
+   * and then takes it away.
+   */
+  protected readonly isQuizGame = computed(() => this.gameController.quiz() !== null);
 
   protected playerName = '';
   protected readonly isSaving = signal(false);
@@ -575,7 +596,7 @@ export class GameOverComponent implements OnInit {
   );
 
   /**
-   * Which of the card's five faces to show, as one pure decision rather than a
+   * Which of the card's six faces to show, as one pure decision rather than a
    * template `@if`/`@else if` chain.
    *
    * Written this way for two reasons. It is unit-testable in isolation, which
@@ -587,6 +608,11 @@ export class GameOverComponent implements OnInit {
    * three and the one a first-time visitor almost always ends up in anyway.
    */
   protected readonly scoreAction = computed<ScoreAction>(() => {
+    // First, and ahead of every auth state: a quiz is never saved, so there is
+    // no account it could be shown to that would make a save form honest.
+    if (this.isQuizGame()) {
+      return 'quiz';
+    }
     if (this.hasSaved()) {
       return this.saveError() ? 'saveFailed' : 'saved';
     }
@@ -793,8 +819,13 @@ export class GameOverComponent implements OnInit {
     // Reaching here means hasCompletedGameGuard passed — a finished game is in
     // memory (finding F4; the completeness check lives on the route, not here).
     this.playerName = this.authService.user()?.displayName ?? '';
-    void this.loadLeaderboard();
-    void this.preselectRegion();
+    // A quiz game shows no board — it has none, and is on nobody else's — so it
+    // reads none: neither the top ten nor the country lookup that only the
+    // save form and the regional tab use.
+    if (!this.isQuizGame()) {
+      void this.loadLeaderboard();
+      void this.preselectRegion();
+    }
     this.recordGameResult();
     // Once per arrival at the screen, a reload included — and the reload is
     // the case worth knowing about, because the obvious guess about it is
@@ -904,7 +935,16 @@ export class GameOverComponent implements OnInit {
   async saveScore(): Promise<void> {
     const user = this.authService.user();
     const name = this.playerName.trim();
-    if (!name || this.hasSaved() || !user || !this.authService.isFullyAuthenticated()) {
+    // A quiz game's form is never shown (`scoreAction`), and this refuses it
+    // as well, so no route to the write survives a template change — a quiz is
+    // not ranked (`FEAT-024`).
+    if (
+      this.isQuizGame() ||
+      !name ||
+      this.hasSaved() ||
+      !user ||
+      !this.authService.isFullyAuthenticated()
+    ) {
       return;
     }
 

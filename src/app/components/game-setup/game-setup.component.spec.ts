@@ -9,6 +9,7 @@ import {
 } from '../../services/daily-game-limit.service';
 import { GameControllerService } from '../../services/game-controller.service';
 import { OfflineQuestionsService } from '../../services/offline-questions.service';
+import { QuizService } from '../../services/quiz.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { GameSetupComponent } from './game-setup.component';
 
@@ -60,6 +61,10 @@ function setup(
       { provide: SubscriptionService, useValue: { isProUser: signal(false) } },
       { provide: ConnectivityService, useValue: { isOnline } },
       { provide: OfflineQuestionsService, useValue: { cachedCount: signal(0) } },
+      // The curated-quiz list under the card (`FEAT-024`), stubbed: jsdom has
+      // no IntersectionObserver, so the list reads at once, and these tests
+      // are about the form above it. `quiz-list.component.spec.ts` is its own.
+      { provide: QuizService, useValue: { listPublished: () => Promise.resolve([]) } },
       // The real router, not a stub: this template has a `routerLink`, and
       // RouterLink needs an `ActivatedRoute` and a `Router` that can actually
       // build a UrlTree. Nothing here navigates.

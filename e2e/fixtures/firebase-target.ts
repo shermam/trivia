@@ -19,6 +19,8 @@ export interface CreatedState {
    * sweep cannot reach it by walking `authUids` alone.
    */
   readonly leaderboardUids: ReadonlySet<string>;
+  /** Quizzes seeded by id (`FEAT-024`) — a quiz is keyed by nothing else the sweep holds. */
+  readonly quizIds: ReadonlySet<string>;
 }
 
 /**

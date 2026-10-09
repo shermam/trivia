@@ -98,7 +98,7 @@
     </div>
 
     <!--
-      **One grid cell, five faces.** Every child below sits in
+      **One grid cell, six faces.** Every child below sits in
       `col-start-1 row-start-1`, so the cell is as tall as the tallest of them
       and the card's height does not depend on which one is showing. Only
       `invisible` moves.
@@ -124,6 +124,26 @@
       exactly that.
     -->
     <div class="grid" data-cy="score-action">
+      <!--
+        quiz: a curated quiz (`FEAT-024`), which makes no leaderboard entry —
+        everybody plays the same questions in the same order, so its score is
+        not ranked. It wins over every auth state (`scoreAction`), and it sits
+        in the same cell as the save form so a quiz's result card is the size a
+        drawn game's is.
+      -->
+      <div
+        class="col-start-1 row-start-1 flex flex-col justify-center text-center bg-slate-100 dark:bg-slate-800/60 border border-slate-900/7 dark:border-white/10 rounded-2xl px-5 py-5"
+        [class.invisible]="scoreAction() !== 'quiz'"
+        data-cy="score-quiz"
+      >
+        <p class="font-semibold text-slate-900 dark:text-slate-50">
+          Quizzes aren't ranked on a leaderboard.
+        </p>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+          Everyone plays a quiz's questions in the same order, so its score stays off the board.
+        </p>
+      </div>
+
       <!-- saved: the confirmation. In the stack rather than replacing it, so
            saving does not yank the leaderboard up by ~100px at the moment the
            player's own entry appears in it. -->
@@ -318,256 +338,266 @@
       </p>
     }
 
-    <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden">
+    <!--
+      The board, for a drawn game only. A curated quiz (`FEAT-024`) is not
+      ranked and the board is not about it, so it is neither shown nor read —
+      decided from the restored game before the first frame, never on arrival.
+    -->
+    @if (!isQuizGame()) {
       <div
-        class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
+        class="bg-white dark:bg-slate-900 rounded-3xl shadow-card-lg overflow-hidden"
+        data-cy="leaderboard-card"
       >
-        <app-icon name="medal" [size]="18" class="text-amber-500" />
-        <div>
-          <!--
-            Names the board, because there is more than one now (G7). "Top 10"
-            alone would quietly imply a single global ranking and make a modest
-            score on the no-limit board look like a modest score overall.
-          -->
-          <h2
-            class="text-base font-bold text-slate-900 dark:text-slate-50"
-            data-cy="leaderboard-title"
-          >
-            Top 10 — {{ boardLabel() }} games
-          </h2>
-          <!--
-            Which population is being ranked (`FEAT-028`) — eight names on a
-            country board look exactly like eight names in the world otherwise.
-
-            A second line rendered always, rather than folded into the heading
-            above, so the header is the same height whichever board is showing:
-            "Top 10 in Brazil — 15-second games" is long enough to wrap onto a
-            second line at 390px and short enough not to at 1024px, which is
-            the viewport-dependent shift `CLAUDE.md` §4.4 warns about, in the
-            one place a check at a convenient window size would call fixed.
-          -->
-          <p class="text-xs text-slate-500 dark:text-slate-400" data-cy="leaderboard-scope">
-            {{ boardScopeLabel() }}
-          </p>
-        </div>
-      </div>
-
-      <!--
-        Global / Regional (`FEAT-028`).
-
-        **Real `<input type="radio">` elements hidden with `sr-only`**, inside a
-        `role="radiogroup"` carrying an `aria-labelledby` — the same shape as
-        the pricing page's currency switch (§1.6), and for more than
-        consistency. A pair of `role="radio"` buttons has to reimplement arrow
-        keys and roving focus to behave as a radio group does; native inputs
-        already do, and `expectRadiosAreGrouped` in the e2e suite sweeps every
-        `input[type="radio"]` on a page, so building it this way puts the
-        control inside a check that already exists rather than beside one.
-
-        The group's own label is `sr-only`: the heading above already tells a
-        sighted reader which board they are on, so it needs a name in the
-        accessibility tree and nowhere else.
-
-        **Both options render in both states, with fixed labels**, and the
-        regional one is selectable with no country set. That is the size rule
-        (§4.4) and the never-blocks rule at once: a toggle that appeared once a
-        country was declared would move the board down at the moment one is, a
-        label that became "Brazil" when the preselection resolved would change
-        width under the reader a second into the page (the account chip's
-        defect, #127), and a disabled option tells the reader nothing about
-        why. Which country is being ranked is in the header's second line,
-        rendered in both states. Selecting Regional with no country set shows
-        the one-line explanation in the board's reserved space.
-      -->
-      <div
-        class="flex items-center gap-2 px-6 py-3 border-b border-slate-900/6 dark:border-white/10"
-      >
-        <span id="board-scope-label" class="sr-only">Which leaderboard to show</span>
         <div
-          role="radiogroup"
-          aria-labelledby="board-scope-label"
-          data-cy="board-scope"
-          class="inline-flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+          class="flex items-center gap-2.5 px-6 py-4 border-b border-slate-900/6 dark:border-white/10"
         >
-          @for (option of BOARD_SCOPES; track option.scope) {
-            <label
-              class="flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors"
-              [class.bg-white]="boardScope() === option.scope"
-              [class.dark:bg-slate-900]="boardScope() === option.scope"
-              [class.shadow-sm]="boardScope() === option.scope"
-              [class.text-slate-900]="boardScope() === option.scope"
-              [class.dark:text-slate-50]="boardScope() === option.scope"
-              [class.text-slate-600]="boardScope() !== option.scope"
-              [class.dark:text-slate-400]="boardScope() !== option.scope"
+          <app-icon name="medal" [size]="18" class="text-amber-500" />
+          <div>
+            <!--
+              Names the board, because there is more than one now (G7). "Top 10"
+              alone would quietly imply a single global ranking and make a modest
+              score on the no-limit board look like a modest score overall.
+            -->
+            <h2
+              class="text-base font-bold text-slate-900 dark:text-slate-50"
+              data-cy="leaderboard-title"
             >
-              <input
-                type="radio"
-                name="board-scope"
-                class="sr-only"
-                [attr.data-cy]="'board-scope-' + option.scope"
-                [attr.value]="option.scope"
-                [checked]="boardScope() === option.scope"
-                (change)="onBoardScopeChange(option.scope)"
-              />
-              {{ option.label }}
-            </label>
-          }
+              Top 10 — {{ boardLabel() }} games
+            </h2>
+            <!--
+              Which population is being ranked (`FEAT-028`) — eight names on a
+              country board look exactly like eight names in the world otherwise.
+
+              A second line rendered always, rather than folded into the heading
+              above, so the header is the same height whichever board is showing:
+              "Top 10 in Brazil — 15-second games" is long enough to wrap onto a
+              second line at 390px and short enough not to at 1024px, which is
+              the viewport-dependent shift `CLAUDE.md` §4.4 warns about, in the
+              one place a check at a convenient window size would call fixed.
+            -->
+            <p class="text-xs text-slate-500 dark:text-slate-400" data-cy="leaderboard-scope">
+              {{ boardScopeLabel() }}
+            </p>
+          </div>
         </div>
-      </div>
 
-      <!--
-        The board is ten rows tall in every state, because ten is known before
-        the data is — it is the `limit` passed to `getTopScores`. It used to be
-        a single line of "Loading leaderboard…" that became up to ten rows, so
-        the card grew by roughly half a screen at the exact moment a player is
-        reading their score.
+        <!--
+          Global / Regional (`FEAT-028`).
 
-        Three kinds of row, all built from the same box so their heights cannot
-        drift apart: real entries in the `<ol>`, pulsing skeletons while the
-        fetch is in flight, and invisible fillers for slots the board has not
-        reached. Only the first is in the accessibility tree — the other two are
-        `aria-hidden` decoration, and `leaderboardStatus()` says in words what
-        they say in pixels.
-      -->
-      <div class="relative py-2" data-cy="leaderboard-body">
-        <p role="status" aria-live="polite" class="sr-only" data-cy="leaderboard-status">
-          {{ leaderboardStatus() }}
-        </p>
+          **Real `<input type="radio">` elements hidden with `sr-only`**, inside a
+          `role="radiogroup"` carrying an `aria-labelledby` — the same shape as
+          the pricing page's currency switch (§1.6), and for more than
+          consistency. A pair of `role="radio"` buttons has to reimplement arrow
+          keys and roving focus to behave as a radio group does; native inputs
+          already do, and `expectRadiosAreGrouped` in the e2e suite sweeps every
+          `input[type="radio"]` on a page, so building it this way puts the
+          control inside a check that already exists rather than beside one.
 
-        @if (isLoadingLeaderboard()) {
-          <div aria-hidden="true" data-cy="leaderboard-skeleton">
-            @for (row of skeletonRows; track row) {
-              <div class="flex items-center gap-3.5 px-6 py-2.5">
-                <span
-                  class="h-4 w-7 shrink-0 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
-                ></span>
-                <span
-                  class="h-9 w-9 shrink-0 rounded-full bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
-                ></span>
-                <span
-                  class="h-4 flex-1 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
-                ></span>
-                <span
-                  class="h-4 w-24 shrink-0 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
-                ></span>
-              </div>
+          The group's own label is `sr-only`: the heading above already tells a
+          sighted reader which board they are on, so it needs a name in the
+          accessibility tree and nowhere else.
+
+          **Both options render in both states, with fixed labels**, and the
+          regional one is selectable with no country set. That is the size rule
+          (§4.4) and the never-blocks rule at once: a toggle that appeared once a
+          country was declared would move the board down at the moment one is, a
+          label that became "Brazil" when the preselection resolved would change
+          width under the reader a second into the page (the account chip's
+          defect, #127), and a disabled option tells the reader nothing about
+          why. Which country is being ranked is in the header's second line,
+          rendered in both states. Selecting Regional with no country set shows
+          the one-line explanation in the board's reserved space.
+        -->
+        <div
+          class="flex items-center gap-2 px-6 py-3 border-b border-slate-900/6 dark:border-white/10"
+        >
+          <span id="board-scope-label" class="sr-only">Which leaderboard to show</span>
+          <div
+            role="radiogroup"
+            aria-labelledby="board-scope-label"
+            data-cy="board-scope"
+            class="inline-flex gap-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 p-1"
+          >
+            @for (option of BOARD_SCOPES; track option.scope) {
+              <label
+                class="flex items-center justify-center rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors"
+                [class.bg-white]="boardScope() === option.scope"
+                [class.dark:bg-slate-900]="boardScope() === option.scope"
+                [class.shadow-sm]="boardScope() === option.scope"
+                [class.text-slate-900]="boardScope() === option.scope"
+                [class.dark:text-slate-50]="boardScope() === option.scope"
+                [class.text-slate-600]="boardScope() !== option.scope"
+                [class.dark:text-slate-400]="boardScope() !== option.scope"
+              >
+                <input
+                  type="radio"
+                  name="board-scope"
+                  class="sr-only"
+                  [attr.data-cy]="'board-scope-' + option.scope"
+                  [attr.value]="option.scope"
+                  [checked]="boardScope() === option.scope"
+                  (change)="onBoardScopeChange(option.scope)"
+                />
+                {{ option.label }}
+              </label>
             }
           </div>
-        } @else {
-          <ol>
-            <!--
-            Tracked by `uid`, not `id`. `id` is optional on `LeaderboardEntry`,
-            so any path that ever omits it hands `@for` the same `undefined`
-            key for every row — the duplicate-key failure `CLAUDE.md` §4.4 is
-            about. `uid` is the entry's Firestore document id and there is one
-            entry per user per board, so it is both always present and unique.
-          -->
-            @for (entry of leaderboard(); track entry.uid; let i = $index) {
-              <li
-                class="flex items-center gap-3.5 px-6 py-2.5"
-                [class.bg-emerald-50]="entry.uid === authService.user()?.uid"
-                [class.dark:bg-emerald-500/10]="entry.uid === authService.user()?.uid"
-                [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
-                [class.border-emerald-600]="entry.uid === authService.user()?.uid"
-              >
-                <span
-                  class="w-7 text-center shrink-0"
-                  [class.text-lg]="i < 3"
-                  [class.text-sm]="i >= 3"
-                  [class.font-bold]="i >= 3"
-                  [class.text-slate-400]="i >= 3"
-                  [class.dark:text-slate-500]="i >= 3"
-                >
-                  @if (i === 0) {
-                    &#129351;
-                  } @else if (i === 1) {
-                    &#129352;
-                  } @else if (i === 2) {
-                    &#129353;
-                  } @else {
-                    #{{ i + 1 }}
-                  }
-                </span>
+        </div>
 
-                <span
-                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                  [class.bg-emerald-700]="entry.uid === authService.user()?.uid"
-                  [class.bg-slate-500]="entry.uid !== authService.user()?.uid"
-                >
-                  {{ initialsFor(entry.name) }}
-                </span>
+        <!--
+          The board is ten rows tall in every state, because ten is known before
+          the data is — it is the `limit` passed to `getTopScores`. It used to be
+          a single line of "Loading leaderboard…" that became up to ten rows, so
+          the card grew by roughly half a screen at the exact moment a player is
+          reading their score.
 
-                <span class="flex-1 min-w-0">
+          Three kinds of row, all built from the same box so their heights cannot
+          drift apart: real entries in the `<ol>`, pulsing skeletons while the
+          fetch is in flight, and invisible fillers for slots the board has not
+          reached. Only the first is in the accessibility tree — the other two are
+          `aria-hidden` decoration, and `leaderboardStatus()` says in words what
+          they say in pixels.
+        -->
+        <div class="relative py-2" data-cy="leaderboard-body">
+          <p role="status" aria-live="polite" class="sr-only" data-cy="leaderboard-status">
+            {{ leaderboardStatus() }}
+          </p>
+
+          @if (isLoadingLeaderboard()) {
+            <div aria-hidden="true" data-cy="leaderboard-skeleton">
+              @for (row of skeletonRows; track row) {
+                <div class="flex items-center gap-3.5 px-6 py-2.5">
                   <span
-                    class="font-medium text-slate-900 dark:text-slate-50 truncate"
-                    [class.font-bold]="entry.uid === authService.user()?.uid"
+                    class="h-4 w-7 shrink-0 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                  ></span>
+                  <span
+                    class="h-9 w-9 shrink-0 rounded-full bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                  ></span>
+                  <span
+                    class="h-4 flex-1 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                  ></span>
+                  <span
+                    class="h-4 w-24 shrink-0 rounded bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
+                  ></span>
+                </div>
+              }
+            </div>
+          } @else {
+            <ol>
+              <!--
+              Tracked by `uid`, not `id`. `id` is optional on `LeaderboardEntry`,
+              so any path that ever omits it hands `@for` the same `undefined`
+              key for every row — the duplicate-key failure `CLAUDE.md` §4.4 is
+              about. `uid` is the entry's Firestore document id and there is one
+              entry per user per board, so it is both always present and unique.
+            -->
+              @for (entry of leaderboard(); track entry.uid; let i = $index) {
+                <li
+                  class="flex items-center gap-3.5 px-6 py-2.5"
+                  [class.bg-emerald-50]="entry.uid === authService.user()?.uid"
+                  [class.dark:bg-emerald-500/10]="entry.uid === authService.user()?.uid"
+                  [class.border-l-[3px]]="entry.uid === authService.user()?.uid"
+                  [class.border-emerald-600]="entry.uid === authService.user()?.uid"
+                >
+                  <span
+                    class="w-7 text-center shrink-0"
+                    [class.text-lg]="i < 3"
+                    [class.text-sm]="i >= 3"
+                    [class.font-bold]="i >= 3"
+                    [class.text-slate-400]="i >= 3"
+                    [class.dark:text-slate-500]="i >= 3"
+                  >
+                    @if (i === 0) {
+                      &#129351;
+                    } @else if (i === 1) {
+                      &#129352;
+                    } @else if (i === 2) {
+                      &#129353;
+                    } @else {
+                      #{{ i + 1 }}
+                    }
+                  </span>
+
+                  <span
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    [class.bg-emerald-700]="entry.uid === authService.user()?.uid"
+                    [class.bg-slate-500]="entry.uid !== authService.user()?.uid"
+                  >
+                    {{ initialsFor(entry.name) }}
+                  </span>
+
+                  <span class="flex-1 min-w-0">
+                    <span
+                      class="font-medium text-slate-900 dark:text-slate-50 truncate"
+                      [class.font-bold]="entry.uid === authService.user()?.uid"
+                      [class.text-emerald-600]="entry.uid === authService.user()?.uid"
+                      [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
+                    >
+                      {{ entry.name }}
+                    </span>
+                    @if (entry.uid === authService.user()?.uid) {
+                      <span
+                        class="ml-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
+                        >YOU</span
+                      >
+                    }
+                  </span>
+
+                  <!--
+                    Points and accuracy, not `score / totalQuestions`: a streak
+                    multiplier can carry a score past the number of questions
+                    (`FEAT-004`), and a row reading "7 / 5" invites the reader to
+                    divide two numbers that no longer divide. The question count
+                    is still stored on the entry and still shown in an export — it
+                    is dropped from the row alone, because the row has one line at
+                    320px and the name is the thing that must not be squeezed out
+                    of it.
+                  -->
+                  <span
+                    class="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-slate-50"
                     [class.text-emerald-600]="entry.uid === authService.user()?.uid"
                     [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
                   >
-                    {{ entry.name }}
+                    {{ entry.score }} pts &middot; {{ entry.percentage }}%
                   </span>
-                  @if (entry.uid === authService.user()?.uid) {
-                    <span
-                      class="ml-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
-                      >YOU</span
-                    >
-                  }
-                </span>
+                </li>
+              }
+            </ol>
 
-                <!--
-                  Points and accuracy, not `score / totalQuestions`: a streak
-                  multiplier can carry a score past the number of questions
-                  (`FEAT-004`), and a row reading "7 / 5" invites the reader to
-                  divide two numbers that no longer divide. The question count
-                  is still stored on the entry and still shown in an export — it
-                  is dropped from the row alone, because the row has one line at
-                  320px and the name is the thing that must not be squeezed out
-                  of it.
-                -->
-                <span
-                  class="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-slate-50"
-                  [class.text-emerald-600]="entry.uid === authService.user()?.uid"
-                  [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
-                >
-                  {{ entry.score }} pts &middot; {{ entry.percentage }}%
-                </span>
-              </li>
+            <!--
+              One per slot the board has not reached. Same box as a real row and
+              the same 36px avatar-sized spacer inside it, so the height is
+              identical by construction rather than by a matching `h-` guess.
+            -->
+            @for (row of fillerRows(); track row) {
+              <div aria-hidden="true" class="flex items-center gap-3.5 px-6 py-2.5">
+                <span class="h-9 w-9"></span>
+              </div>
             }
-          </ol>
+          }
 
           <!--
-            One per slot the board has not reached. Same box as a real row and
-            the same 36px avatar-sized spacer inside it, so the height is
-            identical by construction rather than by a matching `h-` guess.
+            Laid over the reserved rows rather than replacing them, so an empty
+            board, a failed one and a full one are all the same height. It is
+            real information, so unlike the rows behind it this is not
+            `aria-hidden` — though `leaderboardStatus()` carries the same words
+            into the live region for the case where it appears after a wait.
           -->
-          @for (row of fillerRows(); track row) {
-            <div aria-hidden="true" class="flex items-center gap-3.5 px-6 py-2.5">
-              <span class="h-9 w-9"></span>
-            </div>
+          @if (leaderboardMessage(); as message) {
+            <p
+              class="absolute inset-0 flex items-center justify-center px-6 text-center text-sm"
+              [class.text-slate-500]="!leaderboardError()"
+              [class.dark:text-slate-400]="!leaderboardError()"
+              [class.text-red-700]="leaderboardError()"
+              [class.dark:text-red-300]="leaderboardError()"
+              data-cy="leaderboard-message"
+            >
+              {{ message }}
+            </p>
           }
-        }
-
-        <!--
-          Laid over the reserved rows rather than replacing them, so an empty
-          board, a failed one and a full one are all the same height. It is
-          real information, so unlike the rows behind it this is not
-          `aria-hidden` — though `leaderboardStatus()` carries the same words
-          into the live region for the case where it appears after a wait.
-        -->
-        @if (leaderboardMessage(); as message) {
-          <p
-            class="absolute inset-0 flex items-center justify-center px-6 text-center text-sm"
-            [class.text-slate-500]="!leaderboardError()"
-            [class.dark:text-slate-400]="!leaderboardError()"
-            [class.text-red-700]="leaderboardError()"
-            [class.dark:text-red-300]="leaderboardError()"
-            data-cy="leaderboard-message"
-          >
-            {{ message }}
-          </p>
-        }
+        </div>
       </div>
-    </div>
+    }
 
     <!-- Rendered always and outside every conditional section: a report can
          be sent from the dialog when no question is flagged, so a live region

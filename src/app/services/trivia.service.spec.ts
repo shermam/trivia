@@ -1337,3 +1337,132 @@ describe('TriviaService topic tags (FEAT-021)', () => {
     }
   });
 });
+
+describe('TriviaService.getQuizQuestions (FEAT-024)', () => {
+  /** A bank document as `getApprovedQuestionsByIds` hands it back. */
+  function bankDoc(id: string, overrides: Record<string, unknown> = {}) {
+    return {
+      id,
+      type: 'multiple' as const,
+      difficulty: 'easy' as const,
+      question: `Question ${id}?`,
+      correct_answer: 'Right',
+      incorrect_answers: ['Wrong 1', 'Wrong 2', 'Wrong 3'],
+      status: 'approved' as const,
+      tags: ['football'],
+      ...overrides,
+    };
+  }
+
+  function setup(docs: ReturnType<typeof bankDoc>[]) {
+    const getApprovedQuestionsByIds = vi.fn((ids: readonly string[]) => {
+      void ids;
+      return Promise.resolve(docs);
+    });
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: FirebaseService, useValue: { getApprovedQuestionsByIds } },
+        nothingSeenYet(),
+      ],
+    });
+    return { service: TestBed.inject(TriviaService), getApprovedQuestionsByIds };
+  }
+
+  // The one promise a curated quiz makes is that somebody chose these questions
+  // in this order, so the order is the quiz's whatever order the query answers
+  // in — a query by document id comes back sorted by id.
+  it('plays the questions in the quiz’s own order, not the order the read returned', async () => {
+    const { service } = setup([bankDoc('a-first'), bankDoc('b-second'), bankDoc('c-third')]);
+
+    const questions = await service.getQuizQuestions(['c-third', 'a-first', 'b-second']);
+
+    expect(questions.map((question) => question.id)).toEqual(['c-third', 'a-first', 'b-second']);
+  });
+
+  it('shuffles each question’s answers but keeps them all, as every bank question does', async () => {
+    const { service } = setup([bankDoc('q-1')]);
+
+    const [question] = await service.getQuizQuestions(['q-1']);
+
+    expect(question.source).toBe('custom');
+    expect(question.tags).toEqual(['football']);
+    expect(question.all_answers.map((answer) => answer.text).sort()).toEqual([
+      'Right',
+      'Wrong 1',
+      'Wrong 2',
+      'Wrong 3',
+    ]);
+    expect(question.all_answers.filter((answer) => answer.isCorrect)).toEqual([
+      { id: 'q-1:correct', text: 'Right', isCorrect: true },
+    ]);
+  });
+
+  it('skips an id the read did not return, and plays what remains', async () => {
+    const { service } = setup([bankDoc('q-1'), bankDoc('q-3')]);
+
+    const questions = await service.getQuizQuestions(['q-1', 'q-2-withdrawn', 'q-3']);
+
+    expect(questions.map((question) => question.id)).toEqual(['q-1', 'q-3']);
+  });
+
+  // A console-broken document is one more question the quiz skips, rather than
+  // a throw from the mapper that takes every question down with it.
+  it('skips a document too broken to play', async () => {
+    const { service } = setup([
+      bankDoc('good'),
+      bankDoc('no-wrong-answers', { incorrect_answers: [] }),
+      bankDoc('not-a-list', { incorrect_answers: 'Wrong' }),
+      bankDoc('odd-difficulty', { difficulty: 'expert' }),
+      bankDoc('no-text', { question: '' }),
+    ]);
+
+    const questions = await service.getQuizQuestions([
+      'no-wrong-answers',
+      'good',
+      'not-a-list',
+      'odd-difficulty',
+      'no-text',
+    ]);
+
+    expect(questions.map((question) => question.id)).toEqual(['good']);
+  });
+
+  it('plays a question the list names twice only once', async () => {
+    const { service } = setup([bankDoc('q-1'), bankDoc('q-2')]);
+
+    const questions = await service.getQuizQuestions(['q-1', 'q-2', 'q-1']);
+
+    expect(questions.map((question) => question.id)).toEqual(['q-1', 'q-2']);
+  });
+
+  // The loop's offline banner reads this, and a quiz is never served from the
+  // pool — so one played after an offline round must not inherit the banner.
+  it('clears the offline flag a previous offline round left behind', async () => {
+    const { service } = setup([bankDoc('q-1')]);
+    service.playingOffline.set(true);
+
+    await service.getQuizQuestions(['q-1']);
+
+    expect(service.playingOffline()).toBe(false);
+  });
+
+  it('lets a failed read throw rather than falling back to the offline pool', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        {
+          provide: FirebaseService,
+          useValue: { getApprovedQuestionsByIds: () => Promise.reject(new Error('offline')) },
+        },
+        nothingSeenYet(),
+      ],
+    });
+
+    await expect(TestBed.inject(TriviaService).getQuizQuestions(['q-1'])).rejects.toThrow(
+      'offline',
+    );
+  });
+});

@@ -15,6 +15,7 @@
           "/pricing.component-*.js",
           "/privacy-policy.component-*.js",
           "/profile-stats.component-*.js",
+          "/quiz-detail.component-*.js",
           "/review-queue.component-*.js",
           "/terms-of-service.component-*.js"
         ]

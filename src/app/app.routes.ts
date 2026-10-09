@@ -30,6 +30,16 @@ export const routes: Routes = [
       import('./components/game-over/game-over.component').then((m) => m.GameOverComponent),
   },
   {
+    // A curated quiz (`FEAT-024`), addressed by its document id. Lazy and
+    // outside the precache like every route a game does not need offline: a
+    // quiz is read from Firestore before it can start, so its screen has
+    // nothing to show without a connection (`ngsw-config.json`).
+    path: 'quiz/:quizId',
+    title: 'Curated quiz',
+    loadComponent: () =>
+      import('./components/quiz-detail/quiz-detail.component').then((m) => m.QuizDetailComponent),
+  },
+  {
     path: 'add-question',
     title: 'Add a question',
     loadComponent: () =>

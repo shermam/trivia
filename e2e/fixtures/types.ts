@@ -65,6 +65,29 @@ export interface CustomQuestionSeed {
 }
 
 /**
+ * A curated quiz to seed (`FEAT-024`) — what `scripts/seed-quiz.mjs` writes,
+ * written straight through the Admin SDK instead.
+ *
+ * Every field but `id` and `questionIds` has a default, and `isPublished`
+ * defaults to `true` because a published quiz is what nearly every spec plays;
+ * a spec about a draft says so. Nothing here is validated, deliberately: the
+ * console can write any shape at all, and a spec standing in for one of those
+ * documents needs to be able to as well.
+ */
+export interface QuizSeed {
+  id: string;
+  questionIds: string[];
+  title?: string;
+  description?: string;
+  createdBy?: string;
+  /** Epoch ms. Defaults to now; the list on `/` orders by it, newest first. */
+  createdAt?: number;
+  isPublished?: boolean;
+  /** 15, 30 or `'unlimited'` — pre-selects the quiz page's picker. */
+  suggestedTimeLimit?: 15 | 30 | 'unlimited' | null;
+}
+
+/**
  * A question's difficulty counters as stored (`FEAT-023`), or `null` for a
  * question whose document does not exist — which is a different fact from one
  * nobody has answered, where both counts are simply absent.

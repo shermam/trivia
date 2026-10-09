@@ -6,6 +6,7 @@ import { FirebaseAppService } from './firebase-app.service';
 import {
   FirebaseService,
   MAX_TAG_FILTER_VALUES,
+  QUIZ_LIST_LIMIT,
   QuestionReportRejectedError,
   REVIEW_PAGE_SIZE,
 } from './firebase.service';
@@ -116,6 +117,41 @@ interface RecordedWrite {
 /** How the fake server should answer one write. */
 type WriteOutcome = 'ok' | 'permission-denied' | 'server-error';
 
+/**
+ * Whether the fake's stand-in for `firestore.rules` lets this caller read one
+ * document — `data` is `undefined` for a document that does not exist.
+ *
+ * Opt-in, for the tests whose subject is how Firestore *authorises* a read
+ * rather than what it returns: with a policy, a `__name__ IN` query naming any
+ * unreadable document is refused whole, and a `get` of one is a 403 — which is
+ * what the emulator's rules engine does (`FEAT-024`). Without one, everything
+ * is readable, which is what every other test here assumes.
+ */
+type ReadPolicy = (
+  collectionPath: string,
+  id: string,
+  data: Record<string, unknown> | undefined,
+) => boolean;
+
+const PERMISSION_DENIED_RESPONSE = {
+  ok: false,
+  status: 403,
+  json: () => Promise.resolve({ error: { status: 'PERMISSION_DENIED', message: 'refused' } }),
+};
+
+/**
+ * A refusal, answered on a later turn of the event loop.
+ *
+ * Everything else this fake answers resolves at once, and against that a
+ * client that re-sent a refused read for ever would be a pure microtask loop —
+ * one the test timeout, a timer, never gets to interrupt, so the run would hang
+ * rather than fail. The tick is what turns that mutation of the quiz fallback
+ * into a timed-out test (`FEAT-024`).
+ */
+function refusedLater(): Promise<typeof PERMISSION_DENIED_RESPONSE> {
+  return new Promise((resolve) => setTimeout(() => resolve(PERMISSION_DENIED_RESPONSE), 0));
+}
+
 interface FakeServer {
   queries: RecordedQuery[];
   writes: RecordedWrite[];
@@ -151,6 +187,7 @@ function referenceId(value: { referenceValue?: string } | undefined) {
 function fakeServer(
   seed: SeedDoc[],
   onWrite: (path: string, attempt: number) => WriteOutcome = () => 'ok',
+  canRead?: ReadPolicy,
 ): FakeServer {
   const server: FakeServer = { queries: [], writes: [], attempts: [] };
   let writeAttempt = 0;
@@ -184,6 +221,7 @@ function fakeServer(
               op: string;
               value: {
                 stringValue?: string;
+                booleanValue?: boolean;
                 arrayValue?: { values?: { referenceValue?: string; stringValue?: string }[] };
               };
             },
@@ -192,7 +230,12 @@ function fakeServer(
           .filter(
             (filter) => filter.field.fieldPath !== '__name__' && filter.op !== 'ARRAY_CONTAINS_ANY',
           )
-          .map((filter) => ({ field: filter.field.fieldPath, value: filter.value.stringValue }));
+          .map((filter) => ({
+            field: filter.field.fieldPath,
+            // `isPublished == true` is the one boolean equality the app sends
+            // (`FEAT-024`); every other is a string.
+            value: filter.value.stringValue ?? filter.value.booleanValue,
+          }));
         const documentIds = fieldFilters
           .filter((filter) => filter.field.fieldPath === '__name__')
           .flatMap((filter) => (filter.value.arrayValue?.values ?? []).map(referenceId))
@@ -218,6 +261,15 @@ function fakeServer(
           limit: query['limit'] as number | undefined,
         };
         server.queries.push(recorded);
+
+        if (
+          canRead &&
+          recorded.documentIds?.some(
+            (id) => !canRead(collectionPath, id, seed.find((row) => row.id === id)?.data),
+          )
+        ) {
+          return refusedLater();
+        }
 
         let rows = [...seed].sort((a, b) => (a.id < b.id ? -1 : 1));
         const descending = ((query['orderBy'] ?? []) as { direction: string }[]).some(
@@ -277,6 +329,9 @@ function fakeServer(
         const path = pathFromUrl(url);
         const id = path.slice(path.lastIndexOf('/') + 1);
         const match = seed.find((row) => row.id === id);
+        if (canRead && !canRead(path.slice(0, path.lastIndexOf('/')), id, match?.data)) {
+          return refusedLater();
+        }
         return Promise.resolve(
           match
             ? {
@@ -382,6 +437,7 @@ const LOW_CURSOR = 61; // '9' — sorts before a 'q…' document id
 function setup(
   seed: SeedDoc[],
   onWrite?: (path: string, attempt: number) => WriteOutcome,
+  canRead?: ReadPolicy,
 ): { service: FirebaseService } & FakeServer {
   TestBed.configureTestingModule({
     providers: [
@@ -392,7 +448,7 @@ function setup(
       { provide: AuthService, useValue: { getIdToken: () => Promise.resolve('id-token') } },
     ],
   });
-  const server = fakeServer(seed, onWrite);
+  const server = fakeServer(seed, onWrite, canRead);
   return { service: TestBed.inject(FirebaseService), ...server };
 }
 
@@ -1728,5 +1784,275 @@ describe('FirebaseService: question votes (FEAT-027)', () => {
 
     await expect(service.setQuestionVote('u1', 'q1', 1, false)).rejects.toThrow('boom');
     expect(attempts).toHaveLength(1);
+  });
+});
+
+describe('FirebaseService: curated quizzes (FEAT-024)', () => {
+  const QUIZ = {
+    title: 'The 1998 World Cup',
+    questionIds: ['q-1', 'q-2'],
+    createdBy: 'curator-uid',
+    isPublished: true,
+  };
+
+  /**
+   * The list on `/`, exactly: the `where` the read rule needs before it serves
+   * the query at all, the order that makes the bound mean "the newest", and the
+   * bound (`CLAUDE.md` §4.1). Pinned on the wire because a query that dropped
+   * the `where` would be refused in production and answered here.
+   */
+  it('reads the newest published quizzes, filtered, ordered and bounded', async () => {
+    const { service, queries } = setup([
+      { id: 'older', data: { ...QUIZ, createdAt: 100 } },
+      { id: 'newer', data: { ...QUIZ, createdAt: 200 } },
+      { id: 'draft', data: { ...QUIZ, isPublished: false, createdAt: 300 } },
+    ]);
+
+    const quizzes = await service.getPublishedQuizzes();
+
+    expect(quizzes.map((quiz) => quiz.id)).toEqual(['newer', 'older']);
+    expect(quizzes[0].data['title']).toBe('The 1998 World Cup');
+    expect(queries).toEqual([
+      expect.objectContaining({
+        collectionPath: 'quizzes',
+        wheres: [{ field: 'isPublished', value: true }],
+        orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+        limit: QUIZ_LIST_LIMIT,
+      }),
+    ]);
+  });
+
+  it('reads one quiz by its id', async () => {
+    const { service } = setup([{ id: 'world-cup-1998', data: QUIZ }]);
+
+    const quiz = await service.getQuiz('world-cup-1998');
+
+    expect(quiz?.id).toBe('world-cup-1998');
+    expect(quiz?.data['questionIds']).toEqual(['q-1', 'q-2']);
+  });
+
+  it('answers null for a quiz that is not there', async () => {
+    const { service } = setup([]);
+
+    expect(await service.getQuiz('never-written')).toBeNull();
+  });
+
+  /**
+   * The read rule errors on a missing document, so Firestore answers a
+   * missing quiz and an unpublished one with the same 403 — and both mean
+   * "nothing to play here". Anything else is still a failure.
+   */
+  it('answers null for a refusal, and throws anything else', async () => {
+    const { service } = setup([]);
+    const answer = (status: number, code: string) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() =>
+          Promise.resolve({
+            ok: false,
+            status,
+            json: () => Promise.resolve({ error: { status: code, message: code } }),
+          }),
+        ),
+      );
+
+    answer(403, 'PERMISSION_DENIED');
+    expect(await service.getQuiz('draft')).toBeNull();
+
+    answer(500, 'INTERNAL');
+    await expect(service.getQuiz('draft')).rejects.toMatchObject({ status: 'INTERNAL' });
+  });
+
+  /**
+   * The public branch of the `custom_questions` read rule, as the fake's
+   * stand-in for `firestore.rules`: an approved question that exists. A
+   * missing one is refused too, not reported missing, because the real rule
+   * errors reading `.data` from nothing.
+   */
+  const publicReader: ReadPolicy = (collectionPath, _id, data) =>
+    collectionPath !== 'custom_questions' || data?.['status'] === 'approved';
+
+  /** Every `get` the service sent, by path. */
+  function documentGets(): string[] {
+    return vi
+      .mocked(fetch)
+      .mock.calls.filter(([, init]) => (init as { method: string }).method === 'GET')
+      .map(([url]) => pathFromUrl(url as string));
+  }
+
+  /**
+   * One query for a whole quiz when every question in it can be read: the
+   * status filter the read rule needs to prove the public branch, the ids as
+   * references, and a limit no larger than the ids it named.
+   */
+  it('resolves a quiz’s questions in one bounded query when every one can be read', async () => {
+    const { service, queries } = setup(
+      [
+        { id: 'q-1', data: makeQuestion() as never },
+        { id: 'q-3', data: makeQuestion() as never },
+      ],
+      undefined,
+      publicReader,
+    );
+
+    const questions = await service.getApprovedQuestionsByIds(['q-3', 'q-1']);
+
+    expect(questions.map((question) => question.id).sort()).toEqual(['q-1', 'q-3']);
+    expect(queries).toEqual([
+      expect.objectContaining({
+        collectionPath: 'custom_questions',
+        wheres: [{ field: 'status', value: 'approved' }],
+        documentIds: ['q-3', 'q-1'],
+        limit: 2,
+      }),
+    ]);
+    expect(documentGets()).toEqual([]);
+  });
+
+  /**
+   * The rot a quiz is expected to suffer. One unreadable name refuses the
+   * whole query — a pending question and a deleted one both, measured against
+   * the emulator — so the service reads each id on its own and skips what it
+   * cannot read, rather than taking the quiz offline.
+   */
+  it('reads each id on its own when the query is refused, and skips what it cannot read', async () => {
+    const { service, queries } = setup(
+      [
+        { id: 'q-1', data: makeQuestion() as never },
+        { id: 'q-2', data: makeQuestion({ status: 'pending' }) as never },
+        { id: 'q-3', data: makeQuestion() as never },
+      ],
+      undefined,
+      publicReader,
+    );
+
+    const questions = await service.getApprovedQuestionsByIds(['q-3', 'q-1', 'q-2', 'q-gone']);
+
+    expect(questions.map((question) => question.id)).toEqual(['q-3', 'q-1']);
+    expect(queries).toHaveLength(1);
+    expect(documentGets()).toEqual([
+      'custom_questions/q-3',
+      'custom_questions/q-1',
+      'custom_questions/q-2',
+      'custom_questions/q-gone',
+    ]);
+  });
+
+  /**
+   * The fallback is bounded exactly as the query it replaces (`CLAUDE.md`
+   * §4.1): one get per id the query named — malformed ids and repeats already
+   * dropped, never more than twenty-five — and the refused query is not sent
+   * again. A fallback that walked the caller's raw list instead would read a
+   * thirty-id quiz thirty-three times here, one of them a path the REST client
+   * refuses outright; one that re-sent the query fails on the count, and one
+   * that re-sent it for ever times out (see `refusedLater`).
+   */
+  it('falls back to at most twenty-five gets, one per usable id, and never re-sends the query', async () => {
+    const { service, queries } = setup([], undefined, () => false);
+    const ids = Array.from({ length: 30 }, (_, index) => `q-${index}`);
+
+    const questions = await service.getApprovedQuestionsByIds([...ids, 'q-0', 'a/b', '__x__']);
+
+    expect(questions).toEqual([]);
+    expect(queries).toHaveLength(1);
+    expect(documentGets()).toEqual(ids.slice(0, 25).map((id) => `custom_questions/${id}`));
+  });
+
+  /**
+   * A reviewer, or the author of a pending question, may read it — so the
+   * per-id reads can hand back a question the quiz must not play. The status
+   * is checked on what came back, so a quiz plays the same questions to
+   * everybody.
+   */
+  it('plays approved questions only, even to a caller who may read the others', async () => {
+    const author: ReadPolicy = (collectionPath, _id, data) =>
+      collectionPath !== 'custom_questions' ||
+      (data !== undefined && (data['status'] === 'approved' || data['createdBy'] === 'me'));
+    const { service } = setup(
+      [
+        { id: 'q-1', data: makeQuestion() as never },
+        { id: 'q-mine', data: makeQuestion({ status: 'pending', createdBy: 'me' }) as never },
+      ],
+      undefined,
+      author,
+    );
+
+    const questions = await service.getApprovedQuestionsByIds(['q-1', 'q-mine', 'q-gone']);
+
+    expect(questions.map((question) => question.id)).toEqual(['q-1']);
+    expect(documentGets()).toContain('custom_questions/q-mine');
+  });
+
+  it('fails the read on anything but a refusal, from the query or from a get', async () => {
+    const { service } = setup([]);
+    const respond = (answer: (url: string) => { status: number; code: string } | null) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((url: string) => {
+          const failure = answer(url);
+          const response = failure
+            ? {
+                ok: false,
+                status: failure.status,
+                json: () =>
+                  Promise.resolve({ error: { status: failure.code, message: failure.code } }),
+              }
+            : {
+                ok: true,
+                status: 200,
+                json: () =>
+                  Promise.resolve({
+                    name: `${RESOURCE_ROOT}/custom_questions/q-1`,
+                    fields: toWireFields(makeQuestion() as never),
+                  }),
+              };
+          // On a later tick, for the reason `refusedLater` gives.
+          return new Promise((resolve) => setTimeout(() => resolve(response), 0));
+        }),
+      );
+
+    respond(() => ({ status: 500, code: 'INTERNAL' }));
+    await expect(service.getApprovedQuestionsByIds(['q-1'])).rejects.toMatchObject({
+      status: 'INTERNAL',
+    });
+
+    respond((url) =>
+      url.includes(':runQuery')
+        ? { status: 403, code: 'PERMISSION_DENIED' }
+        : url.includes('q-2')
+          ? { status: 503, code: 'UNAVAILABLE' }
+          : null,
+    );
+    await expect(service.getApprovedQuestionsByIds(['q-1', 'q-2'])).rejects.toMatchObject({
+      status: 'UNAVAILABLE',
+    });
+  });
+
+  // An id a `__name__` filter would refuse fails the whole query, so it is
+  // dropped before it is sent — one malformed entry must not sink the quiz.
+  it('drops ids that cannot name a document, and duplicates, before sending', async () => {
+    const { service, queries } = setup([{ id: 'q-1', data: makeQuestion() as never }]);
+
+    await service.getApprovedQuestionsByIds(['q-1', 'a/b', '..', '__x__', 'q-1']);
+
+    expect(queries[0].documentIds).toEqual(['q-1']);
+    expect(queries[0].limit).toBe(1);
+  });
+
+  it('never names more than twenty-five ids in one read', async () => {
+    const { service, queries } = setup([]);
+    const ids = Array.from({ length: 30 }, (_, index) => `q-${index}`);
+
+    await service.getApprovedQuestionsByIds(ids);
+
+    expect(queries[0].documentIds).toHaveLength(25);
+    expect(queries[0].limit).toBe(25);
+  });
+
+  it('reads nothing at all for a quiz with no usable ids', async () => {
+    const { service, queries } = setup([]);
+
+    expect(await service.getApprovedQuestionsByIds(['a/b'])).toEqual([]);
+    expect(queries).toEqual([]);
   });
 });

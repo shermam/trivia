@@ -24,6 +24,7 @@ import { SubscriptionService } from '../../services/subscription.service';
 import { SEED_TAGS, firstSeedTag } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
+import { QuizListComponent } from '../quiz-list/quiz-list.component';
 import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
 
 /** What `createDonationSession` sends the browser back to `/` carrying. */
@@ -92,7 +93,14 @@ function listTags(tags: readonly string[]): string {
 @Component({
   selector: 'app-game-setup',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink, IconComponent, LogoComponent, TagSelectorComponent],
+  imports: [
+    ReactiveFormsModule,
+    RouterLink,
+    IconComponent,
+    LogoComponent,
+    QuizListComponent,
+    TagSelectorComponent,
+  ],
   templateUrl: './game-setup.component.html',
   styleUrl: './game-setup.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

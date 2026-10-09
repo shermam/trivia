@@ -60,6 +60,32 @@ const MAX_DEDUPE_DRAW = 50;
 /** What this device has answered: seen key → when it last answered it. */
 type SeenSet = ReadonlyMap<string, number>;
 
+const DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'];
+
+/**
+ * Whether a bank document can be put in front of a player at all — the text a
+ * question needs, at least one wrong answer, and a difficulty the app knows.
+ *
+ * Used where a question is named rather than drawn (`FEAT-024`): a curated quiz
+ * plays what remains of its list, so a document the console has broken is one
+ * more question it skips rather than an exception that takes the whole quiz
+ * down while it maps. The difficulty is in the check because everything
+ * downstream is typed on the three values, and the play history a finished
+ * game banks is refused whole over one it does not recognise (`docs/app.md`
+ * §1.1).
+ */
+function isPlayableBankQuestion(doc: CustomQuestionDoc): boolean {
+  return (
+    typeof doc.question === 'string' &&
+    doc.question.length > 0 &&
+    typeof doc.correct_answer === 'string' &&
+    Array.isArray(doc.incorrect_answers) &&
+    doc.incorrect_answers.length > 0 &&
+    doc.incorrect_answers.every((answer) => typeof answer === 'string') &&
+    DIFFICULTIES.includes(doc.difficulty)
+  );
+}
+
 /**
  * Chooses the questions a game is actually played with, preferring ones this
  * device has never answered (`FEAT-034`).
@@ -200,6 +226,43 @@ export class TriviaService {
       }
       throw error;
     }
+  }
+
+  /**
+   * A curated quiz's questions, in the quiz's own order (`FEAT-024`).
+   *
+   * **A named list, not a draw.** A bounded read resolves the ids — one query,
+   * or one get per id when a question in the list can no longer be read
+   * (`FirebaseService.getApprovedQuestionsByIds`) — and nothing about it is
+   * random: the questions come back in the order the curator wrote them —
+   * that order is the one promise a curated quiz makes — and only each
+   * question's own answers are shuffled, by the same mapper every bank question
+   * goes through. No seen-set, because a quiz is the questions somebody chose
+   * rather than a pool to prefer unseen ones from.
+   *
+   * **What is missing is skipped, and the quiz plays what remains.** An id the
+   * read does not return — deleted, withdrawn, sent back to `pending`, rejected
+   * — and a document too broken to play are both left out, and the caller
+   * says how many. Decided by the administrator on 8 October 2026, over
+   * `FEAT-024` §0.4's "refuse to start".
+   *
+   * **No offline fallback.** The pool holds questions by source, with no
+   * notion of a quiz and no moderation state, so a failed read throws and the
+   * quiz page says it needs a connection. It does reset `playingOffline`,
+   * which the loop's offline banner reads: a quiz played after an offline round
+   * would otherwise start under a banner about a pool it was never drawn from.
+   */
+  async getQuizQuestions(questionIds: readonly string[]): Promise<TriviaQuestion[]> {
+    const docs = await this.firebaseService.getApprovedQuestionsByIds(questionIds);
+    const byId = new Map(docs.filter(isPlayableBankQuestion).map((doc) => [doc.id, doc]));
+    this.playingOffline.set(false);
+    return questionIds.flatMap((id) => {
+      const doc = byId.get(id);
+      // Taken out of the map as it is used, so an id the list repeats is
+      // played once rather than twice in one round.
+      byId.delete(id);
+      return doc ? [this.mapToTriviaQuestion(doc, 'custom', doc.id)] : [];
+    });
   }
 
   /**

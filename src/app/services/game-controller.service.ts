@@ -9,9 +9,11 @@ import {
   PickedAnswer,
   SKIPPED,
   TIMED_OUT,
+  TimeLimitOption,
   TriviaQuestion,
   answeredWith,
 } from '../models/question.model';
+import { QuizContext } from '../models/quiz.model';
 import { displayScore, multiplierForStreak, pointsForStreak } from '../models/scoring';
 import { giveUpAfter } from '../utils/give-up-after.util';
 import { MAX_ANSWER_MS } from '../utils/play-history.util';
@@ -194,6 +196,19 @@ export class GameControllerService {
   readonly gameId = signal<string | null>(null);
 
   /**
+   * The curated quiz this game is playing, or `null` for a drawn game
+   * (`FEAT-024`).
+   *
+   * Set only by {@link startQuiz} and cleared by every other way into a game,
+   * the way the flags and the history are. It is what `/game-over` keys on to
+   * offer no leaderboard entry — a quiz is the same questions in the same
+   * order for everybody, so it is not ranked — and it rides the persisted
+   * snapshot for the reason the rest of the game does: a quiz reloaded on its
+   * last question is still a quiz when the results screen renders.
+   */
+  readonly quiz = signal<QuizContext | null>(null);
+
+  /**
    * When the question on screen appeared, as the wall clock reads it.
    *
    * `null` until `markQuestionShown()` is called, which is the quiz screen's
@@ -309,6 +324,7 @@ export class GameControllerService {
         lifelines: { ...this.lifelines() },
         eliminatedAnswerIds: [...this.eliminatedAnswerIds()],
         gameId: this.gameId(),
+        quiz: this.quiz(),
       };
       this.enqueueWrite(() => this.persistence.save(snapshot));
     });
@@ -389,6 +405,7 @@ export class GameControllerService {
     this.lifelines.set(saved.lifelines);
     this.eliminatedAnswerIds.set(saved.eliminatedAnswerIds);
     this.gameId.set(saved.gameId);
+    this.quiz.set(saved.quiz);
   }
 
   /**
@@ -521,46 +538,122 @@ export class GameControllerService {
         return;
       }
 
-      this.config.set(config);
-      this.questions.set(questions);
-      this.gameId.set(crypto.randomUUID());
-      this.currentIndex.set(0);
-      this.points.set(0);
-      this.correctAnswers.set(0);
-      // Same two places as the flags and the history below, and the same
-      // reason: not every route into a new game goes through `clearGameState`.
-      // A leaked streak is the one that pays out, too — a player who abandoned
-      // a game eight correct answers in would start the next one at 3×.
-      this.currentStreak.set(0);
-      this.maxStreak.set(0);
-      this.isComplete.set(false);
-      // Cleared here as well as in `clearGameState()`, because not every route
-      // into a new game goes through one. "Play Again" does (`resetGame`), and
-      // so does the resume banner's Discard — but the top bar's logo is a plain
-      // `routerLink="/"`, so a player can abandon a game and start another
-      // without either, and `restoreSavedGame()` puts the old flags back into
-      // the signal on the way. Custom question ids are stable Firestore
-      // document ids, so a leaked flag is not a harmless stale byte: draw the
-      // same question again and it renders pre-flagged, and game-over leads
-      // with "Questions you flagged" for a question the player never flagged
-      // in this game.
-      this.flaggedQuestionIds.set(new Set());
-      // Same reasoning, and the same two places: a leaked history is worse
-      // than a leaked flag, because the recap would show the previous game's
-      // answers underneath this game's score.
-      this.answerHistory.set([]);
-      this.answerDurations.set([]);
-      // ...and the same for lifelines, which leak in the most rewarding
-      // direction: a player who abandoned a game having spent all three would
-      // start the next one with none.
-      this.lifelines.set(ALL_LIFELINES_AVAILABLE);
-      this.eliminatedAnswerIds.set([]);
+      this.beginGame(config, questions, null);
       await this.router.navigateByUrl('/play');
     } catch {
       this.loadError.set('Failed to load questions. Please check your connection and try again.');
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  /**
+   * Starts a curated quiz (`FEAT-024`) — the second way into the loop, beside
+   * {@link startGame}'s draw — and reports whether it started.
+   *
+   * **The questions arrive resolved**, in the quiz's own order: the quiz page
+   * read them so it could say how many it can play before Start, so starting
+   * reads nothing and cannot come back short or empty. Everything after that is
+   * shared with a drawn game — the loop, the countdown, the lifelines, the
+   * recap, `recordGameResult` — and so is the daily allowance, spent the same
+   * way: after the questions are in hand and before any state is committed. A
+   * quiz is a game like any other on the free tier.
+   *
+   * **The time limit is the player's**, picked on the quiz page; a quiz's
+   * `suggestedTimeLimit` only pre-selects it (WCAG 2.2.1, `CLAUDE.md` §4.5).
+   *
+   * The config says what the game is — community questions, any difficulty, no
+   * topic filter, the quiz's length — and the quiz itself rides beside it as
+   * {@link quiz}, which is what tells `/game-over` there is no leaderboard
+   * entry to offer.
+   *
+   * `false` means it did not start: the allowance was spent, which
+   * {@link limitReached} says, or the navigation failed, which the console
+   * says. The quiz page tells the two apart by the signal.
+   */
+  async startQuiz(
+    quiz: QuizContext,
+    questions: readonly TriviaQuestion[],
+    timeLimit: TimeLimitOption,
+  ): Promise<boolean> {
+    if (questions.length === 0) {
+      return false;
+    }
+    this.isLoading.set(true);
+    this.limitReached.set(false);
+    // A short draw held for the setup screen belongs to a game the player has
+    // just chosen not to play; leaving it would let a later Start on `/` apply
+    // it to whatever the form says by then.
+    this.pendingDraw = null;
+    this.shortDraw.set(null);
+    try {
+      if (!(await this.dailyLimit.consumeGame())) {
+        this.limitReached.set(true);
+        return false;
+      }
+      this.beginGame(
+        { amount: questions.length, difficulty: '', source: 'custom', timeLimit },
+        [...questions],
+        { id: quiz.id, title: quiz.title },
+      );
+      return await this.router.navigateByUrl('/play');
+    } catch (error) {
+      console.error('[quiz] could not start the quiz', error);
+      return false;
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  /**
+   * Commits a new game's state — the one place every way into a game resets
+   * what the previous one left behind.
+   *
+   * A method rather than the block it was inside `startGame`, because there are
+   * two ways in now and the failure it guards against is exactly one of them
+   * forgetting a field: every signal below leaks into the next game if it is
+   * not reset, and each comment says what the leak looked like.
+   */
+  private beginGame(
+    config: GameConfig,
+    questions: TriviaQuestion[],
+    quiz: QuizContext | null,
+  ): void {
+    this.config.set(config);
+    this.questions.set(questions);
+    this.quiz.set(quiz);
+    this.gameId.set(crypto.randomUUID());
+    this.currentIndex.set(0);
+    this.points.set(0);
+    this.correctAnswers.set(0);
+    // Same two places as the flags and the history below, and the same
+    // reason: not every route into a new game goes through `clearGameState`.
+    // A leaked streak is the one that pays out, too — a player who abandoned
+    // a game eight correct answers in would start the next one at 3×.
+    this.currentStreak.set(0);
+    this.maxStreak.set(0);
+    this.isComplete.set(false);
+    // Cleared here as well as in `clearGameState()`, because not every route
+    // into a new game goes through one. "Play Again" does (`resetGame`), and
+    // so does the resume banner's Discard — but the top bar's logo is a plain
+    // `routerLink="/"`, so a player can abandon a game and start another
+    // without either, and `restoreSavedGame()` puts the old flags back into
+    // the signal on the way. Custom question ids are stable Firestore
+    // document ids, so a leaked flag is not a harmless stale byte: draw the
+    // same question again and it renders pre-flagged, and game-over leads
+    // with "Questions you flagged" for a question the player never flagged
+    // in this game.
+    this.flaggedQuestionIds.set(new Set());
+    // Same reasoning, and the same two places: a leaked history is worse
+    // than a leaked flag, because the recap would show the previous game's
+    // answers underneath this game's score.
+    this.answerHistory.set([]);
+    this.answerDurations.set([]);
+    // ...and the same for lifelines, which leak in the most rewarding
+    // direction: a player who abandoned a game having spent all three would
+    // start the next one with none.
+    this.lifelines.set(ALL_LIFELINES_AVAILABLE);
+    this.eliminatedAnswerIds.set([]);
   }
 
   /**
@@ -809,5 +902,6 @@ export class GameControllerService {
     this.lifelines.set(ALL_LIFELINES_AVAILABLE);
     this.eliminatedAnswerIds.set([]);
     this.gameId.set(null);
+    this.quiz.set(null);
   }
 }

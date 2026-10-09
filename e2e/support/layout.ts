@@ -82,3 +82,85 @@ export async function expectSameHeight(box: Locator, height: number, what: strin
     })
     .toBe(0);
 }
+
+/** Where an element is, in document coordinates — see {@link documentBox}. */
+export interface DocumentBox {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One reading of an element's box in **document** coordinates.
+ *
+ * Document rather than viewport coordinates, because a click that scrolls a
+ * control into view would otherwise read as the layout moving. One read, so
+ * never an assertion on its own (`CLAUDE.md` §4.6): take it through
+ * {@link settledBox} or {@link expectBoxUnmoved}.
+ */
+export function documentBox(element: Locator): Promise<DocumentBox> {
+  return element.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      top: rect.top + window.scrollY,
+      left: rect.left + window.scrollX,
+      width: rect.width,
+      height: rect.height,
+    };
+  });
+}
+
+/** The furthest any edge of a box moved, after {@link drift}'s sub-pixel tolerance. */
+export function largestShift(before: DocumentBox, after: DocumentBox): number {
+  return Math.max(
+    ...(['top', 'left', 'width', 'height'] as const).map((edge) =>
+      Math.abs(drift(after[edge], before[edge])),
+    ),
+  );
+}
+
+/**
+ * {@link documentBox} once two consecutive readings agree — the baseline of a
+ * before/after pair, read the way {@link settledHeight} reads a height, so it
+ * cannot be a frame caught mid-layout. Assert the state first, then measure.
+ */
+export async function settledBox(element: Locator, what: string): Promise<DocumentBox> {
+  let previous: DocumentBox | null = null;
+  let settled: DocumentBox | null = null;
+
+  await expect
+    .poll(
+      async () => {
+        const box = await documentBox(element);
+        const agrees = previous !== null && box.height > 0 && largestShift(previous, box) === 0;
+        previous = box;
+        if (agrees) {
+          settled = box;
+        }
+        return agrees;
+      },
+      { message: `${what} settling to a stable box` },
+    )
+    .toBe(true);
+
+  return settled!;
+}
+
+/**
+ * Fails unless an element is exactly where it was and exactly as big, once
+ * whatever just changed has finished rendering. Polled for the reason
+ * {@link expectSameHeight} is: the only value it can settle to is the box it
+ * started with.
+ */
+export async function expectBoxUnmoved(
+  element: Locator,
+  box: DocumentBox,
+  what: string,
+): Promise<void> {
+  await expect
+    .poll(async () => largestShift(box, await documentBox(element)), {
+      message: `${what} (expected to stay at ${JSON.stringify(box)})`,
+    })
+    .toBe(0);
+}
