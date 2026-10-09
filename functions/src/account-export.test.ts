@@ -232,6 +232,26 @@ test('carries the experience points stored beside the totals', () => {
   assert.equal(result.gameplayStats?.['xp'], 640);
 });
 
+/**
+ * The bookkeeping `recordGameResult` keeps on the same document — the ids of
+ * the last twenty games banked, and how many banked on the UTC day of the
+ * latest — reaches the export the same way, and is pinned for the same reason:
+ * the Privacy Policy says "Download my data" returns them, and rebuilding
+ * `gameplayStats` from a list of known fields would drop them silently.
+ */
+test('carries the ring of recent game ids and the day count stored beside the totals', () => {
+  const recentGameIds = ['game-3', 'game-2', 'game-1'];
+  const dailyGames = { day: '2026-10-09', count: 3 };
+
+  const result = buildAccountExport({
+    ...base,
+    gameplayStats: { gamesPlayed: 3, recentGameIds, dailyGames },
+  });
+
+  assert.deepEqual(result.gameplayStats?.['recentGameIds'], recentGameIds);
+  assert.deepEqual(result.gameplayStats?.['dailyGames'], dailyGames);
+});
+
 test('reports an explicit null, not an absent key, when no game has been finished', () => {
   const result = buildAccountExport({ ...base, gameplayStats: null });
 

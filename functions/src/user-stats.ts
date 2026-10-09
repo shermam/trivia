@@ -61,12 +61,14 @@ export const recordGameResult = onCall(async (request) => {
   const ref = firestore.collection('users').doc(uid);
 
   try {
-    // A transaction, because the duplicate check and the increments have to be
-    // atomic against each other. Two `/game-over` reloads racing would
-    // otherwise both read "no such game id" and both bank it — which is
-    // precisely the case `lastGameId` exists to stop. The question counters
-    // are inside it for the same reason: a game counted into a question by a
-    // call that was then refused as a duplicate would be counted twice.
+    // A transaction, because the duplicate check, the two budgets and the
+    // increments have to be atomic against each other. Two `/game-over`
+    // reloads racing would otherwise both read "no such game id" and both bank
+    // it — which is precisely the case the ring of recent game ids exists to
+    // stop — and two calls racing at the 199th game of the day would both read
+    // room for one more. The question counters are inside it for the same
+    // reason: a game counted into a question by a call that was then refused
+    // as a duplicate would be counted twice.
     const outcome = await firestore.runTransaction((tx) =>
       applyGameResult(
         tx,
@@ -84,7 +86,18 @@ export const recordGameResult = onCall(async (request) => {
       // Not an error to the caller. A duplicate is the ordinary consequence of
       // reloading `/game-over`, which the app supports on purpose; a rejection
       // that surfaced as a failure would make a supported action look broken.
-      logger.info(`recordGameResult declined for uid=${uid}: ${outcome.reason}`);
+      // The reason is the answer, because the client says something different
+      // for each: nothing for a duplicate, and for `daily-limit` that the count
+      // starts again at midnight UTC (`AccountService`, `/profile`).
+      const line = `recordGameResult declined for uid=${uid}: ${outcome.reason}`;
+      // The daily ceiling sits where no honest player arrives
+      // (`daily-ceiling.ts`), so an account reaching it is worth seeing in the
+      // logs rather than among the reloads.
+      if (outcome.reason === 'daily-limit') {
+        logger.warn(line);
+      } else {
+        logger.info(line);
+      }
       return { recorded: false, reason: outcome.reason };
     }
 

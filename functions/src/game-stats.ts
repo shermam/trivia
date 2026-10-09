@@ -17,6 +17,13 @@ import {
   playRecordFrom,
 } from './play-history';
 import { type QuestionCounterIncrement, counterIncrementsFrom } from './question-counters';
+import { type DailyGames, nextDailyGames } from './daily-ceiling';
+import {
+  MAX_GAME_ID_LENGTH,
+  hasLegacyGameId,
+  recentGameIdsOf,
+  withRecentGame,
+} from './recent-games';
 
 /** The most questions a single game can hold — the setup form's own maximum. */
 export const MAX_QUESTIONS_PER_GAME = 25;
@@ -31,16 +38,18 @@ export const MAX_QUESTIONS_PER_GAME = 25;
  * invocation is already billed by the time this counter is read. The 61st call
  * costs exactly what the 1st did.
  *
- * What it does buy is **stat integrity**: `lastGameId` stops the same game
- * being banked twice, but nothing stops a client minting fresh ids in a loop
- * and inflating its own totals, and this is what bounds that. Quota on this
- * path is genuinely unprotected — closing it needs App Check or a
- * `maxInstances` ceiling, and neither is in this change. Do not read this
- * constant as discharging §4.1.
+ * What it does buy is **stat integrity**: the ring of recent game ids stops
+ * the same game being banked twice (`recent-games.ts`), but nothing stops a
+ * client minting fresh ids in a loop and inflating its own totals, and this is
+ * what bounds that by the hour — as `DAILY_GAME_CEILING` bounds it by the day
+ * (`daily-ceiling.ts`), which is what stops an hour's worth repeating around
+ * the clock. Between them they bound what one account can make this callable
+ * write; the invocation itself is still unprotected — closing that needs App
+ * Check or a `maxInstances` ceiling. Do not read either constant as
+ * discharging §4.1.
  *
  * 60/hour sits far above any real play rate — the shortest possible game is
- * five questions on a 15-second clock — and far below anything that distorts a
- * lifetime total.
+ * five questions on a 15-second clock.
  */
 export const MAX_GAMES_PER_WINDOW = 60;
 
@@ -58,14 +67,26 @@ export interface UserStats {
   correctAnswers: number;
   /** Longest run of consecutive correct answers **within a single game**. */
   bestStreak: number;
-  /** The last game banked, so a reload of `/game-over` cannot bank it twice. */
-  lastGameId: string;
+  /**
+   * The last games banked, newest first, so a reload of `/game-over` — or a
+   * second tab, or a retried call — cannot bank one twice (`recent-games.ts`).
+   */
+  recentGameIds: string[];
+  /** The games banked on one UTC day, against the daily ceiling (`daily-ceiling.ts`). */
+  dailyGames: DailyGames;
   /** When these totals started accumulating — what makes the word "lifetime" honest. */
   statsSince: number;
   updatedAt: number;
   rateWindowStart: number;
   gamesInWindow: number;
 }
+
+/**
+ * `users/{uid}` as the transaction reads it: any of the totals, possibly none
+ * of them, and — on a document no game has banked on since the ring replaced
+ * it — the single `lastGameId` the ring migrates from (`recent-games.ts`).
+ */
+export type StoredUserStats = Partial<UserStats> & { lastGameId?: unknown };
 
 /** What the client claims about a finished game. Bounded here; never trusted as given. */
 export interface GameResultSubmission {
@@ -91,12 +112,20 @@ export interface GameResultSubmission {
   answers?: PlayAnswer[] | null;
 }
 
-export type RejectionReason = 'invalid' | 'duplicate' | 'rate-limited';
+export type RejectionReason = 'invalid' | 'duplicate' | 'daily-limit' | 'rate-limited';
 
 export type StatsDecision =
   | {
       accepted: true;
+      /** The id this game banks under — the ring's newest entry, and its play-history document's id. */
+      gameId: string;
       stats: UserStats;
+      /**
+       * Whether the stored document still carries the `lastGameId` the ring
+       * replaced, which this write deletes — the migration's second half, the
+       * first being `recentGameIdsOf` reading it as a ring of one.
+       */
+      dropsLastGameId: boolean;
       /**
        * The play-history document to write beside the totals, or `null` when
        * the submission carried no per-answer records. Decided here so the
@@ -109,9 +138,9 @@ export type StatsDecision =
        * no history, or one drawn wholly from Open Trivia DB.
        *
        * **Only an accepted decision carries any**, which is the whole of how a
-       * refused submission moves no counter: a duplicate or a rate-limited
-       * call returns before this exists, so there is nothing for the
-       * transaction to apply.
+       * refused submission moves no counter: a duplicate, or a call over the
+       * daily ceiling or the hourly window, returns before this exists, so
+       * there is nothing for the transaction to apply.
        */
       counters: QuestionCounterIncrement[];
     }
@@ -139,7 +168,7 @@ export function isValidSubmission(submission: unknown): submission is GameResult
     unknown
   >;
 
-  if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > 128) {
+  if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > MAX_GAME_ID_LENGTH) {
     return false;
   }
   // It names `users/{uid}/plays/{gameId}` (`FEAT-049`). Every id the app mints
@@ -178,12 +207,18 @@ export function isValidSubmission(submission: unknown): submission is GameResult
 /**
  * The totals after banking one completed game, or the reason it was refused.
  *
- * **Order is load-bearing: the duplicate check runs before the rate window.**
- * A duplicate is the ordinary case this function exists for — `/game-over`
+ * **Order is load-bearing: the duplicate check runs before both budgets.** A
+ * duplicate is the ordinary case this function exists for — `/game-over`
  * survives a reload by design, and a callable that times out gets retried — so
  * charging it a slot would let a player with a flaky connection exhaust an
- * hour's budget on one game. Pinned by a test that submits a repeat id at a
- * full window and expects `duplicate`, not `rate-limited`.
+ * hour's budget on one game, and answering it `daily-limit` would have
+ * `/profile` tell a player that a game which counted did not. Pinned by tests
+ * that submit a repeat id at a full window and at a full day and expect
+ * `duplicate` both times.
+ *
+ * **The day is judged before the hour.** Over both, the day is the refusal
+ * that is still true an hour from now, and the one `/profile` can say
+ * something useful about — when the count starts again.
  *
  * **`current` may be a document that holds no totals at all.** A player who
  * chooses an avatar before finishing a game has a `users/{uid}` carrying only
@@ -195,7 +230,7 @@ export function isValidSubmission(submission: unknown): submission is GameResult
  * `undefined` field — every game that player finished, forever.
  */
 export function nextUserStats(
-  current: Partial<UserStats> | null,
+  current: StoredUserStats | null,
   submission: GameResultSubmission,
   nowMs: number,
 ): StatsDecision {
@@ -203,8 +238,17 @@ export function nextUserStats(
     return { accepted: false, reason: 'invalid' };
   }
 
-  if (current !== null && current.lastGameId === submission.gameId) {
+  // The last twenty games banked, the old single `lastGameId` read as a ring of
+  // one, and a malformed ring as none (`recent-games.ts`).
+  const recentGameIds = recentGameIdsOf(current);
+  if (recentGameIds.includes(submission.gameId)) {
     return { accepted: false, reason: 'duplicate' };
+  }
+
+  // A counter for another UTC day, or a malformed one, is no counter.
+  const dailyGames = nextDailyGames(current?.dailyGames, nowMs);
+  if (dailyGames === null) {
+    return { accepted: false, reason: 'daily-limit' };
   }
 
   // A window that has rolled starts again at zero. Comparing elapsed time
@@ -228,12 +272,14 @@ export function nextUserStats(
 
   return {
     accepted: true,
+    gameId: submission.gameId,
     stats: {
       gamesPlayed: (current?.gamesPlayed ?? 0) + 1,
       questionsAnswered: (current?.questionsAnswered ?? 0) + submission.totalQuestions,
       correctAnswers: (current?.correctAnswers ?? 0) + submission.correctAnswers,
       bestStreak: Math.max(current?.bestStreak ?? 0, submission.bestStreak),
-      lastGameId: submission.gameId,
+      recentGameIds: withRecentGame(recentGameIds, submission.gameId),
+      dailyGames,
       // Written once, on create, and never again — including when the clock
       // has gone backwards, which is why this reads the stored value rather
       // than `Math.min`.
@@ -242,13 +288,14 @@ export function nextUserStats(
       rateWindowStart: openWindowStart ?? nowMs,
       gamesInWindow: gamesInWindow + 1,
     },
+    dropsLastGameId: hasLegacyGameId(current),
     // Written in the same transaction as the totals and keyed by the same game
     // id, so the duplicate check above governs both: a retried call rewrites
     // nothing rather than appending a second copy of the round.
     play: playRecordFrom(submission.answers, nowMs),
     // Counted from the same validated records rather than from a second list
-    // the payload would have to carry, and decided only past the duplicate and
-    // rate checks above — so the `lastGameId` that stops a retried call
+    // the payload would have to carry, and decided only past the duplicate
+    // check and both budgets above — so the ring that stops a retried call
     // counting the game twice into the totals stops it counting twice here.
     counters: counterIncrementsFrom(submission.answers),
   };

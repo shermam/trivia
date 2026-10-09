@@ -12,6 +12,10 @@ import type { PlayAnswer } from './play-history';
 
 const NOW = 1_756_300_000_000;
 const HOUR = 60 * 60 * 1000;
+/** The UTC day `NOW` falls in — 27 August 2025, 13:06:40 UTC. */
+const TODAY = '2025-08-27';
+/** The first millisecond of the UTC day after `NOW`'s. */
+const NEXT_MIDNIGHT = Date.UTC(2025, 7, 28);
 
 function submission(overrides: Partial<GameResultSubmission> = {}): GameResultSubmission {
   return { gameId: 'game-1', totalQuestions: 10, correctAnswers: 7, bestStreak: 4, ...overrides };
@@ -23,7 +27,8 @@ function stored(overrides: Partial<UserStats> = {}): UserStats {
     questionsAnswered: 50,
     correctAnswers: 30,
     bestStreak: 6,
-    lastGameId: 'game-0',
+    recentGameIds: ['game-0'],
+    dailyGames: { day: TODAY, count: 3 },
     statsSince: NOW - 10 * HOUR,
     updatedAt: NOW - HOUR,
     rateWindowStart: NOW - 10 * 60 * 1000,
@@ -51,7 +56,8 @@ test('creates the document on a first game, starting the lifetime clock', () => 
   assert.equal(stats.questionsAnswered, 10);
   assert.equal(stats.correctAnswers, 7);
   assert.equal(stats.bestStreak, 4);
-  assert.equal(stats.lastGameId, 'game-1');
+  assert.deepEqual(stats.recentGameIds, ['game-1']);
+  assert.deepEqual(stats.dailyGames, { day: TODAY, count: 1 });
   assert.equal(stats.statsSince, NOW);
   assert.equal(stats.updatedAt, NOW);
   assert.equal(stats.gamesInWindow, 1);
@@ -81,8 +87,10 @@ test('banks a first game on a document holding only an avatar choice', () => {
   assert.equal(stats.statsSince, NOW);
   assert.equal(stats.rateWindowStart, NOW);
   assert.equal(stats.gamesInWindow, 1);
+  assert.deepEqual(stats.recentGameIds, ['game-1']);
+  assert.deepEqual(stats.dailyGames, { day: TODAY, count: 1 });
   for (const [field, value] of Object.entries(stats)) {
-    if (field !== 'lastGameId') {
+    if (field !== 'recentGameIds' && field !== 'dailyGames') {
       assert.ok(Number.isFinite(value), `${field} is ${String(value)}`);
     }
   }
@@ -108,6 +116,8 @@ test('adds one game to existing totals', () => {
   assert.equal(stats.questionsAnswered, 60);
   assert.equal(stats.correctAnswers, 37);
   assert.equal(stats.gamesInWindow, 4);
+  assert.deepEqual(stats.recentGameIds, ['game-1', 'game-0']);
+  assert.deepEqual(stats.dailyGames, { day: TODAY, count: 4 });
 });
 
 // `statsSince` is what makes "lifetime" honest — every existing player starts
@@ -175,17 +185,114 @@ test('accepts a zero streak alongside a non-zero score, which is what a pre-reca
 });
 
 // ---------------------------------------------------------------------------
-// Idempotency
+// Idempotency — the ring of recent game ids (`recent-games.ts`). The ring's own
+// arithmetic is `recent-games.test.ts`'s; what is pinned here is the decision
+// that reads it.
 // ---------------------------------------------------------------------------
 
 test('refuses a game id already banked', () => {
   const decision = nextUserStats(
-    stored({ lastGameId: 'game-1' }),
+    stored({ recentGameIds: ['game-1'] }),
     submission({ gameId: 'game-1' }),
     NOW,
   );
 
   assert.deepEqual(decision, { accepted: false, reason: 'duplicate' });
+});
+
+/**
+ * Banks each id in turn, feeding the totals each accepted game produces into
+ * the next decision — the way the transaction does — and returns every
+ * decision.
+ */
+function bankInTurn(gameIds: string[], from: Partial<UserStats> | null = null) {
+  let current = from;
+  return gameIds.map((gameId) => {
+    const decision = nextUserStats(current, submission({ gameId }), NOW);
+    if (decision.accepted) {
+      // The hourly window is not this test's subject; holding it open keeps a
+      // long sequence from running into it.
+      current = { ...decision.stats, gamesInWindow: 0 };
+    }
+    return decision;
+  });
+}
+
+/**
+ * **The defect the ring replaces `lastGameId` to close.** One stored id stopped
+ * an immediate repeat and nothing else, so banking A, then B, then A again
+ * counted A twice — reproduced in review, and reachable without forging
+ * anything: a results screen left open in one tab re-sends its game on a
+ * reload after a second tab has banked another.
+ */
+test('refuses A after B after A — a repeat that is not the immediate one', () => {
+  const [a, b, again] = bankInTurn(['game-a', 'game-b', 'game-a']);
+
+  assert.equal(a.accepted, true);
+  assert.equal(b.accepted, true);
+  assert.deepEqual(again, { accepted: false, reason: 'duplicate' });
+});
+
+/**
+ * **The ring's boundary, through the decision.** An id nineteen games back is
+ * the twentieth entry and still refused; twenty games back it has fallen out,
+ * and the id banks again. Twenty is written out rather than read from the
+ * module, so shrinking the ring fails here.
+ */
+test('refuses an id nineteen games back, and banks one twenty games back', () => {
+  const others = (count: number) =>
+    Array.from({ length: count }, (_, index) => `game-${index + 2}`);
+
+  const nineteen = bankInTurn(['game-1', ...others(19), 'game-1']);
+  assert.ok(nineteen.slice(0, 20).every((decision) => decision.accepted));
+  assert.deepEqual(nineteen[20], { accepted: false, reason: 'duplicate' });
+
+  const twenty = bankInTurn(['game-1', ...others(20), 'game-1']);
+  assert.ok(twenty.every((decision) => decision.accepted));
+});
+
+/**
+ * **The migration, in place.** A document written before the ring carries
+ * only `lastGameId`: it is read as a ring of one — so the game it names is
+ * still a duplicate — and the decision that banks the next game says the field
+ * goes (`game-result.ts` deletes it in the same write).
+ */
+test('reads a pre-ring lastGameId as a ring of one, and retires it on the next bank', () => {
+  const legacy = { ...stored(), recentGameIds: undefined, lastGameId: 'game-old' };
+
+  assert.deepEqual(nextUserStats(legacy, submission({ gameId: 'game-old' }), NOW), {
+    accepted: false,
+    reason: 'duplicate',
+  });
+
+  const decision = nextUserStats(legacy, submission({ gameId: 'game-new' }), NOW);
+  assert.ok(decision.accepted);
+  assert.deepEqual(decision.stats.recentGameIds, ['game-new', 'game-old']);
+  assert.equal(decision.dropsLastGameId, true);
+  assert.equal(decision.gameId, 'game-new');
+});
+
+test('has no lastGameId to retire on a document that never carried one', () => {
+  const decision = nextUserStats(stored(), submission(), NOW);
+
+  assert.ok(decision.accepted);
+  assert.equal(decision.dropsLastGameId, false);
+
+  const first = nextUserStats(null, submission(), NOW);
+  assert.ok(first.accepted);
+  assert.equal(first.dropsLastGameId, false);
+});
+
+test('reads a malformed ring as empty rather than refusing every game', () => {
+  const stats = accept(
+    nextUserStats(
+      stored({ recentGameIds: 'game-1' as unknown as string[] }),
+      submission({ gameId: 'game-1' }),
+      NOW,
+    ),
+  );
+
+  assert.deepEqual(stats.recentGameIds, ['game-1']);
 });
 
 /**
@@ -196,11 +303,85 @@ test('refuses a game id already banked', () => {
  * the wrong reason and the wrong outcome.
  */
 test('a duplicate at a full window is refused as a duplicate, and consumes no budget', () => {
-  const current = stored({ lastGameId: 'game-1', gamesInWindow: MAX_GAMES_PER_WINDOW });
+  const current = stored({ recentGameIds: ['game-1'], gamesInWindow: MAX_GAMES_PER_WINDOW });
   const decision = nextUserStats(current, submission({ gameId: 'game-1' }), NOW);
 
   assert.deepEqual(decision, { accepted: false, reason: 'duplicate' });
   assert.equal(current.gamesInWindow, MAX_GAMES_PER_WINDOW, 'the stored counter must not move');
+});
+
+// ---------------------------------------------------------------------------
+// The daily ceiling (`daily-ceiling.ts`): two hundred games per UTC day. The
+// counter's own arithmetic is `daily-ceiling.test.ts`'s; what is pinned here is
+// the decision that reads it, and where it sits among the others. The numbers
+// are written out, so moving the ceiling fails here.
+// ---------------------------------------------------------------------------
+
+test('banks the 200th game of the UTC day', () => {
+  const stats = accept(
+    nextUserStats(stored({ dailyGames: { day: TODAY, count: 199 } }), submission(), NOW),
+  );
+
+  assert.deepEqual(stats.dailyGames, { day: TODAY, count: 200 });
+  assert.equal(stats.gamesPlayed, 6);
+});
+
+test('refuses the 201st game of the UTC day, as daily-limit', () => {
+  const decision = nextUserStats(
+    stored({ dailyGames: { day: TODAY, count: 200 } }),
+    submission(),
+    NOW,
+  );
+
+  assert.deepEqual(decision, { accepted: false, reason: 'daily-limit' });
+});
+
+test('counts again from midnight UTC, whatever the day before reached', () => {
+  const stats = accept(
+    nextUserStats(stored({ dailyGames: { day: TODAY, count: 200 } }), submission(), NEXT_MIDNIGHT),
+  );
+
+  assert.deepEqual(stats.dailyGames, { day: '2025-08-28', count: 1 });
+});
+
+/**
+ * **A reload of `/game-over` after the day's last game is still a duplicate.**
+ * The ring is checked before the ceiling, so the 200th game's results screen
+ * reloaded reads as banked — `daily-limit` there would have `/profile` tell
+ * the player that a game which counted did not.
+ */
+test('a duplicate at a full day is refused as a duplicate, not as the day', () => {
+  const decision = nextUserStats(
+    stored({ recentGameIds: ['game-1'], dailyGames: { day: TODAY, count: 200 } }),
+    submission({ gameId: 'game-1' }),
+    NOW,
+  );
+
+  assert.deepEqual(decision, { accepted: false, reason: 'duplicate' });
+});
+
+/**
+ * Over both budgets, the day is the refusal still true an hour from now, and
+ * the one `/profile` can say something useful about.
+ */
+test('a game over both the day and the hour is refused for the day', () => {
+  const decision = nextUserStats(
+    stored({ dailyGames: { day: TODAY, count: 200 }, gamesInWindow: MAX_GAMES_PER_WINDOW }),
+    submission(),
+    NOW,
+  );
+
+  assert.deepEqual(decision, { accepted: false, reason: 'daily-limit' });
+});
+
+test('a full hour on a day with room left is still refused for the hour', () => {
+  const decision = nextUserStats(
+    stored({ dailyGames: { day: TODAY, count: 60 }, gamesInWindow: MAX_GAMES_PER_WINDOW }),
+    submission(),
+    NOW,
+  );
+
+  assert.deepEqual(decision, { accepted: false, reason: 'rate-limited' });
 });
 
 // ---------------------------------------------------------------------------
@@ -315,7 +496,8 @@ test('refuses a missing, empty or over-long game id', () => {
 
 test('accepts a game id at exactly the length limit', () => {
   assert.equal(
-    accept(nextUserStats(null, submission({ gameId: 'x'.repeat(128) }), NOW)).lastGameId.length,
+    accept(nextUserStats(null, submission({ gameId: 'x'.repeat(128) }), NOW)).recentGameIds[0]
+      .length,
     128,
   );
 });
@@ -448,7 +630,9 @@ test('refuses a game id that is not usable as a document id', () => {
 
 test('accepts a game id that merely looks unusual', () => {
   for (const good of ['a.b', '_leading-underscore', '__only-leading', 'trailing__']) {
-    assert.equal(accept(nextUserStats(null, submission({ gameId: good }), NOW)).lastGameId, good);
+    assert.deepEqual(accept(nextUserStats(null, submission({ gameId: good }), NOW)).recentGameIds, [
+      good,
+    ]);
   }
 });
 
@@ -480,16 +664,20 @@ test('an accepted game with no history carries no increment', () => {
 /**
  * A refusal is a bare reason and nothing else — no totals, no play, no
  * counters — which is what lets the transaction apply a decision without
- * asking how it was reached. Pinned for both refusals that a real client meets:
- * a reload of `/game-over` and a full window.
+ * asking how it was reached. Pinned for the three refusals a real client
+ * meets: a reload of `/game-over`, a full day and a full window.
  */
 test('a refused game carries no increment, whatever its answers named', () => {
   const answers = [playAnswer({ questionId: 'bank-a' }), playAnswer({ questionId: 'bank-b' })];
   const game = twoQuestionGame(answers);
 
-  assert.deepEqual(nextUserStats(stored({ lastGameId: game.gameId }), game, NOW), {
+  assert.deepEqual(nextUserStats(stored({ recentGameIds: [game.gameId] }), game, NOW), {
     accepted: false,
     reason: 'duplicate',
+  });
+  assert.deepEqual(nextUserStats(stored({ dailyGames: { day: TODAY, count: 200 } }), game, NOW), {
+    accepted: false,
+    reason: 'daily-limit',
   });
   assert.deepEqual(nextUserStats(stored({ gamesInWindow: MAX_GAMES_PER_WINDOW }), game, NOW), {
     accepted: false,
