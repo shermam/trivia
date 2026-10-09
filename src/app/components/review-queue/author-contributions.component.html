@@ -1,0 +1,412 @@
+<section data-cy="author-view" aria-labelledby="author-view-heading">
+  <button
+    type="button"
+    data-cy="close-author-view"
+    (click)="back()"
+    [disabled]="inFlight()"
+    class="inline-flex items-center gap-1.5 mb-4 text-sm font-semibold text-slate-600 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-400 transition-colors disabled:opacity-50"
+  >
+    <app-icon name="arrow-left" [size]="15" />
+    Back to {{ returnLabel() }}
+  </button>
+
+  <!-- Focused when the view opens, so it is announced by name: the queue the
+       reviewer was reading has just been replaced under them. -->
+  <h2
+    #heading
+    id="author-view-heading"
+    tabindex="-1"
+    data-cy="author-view-heading"
+    class="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 focus:outline-none"
+  >
+    Everything this account contributed
+  </h2>
+
+  <!--
+    How the account is named: by the question the reviewer opened this from,
+    never by its uid (`FEAT-006` §0). Clamped, because a question may run to
+    2,000 characters and this is a label for the set rather than the question
+    itself — which is in the list below, whole.
+  -->
+  <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">The account that wrote:</p>
+  <div
+    data-cy="author-view-anchor"
+    class="mt-1 line-clamp-3 border-l-2 border-slate-300 dark:border-slate-700 pl-3 text-sm text-slate-700 dark:text-slate-200"
+  >
+    <app-rendered-text [text]="anchor().question" [format]="anchor().format" />
+  </div>
+  <p class="mt-3 mb-6 text-sm text-slate-500 dark:text-slate-400">
+    Every status, newest first, {{ pageSize }} to a page. Rejecting stops a question being served
+    and shows your reason to its author; nothing is deleted, and any of them can be approved again
+    from the Rejected tab. Suspending or deleting the account itself is not done here — the site
+    owner does that in the Firebase console.
+  </p>
+
+  <!--
+    One grid cell holding every message the read can end in, rendered from the
+    view's first paint and switched with `invisible` rather than `@if`, so the
+    loaded and empty faces occupy the space the loading face already had
+    (`CLAUDE.md` §4.4). Every face is a fixed sentence — the page label is the
+    one that varies, and only in its numbers — so the reservation is true from
+    the first frame rather than once an error arrives.
+
+    `role="status"` on the container: a hidden face is out of the accessibility
+    tree, so the region says whichever message is showing, and the change is
+    what gets announced. `tabindex="-1"` because paging and retrying hand focus
+    here before they disable the button that was pressed.
+  -->
+  <div
+    #statusBlock
+    role="status"
+    tabindex="-1"
+    data-cy="author-status"
+    class="grid mb-4 focus:outline-none"
+  >
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="statusView() !== 'loading'"
+      data-cy="author-loading"
+    >
+      Loading this account’s contributions…
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="statusView() !== 'empty' || pageIndex() > 0"
+      data-cy="author-empty"
+    >
+      Nothing this account contributed is in the bank any more.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="statusView() !== 'empty' || pageIndex() === 0"
+      data-cy="author-empty-older"
+    >
+      There is nothing older from this account.
+    </p>
+    <div
+      class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
+      [class.invisible]="statusView() !== 'failed'"
+      data-cy="author-failed"
+    >
+      <p class="text-sm text-red-700 dark:text-red-300">
+        Could not load this account’s contributions.
+      </p>
+      <button
+        type="button"
+        data-cy="author-retry"
+        (click)="retry()"
+        class="text-sm font-semibold text-red-700 dark:text-red-300 hover:underline"
+      >
+        Try again
+      </button>
+    </div>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="statusView() !== 'loaded'"
+      data-cy="author-summary"
+    >
+      {{ pageLabel() }}
+    </p>
+  </div>
+
+  <!-- The outcome of a bulk action, announced (`CLAUDE.md` §4.5). Permanent,
+       and only its text changes, so the change is what gets read out. -->
+  <p role="status" class="sr-only" data-cy="author-announcement">{{ announcement() }}</p>
+
+  @if (rows().length > 0) {
+    <!--
+      The one action, on the set. Rendered with the first page and kept across
+      every later one, so nothing above the list moves when a page or an
+      outcome lands.
+    -->
+    <div
+      data-cy="bulk-bar"
+      class="mb-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5"
+    >
+      <label
+        class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200"
+      >
+        <input
+          #selectAll
+          type="checkbox"
+          data-cy="select-all"
+          class="h-4 w-4 accent-emerald-600"
+          [checked]="allSelected()"
+          [indeterminate]="someSelected()"
+          [disabled]="isBusy() || selectable().length === 0"
+          aria-describedby="author-selection-line"
+          (change)="toggleAll()"
+        />
+        Select all on this page
+      </label>
+
+      <!--
+        What the selection is, what the action is doing, and what it did, in
+        one grid cell — so the line is as tall as the longest of them and the
+        list under it never moves when one replaces another (`CLAUDE.md`
+        §4.4). The longest is a partial failure, whose length depends on its
+        numbers, so an invisible copy written with the widest numbers a page
+        can produce holds its place from the first frame.
+      -->
+      <div
+        id="author-selection-line"
+        data-cy="selection-line"
+        class="grid mt-2 text-sm tabular-nums"
+      >
+        <p
+          class="col-start-1 row-start-1 text-slate-600 dark:text-slate-300"
+          [class.invisible]="selectionLine() !== 'count'"
+          data-cy="selection-count"
+        >
+          {{ selectedCount() }} of {{ selectable().length }} selected
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-slate-600 dark:text-slate-300"
+          [class.invisible]="selectionLine() !== 'nothing-to-reject'"
+          data-cy="selection-nothing"
+        >
+          Everything on this page is already rejected.
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-slate-600 dark:text-slate-300"
+          [class.invisible]="selectionLine() !== 'progress'"
+          data-cy="selection-progress"
+        >
+          Rejecting… {{ progress()?.done ?? 0 }} of {{ progress()?.total ?? 0 }}
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-slate-700 dark:text-slate-200"
+          [class.invisible]="selectionLine() !== 'outcome'"
+          data-cy="selection-outcome"
+        >
+          {{ outcome() }}
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-red-700 dark:text-red-300"
+          [class.invisible]="selectionLine() !== 'error'"
+          data-cy="selection-error"
+        >
+          Select at least one question to reject.
+        </p>
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ longestOutcome }}</p>
+      </div>
+
+      <!--
+        Required, unlike the single decision's box: one reason is going on
+        every question this rejects, and a set of silent rejections is exactly
+        what an author could not act on. The same field, the same bound as the
+        rules (`FEAT-007`), checked here so an over-long note is a named error
+        rather than fifty bare refusals.
+      -->
+      <label
+        for="author-bulk-reason"
+        class="block mt-4 mb-1 text-xs font-semibold text-slate-500 dark:text-slate-400"
+      >
+        Reason for rejecting <span class="font-normal">(required)</span>
+      </label>
+      <textarea
+        #reasonBox
+        id="author-bulk-reason"
+        data-cy="bulk-reason"
+        rows="2"
+        required
+        [value]="reason()"
+        [readOnly]="inFlight()"
+        (input)="setReason($any($event.target).value)"
+        [attr.aria-invalid]="reasonError() !== null"
+        [attr.aria-describedby]="
+          reasonError()
+            ? 'author-bulk-reason-hint author-bulk-reason-error'
+            : 'author-bulk-reason-hint'
+        "
+        class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+      ></textarea>
+      <p id="author-bulk-reason-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        Shown to the author on every question this rejects.
+      </p>
+      <!--
+        The box's error lands in a line held for it from the first frame — the
+        same cell as invisible copies of both its messages, so the line is as
+        tall as the longer of them — because the Reject button under it is the
+        control the reviewer has just pressed, and an error pushing it and
+        every row below down a line, then pulling them back on the first
+        keystroke, is the jump `CLAUDE.md` §4.4 forbids.
+      -->
+      <div data-cy="bulk-reason-error-line" class="grid mt-1.5 text-sm">
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonMissing }}</p>
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonTooLong }}</p>
+        @if (reasonError(); as error) {
+          <p
+            id="author-bulk-reason-error"
+            data-cy="bulk-reason-error"
+            class="col-start-1 row-start-1 text-red-700 dark:text-red-300"
+          >
+            {{ error }}
+          </p>
+        }
+      </div>
+
+      <!--
+        `aria-disabled` rather than `disabled` while the writes are out: the
+        reviewer's focus is on this button, and disabling the focused control
+        drops focus to `<body>` (`CLAUDE.md` §4.4). Both labels are stacked in
+        one cell so the button is one width throughout.
+      -->
+      <button
+        type="button"
+        data-cy="bulk-reject"
+        [attr.aria-disabled]="inFlight() || null"
+        (click)="rejectSelected()"
+        class="mt-3 inline-grid rounded-lg border border-red-300 dark:border-red-500/40 px-3 py-1.5 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 aria-disabled:opacity-60"
+      >
+        <span class="col-start-1 row-start-1" [class.invisible]="inFlight()">Reject selected</span>
+        <span class="col-start-1 row-start-1" [class.invisible]="!inFlight()">Rejecting…</span>
+      </button>
+    </div>
+
+    <ul
+      class="space-y-3"
+      data-cy="author-questions"
+      aria-label="This account’s contributions on this page"
+      [attr.aria-busy]="isLoading() || null"
+    >
+      <!-- Tracked by the document id, never by the question text: two
+           questions with the same wording are still two questions
+           (`CLAUDE.md` §4.4). -->
+      @for (question of rows(); track question.id; let index = $index) {
+        <li
+          data-cy="author-question"
+          [attr.data-question-id]="question.id"
+          class="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"
+        >
+          <!-- A 40px target around a 16px box. Named by its position, and
+               described by the question and its status, so a screen reader
+               hears what it is selecting. -->
+          <label class="-m-2 flex h-10 w-10 shrink-0 items-center justify-center">
+            <input
+              type="checkbox"
+              data-cy="author-select"
+              class="h-4 w-4 accent-emerald-600"
+              [checked]="isSelected(question)"
+              [disabled]="!canSelect(question)"
+              [attr.aria-describedby]="
+                'author-question-' + question.id + ' author-question-status-' + question.id
+              "
+              (change)="toggle(question, $any($event.target).checked)"
+            />
+            <span class="sr-only">Select question {{ index + 1 }}</span>
+          </label>
+
+          <div class="min-w-0 flex-1">
+            <!-- Wraps the way `/my-questions`' row does, so a long question keeps
+                 the full width on a phone and the pill drops under it. The
+                 pill is one width in every state, so a status change can never
+                 change where it wraps. -->
+            <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+              <!-- A `<div>`, not a `<p>`: a Markdown question renders block
+                   content a paragraph may not contain (`FEAT-019`). -->
+              <div
+                [id]="'author-question-' + question.id"
+                class="min-w-0 font-semibold text-slate-900 dark:text-slate-50"
+              >
+                <app-rendered-text [text]="question.question" [format]="question.format" />
+              </div>
+              <!--
+                The words and colours `/my-questions` shows the author, with
+                every label stacked in one cell, so the pill is one width
+                whatever it says: a narrower one would hand the question text
+                more room the moment a bulk action rejected it, re-wrapping
+                the row and moving every row under it (`CLAUDE.md` §4.4).
+              -->
+              <span
+                [id]="'author-question-status-' + question.id"
+                data-cy="author-question-status"
+                [attr.data-status]="question.status ?? 'unknown'"
+                class="grid shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold tracking-wide"
+                [class.bg-amber-100]="question.status === 'pending'"
+                [class.text-amber-800]="question.status === 'pending'"
+                [class.dark:bg-amber-500/15]="question.status === 'pending'"
+                [class.dark:text-amber-300]="question.status === 'pending'"
+                [class.bg-emerald-100]="question.status === 'approved'"
+                [class.text-emerald-800]="question.status === 'approved'"
+                [class.dark:bg-emerald-500/15]="question.status === 'approved'"
+                [class.dark:text-emerald-300]="question.status === 'approved'"
+                [class.bg-red-100]="question.status === 'rejected'"
+                [class.text-red-800]="question.status === 'rejected'"
+                [class.dark:bg-red-500/15]="question.status === 'rejected'"
+                [class.dark:text-red-300]="question.status === 'rejected'"
+                [class.bg-slate-100]="!question.status"
+                [class.text-slate-700]="!question.status"
+                [class.dark:bg-slate-800]="!question.status"
+                [class.dark:text-slate-300]="!question.status"
+              >
+                <span
+                  class="col-start-1 row-start-1 text-center"
+                  [class.invisible]="question.status !== 'pending'"
+                  >Pending review</span
+                >
+                <span
+                  class="col-start-1 row-start-1 text-center"
+                  [class.invisible]="question.status !== 'approved'"
+                  >Approved</span
+                >
+                <span
+                  class="col-start-1 row-start-1 text-center"
+                  [class.invisible]="question.status !== 'rejected'"
+                  >Rejected</span
+                >
+                <span
+                  class="col-start-1 row-start-1 text-center"
+                  [class.invisible]="!!question.status"
+                  >Unknown</span
+                >
+              </span>
+            </div>
+
+            <dl
+              class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400"
+            >
+              <div class="flex gap-1">
+                <dt>Submitted:</dt>
+                <dd>{{ submittedAt(question) }}</dd>
+              </div>
+              <div class="flex gap-1">
+                <dt>Difficulty:</dt>
+                <dd>{{ question.difficulty }}</dd>
+              </div>
+            </dl>
+
+            <app-question-tags
+              [tags]="topicsOf(question)"
+              label="Topics"
+              testId="author-question-tags"
+            />
+          </div>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (hasPages()) {
+    <div data-cy="author-paging" class="mt-6 flex flex-wrap items-center justify-between gap-3">
+      <button
+        type="button"
+        data-cy="author-newer"
+        (click)="newer()"
+        [disabled]="pageIndex() === 0 || isBusy()"
+        class="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+      >
+        Newer contributions
+      </button>
+      <button
+        type="button"
+        data-cy="author-older"
+        (click)="older()"
+        [disabled]="next() === null || isBusy()"
+        class="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+      >
+        Older contributions
+      </button>
+    </div>
+  }
+</section>

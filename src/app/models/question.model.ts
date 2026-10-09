@@ -419,6 +419,20 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
 }
 
 /**
+ * What `deleteAccount` writes into `createdBy` when an author erases their
+ * account — `ANONYMISED_AUTHOR` in `functions/src/account-policy.ts`, and the
+ * value `firestore.rules`' `isQuestionAuthor()` refuses by name. The question
+ * survives; the person does not.
+ *
+ * **Not a uid, so nothing that looks an account up by it may treat it as one.**
+ * Every erased author shares it, so "everything this account contributed"
+ * (`FEAT-006`) asked of the sentinel would be the contributions of everybody
+ * who ever left, presented as one account's. `firestore-tests` pins the three
+ * copies equal, since nothing else would notice them drift.
+ */
+export const DELETED_AUTHOR = '[deleted-user]';
+
+/**
  * What the client writes. `firestore.rules` requires `createdBy` to equal the
  * caller's own uid and `createdAt` to sit near server time, so neither can be
  * spoofed or backdated — see `isValidCustomQuestion()`.

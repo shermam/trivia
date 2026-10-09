@@ -954,3 +954,227 @@ describe('ReviewQueueComponent rejected tab, rendered', () => {
     expect(host.querySelector<HTMLTextAreaElement>('[data-cy="rejection-reason"]')!.value).toBe('');
   });
 });
+
+/**
+ * `FEAT-006`: the way into everything one account contributed, and back.
+ *
+ * The view itself is `author-contributions.component.spec.ts`'s. What is
+ * pinned here is the queue's half: which cards offer the way in (an account
+ * has to be there to look up), that a non-reviewer is offered nothing, that
+ * the queue is hidden rather than destroyed while the view is open, that a
+ * bulk action brings the queue's own copies up to date without a second read,
+ * and where focus goes on the way back.
+ */
+describe('ReviewQueueComponent: everything one account contributed (FEAT-006)', () => {
+  const AUTHOR = 'author-uid-x91';
+
+  async function renderQueue(
+    options: {
+      pending?: Q[];
+      reports?: QuestionReport[];
+      questionsById?: Q[];
+      isReviewer?: boolean;
+      byAuthor?: Q[];
+    } = {},
+  ) {
+    const getQuestionsByAuthor = vi.fn((_uid: string) =>
+      Promise.resolve({ questions: options.byAuthor ?? [], next: null }),
+    );
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: FirebaseService,
+          useValue: {
+            getQuestionsByStatus: (status: QuestionStatus) =>
+              of(status === 'pending' ? (options.pending ?? []) : []),
+            getQuestionsByIds: (ids: string[]) =>
+              of((options.questionsById ?? []).filter((q) => ids.includes(q.id))),
+            setQuestionStatus: vi.fn(() => Promise.resolve()),
+            getQuestionsByAuthor,
+            rejectQuestions: vi.fn(),
+          },
+        },
+        {
+          provide: ReviewerService,
+          useValue: {
+            isReviewer: signal(options.isReviewer ?? true),
+            isResolved: signal(true),
+            getQuestionReports: () =>
+              Promise.resolve({ reports: options.reports ?? [], next: null }),
+          },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(ReviewQueueComponent);
+    // A few passes, each ending on a macrotask: the reports tab reads twice in
+    // sequence (the page, then its questions), and `whenStable` does not wait
+    // on a promise chain nothing registered as pending work.
+    const settle = async () => {
+      for (let pass = 0; pass < 3; pass++) {
+        fixture.detectChanges();
+        await fixture.whenStable();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      fixture.detectChanges();
+    };
+    await settle();
+    return {
+      fixture,
+      host: fixture.nativeElement as HTMLElement,
+      component: fixture.componentInstance as never as InternalReviewQueue & {
+        applyBulkRejection(event: { ids: readonly string[]; reason: string }): void;
+      },
+      getQuestionsByAuthor,
+      settle,
+    };
+  }
+
+  function openers(host: HTMLElement): HTMLButtonElement[] {
+    return [...host.querySelectorAll<HTMLButtonElement>('[data-cy="open-author-view"]')];
+  }
+
+  it('offers the way in on a card with an account behind it, and on no other', async () => {
+    const { host } = await renderQueue({
+      pending: [
+        question('attributed', { createdBy: AUTHOR, createdAt: 3 }),
+        question('unattributed', { createdAt: 2 }),
+        question('erased', { createdBy: '[deleted-user]', createdAt: 1 }),
+      ],
+    });
+
+    const cards = [...host.querySelectorAll<HTMLElement>('[data-cy="review-question"]')];
+    expect(cards).toHaveLength(3);
+    const offering = cards.filter((card) => card.querySelector('[data-cy="open-author-view"]'));
+    expect(offering.map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Q attributed?'),
+    ]);
+  });
+
+  /**
+   * The UI half of the gate, which is the reviewer branch the whole page is
+   * already behind — the same `user_roles` document the rules read. A
+   * non-reviewer is shown no card, so no way in, and the rules refuse the read
+   * regardless (`firestore-tests`).
+   */
+  it('offers a non-reviewer nothing at all', async () => {
+    const { host } = await renderQueue({
+      isReviewer: false,
+      pending: [question('attributed', { createdBy: AUTHOR })],
+    });
+
+    expect(openers(host)).toHaveLength(0);
+    expect(host.querySelector('app-author-contributions')).toBeNull();
+  });
+
+  it('opens the account from a card, hiding the queue rather than destroying it', async () => {
+    const { host, getQuestionsByAuthor, settle } = await renderQueue({
+      pending: [question('p1', { createdBy: AUTHOR })],
+      byAuthor: [question('p1', { createdBy: AUTHOR })],
+    });
+
+    openers(host)[0].click();
+    await settle();
+
+    expect(getQuestionsByAuthor).toHaveBeenCalledWith(AUTHOR, undefined);
+    expect(host.querySelector('[data-cy="author-view"]')).not.toBeNull();
+    const queue = host.querySelector<HTMLElement>('[data-cy="review-queue-body"]')!;
+    expect(queue.hidden).toBe(true);
+    // Still there: the card, its drafts and the button that opened the view.
+    expect(queue.querySelector('[data-cy="review-question"]')).not.toBeNull();
+    expect(host.querySelector('[data-cy="close-author-view"]')?.textContent).toContain(
+      'Back to Pending',
+    );
+  });
+
+  it('opens the account from a report, too', async () => {
+    const { host, getQuestionsByAuthor, settle } = await renderQueue({
+      reports: [report('r1', { questionId: 'p1' })],
+      questionsById: [question('p1', { createdBy: AUTHOR })],
+    });
+    host.querySelector<HTMLElement>('[data-cy="review-tab"][data-status="reports"]')!.click();
+    await settle();
+
+    openers(host)[0].click();
+    await settle();
+
+    expect(getQuestionsByAuthor).toHaveBeenCalledWith(AUTHOR, undefined);
+    expect(host.querySelector('[data-cy="close-author-view"]')?.textContent).toContain(
+      'Back to Reports',
+    );
+  });
+
+  it('takes a bulk-rejected question out of Pending without reading the tab again', async () => {
+    const { component, host, settle } = await renderQueue({
+      pending: [question('p1', { createdBy: AUTHOR }), question('p2', { createdBy: 'other' })],
+    });
+    openers(host)[0].click();
+    await settle();
+
+    component.applyBulkRejection({ ids: ['p1'], reason: 'Spam account.' });
+
+    expect(component.questions().map((q) => q.id)).toEqual(['p2']);
+  });
+
+  it('updates a report row’s question in place rather than dropping the report', async () => {
+    const { component, host, settle } = await renderQueue({
+      reports: [report('r1', { questionId: 'p1' }), report('r2', { questionId: 'p1' })],
+      questionsById: [question('p1', { createdBy: AUTHOR })],
+    });
+    host.querySelector<HTMLElement>('[data-cy="review-tab"][data-status="reports"]')!.click();
+    await settle();
+    openers(host)[0].click();
+    await settle();
+
+    component.applyBulkRejection({ ids: ['p1'], reason: 'Spam account.' });
+
+    expect(
+      component
+        .reports()
+        .map((row) => [row.report.id, row.question?.status, row.question?.rejectionReason]),
+    ).toEqual([
+      ['r1', 'rejected', 'Spam account.'],
+      ['r2', 'rejected', 'Spam account.'],
+    ]);
+  });
+
+  /**
+   * Focus goes back to the button that was pressed — after the render, since
+   * until then the queue is still hidden — and to the tab when that button has
+   * gone with its row. jsdom enforces neither `hidden` nor detachment in
+   * `focus()`, so this pins the choice of target; `review-author-view.spec.ts`
+   * proves the browser honours it.
+   */
+  it('returns focus to the button that opened the view', async () => {
+    const { host, settle } = await renderQueue({
+      pending: [question('p1', { createdBy: AUTHOR })],
+    });
+    const opener = openers(host)[0];
+    opener.click();
+    await settle();
+
+    host.querySelector<HTMLElement>('[data-cy="close-author-view"]')!.click();
+    await settle();
+
+    expect(host.querySelector('[data-cy="author-view"]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-cy="review-queue-body"]')!.hidden).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('returns focus to the tab when the opener left with its row', async () => {
+    const { component, host, settle } = await renderQueue({
+      pending: [question('p1', { createdBy: AUTHOR })],
+    });
+    openers(host)[0].click();
+    await settle();
+    component.applyBulkRejection({ ids: ['p1'], reason: 'Spam account.' });
+    await settle();
+
+    host.querySelector<HTMLElement>('[data-cy="close-author-view"]')!.click();
+    await settle();
+
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-cy="review-tab"][data-status="pending"]'),
+    );
+  });
+});

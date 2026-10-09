@@ -2,17 +2,21 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  Injector,
   OnInit,
+  afterNextRender,
   computed,
   inject,
   signal,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import {
   CustomQuestionDoc,
+  DELETED_AUTHOR,
   QuestionReport,
   QuestionReportReason,
   QuestionStatus,
@@ -25,6 +29,7 @@ import {
 import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
 import { topicTagsOf } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
+import { AuthorContributionsComponent, BulkRejection } from './author-contributions.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
@@ -39,6 +44,19 @@ export type ReviewView = QuestionStatus | 'reports';
 export interface ReportRow {
   report: QuestionReport;
   question: ReviewQuestion | null;
+}
+
+/**
+ * The per-author view, while it is open (`FEAT-006`): whose contributions, the
+ * question it was opened from, the tab to go back to, and the button to hand
+ * focus back to.
+ */
+interface AuthorViewState {
+  /** The author's uid — a filter value for the read, never rendered. */
+  readonly uid: string;
+  readonly anchor: ReviewQuestion;
+  readonly returnTo: ReviewView;
+  readonly opener: HTMLElement | null;
 }
 
 /** The views, in the order the picker offers them. */
@@ -78,6 +96,7 @@ const REASON_LABELS: Record<QuestionReportReason, string> = {
   imports: [
     NgTemplateOutlet,
     RouterLink,
+    AuthorContributionsComponent,
     IconComponent,
     SourceLinkComponent,
     QuestionJustificationComponent,
@@ -90,6 +109,15 @@ const REASON_LABELS: Record<QuestionReportReason, string> = {
 export class ReviewQueueComponent implements OnInit {
   private readonly firebaseService = inject(FirebaseService);
   protected readonly reviewerService = inject(ReviewerService);
+  private readonly injector = inject(Injector);
+
+  /**
+   * Everything one account contributed, while a reviewer is looking at it
+   * (`FEAT-006`), or `null`. While it is open the queue is hidden rather than
+   * destroyed, so its rows, its drafts and the button that opened the view are
+   * all still there to come back to.
+   */
+  protected readonly authorView = signal<AuthorViewState | null>(null);
 
   protected readonly tabs = REVIEW_TABS;
   protected readonly pageSize = REVIEW_PAGE_SIZE;
@@ -134,6 +162,9 @@ export class ReviewQueueComponent implements OnInit {
 
   /** The block of stacked messages, focused when a retry starts — see `retryReports()`. */
   private readonly reportsStatus = viewChild<ElementRef<HTMLElement>>('reportsStatus');
+
+  /** The picker's buttons — where focus goes back to when the per-author view closes. */
+  private readonly tabButtons = viewChildren<ElementRef<HTMLElement>>('tabButton');
 
   /**
    * The question currently being acted on, so its two buttons can disable
@@ -451,5 +482,120 @@ export class ReviewQueueComponent implements OnInit {
 
   protected reasonLabel(report: QuestionReport): string {
     return REASON_LABELS[report.reason];
+  }
+
+  /** A tab's name, as the picker shows it — what the per-author view's Back button names. */
+  protected tabLabel(view: ReviewView): string {
+    return REVIEW_TABS.find((tab) => tab.view === view)?.label ?? 'the queue';
+  }
+
+  /**
+   * Whether this question has an account behind it to look up (`FEAT-006`).
+   *
+   * Two populations have none, and the card offers no button for either: a
+   * question written before attribution carries no `createdBy` at all, and one
+   * whose author erased their account carries the `[deleted-user]` sentinel —
+   * which every erased author shares, so asking for "everything this account
+   * contributed" by it would present everybody who ever left as one account.
+   */
+  protected canOpenAuthorView(question: ReviewQuestion): boolean {
+    const author = question.createdBy;
+    return typeof author === 'string' && author.length > 0 && author !== DELETED_AUTHOR;
+  }
+
+  /**
+   * Opens everything this question's author has contributed (`FEAT-006`).
+   *
+   * Reached from a question the reviewer is already looking at, which is the
+   * only place the app ever meets an author's uid: it travels from the card to
+   * the read as a filter value and is rendered nowhere in the view.
+   *
+   * The button that opened it is captured rather than looked up again later:
+   * one question can sit in several report rows, each with its own button, and
+   * focus belongs back on the one that was pressed.
+   */
+  protected openAuthorView(question: ReviewQuestion, opener: HTMLElement | null): void {
+    if (!this.canOpenAuthorView(question)) {
+      return;
+    }
+    this.actionResult.set(null);
+    this.actionError.set(null);
+    this.authorView.set({
+      uid: question.createdBy!,
+      anchor: question,
+      returnTo: this.activeView(),
+      opener,
+    });
+  }
+
+  /**
+   * Back to the tab the view was opened from, with focus on the button that
+   * opened it.
+   *
+   * **After the render**, because until then the queue is still hidden and a
+   * `focus()` on a hidden element silently does nothing (`CLAUDE.md` §4.4).
+   * And with a fallback, because the button may have gone: rejecting the
+   * question it sat on removes that row from the Pending and Approved tabs,
+   * and focus asked to stay on a detached element drops to `<body>`. The tab
+   * the reviewer returns to is present in every state, so focus goes there
+   * instead.
+   */
+  protected closeAuthorView(): void {
+    const view = this.authorView();
+    if (view === null) {
+      return;
+    }
+    this.authorView.set(null);
+    afterNextRender(
+      () => {
+        if (view.opener?.isConnected) {
+          view.opener.focus();
+          return;
+        }
+        this.tabButtons()
+          .find((tab) => tab.nativeElement.dataset['status'] === view.returnTo)
+          ?.nativeElement.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
+   * Brings the queue's own copies of these questions up to date with a bulk
+   * rejection made in the per-author view, without a second read — the same
+   * reasoning `decide()` drops a row locally rather than refetching.
+   *
+   * The Pending and Approved lists lose them, since they no longer belong
+   * there; a report row keeps its question and shows its new status, because
+   * the report is the record that somebody complained; and any draft typed on
+   * one of their cards is dropped, because it was about a decision that has
+   * now been made. A rejected question the Rejected tab has not loaded is not
+   * added to it — that tab is a page of the queue, and says so.
+   */
+  protected applyBulkRejection({ ids, reason }: BulkRejection): void {
+    const rejected = new Set(ids);
+    const view = this.authorView()?.returnTo ?? this.activeView();
+    if (view === 'pending' || view === 'approved') {
+      this.questions.update((all) => all.filter((question) => !rejected.has(question.id)));
+    } else if (view === 'rejected') {
+      this.questions.update((all) =>
+        all.map((question) =>
+          rejected.has(question.id) ? { ...question, rejectionReason: reason } : question,
+        ),
+      );
+    }
+    this.reports.update((rows) =>
+      rows.map((row) =>
+        row.question && rejected.has(row.question.id)
+          ? {
+              ...row,
+              question: { ...row.question, status: 'rejected', rejectionReason: reason },
+            }
+          : row,
+      ),
+    );
+    this.reasonDrafts.update((drafts) =>
+      Object.fromEntries(Object.entries(drafts).filter(([id]) => !rejected.has(id))),
+    );
   }
 }

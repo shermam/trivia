@@ -164,6 +164,11 @@ test.describe('the review queue', () => {
     // Not a tab in sight, the reports one included — so there is no control
     // offering a read `firestore.rules` would refuse anyway (`FEAT-026`).
     await expect(page.getByTestId('review-tab')).toHaveCount(0);
+    // ...and no way into everything one account contributed (`FEAT-006`): the
+    // view is reached only from a card, and the rules refuse its read to
+    // anybody who is not a reviewer regardless (`firestore-tests`).
+    await expect(page.getByTestId('open-author-view')).toHaveCount(0);
+    await expect(page.getByTestId('author-view')).toHaveCount(0);
   });
 
   /**
