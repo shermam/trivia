@@ -24,6 +24,8 @@ const h = vi.hoisted(() => ({
   importError: null as unknown,
   callableError: null as unknown,
   importCount: 0,
+  /** What `recordGameResult` answers — the server's verdict on the game. */
+  recordAnswer: { recorded: true } as unknown,
 }));
 
 vi.mock('firebase/functions', () => ({
@@ -36,27 +38,35 @@ vi.mock('firebase/functions', () => ({
       if (h.callableError) {
         return Promise.reject(h.callableError);
       }
-      // `setAvatar` answers with the choice it stored; everything else here
-      // only needs to resolve.
+      // `setAvatar` answers with the choice it stored, `recordGameResult` with
+      // its verdict; everything else here only needs to resolve.
       return Promise.resolve({
-        data: name === 'setAvatar' ? { avatar: payload } : { recorded: true },
+        data: name === 'setAvatar' ? { avatar: payload } : h.recordAnswer,
       });
     };
   },
 }));
 
-function setup(options: { authReadyError?: unknown } = {}) {
+type Account = { uid: string; isAnonymous: boolean } | null;
+
+function setup(options: { authReadyError?: unknown; account?: Account } = {}) {
   h.calls.length = 0;
   h.events.length = 0;
   h.importError = null;
   h.callableError = null;
   h.importCount = 0;
+  h.recordAnswer = { recorded: true };
 
-  const whenAuthStateReady = vi.fn(async () => {
+  // A signed-in account unless a test says otherwise: the refusal handling
+  // below is about accounts, and a guest is the case a test opts into.
+  const account: Account =
+    'account' in options ? (options.account ?? null) : { uid: 'player-1', isAnonymous: false };
+  const currentAccount = vi.fn(async () => {
     h.events.push('authReady');
     if (options.authReadyError) {
       throw options.authReadyError;
     }
+    return account;
   });
 
   TestBed.configureTestingModule({
@@ -74,11 +84,11 @@ function setup(options: { authReadyError?: unknown } = {}) {
           }),
         },
       },
-      { provide: AuthService, useValue: { whenAuthStateReady, signOut: vi.fn() } },
+      { provide: AuthService, useValue: { currentAccount, signOut: vi.fn() } },
     ],
   });
 
-  return { service: TestBed.inject(AccountService), whenAuthStateReady };
+  return { service: TestBed.inject(AccountService), currentAccount };
 }
 
 afterEach(() => TestBed.resetTestingModule());
@@ -104,11 +114,11 @@ describe('AccountService.recordGameResult', () => {
    * order, so a test that only checked both happened would pass against it.
    */
   it('waits for auth to settle before invoking the callable', async () => {
-    const { service, whenAuthStateReady } = setup();
+    const { service, currentAccount } = setup();
 
     await service.recordGameResult(result);
 
-    expect(whenAuthStateReady).toHaveBeenCalledOnce();
+    expect(currentAccount).toHaveBeenCalledOnce();
     expect(h.events.indexOf('authReady')).toBeLessThan(h.events.indexOf('call:recordGameResult'));
   });
 
@@ -149,6 +159,125 @@ describe('AccountService.recordGameResult', () => {
     h.importError = new Error('chunk load failed');
 
     await expect(service.recordGameResult(result)).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * What the callable's answer means, which used to be nothing at all: the
+ * answer was never read, so a signed-in player whose games the server refused
+ * — every GitHub, Microsoft, Apple, Twitter/X and Yahoo account — got no
+ * totals and no sign that anything had gone wrong (`docs/data-model.md`,
+ * `users`). A refusal of a signed-in account is now logged with the server's
+ * reason and held for `/profile`; a guest's, and a game already banked, are
+ * the design and say nothing.
+ */
+describe('AccountService.recordGameResult reading the answer', () => {
+  const result = { gameId: 'g1', totalQuestions: 5, correctAnswers: 4, bestStreak: 3 };
+
+  const silenceConsoleError = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  let consoleError: ReturnType<typeof silenceConsoleError>;
+  beforeEach(() => {
+    consoleError = silenceConsoleError();
+  });
+  afterEach(() => consoleError.mockRestore());
+
+  // The accept case first (`CLAUDE.md` §4.6): a handler that flagged every
+  // answer would pass every refusal row below.
+  it('notes nothing when the game is banked', async () => {
+    const { service } = setup();
+
+    await service.recordGameResult(result);
+
+    expect(service.unbankedGame()).toBeNull();
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("reports a signed-in account's refused game, with the server's reason", async () => {
+    const { service } = setup({ account: { uid: 'player-1', isAnonymous: false } });
+    h.recordAnswer = { recorded: false, reason: 'unsupported-provider', provider: 'oidc.example' };
+
+    await service.recordGameResult(result);
+
+    expect(service.unbankedGame()).toEqual({ uid: 'player-1', reason: 'unsupported-provider' });
+    expect(consoleError).toHaveBeenCalledOnce();
+    expect(String(consoleError.mock.calls[0][0])).toContain('unsupported-provider');
+    expect(String(consoleError.mock.calls[0][0])).toContain('oidc.example');
+  });
+
+  it('reports every refusal of a signed-in account it was not built to expect', async () => {
+    for (const reason of ['invalid', 'rate-limited', 'anonymous', 'a-reason-from-a-newer-server']) {
+      const { service } = setup();
+      h.recordAnswer = { recorded: false, reason };
+
+      await service.recordGameResult(result);
+
+      expect(service.unbankedGame(), reason).toEqual({ uid: 'player-1', reason });
+      TestBed.resetTestingModule();
+    }
+  });
+
+  /**
+   * Whatever reason it carries: this server says `anonymous`, an older one said
+   * `unsupported-provider`, and a preview channel talks to whichever functions
+   * `main` last deployed. Deciding from the account is what keeps every guest's
+   * game from reading as a gap — and from putting a `console.error` on every
+   * game an anonymous e2e spec plays, which the preview slice's console checks
+   * would fail on.
+   */
+  it("says nothing about a guest's refused game, whichever reason the server gives", async () => {
+    for (const reason of ['anonymous', 'unsupported-provider']) {
+      const { service } = setup({ account: { uid: 'guest-1', isAnonymous: true } });
+      h.recordAnswer = { recorded: false, reason };
+
+      await service.recordGameResult(result);
+
+      expect(service.unbankedGame(), reason).toBeNull();
+      TestBed.resetTestingModule();
+    }
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it('reads a duplicate as banked — a reload of /game-over re-sends a game that counted', async () => {
+    const { service } = setup();
+    h.recordAnswer = { recorded: false, reason: 'duplicate' };
+
+    await service.recordGameResult(result);
+
+    expect(service.unbankedGame()).toBeNull();
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("clears the note once the same account's next game banks", async () => {
+    const { service } = setup();
+    h.recordAnswer = { recorded: false, reason: 'unsupported-provider' };
+    await service.recordGameResult(result);
+    expect(service.unbankedGame()).not.toBeNull();
+
+    h.recordAnswer = { recorded: true };
+    await service.recordGameResult({ ...result, gameId: 'g2' });
+
+    expect(service.unbankedGame()).toBeNull();
+  });
+
+  it('does not report an answer it cannot read, nor a call that never reached the server', async () => {
+    for (const answer of [null, {}, { recorded: 'no' }]) {
+      const { service } = setup();
+      h.recordAnswer = answer;
+
+      await service.recordGameResult(result);
+
+      expect(service.unbankedGame(), JSON.stringify(answer)).toBeNull();
+      TestBed.resetTestingModule();
+    }
+
+    // A timeout is not a refusal: the SDK's timeout cancels nothing, so the
+    // game may well have landed.
+    const { service } = setup();
+    h.callableError = Object.assign(new Error('timeout'), { code: 'functions/deadline-exceeded' });
+    await service.recordGameResult(result);
+
+    expect(service.unbankedGame()).toBeNull();
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });
 

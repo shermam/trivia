@@ -1,5 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { AuthService } from './auth.service';
+// Across the package boundary on purpose: the server's caller gate is the
+// authority on which sign-in providers may have anything kept about them, and
+// this suite pins it to the buttons the auth menu renders.
+import { PLAYER_SIGN_IN_PROVIDERS } from '../../../functions/src/caller-gate';
+import { AuthService, PROMINENT_OAUTH_PROVIDERS, SECONDARY_OAUTH_PROVIDERS } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 
 /**
@@ -703,6 +707,66 @@ describe('AuthService entitlement signals', () => {
     expect(service.proStatusReady()).toBe(true);
     expect(service.isProUser()).toBe(false);
     await expect(service.whenProStatusReady()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * The callables that write about a player — `recordGameResult` and `setAvatar`
+ * — admit an allowlist of sign-in providers (`functions/src/caller-gate.ts`),
+ * and the auth menu renders a button per provider here. The two lists are one
+ * fact kept in two packages, and when they disagreed the cost was silent: a
+ * GitHub, Microsoft, Apple, Twitter/X or Yahoo player could sign in, saw the
+ * avatar picker, and had every finished game refused, with no totals, no play
+ * history and nothing on screen saying why.
+ *
+ * Compared as sets: the order is the menu's business, and the gate's is
+ * nobody's.
+ */
+describe('AuthService sign-in providers', () => {
+  it('offers exactly the providers the server-side caller gate admits', () => {
+    const offered = new Set<string>([
+      'password',
+      ...PROMINENT_OAUTH_PROVIDERS,
+      ...SECONDARY_OAUTH_PROVIDERS,
+    ]);
+
+    expect(new Set<string>(PLAYER_SIGN_IN_PROVIDERS)).toEqual(offered);
+    // Sizes as well: a provider listed twice on either side would still pass
+    // the set comparison above while meaning one side is miscounted.
+    expect(PLAYER_SIGN_IN_PROVIDERS).toHaveLength(offered.size);
+  });
+});
+
+/**
+ * `currentAccount()` is what `AccountService.recordGameResult` reads to know
+ * whose game a refusal is about — so it has to answer from Auth itself, after
+ * a persisted session has been restored, and never from `user()`, which the
+ * SDK fills a microtask later.
+ */
+describe('AuthService.currentAccount', () => {
+  it('answers with the session Auth restored', async () => {
+    const service = setup();
+    h.state.persistedUser = Object.assign(fakeUser({ isAnonymous: false }), { uid: 'player-1' });
+
+    await expect(service.currentAccount()).resolves.toEqual({
+      uid: 'player-1',
+      isAnonymous: false,
+    });
+  });
+
+  it('says whether the session is a guest', async () => {
+    const service = setup();
+    h.state.persistedUser = Object.assign(fakeUser({ isAnonymous: true }), { uid: 'guest-1' });
+
+    await expect(service.currentAccount()).resolves.toEqual({ uid: 'guest-1', isAnonymous: true });
+  });
+
+  it('answers null when nobody is signed in', async () => {
+    await expect(setup().currentAccount()).resolves.toBeNull();
+  });
+
+  it('answers null, rather than rejecting, when auth cannot be reached', async () => {
+    await expect(setup({ appUnreachable: true }).currentAccount()).resolves.toBeNull();
   });
 });
 

@@ -544,6 +544,56 @@ describe('TriviaService contributor attribution passes through the mapper', () =
     expect('correct' in question).toBe(false);
   });
 
+  /**
+   * `FEAT-020`. A question the generation pipeline wrote carries a
+   * `provenance` map, and the one reader of it in a game — the recap's
+   * "Machine-generated from" line — needs one fact out of it. That fact is
+   * carried and nothing else: the model and the run would otherwise ride
+   * into the saved game and the offline pool for nobody to read.
+   */
+  it('carries the one fact the label needs from a generated question’s provenance', async () => {
+    configure([
+      {
+        ...base,
+        createdBy: '[generated]',
+        provenance: {
+          source: 'ai',
+          provider: 'example-provider',
+          model: 'example-model',
+          modelVersion: 'example-model-2026-10-01',
+          generatedAt: 1_760_000_000_000,
+          runId: '20261009T120000Z-water',
+        },
+      },
+    ]);
+
+    const [question] = await play();
+
+    expect(question.provenance).toEqual({ source: 'ai' });
+  });
+
+  it('carries no provenance for a question a person wrote', async () => {
+    configure([base]);
+
+    const [question] = await play();
+
+    expect('provenance' in question).toBe(false);
+  });
+
+  // Re-checked like the tags and the counters: the console can write any
+  // shape, and anything but a map saying `ai` reads as a person's question.
+  it.each([
+    ['a different source', { source: 'human', runId: 'r' }],
+    ['a bare string', 'ai'],
+    ['null', null],
+  ])('carries none for %s', async (_label, provenance) => {
+    configure([{ ...base, provenance }]);
+
+    const [question] = await play();
+
+    expect('provenance' in question).toBe(false);
+  });
+
   it('does not decode entities in a source title, the way it leaves every other Firestore field alone', async () => {
     configure([{ ...base, sourceTitle: 'Tom &amp; Jerry Quarterly' }]);
 

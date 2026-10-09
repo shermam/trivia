@@ -164,3 +164,21 @@ export async function expectBoxUnmoved(
     })
     .toBe(0);
 }
+
+/**
+ * Fails unless an element's content fits its own box — `scrollWidth` no wider
+ * than `clientWidth` — so none of its text is cut off or spills past it.
+ *
+ * The check a text assertion cannot make: `toHaveText` reads the DOM, which
+ * holds the whole string whether or not the box shows it, so a line that
+ * `truncate` clips to "…· run 20" still has the text a test asked for. Polled
+ * rather than read once (`CLAUDE.md` §4.6): a width read mid-layout would fail
+ * for a frame no reader saw, or pass on one before the text arrived.
+ */
+export async function expectUnclipped(element: Locator, what: string): Promise<void> {
+  await expect
+    .poll(() => element.evaluate((node) => node.scrollWidth - node.clientWidth), {
+      message: `${what} (its content wider than its box, in pixels)`,
+    })
+    .toBeLessThanOrEqual(0);
+}

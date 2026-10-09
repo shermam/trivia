@@ -42,6 +42,7 @@ import { topicTagsOf } from '../../utils/category-tags';
 import { difficultyBand, difficultyScore } from '../../utils/difficulty-score.util';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { buildPlayAnswers } from '../../utils/play-history.util';
+import { isMachineGenerated } from '../../utils/question-provenance.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
@@ -100,6 +101,13 @@ interface RecapRow {
    * since moved.
    */
   difficulty: Difficulty;
+  /**
+   * Whether the generation pipeline wrote the question (`FEAT-020`), which
+   * makes the row's source line read "Machine-generated from …". Read off the
+   * one fact `TriviaService` carries from the stored `provenance`, so it is
+   * the same answer after a reload of this screen as before it.
+   */
+  machineGenerated: boolean;
 }
 
 /**
@@ -680,6 +688,7 @@ export class GameOverComponent implements OnInit {
           question.source === 'custom'
             ? difficultyBand(difficultyScore(question))
             : question.difficulty,
+        machineGenerated: isMachineGenerated(question.provenance),
       });
     }
     return rows;
@@ -751,9 +760,13 @@ export class GameOverComponent implements OnInit {
    * inflate the totals on each one, which is precisely what the id exists to
    * prevent.
    *
-   * Anonymous and unverified sessions are refused server-side rather than
-   * here, so this deliberately does not duplicate that predicate — a client
-   * mirror of a server gate is a thing that drifts (H6).
+   * Anonymous sessions, and any sign-in provider the app does not offer, are
+   * refused server-side by the shared caller gate
+   * (`functions/src/caller-gate.ts`) rather than here, so this deliberately
+   * does not duplicate that predicate — a client mirror of a server gate is a
+   * thing that drifts (H6). A password account whose address is not verified
+   * yet is banked like any other: the gate's email clause is for writes such
+   * as the leaderboard save, which this screen's "verify" face is about.
    *
    * **Both numbers come from the game's own counters, and neither is the
    * score.** `correctAnswers` used to be `score()`, correct only while the two
@@ -785,10 +798,11 @@ export class GameOverComponent implements OnInit {
     // half of a bound held at both ends, not the only thing holding it.
     //
     // Sent for every account, including an anonymous one. The gate is the
-    // callable's provider allowlist and nothing here duplicates it, for the
-    // reason the doc comment gives: a client mirror of a server gate is a thing
-    // that drifts (H6). An anonymous submission is refused before any write, so
-    // nothing is stored for a guest.
+    // callable's — the shared caller gate — and nothing here duplicates it, for
+    // the reason the doc comment gives: a client mirror of a server gate is a
+    // thing that drifts (H6). An anonymous submission is refused before any
+    // write, so nothing is stored for a guest; what a refusal of a signed-in
+    // account means is `AccountService.recordGameResult`'s to report.
     const answers = buildPlayAnswers(
       this.gameController.questions(),
       this.gameController.answerHistory(),

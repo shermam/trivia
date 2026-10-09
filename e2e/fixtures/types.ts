@@ -68,6 +68,21 @@ export interface CustomQuestionSeed {
    */
   answered?: number;
   correct?: number;
+  /**
+   * What the question-generation pipeline writes on a question it promotes
+   * (`FEAT-020`): `source: 'ai'` and the run behind it. Only the Admin SDK can
+   * write it — no client create admits the key — so seeding it here, beside
+   * `createdBy: '[generated]'` and no `category`, is how a spec stands in for
+   * a question the pipeline promoted.
+   */
+  provenance?: {
+    source: 'ai';
+    provider: string;
+    model: string;
+    modelVersion: string;
+    generatedAt: number;
+    runId: string;
+  };
 }
 
 /**
@@ -351,4 +366,31 @@ export interface AccountState {
   questionCreatedBy: string | null;
   /** `users/{uid}` in full, or null when the account has never finished a game. */
   gameplayStats: Record<string, unknown> | null;
+}
+
+/**
+ * Who `signInAs` signs in as (`caller-gate.spec.ts`): a guest, an email and
+ * password account in either verification state, or an account of an OAuth
+ * provider named by its Firebase id — one the app offers, or one it does not.
+ */
+export type CallerIdentity =
+  | { kind: 'anonymous' }
+  | { kind: 'password'; emailVerified: boolean }
+  | { kind: 'oauth'; providerId: string };
+
+/** A session the Auth emulator signed: the account, and the ID token a callable carries. */
+export interface SignedInCaller {
+  uid: string;
+  idToken: string;
+}
+
+/**
+ * A callable's answer as its HTTP protocol carries it: `result` when the
+ * function returned, `error` — with the HTTP status beside it — when it threw
+ * an `HttpsError`.
+ */
+export interface CallableAnswer {
+  status: number;
+  result?: unknown;
+  error?: { status?: string; message?: string };
 }

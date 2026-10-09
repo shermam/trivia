@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { environment } from '../../environments/environment';
 import { AvatarChoice, readAvatarChoice } from '../models/avatar.model';
 import { PlayAnswerRecord } from '../utils/play-history.util';
@@ -55,6 +55,33 @@ const SET_AVATAR_TIMEOUT_MS = 10_000;
 type FunctionsModule = typeof import('firebase/functions');
 
 /**
+ * What `recordGameResult` answers, read field by field rather than trusted:
+ * the server answering may be older or newer than this bundle — a preview
+ * channel serves this client against whatever functions `main` last deployed
+ * (`docs/ci-cd.md` §4.2a).
+ */
+interface RecordGameAnswer {
+  recorded?: unknown;
+  reason?: unknown;
+  provider?: unknown;
+}
+
+/**
+ * A finished game the server declined to bank for a signed-in account — held
+ * for the life of the tab, for the account the call was made as, so
+ * `/profile` can say so rather than promising totals that are not coming.
+ */
+export interface UnbankedGame {
+  /** The account the refused call was made as. */
+  uid: string;
+  /**
+   * The server's reason as it gave it: `unsupported-provider`, `invalid`,
+   * `rate-limited`, or one this build does not know yet.
+   */
+  reason: string;
+}
+
+/**
  * Turns a callable failure into something worth showing a user.
  *
  * `functions/not-found` gets its own message for a specific reason: Cloud
@@ -94,6 +121,15 @@ export class AccountService {
     functions: import('firebase/functions').Functions;
     functionsModule: FunctionsModule;
   }> | null = null;
+
+  private readonly unbankedGameSignal = signal<UnbankedGame | null>(null);
+
+  /**
+   * The last game a signed-in account finished in this tab that the server
+   * declined to bank, or `null` — cleared when that account's next game banks.
+   * `/profile` shows it for the account it belongs to and nobody else.
+   */
+  readonly unbankedGame = this.unbankedGameSignal.asReadonly();
 
   /**
    * The `firebase/functions` bootstrap, memoized — **and cleared on
@@ -247,6 +283,15 @@ export class AccountService {
    * costs one game's worth of totals rather than a broken screen. These are
    * gameplay statistics, not a ledger.
    *
+   * **But a refusal is read, not swallowed.** The callable answers with whether
+   * it banked the game and, when it did not, why. For a guest that is the
+   * design — nothing is kept for anonymous play — and for a reloaded
+   * `/game-over` it is a game already banked. Anything else, for a signed-in
+   * account, is a game the player believes counted and the server dropped:
+   * that is how five of the eight sign-in providers banked nothing, with not a
+   * line anywhere saying so. So it is logged with the server's reason, and
+   * held in {@link unbankedGame} for `/profile` to tell the player.
+   *
    * The uid is never sent: the callable reads it from the verified token, so a
    * caller can only ever record against themselves. The numbers *are* sent,
    * and are bounded server-side rather than attested — see
@@ -277,16 +322,63 @@ export class AccountService {
       // refused with nothing to show for it. `/game-over` runs this from
       // `ngOnInit`, and reloading `/game-over` is a supported flow, so without
       // this a returning player's game is silently dropped from their totals.
-      await this.authService.whenAuthStateReady();
+      //
+      // It also says who the call is about, read at the moment it is made: the
+      // answer can land after a sign-out, and a refusal belongs to the account
+      // that played, not to whoever is signed in by then.
+      const account = await this.authService.currentAccount();
       const { functions, functionsModule } = await this.getFunctions();
-      const callable = functionsModule.httpsCallable(functions, 'recordGameResult', {
-        timeout: RECORD_GAME_TIMEOUT_MS,
-      });
-      await callable(result);
+      const callable = functionsModule.httpsCallable<typeof result, RecordGameAnswer | null>(
+        functions,
+        'recordGameResult',
+        { timeout: RECORD_GAME_TIMEOUT_MS },
+      );
+      const answer = await callable(result);
+      this.noteBankingAnswer(account, answer.data);
     } catch {
-      // Deliberately silent. There is no user-facing action to offer — the
-      // player cannot re-bank a game — and a toast about a background write
-      // would be noise on the screen where they are reading their score.
+      // Deliberately silent: this is a failure to *get* an answer — offline, a
+      // cold start past the timeout, a server error — not a refusal. There is
+      // no user-facing action to offer, the player cannot re-bank a game, and
+      // a timed-out call may well have landed (the SDK's timeout cancels
+      // nothing), so a toast about a background write would be noise on the
+      // screen where they are reading their score, and could be false.
     }
+  }
+
+  /**
+   * What the callable's answer means for the account that played.
+   *
+   * **Nothing, for a guest, whatever the reason says.** A guest is refused on
+   * every game by design, and which reason that refusal carries depends on
+   * which server answered — this one says `anonymous`, an older one said
+   * `unsupported-provider`, and a preview channel talks to whichever functions
+   * `main` last deployed. Deciding from the account rather than from the reason
+   * is what keeps a guest's game from ever reading as a gap.
+   */
+  private noteBankingAnswer(
+    account: { uid: string; isAnonymous: boolean } | null,
+    answer: RecordGameAnswer | null,
+  ): void {
+    if (account === null || account.isAnonymous) {
+      return;
+    }
+    // Banked now, or banked by an earlier call this one repeats — a reload of
+    // `/game-over` re-sends the same game id. Either way it counted.
+    if (answer?.recorded === true || answer?.reason === 'duplicate') {
+      if (this.unbankedGameSignal()?.uid === account.uid) {
+        this.unbankedGameSignal.set(null);
+      }
+      return;
+    }
+    // An answer this build cannot read says nothing either way, so it is not
+    // reported as a refusal.
+    if (answer?.recorded !== false) {
+      return;
+    }
+    const reason = typeof answer.reason === 'string' ? answer.reason : 'unknown';
+    const provider =
+      typeof answer.provider === 'string' ? `, sign-in provider ${answer.provider}` : '';
+    console.error(`[stats] the server did not add this game to your totals (${reason}${provider})`);
+    this.unbankedGameSignal.set({ uid: account.uid, reason });
   }
 }

@@ -1037,14 +1037,18 @@ describe('ReviewQueueComponent: everything one account contributed (FEAT-006)', 
   it('offers the way in on a card with an account behind it, and on no other', async () => {
     const { host } = await renderQueue({
       pending: [
-        question('attributed', { createdBy: AUTHOR, createdAt: 3 }),
-        question('unattributed', { createdAt: 2 }),
-        question('erased', { createdBy: '[deleted-user]', createdAt: 1 }),
+        question('attributed', { createdBy: AUTHOR, createdAt: 4 }),
+        question('unattributed', { createdAt: 3 }),
+        question('erased', { createdBy: '[deleted-user]', createdAt: 2 }),
+        // Every question every pipeline run promotes shares this author
+        // (`FEAT-020`), so the view asked of it would be the pipeline's whole
+        // output dressed as one account's.
+        question('generated', { createdBy: '[generated]', createdAt: 1 }),
       ],
     });
 
     const cards = [...host.querySelectorAll<HTMLElement>('[data-cy="review-question"]')];
-    expect(cards).toHaveLength(3);
+    expect(cards).toHaveLength(4);
     const offering = cards.filter((card) => card.querySelector('[data-cy="open-author-view"]'));
     expect(offering.map((card) => card.textContent)).toEqual([
       expect.stringContaining('Q attributed?'),
@@ -1176,5 +1180,248 @@ describe('ReviewQueueComponent: everything one account contributed (FEAT-006)', 
     expect(document.activeElement).toBe(
       host.querySelector('[data-cy="review-tab"][data-status="pending"]'),
     );
+  });
+});
+
+/**
+ * `FEAT-020`: a question the generation pipeline promoted — the `[generated]`
+ * author, a `provenance` map, tags and no category.
+ *
+ * The card treats it as what it is: the author line names the pipeline and
+ * the run rather than a uid, there is no account to open, the source line
+ * reads as the player's recap will, and once it is rejected the reason box
+ * says the note stays on the record rather than promising an author who does
+ * not exist. A question a person wrote is the control in every row.
+ */
+describe('ReviewQueueComponent: a question the generation pipeline wrote (FEAT-020)', () => {
+  const RUN_ID = '20261009T120000Z-water';
+  const PERSON = 'author-uid-x91';
+
+  /** What promotion writes, as the queue reads it back. */
+  function generated(id: string, overrides: Partial<Q> = {}): Q {
+    const { category: _none, ...uncategorised } = question(id, {
+      createdBy: '[generated]',
+      tags: ['chemistry'],
+      sourceUrl: 'https://en.wikipedia.org/wiki/Water',
+      sourceTitle: 'Water',
+      provenance: {
+        source: 'ai',
+        provider: 'example-provider',
+        model: 'example-model',
+        modelVersion: 'example-model-2026-10-01',
+        generatedAt: 1_760_000_000_000,
+        runId: RUN_ID,
+      },
+      ...overrides,
+    });
+    return uncategorised;
+  }
+
+  async function render(byStatus: Partial<Record<QuestionStatus, Q[]>>, tab?: QuestionStatus) {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: FirebaseService,
+          useValue: {
+            getQuestionsByStatus: (status: QuestionStatus) => of(byStatus[status] ?? []),
+            setQuestionStatus: vi.fn(() => Promise.resolve()),
+          },
+        },
+        {
+          provide: ReviewerService,
+          useValue: { isReviewer: signal(true), isResolved: signal(true) },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(ReviewQueueComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    if (tab) {
+      host.querySelector<HTMLElement>(`[data-cy="review-tab"][data-status="${tab}"]`)!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+    }
+    return [...host.querySelectorAll<HTMLElement>('[data-cy="review-question"]')];
+  }
+
+  const text = (node: Element | null | undefined) =>
+    node?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+  const authorLine = (card: HTMLElement) => text(card.querySelector('[data-cy="question-author"]'));
+  const runLine = (card: HTMLElement) => text(card.querySelector('[data-cy="question-run"]'));
+  const reasonLabel = (card: HTMLElement) => text(card.querySelector('label'));
+
+  /**
+   * The author is the pipeline, in two words — the source line already says
+   * the question was machine-generated — and the run has a line of its own,
+   * which no other card has. Every value is short enough to read whole at a
+   * phone's width; `generated-questions.spec.ts` measures that in a browser.
+   */
+  it('names the pipeline as the author and the run on its own line, where other cards name a uid', async () => {
+    const cards = await render({
+      pending: [
+        generated('g1', { createdAt: 3 }),
+        question('p1', { createdBy: PERSON, createdAt: 2 }),
+        question('legacy', { createdAt: 1 }),
+      ],
+    });
+
+    expect(cards.map(authorLine)).toEqual([
+      'Question pipeline',
+      PERSON,
+      'Unattributed (predates attribution)',
+    ]);
+    expect(cards.map(runLine)).toEqual([RUN_ID, null, null]);
+  });
+
+  /**
+   * The pipeline allows a hundred characters of run id, so a long one is cut
+   * to 32 — keeping the timestamp it starts with, which is what tells two runs
+   * apart, and short enough for one line at 320px.
+   */
+  it('cuts a long run id short, keeping the timestamp it starts with', async () => {
+    const longRun = `20261009T120000Z-${'the-history-of-the-byzantine-empire-'.repeat(2)}`;
+    const [card] = await render({
+      pending: [
+        generated('g1', {
+          provenance: {
+            source: 'ai',
+            provider: 'example-provider',
+            model: 'example-model',
+            modelVersion: 'example-model-2026-10-01',
+            generatedAt: 1,
+            runId: longRun,
+          },
+        }),
+      ],
+    });
+
+    const run = runLine(card)!;
+    expect(run).toHaveLength(32);
+    expect(run.startsWith('20261009T120000Z-')).toBe(true);
+    expect(run.endsWith('…')).toBe(true);
+    expect(authorLine(card)).toBe('Question pipeline');
+  });
+
+  // The console can write the sentinel with no provenance at all. The author
+  // line still says whose it is, and no run line invents one.
+  it('shows no run line when the provenance names no run', async () => {
+    const [card] = await render({ pending: [generated('g1', { provenance: undefined })] });
+
+    expect(authorLine(card)).toBe('Question pipeline');
+    expect(card.querySelector('[data-cy="question-run"]')).toBeNull();
+  });
+
+  // The run line belongs to the author, not to the map: a person's question
+  // carrying a stray `runId` in a console-written provenance shows no run.
+  it('shows no run line on a person’s question, whatever its provenance holds', async () => {
+    const [card] = await render({
+      pending: [question('p1', { createdBy: PERSON, provenance: generated('g1').provenance })],
+    });
+
+    expect(authorLine(card)).toBe(PERSON);
+    expect(card.querySelector('[data-cy="question-run"]')).toBeNull();
+  });
+
+  it('offers no way into "everything this account contributed"', async () => {
+    const [generatedCard, personCard] = await render({
+      pending: [
+        generated('g1', { createdAt: 2 }),
+        question('p1', { createdBy: PERSON, createdAt: 1 }),
+      ],
+    });
+
+    expect(generatedCard.querySelector('[data-cy="open-author-view"]')).toBeNull();
+    expect(personCard.querySelector('[data-cy="open-author-view"]')).not.toBeNull();
+  });
+
+  /**
+   * The wiring half of the label (`SourceLinkComponent`'s spec owns the
+   * words): the reviewer is the one reader who has to see the question as a
+   * player will, so the card says "Machine-generated from" where the recap
+   * does — and not on a source a person cited.
+   */
+  it('reads its source as machine-generated, and a person’s citation as a citation', async () => {
+    const [generatedCard, personCard] = await render({
+      pending: [
+        generated('g1', { createdAt: 2 }),
+        question('p1', {
+          createdBy: PERSON,
+          createdAt: 1,
+          sourceUrl: 'https://example.org/h2o',
+          sourceTitle: 'Example Journal',
+        }),
+      ],
+    });
+
+    expect(text(generatedCard.querySelector('[data-cy="question-source-generated"]'))).toBe(
+      'Machine-generated from',
+    );
+    expect(text(generatedCard.querySelector('[data-cy="question-source"]'))).toContain(
+      'Machine-generated from Water',
+    );
+    expect(personCard.querySelector('[data-cy="question-source-generated"]')).toBeNull();
+    expect(text(personCard.querySelector('[data-cy="question-source"]'))).toContain(
+      'Example Journal',
+    );
+  });
+
+  // The provenance decides the label, not the author: a map that does not say
+  // `ai` is read as a person's, whatever the console put beside it.
+  it('does not label a source whose provenance does not say a machine wrote it', async () => {
+    const [card] = await render({
+      pending: [
+        generated('g1', {
+          provenance: { source: 'human' } as unknown as Q['provenance'],
+        }),
+      ],
+    });
+
+    expect(card.querySelector('[data-cy="question-source-generated"]')).toBeNull();
+  });
+
+  /**
+   * The rejection copy. A person's rejected question tells the reviewer the
+   * note is shown to its author on `/my-questions`; a generated one has
+   * nobody to show it to, so it says the note stays on the record instead.
+   * Before the decision both read the same.
+   */
+  it('says a rejected generated question keeps the reason on the record', async () => {
+    const [generatedCard, personCard] = await render(
+      {
+        rejected: [
+          generated('g1', {
+            status: 'rejected',
+            rejectionReason: 'Not in the source.',
+            createdAt: 2,
+          }),
+          question('p1', {
+            createdBy: PERSON,
+            status: 'rejected',
+            rejectionReason: 'The date is wrong.',
+            createdAt: 1,
+          }),
+        ],
+      },
+      'rejected',
+    );
+
+    expect(reasonLabel(generatedCard)).toBe('Reason kept on the record (optional)');
+    expect(reasonLabel(personCard)).toBe('Reason shown to the author (optional)');
+    expect(generatedCard.textContent).not.toContain('shown to the author');
+  });
+
+  it('asks for a reason for rejecting before the decision, as on any card', async () => {
+    const [generatedCard, personCard] = await render({
+      pending: [
+        generated('g1', { createdAt: 2 }),
+        question('p1', { createdBy: PERSON, createdAt: 1 }),
+      ],
+    });
+
+    expect(reasonLabel(generatedCard)).toBe('Reason for rejecting (optional)');
+    expect(reasonLabel(personCard)).toBe('Reason for rejecting (optional)');
   });
 });
