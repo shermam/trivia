@@ -1,0 +1,212 @@
+{
+  "$comment": [
+    "What the app does with a question's text when the document's format is 'markdown' (FEAT-019, src/app/components/rendered-text/), published for the renderer this repository does not run: the question-generation pipeline (shermam/trivia-pipeline) renders every candidate the same way before a reviewer sees it. Vendor this file and render-contract.golden.json; configure a renderer from them, do not transcribe them.",
+    "The code is the authority and this file is its published statement. Nothing reads it at runtime. src/app/components/rendered-text/render-contract.spec.ts reads it and asserts that the live engines are configured exactly so — every option all four marked instances hold, the math tokenizers and their delimiters, the pattern that decides which instance a source takes, the options KaTeX receives and the defaults it is left with, the objects DOMPurify receives and the one hook it runs — and that the installed packages are the series named under dependencies. A value changed in either place fails that suite.",
+    "render-contract.golden.json is this configuration's output for a corpus of inputs, written from the live renderer under jsdom by scripts/render-contract-golden.mjs, each input through the instance math.selection picks for it, and held equal to it by the same spec. It is the test of a second renderer: one configured from this file reproduces every output there byte for byte, or it is not the same renderer.",
+    "Two modes. block renders a question and its explanation, the explanation trimmed first and not rendered at all when that leaves it empty. inline renders each answer option, which is a button: parsed with parseInline, so nothing block-level; a link renders as its label; a $$…$$ formula compiles undisplayed; DOMPurify's tag list loses a. Each mode has two marked instances, configured alike: a source that math.selection matches renders through the one given the KaTeX renderer, and any other source — most questions — through the one without. A document whose format is anything but exactly 'markdown', absent included, is shown as its text and never parsed. A render that throws is shown as its source text; KaTeX's parse errors do not throw (throwOnError: false) and come out as the formula's own source.",
+    "A RegExp is written as { source, flags }. An option not named here is left at the installed package's default — DOMPurify's KEEP_CONTENT and FORBID_CONTENTS among them: an element off the list is removed and its text kept, except the elements DOMPurify drops whole (annotation-xml, script, style, thead and the rest of FORBID_CONTENTS), which is why a table loses its header row.",
+    "dependencies names each package's release series as a caret range fixes it: the major, or for a 0.x package the minor.",
+    "version is the version of this file's format — its keys and what they mean — not of the configuration: a tag added to the allowlist leaves it at 1."
+  ],
+  "version": 1,
+  "source": {
+    "repository": "shermam/trivia",
+    "directory": "src/app/components/rendered-text",
+    "files": ["markdown-engine.ts", "math-delimiters.ts", "math-engine.ts"]
+  },
+  "dependencies": { "marked": "18", "katex": "0.18", "dompurify": "3" },
+  "marked": {
+    "$comment": "options is every option a Marked instance holds once built, other than tokenizer and renderer below and the extensions under math, and is the same in all four instances: both modes, with the KaTeX renderer and without it. tokenizer names the built-in tokenizers replaced by one that claims nothing (disabled), so raw HTML falls through to the text tokenizer and is escaped. renderer names the renderers replaced in each mode; label renders a link as its label's inline tokens and drops the destination. parse is the method each mode parses with.",
+    "options": {
+      "async": false,
+      "breaks": false,
+      "gfm": true,
+      "hooks": null,
+      "pedantic": false,
+      "silent": false,
+      "walkTokens": null
+    },
+    "tokenizer": { "html": "disabled", "tag": "disabled" },
+    "renderer": { "block": {}, "inline": { "link": "label" } },
+    "parse": { "block": "parse", "inline": "parseInline" }
+  },
+  "math": {
+    "$comment": "Two marked extensions, built into every instance in this order. Each reports the first index of its start marker in the source it is offered, which is where marked stops a paragraph (block level) or a run of text (inline level) so that the extension gets to try; it tries its delimiters in order, and on a match emits one token whose TeX is capture group 1, trimmed. KaTeX compiles that token with the delimiter's displayMode for the mode being rendered. The instance without the KaTeX renderer renders the same token as its source, delimiters included, in a code span: what the app shows when the KaTeX chunk did not load. selection is the test that picks the instance, as RenderedTextComponent applies it (containsMath): the pattern searched for anywhere in the raw source, unanchored — a match takes the instance with KaTeX, no match the one without. It reads text, not tokens, so a delimiter inside a code span still selects KaTeX, which then compiles nothing.",
+    "extensions": [
+      { "name": "mathBlock", "level": "block", "start": "$$", "delimiters": ["displayBlock"] },
+      { "name": "math", "level": "inline", "start": "$", "delimiters": ["displayInline", "inline"] }
+    ],
+    "delimiters": {
+      "displayBlock": {
+        "source": "^\\$\\$([\\s\\S]+?)\\$\\$(?:\\n+|$)",
+        "flags": "",
+        "displayMode": { "block": true, "inline": false }
+      },
+      "displayInline": {
+        "source": "^\\$\\$([\\s\\S]+?)\\$\\$",
+        "flags": "",
+        "displayMode": { "block": true, "inline": false }
+      },
+      "inline": {
+        "source": "^\\$(?![\\s$])([^$\\n]*?[^\\s$])\\$(?!\\d)",
+        "flags": "",
+        "displayMode": { "block": false, "inline": false }
+      }
+    },
+    "selection": {
+      "pattern": {
+        "source": "\\$\\$([\\s\\S]+?)\\$\\$|\\$(?![\\s$])([^$\\n]*?[^\\s$])\\$(?!\\d)",
+        "flags": ""
+      }
+    }
+  },
+  "katex": {
+    "$comment": "options is exactly what renderToString receives besides displayMode. defaults are options it is not given whose installed default the renderer's safety rests on: trust (false, so \\href, \\url, \\includegraphics and the \\html* commands compile as unsupported) and maxExpand (the macro-expansion bound a \\def bomb runs into). maxSize is not set, so sizes are not capped; no macros object is passed, so a \\gdef in one formula never reaches the next.",
+    "options": { "output": "mathml", "throwOnError": false, "strict": "ignore" },
+    "defaults": { "trust": false, "maxExpand": 1000 }
+  },
+  "dompurify": {
+    "$comment": "block is the configuration DOMPurify.sanitize receives in block mode; inline is what replaces in it for inline mode. The lists are per document, not per element, and are the allowlist exactly as configured: ALLOWED_TAGS the twelve prose tags and then the MathML elements, ALLOWED_ATTR the three prose attributes and then the MathML ones. They are not a record of what KaTeX emits, which differs in both directions — render-contract.golden.json shows what the sanitiser drops from KaTeX's output today. hooks is the only hook installed, run after DOMPurify has finished an element's attributes: class is split on whitespace and only the names matching classKeep survive, the attribute going when none does; an element that is not an HTML a loses every attribute in anchorOnly; an a whose href parses as an absolute URL with protocol linkProtocol is given linkAttributes, and any other a loses its href and every attribute in linkAttributes.",
+    "block": {
+      "ALLOWED_TAGS": [
+        "p",
+        "br",
+        "strong",
+        "em",
+        "del",
+        "blockquote",
+        "code",
+        "pre",
+        "ul",
+        "ol",
+        "li",
+        "a",
+        "math",
+        "semantics",
+        "annotation",
+        "mrow",
+        "mi",
+        "mn",
+        "mo",
+        "ms",
+        "mtext",
+        "mspace",
+        "msqrt",
+        "mroot",
+        "mstyle",
+        "merror",
+        "menclose",
+        "mpadded",
+        "mphantom",
+        "mfrac",
+        "msub",
+        "msup",
+        "msubsup",
+        "munder",
+        "mover",
+        "munderover",
+        "mmultiscripts",
+        "mprescripts",
+        "none",
+        "mtable",
+        "mtr",
+        "mtd"
+      ],
+      "ALLOWED_ATTR": [
+        "href",
+        "title",
+        "class",
+        "xmlns",
+        "display",
+        "encoding",
+        "mathvariant",
+        "displaystyle",
+        "scriptlevel",
+        "stretchy",
+        "symmetric",
+        "separator",
+        "fence",
+        "form",
+        "largeop",
+        "minsize",
+        "maxsize",
+        "lspace",
+        "rspace",
+        "width",
+        "height",
+        "depth",
+        "voffset",
+        "linethickness",
+        "accent",
+        "accentunder",
+        "movablelimits",
+        "columnalign",
+        "rowspacing",
+        "columnspacing",
+        "columnlines",
+        "rowlines",
+        "notation"
+      ],
+      "ALLOWED_URI_REGEXP": {
+        "source": "^(?:https:|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))",
+        "flags": "i"
+      },
+      "ALLOW_DATA_ATTR": false,
+      "ALLOW_ARIA_ATTR": false,
+      "FORBID_ATTR": ["style"]
+    },
+    "inline": {
+      "ALLOWED_TAGS": [
+        "p",
+        "br",
+        "strong",
+        "em",
+        "del",
+        "blockquote",
+        "code",
+        "pre",
+        "ul",
+        "ol",
+        "li",
+        "math",
+        "semantics",
+        "annotation",
+        "mrow",
+        "mi",
+        "mn",
+        "mo",
+        "ms",
+        "mtext",
+        "mspace",
+        "msqrt",
+        "mroot",
+        "mstyle",
+        "merror",
+        "menclose",
+        "mpadded",
+        "mphantom",
+        "mfrac",
+        "msub",
+        "msup",
+        "msubsup",
+        "munder",
+        "mover",
+        "munderover",
+        "mmultiscripts",
+        "mprescripts",
+        "none",
+        "mtable",
+        "mtr",
+        "mtd"
+      ]
+    },
+    "hooks": {
+      "afterSanitizeAttributes": {
+        "classKeep": { "source": "^language-[A-Za-z0-9#+._-]*$", "flags": "" },
+        "anchorOnly": ["href", "title"],
+        "linkProtocol": "https:",
+        "linkAttributes": { "target": "_blank", "rel": "noopener noreferrer" }
+      }
+    }
+  }
+}

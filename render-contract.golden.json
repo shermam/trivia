@@ -1,0 +1,411 @@
+{
+  "$comment": [
+    "The app's rendered output for each input below, written by scripts/render-contract-golden.mjs from the live renderer (src/app/components/rendered-text/) under jsdom, with the configuration render-contract.json publishes. Regenerate it with that script; never edit it by hand.",
+    "src/app/components/rendered-text/render-contract.spec.ts re-renders every input, directly and through RenderedTextComponent, and fails on any difference, and on a generatedWith that no longer names the installed packages — so a change to the renderer, or to marked, KaTeX, DOMPurify, jsdom or the parse5 jsdom serialises with, is a change to this file in the same pull request.",
+    "A renderer configured from render-contract.json reproduces every output here byte for byte, or it is not the app's renderer. block renders a question and its explanation; inline renders an answer option. katex says whether render-contract.json's math.selection pattern matched the input, so it rendered through the instance with the KaTeX renderer, as the app would; false means the instance without one, which is where most questions go.",
+    "output is the string the renderer returns — DOMPurify's serialisation, which the app writes into an element as it is — and it is jsdom's serialisation: parse5, at the version under generatedWith. A browser builds the same DOM but need not write it the same way: Chromium 141 escapes < and > inside an attribute value (title=\"a&lt;b&gt;c\") where parse5 writes them as they are (title=\"a<b>c\"), as link-title-with-angle-brackets shows. Byte equality is defined under jsdom; compare there.",
+    "A case whose about starts 'Known defect' records the renderer as it behaves today, not as it should: a fix changes that output, and the change shows here."
+  ],
+  "version": 1,
+  "generatedWith": {
+    "marked": "18.0.13",
+    "katex": "0.18.7",
+    "dompurify": "3.4.16",
+    "jsdom": "28.1.0",
+    "parse5": "8.0.1"
+  },
+  "cases": [
+    {
+      "name": "plain-question",
+      "mode": "block",
+      "about": "Text with no Markdown in it: one paragraph.",
+      "input": "Which planet is closest to the Sun?",
+      "katex": false,
+      "output": "<p>Which planet is closest to the Sun?</p>\n"
+    },
+    {
+      "name": "plain-answer",
+      "mode": "inline",
+      "about": "An answer option carrying characters HTML reads: escaped, with no wrapper element.",
+      "input": "Tom & Jerry <3",
+      "katex": false,
+      "output": "Tom &amp; Jerry &lt;3"
+    },
+    {
+      "name": "currency-is-not-math",
+      "mode": "block",
+      "about": "Two prices are not a formula: the inline delimiter refuses whitespace before its closing $, so the source takes the instance without KaTeX.",
+      "input": "It cost $5 then and $6 today.",
+      "katex": false,
+      "output": "<p>It cost $5 then and $6 today.</p>\n"
+    },
+    {
+      "name": "character-references",
+      "mode": "block",
+      "about": "marked passes references through; the parse DOMPurify does decodes them and the serialiser re-escapes only what HTML needs.",
+      "input": "&copy; 2026 &amp; &#36;5",
+      "katex": false,
+      "output": "<p>© 2026 &amp; $5</p>\n"
+    },
+    {
+      "name": "emphasis-and-code",
+      "mode": "block",
+      "about": "strong, em, del (GFM) and an inline code span.",
+      "input": "**bold**, *italic*, ~~struck~~ and `code`",
+      "katex": false,
+      "output": "<p><strong>bold</strong>, <em>italic</em>, <del>struck</del> and <code>code</code></p>\n"
+    },
+    {
+      "name": "paragraphs-and-line-breaks",
+      "mode": "block",
+      "about": "Two trailing spaces and a trailing backslash are hard breaks (br); a bare newline is a soft one and stays a newline (breaks: false).",
+      "input": "First line  \nsecond line\\\nthird line\nsame paragraph\n\nNext paragraph.",
+      "katex": false,
+      "output": "<p>First line<br>second line<br>third line\nsame paragraph</p>\n<p>Next paragraph.</p>\n"
+    },
+    {
+      "name": "blockquote",
+      "mode": "block",
+      "about": "A quote, with a mark inside it.",
+      "input": "> Quoted, with **bold** inside",
+      "katex": false,
+      "output": "<blockquote>\n<p>Quoted, with <strong>bold</strong> inside</p>\n</blockquote>\n"
+    },
+    {
+      "name": "lists",
+      "mode": "block",
+      "about": "A bulleted list with a nested one, then a numbered list.",
+      "input": "- one\n- two\n  - nested\n\n1. first\n2. second",
+      "katex": false,
+      "output": "<ul>\n<li>one</li>\n<li>two<ul>\n<li>nested</li>\n</ul>\n</li>\n</ul>\n<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n"
+    },
+    {
+      "name": "https-links",
+      "mode": "block",
+      "about": "An https link keeps its href and title and is given target and rel; a bare https URL is a GFM autolink and gets the same.",
+      "input": "[MDN](https://developer.mozilla.org/en-US/ \"Reference\") and https://example.org/page",
+      "katex": false,
+      "output": "<p><a href=\"https://developer.mozilla.org/en-US/\" title=\"Reference\" target=\"_blank\" rel=\"noopener noreferrer\">MDN</a> and <a href=\"https://example.org/page\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.org/page</a></p>\n"
+    },
+    {
+      "name": "uppercase-https-link",
+      "mode": "block",
+      "about": "The hook parses the href rather than prefix-matching it: an uppercase scheme is https: all the same, so the link keeps its href and gains target and rel. A port that compares strings drops it.",
+      "input": "[shout](HTTPS://EXAMPLE.ORG/)",
+      "katex": false,
+      "output": "<p><a href=\"HTTPS://EXAMPLE.ORG/\" target=\"_blank\" rel=\"noopener noreferrer\">shout</a></p>\n"
+    },
+    {
+      "name": "link-title-with-angle-brackets",
+      "mode": "block",
+      "about": "jsdom (parse5) writes < and > inside an attribute value as they are; Chromium writes &lt; and &gt;, the same DOM serialised differently. This file is jsdom's serialisation, so byte equality is defined there.",
+      "input": "[note](https://example.org/ \"a<b>c\")",
+      "katex": false,
+      "output": "<p><a href=\"https://example.org/\" title=\"a<b>c\" target=\"_blank\" rel=\"noopener noreferrer\">note</a></p>\n"
+    },
+    {
+      "name": "fence-with-language",
+      "mode": "block",
+      "about": "The one class anything may carry: the fence language.",
+      "input": "```js\nconst answer = 42;\n```",
+      "katex": false,
+      "output": "<pre><code class=\"language-js\">const answer = 42;\n</code></pre>\n"
+    },
+    {
+      "name": "fence-without-language",
+      "mode": "block",
+      "about": "A fence with no info string: a code block with no class.",
+      "input": "```\nno language here\n```",
+      "katex": false,
+      "output": "<pre><code>no language here\n</code></pre>\n"
+    },
+    {
+      "name": "indented-code-block",
+      "mode": "block",
+      "about": "Renders byte for byte as fence-without-language. Only marked's token tells them apart — type code with codeBlockStyle 'indented' and no lang, against a fence's lang of '' — so a check that a fence names its language has to read the tokens, not this HTML.",
+      "input": "    no language here",
+      "katex": false,
+      "output": "<pre><code>no language here\n</code></pre>\n"
+    },
+    {
+      "name": "unclosed-fence",
+      "mode": "block",
+      "about": "A fence that is never closed runs to the end of the source and is a code block, not an error.",
+      "input": "```js\nconst a = 1;\nno closing fence",
+      "katex": false,
+      "output": "<pre><code class=\"language-js\">const a = 1;\nno closing fence\n</code></pre>\n"
+    },
+    {
+      "name": "unbalanced-emphasis",
+      "mode": "block",
+      "about": "Emphasis that never closes is not emphasis: the asterisks stay as text.",
+      "input": "**bold that never closes and *one more",
+      "katex": false,
+      "output": "<p>**bold that never closes and *one more</p>\n"
+    },
+    {
+      "name": "inline-math",
+      "mode": "block",
+      "about": "A $…$ formula in a sentence: MathML with no display attribute. The GFM strikethrough beside it holds the block instance with KaTeX to gfm by its output.",
+      "input": "The area is ~~about~~ exactly $\\pi r^2$.",
+      "katex": true,
+      "output": "<p>The area is <del>about</del> exactly <math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>π</mi><msup><mi>r</mi><mn>2</mn></msup></mrow><annotation encoding=\"application/x-tex\">\\pi r^2</annotation></semantics></math>.</p>\n"
+    },
+    {
+      "name": "display-math",
+      "mode": "block",
+      "about": "A $$…$$ formula on its own lines: a block of its own, display=\"block\", no paragraph.",
+      "input": "$$\n\\int_0^\\infty e^{-x}\\,dx = 1\n$$",
+      "katex": true,
+      "output": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><msubsup><mo>∫</mo><mn>0</mn><mi mathvariant=\"normal\">∞</mi></msubsup><msup><mi>e</mi><mrow><mo>−</mo><mi>x</mi></mrow></msup><mtext> </mtext><mi>d</mi><mi>x</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding=\"application/x-tex\">\\int_0^\\infty e^{-x}\\,dx = 1</annotation></semantics></math>"
+    },
+    {
+      "name": "display-math-mid-sentence",
+      "mode": "block",
+      "about": "A $$…$$ formula inside a paragraph is still displayed in block mode. The newline before it is marked's: the paragraph is cut at the block extension's start marker and joined back with one.",
+      "input": "So $$e^{i\\pi} + 1 = 0$$ holds.",
+      "katex": true,
+      "output": "<p>So \n<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><msup><mi>e</mi><mrow><mi>i</mi><mi>π</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow><annotation encoding=\"application/x-tex\">e^{i\\pi} + 1 = 0</annotation></semantics></math> holds.</p>\n"
+    },
+    {
+      "name": "boxed-cancel-strike",
+      "mode": "block",
+      "about": "menclose and its notation attribute — the element whose absence once rendered \\boxed{x} as x.",
+      "input": "$\\boxed{x} + \\cancel{y} + \\sout{z}$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><menclose notation=\"box\"><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mstyle scriptlevel=\"0\" displaystyle=\"true\"><mi>x</mi></mstyle></mstyle></mstyle></menclose><mo>+</mo><menclose notation=\"updiagonalstrike\"><mi>y</mi></menclose><mo>+</mo><menclose notation=\"horizontalstrike\"><mi>z</mi></menclose></mrow><annotation encoding=\"application/x-tex\">\\boxed{x} + \\cancel{y} + \\sout{z}</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "fractions-roots-scripts",
+      "mode": "block",
+      "about": "mfrac, mroot and msqrt; msubsup for a prescript, which KaTeX writes as scripts on an empty mrow rather than as mmultiscripts; msubsup again for the sum, whose limits stay scripts in inline style; msub.",
+      "input": "$\\frac{a}{b} + \\sqrt[3]{x} + \\sqrt{y} + {}^{3}_{4}z + \\sum_{i=1}^{n} a_i$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>+</mo><mroot><mi>x</mi><mn>3</mn></mroot><mo>+</mo><msqrt><mi>y</mi></msqrt><mo>+</mo><msubsup><mrow></mrow><mn>4</mn><mn>3</mn></msubsup><mi>z</mi><mo>+</mo><msubsup><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></msubsup><msub><mi>a</mi><mi>i</mi></msub></mrow><annotation encoding=\"application/x-tex\">\\frac{a}{b} + \\sqrt[3]{x} + \\sqrt{y} + {}^{3}_{4}z + \\sum_{i=1}^{n} a_i</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "limits-under-and-over",
+      "mode": "block",
+      "about": "In display style a sum with both limits is munderover and a limit with one is munder; \\underline is munder with accentunder.",
+      "input": "$$\\sum_{i=1}^{n} i = \\lim_{k \\to \\infty} \\underline{s_k}$$",
+      "katex": true,
+      "output": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><mi>i</mi><mo>=</mo><munder><mrow><mi>lim</mi><mo>⁡</mo></mrow><mrow><mi>k</mi><mo>→</mo><mi mathvariant=\"normal\">∞</mi></mrow></munder><munder accentunder=\"true\"><msub><mi>s</mi><mi>k</mi></msub><mo stretchy=\"true\">‾</mo></munder></mrow><annotation encoding=\"application/x-tex\">\\sum_{i=1}^{n} i = \\lim_{k \\to \\infty} \\underline{s_k}</annotation></semantics></math>"
+    },
+    {
+      "name": "cases-environment",
+      "mode": "block",
+      "about": "mtable, mtr and mtd with their alignment and spacing attributes.",
+      "input": "$$\\begin{cases} a & x < 0 \\\\ b & x \\ge 0 \\end{cases}$$",
+      "katex": true,
+      "output": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><mo fence=\"true\">{</mo><mtable rowspacing=\"0.36em\" columnalign=\"left left\" columnspacing=\"1em\"><mtr><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mi>a</mi></mstyle></mtd><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mrow><mi>x</mi><mo>&lt;</mo><mn>0</mn></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mi>b</mi></mstyle></mtd><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mrow><mi>x</mi><mo>≥</mo><mn>0</mn></mrow></mstyle></mtd></mtr></mtable></mrow><annotation encoding=\"application/x-tex\">\\begin{cases} a &amp; x &lt; 0 \\\\ b &amp; x \\ge 0 \\end{cases}</annotation></semantics></math>"
+    },
+    {
+      "name": "array-with-rules",
+      "mode": "block",
+      "about": "An array with a vertical rule and an \\hline: columnlines and rowlines.",
+      "input": "$$\\begin{array}{c|c} a & b \\\\ \\hline c & d \\end{array}$$",
+      "katex": true,
+      "output": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mtable rowspacing=\"0.16em\" columnalign=\"center center\" columnlines=\"solid\" columnspacing=\"1em\" rowlines=\"solid\"><mtr><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mi>a</mi></mstyle></mtd><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mi>b</mi></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mi>c</mi></mstyle></mtd><mtd><mstyle scriptlevel=\"0\" displaystyle=\"false\"><mi>d</mi></mstyle></mtd></mtr></mtable><annotation encoding=\"application/x-tex\">\\begin{array}{c|c} a &amp; b \\\\ \\hline c &amp; d \\end{array}</annotation></semantics></math>"
+    },
+    {
+      "name": "delimiters-accents-fonts",
+      "mode": "block",
+      "about": "Stretchy fences, an over-brace, an accent, a blackboard letter, a text run and an operator name.",
+      "input": "$\\left( \\frac{a}{b} \\right] \\overbrace{a+b}^{s} \\vec{v} \\mathbb{R} \\text{ and } \\operatorname{sin}\\theta$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mrow><mo fence=\"true\">(</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo fence=\"true\">]</mo></mrow><mover><mover><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><mo stretchy=\"true\">⏞</mo></mover><mi>s</mi></mover><mover accent=\"true\"><mi>v</mi><mo>⃗</mo></mover><mi mathvariant=\"double-struck\">R</mi><mtext>&nbsp;and&nbsp;</mtext><mi mathvariant=\"normal\">sin</mi><mo>⁡</mo><mi>θ</mi></mrow><annotation encoding=\"application/x-tex\">\\left( \\frac{a}{b} \\right] \\overbrace{a+b}^{s} \\vec{v} \\mathbb{R} \\text{ and } \\operatorname{sin}\\theta</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "binomial-fences-spacing",
+      "mode": "block",
+      "about": "linethickness (\\binom), minsize and maxsize (\\big), separator (the comma in an argument list), lspace and rspace (\\mathbin).",
+      "input": "$\\binom{n}{k} \\big( f(a, b) \\big) \\mathbin{+} x$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mrow><mo fence=\"true\">(</mo><mfrac linethickness=\"0px\"><mi>n</mi><mi>k</mi></mfrac><mo fence=\"true\">)</mo></mrow><mo fence=\"false\" stretchy=\"true\" minsize=\"1.2em\" maxsize=\"1.2em\">(</mo><mi>f</mi><mo stretchy=\"false\">(</mo><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi><mo stretchy=\"false\">)</mo><mo fence=\"false\" stretchy=\"true\" minsize=\"1.2em\" maxsize=\"1.2em\">)</mo><mo lspace=\"0.22em\" rspace=\"0.22em\">+</mo><mi>x</mi></mrow><annotation encoding=\"application/x-tex\">\\binom{n}{k} \\big( f(a, b) \\big) \\mathbin{+} x</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "phantom-smash-small-integral",
+      "mode": "block",
+      "about": "mphantom, depth (\\smash) and largeop (\\smallint, the one operator KaTeX marks).",
+      "input": "$\\phantom{x}\\smash{y} + \\smallint f$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mphantom><mi>x</mi></mphantom><mpadded height=\"0px\" depth=\"0px\"><mi>y</mi></mpadded><mo>+</mo><mo largeop=\"false\">∫</mo><mi>f</mi></mrow><annotation encoding=\"application/x-tex\">\\phantom{x}\\smash{y} + \\smallint f</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "math-inside-code",
+      "mode": "block",
+      "about": "A delimiter inside a code span or a fence is code: the fence tokenizer claims it first. The source still takes the KaTeX instance — the selection pattern reads the raw text — and nothing is compiled.",
+      "input": "Write `$x^2$` for a formula:\n\n```tex\n$$y$$\n```",
+      "katex": true,
+      "output": "<p>Write <code>$x^2$</code> for a formula:</p>\n<pre><code class=\"language-tex\">$$y$$\n</code></pre>\n"
+    },
+    {
+      "name": "heading",
+      "mode": "block",
+      "about": "A heading is not on the list: the tag goes, its words stay.",
+      "input": "# A heading\n\nBody text.",
+      "katex": false,
+      "output": "A heading\n<p>Body text.</p>\n"
+    },
+    {
+      "name": "image",
+      "mode": "block",
+      "about": "An image is not on the list, and an img has no text to keep: the alt text goes with it.",
+      "input": "![a cat](https://example.org/cat.png)",
+      "katex": false,
+      "output": "<p></p>\n"
+    },
+    {
+      "name": "table",
+      "mode": "block",
+      "about": "Known defect, recorded as the app renders it today: table elements are not on the list and their text is kept — except the header row, which DOMPurify drops whole, because thead is in its FORBID_CONTENTS.",
+      "input": "| a | b |\n|---|---|\n| 1 | 2 |",
+      "katex": false,
+      "output": "\n\n\n1\n2\n\n\n"
+    },
+    {
+      "name": "horizontal-rule",
+      "mode": "block",
+      "about": "A thematic break is not on the list and has no text: it goes.",
+      "input": "above\n\n---\n\nbelow",
+      "katex": false,
+      "output": "<p>above</p>\n\n<p>below</p>\n"
+    },
+    {
+      "name": "task-list",
+      "mode": "block",
+      "about": "A GFM task item keeps its text and loses its checkbox.",
+      "input": "- [x] done\n- [ ] todo",
+      "katex": false,
+      "output": "<ul>\n<li> done</li>\n<li> todo</li>\n</ul>\n"
+    },
+    {
+      "name": "links-that-are-not-https",
+      "mode": "block",
+      "about": "http, a relative path, mailto: and javascript: lose their href, and so does a www autolink, which marked gives http://: each anchor stays as its label.",
+      "input": "[plain http](http://example.org/) [relative](/account) [mail](mailto:a@example.org) [click](javascript:alert(1)) www.example.org",
+      "katex": false,
+      "output": "<p><a>plain http</a> <a>relative</a> <a>mail</a> <a>click</a> <a>www.example.org</a></p>\n"
+    },
+    {
+      "name": "raw-html",
+      "mode": "block",
+      "about": "marked's html and tag tokenizers are off: raw HTML is text, escaped before DOMPurify sees it.",
+      "input": "<b>bold?</b> <div class=\"x\">block</div>",
+      "katex": false,
+      "output": "<p>&lt;b&gt;bold?&lt;/b&gt; &lt;div class=\"x\"&gt;block&lt;/div&gt;</p>\n"
+    },
+    {
+      "name": "event-handler-injection",
+      "mode": "block",
+      "about": "An injection attempt: the img and its handler arrive as escaped text.",
+      "input": "Before <img src=x onerror=alert(1)> after",
+      "katex": false,
+      "output": "<p>Before &lt;img src=x onerror=alert(1)&gt; after</p>\n"
+    },
+    {
+      "name": "markup-inside-math",
+      "mode": "block",
+      "about": "Markup inside a formula is TeX to KaTeX: its characters become MathML operators and identifiers.",
+      "input": "$<script>alert(1)</script>$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mo>&lt;</mo><mi>s</mi><mi>c</mi><mi>r</mi><mi>i</mi><mi>p</mi><mi>t</mi><mo>&gt;</mo><mi>a</mi><mi>l</mi><mi>e</mi><mi>r</mi><mi>t</mi><mo stretchy=\"false\">(</mo><mn>1</mn><mo stretchy=\"false\">)</mo><mo>&lt;</mo><mi mathvariant=\"normal\">/</mi><mi>s</mi><mi>c</mi><mi>r</mi><mi>i</mi><mi>p</mi><mi>t</mi><mo>&gt;</mo></mrow><annotation encoding=\"application/x-tex\">&lt;script&gt;alert(1)&lt;/script&gt;</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "katex-parse-error",
+      "mode": "block",
+      "about": "A formula that will not compile: KaTeX emits a span with an inline style, which the sanitiser drops while keeping the source text.",
+      "input": "$\\frac{$",
+      "katex": true,
+      "output": "<p>\\frac{</p>\n"
+    },
+    {
+      "name": "katex-colour-and-rule",
+      "mode": "block",
+      "about": "mathcolor and mathbackground are a style attribute in MathML clothing: both go, and the rule keeps the space it reserves.",
+      "input": "$\\textcolor{red}{x} \\rule{1em}{1em}$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle><mi>x</mi></mstyle><mpadded height=\"0em\" voffset=\"0em\"><mspace width=\"1em\" height=\"1em\"></mspace></mpadded></mrow><annotation encoding=\"application/x-tex\">\\textcolor{red}{x} \\rule{1em}{1em}</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "katex-untrusted-command",
+      "mode": "block",
+      "about": "KaTeX runs untrusted (trust: false): \\href compiles as an unsupported command, shown as text with its error colour stripped.",
+      "input": "$\\href{https://evil.example}{x}$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle><mtext>\\href</mtext></mstyle></mrow><annotation encoding=\"application/x-tex\">\\href{https://evil.example}{x}</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "known-overset-emptied",
+      "mode": "block",
+      "about": "Known defect, recorded as the app renders it today: KaTeX nests the over-script inside an <mo>, a MathML token element whose children the HTML parser puts in the HTML namespace; DOMPurify refuses a MathML name there and drops it with its content, so \"a =! b\" reads \"ab\".",
+      "input": "$a \\overset{!}{=} b$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mo></mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\overset{!}{=} b</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "known-nested-token-constructs",
+      "mode": "block",
+      "about": "Known defect, recorded as the app renders it today: the same nesting empties \\underset, \\stackrel and \\mathop…\\limits: each leaves an empty token element behind.",
+      "input": "$\\underset{x}{y} + \\stackrel{a}{b} + \\mathop{x}\\limits_{1}^{2}$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi></mi><mo>+</mo><mo></mo><mo>+</mo><msubsup><mo></mo><mn>1</mn><mn>2</mn></msubsup></mrow><annotation encoding=\"application/x-tex\">\\underset{x}{y} + \\stackrel{a}{b} + \\mathop{x}\\limits_{1}^{2}</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "known-sizing-and-linebreak",
+      "mode": "block",
+      "about": "Known defect, recorded as the app renders it today: KaTeX emits mathsize for a sizing command and linebreak for \\\\, and neither is on the attribute list, so the size and the break are both lost.",
+      "input": "$\\Huge x$ and $a \\\\ b$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle><mi>x</mi></mstyle></mrow><annotation encoding=\"application/x-tex\">\\Huge x</annotation></semantics></math> and <math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mspace></mspace><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\\\ b</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "known-ordered-list-start",
+      "mode": "block",
+      "about": "Known defect, recorded as the app renders it today: marked writes start=\"3\", which is not on the attribute list, so the list is numbered from 1.",
+      "input": "3. three\n4. four",
+      "katex": false,
+      "output": "<ol>\n<li>three</li>\n<li>four</li>\n</ol>\n"
+    },
+    {
+      "name": "inline-link-as-label",
+      "mode": "inline",
+      "about": "A link inside a button is nested interactive content: it renders as its formatted label.",
+      "input": "[**Paris**](https://example.org/a)",
+      "katex": false,
+      "output": "<strong>Paris</strong>"
+    },
+    {
+      "name": "inline-display-math",
+      "mode": "inline",
+      "about": "A $$…$$ formula in an answer compiles undisplayed.",
+      "input": "$$x^2$$",
+      "katex": true,
+      "output": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mi>x</mi><mn>2</mn></msup></mrow><annotation encoding=\"application/x-tex\">x^2</annotation></semantics></math>"
+    },
+    {
+      "name": "inline-block-syntax",
+      "mode": "inline",
+      "about": "parseInline: list, quote and heading syntax stay as characters.",
+      "input": "- one\n> two\n# three",
+      "katex": false,
+      "output": "- one\n&gt; two\n# three"
+    },
+    {
+      "name": "inline-marks-and-math",
+      "mode": "inline",
+      "about": "What an answer can carry: marks, GFM strikethrough among them, code and inline math — which takes it through the inline instance with KaTeX.",
+      "input": "**b**, ~~s~~, `c` and $\\sqrt{2}$",
+      "katex": true,
+      "output": "<strong>b</strong>, <del>s</del>, <code>c</code> and <math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msqrt><mn>2</mn></msqrt></mrow><annotation encoding=\"application/x-tex\">\\sqrt{2}</annotation></semantics></math>"
+    },
+    {
+      "name": "inline-strikethrough",
+      "mode": "inline",
+      "about": "An answer with no formula, so it takes the inline instance without KaTeX, which most answers do; its GFM strikethrough holds that instance to gfm by its output.",
+      "input": "~~Pluto~~ Mercury",
+      "katex": false,
+      "output": "<del>Pluto</del> Mercury"
+    }
+  ]
+}

@@ -36,12 +36,21 @@ const INLINE_MATH_SOURCE = String.raw`\$(?![\s$])([^$\n]*?[^\s$])\$(?!\d)`;
  * The block form also swallows the newlines after the closing `$$`, which is
  * what makes a display formula a block of its own rather than the first thing
  * in a paragraph that continues after it.
+ *
+ * All three are published, source and flags, in `render-contract.json`;
+ * `render-contract.spec.ts` holds them equal.
  */
 export const DISPLAY_MATH_BLOCK = new RegExp(`^${DISPLAY_MATH_SOURCE}(?:\\n+|$)`);
 export const DISPLAY_MATH_INLINE = new RegExp(`^${DISPLAY_MATH_SOURCE}`);
 export const INLINE_MATH = new RegExp(`^${INLINE_MATH_SOURCE}`);
 
-const ANY_MATH = new RegExp(`${DISPLAY_MATH_SOURCE}|${INLINE_MATH_SOURCE}`);
+/**
+ * Either delimiter, anywhere in the source: the pattern {@link containsMath}
+ * tests. Exported because it decides which `marked` instance a source renders
+ * through — with the KaTeX renderer or without it — so `render-contract.json`
+ * publishes it and `render-contract.spec.ts` holds the two equal.
+ */
+export const ANY_MATH = new RegExp(`${DISPLAY_MATH_SOURCE}|${INLINE_MATH_SOURCE}`);
 
 /**
  * Whether this source is worth fetching KaTeX for.
