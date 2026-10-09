@@ -686,7 +686,7 @@ export class GameControllerService {
       before.difficulty === config.difficulty &&
       before.source === config.source &&
       before.timeLimit === config.timeLimit &&
-      (before.tags ?? []).join(' ') === (config.tags ?? []).join(' ');
+      (before.tags ?? []).join('\u0000') === (config.tags ?? []).join('\u0000');
 
     return same ? pending.questions : null;
   }

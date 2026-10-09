@@ -61,8 +61,19 @@
         [size]="32"
         class="text-emerald-600 max-[359px]:[&>svg]:h-5 max-[359px]:[&>svg]:w-5"
       />
+      <!--
+        The name is darker than the mark beside it, on purpose. At 18px (14px
+        below 360) it is body-size text and needs 4.5:1 against whatever is
+        behind this header, which is translucent: on `/` scrolled down, that is
+        the home screen's dark gradient through 85% white. Measured there in a
+        real browser, emerald-600 gives 2.9:1 and emerald-700 4.3:1, so the name
+        is emerald-800 — 6.1:1 scrolled, 7.3:1 at rest — and emerald-400 in the
+        dark theme, 7.8:1 or better. The mark is a graphic, not text, and keeps
+        the brand shade the favicon and `theme-color` hard-code
+        (`BRAND_DESIGN_SYSTEM.md` §1).
+      -->
       <span
-        class="font-extrabold text-emerald-600 dark:text-emerald-400 text-lg tracking-tight max-[359px]:text-sm"
+        class="font-extrabold text-emerald-800 dark:text-emerald-400 text-lg tracking-tight max-[359px]:text-sm"
         >Trivimind</span
       >
       <!--

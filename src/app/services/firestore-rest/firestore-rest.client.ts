@@ -272,6 +272,61 @@ export class FirestoreRestClient {
   }
 
   /**
+   * Reads one document, or `null` when it does not exist — like
+   * {@link getDocument}, but through `documents:batchGet`, which answers an
+   * absent document with **`200` and a `missing` entry** rather than a `404`.
+   *
+   * For a read whose ordinary answer is "there is no such document", and the
+   * difference is the browser console's rather than the caller's: Chromium
+   * writes `Failed to load resource … 404` there, at error level, for every
+   * response with an error status, `fetch` included. A `GET` for a document
+   * most accounts do not have therefore logs an error on most page loads,
+   * which nothing in the app can suppress — `ReviewerService`'s role read was
+   * exactly that (`docs/app.md` §1.4).
+   *
+   * `firestore.rules` evaluates each document of a `batchGet` as a `get`, so
+   * the boundary is the one {@link getDocument} meets: a refused read is a
+   * `403` for the whole request and throws, and so does a network failure. Only
+   * a `missing` entry is `null` — a success that carries neither `found` nor
+   * `missing` throws too, because reading it as "no document" would turn a
+   * malformed answer into a silent "no".
+   *
+   * One document per call: the endpoint takes a list, and a caller that needs
+   * several should add that with a bound of its own (`CLAUDE.md` §4.1).
+   */
+  async batchGetDocument(
+    documentPath: string,
+    options: RestRequestOptions = {},
+  ): Promise<RestDocument | null> {
+    assertDocumentPath(documentPath);
+    const { url, resourceName } = await this.getDocumentsRoot();
+    const results = await this.request<WireBatchGetResult[]>(
+      `${url}:batchGet`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ documents: [`${resourceName}/${documentPath}`] }),
+      },
+      options,
+    );
+    // One document asked for, so the one entry naming it either way is the
+    // answer. `readTime` rides on every entry and decides nothing.
+    const entry = Array.isArray(results)
+      ? results.find((result) => result.found !== undefined || result.missing !== undefined)
+      : undefined;
+    if (entry?.found) {
+      return toRestDocument(entry.found);
+    }
+    if (entry?.missing !== undefined) {
+      return null;
+    }
+    throw new FirestoreRestError(
+      'UNKNOWN',
+      200,
+      `batchGet answered without a found or missing entry for ${documentPath}`,
+    );
+  }
+
+  /**
    * Creates or overwrites a document at a known ID — the REST equivalent of
    * `setDoc`.
    *
@@ -518,6 +573,13 @@ interface WireDocument {
 
 interface WireQueryResult {
   document?: WireDocument;
+  readTime?: string;
+}
+
+/** One entry of a `documents:batchGet` answer: the document, or its name when absent. */
+interface WireBatchGetResult {
+  found?: WireDocument;
+  missing?: string;
   readTime?: string;
 }
 

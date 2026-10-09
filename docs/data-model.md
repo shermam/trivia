@@ -19,7 +19,7 @@ user_roles/{uid}
 
 One document per account, named by uid, holding role flags. **`isReviewer()` in `firestore.rules` reads it** — it is what gates the `/review` queue, the reviewer's `status` write on `custom_questions`, the read of a question that is not yet approved, and the read of `question_reports`. It shipped one release ahead of those rules on purpose, so the register, its lockdown and its tests were deployed and provable before any privilege depended on them, and so a reviewer could be appointed before there was anything to appoint them for.
 
-- **Read**: `get` on your own document only (`request.auth != null && request.auth.uid == uid`). Any uid, anonymous included — see below.
+- **Read**: `get` on your own document only (`request.auth != null && request.auth.uid == uid`). Any uid, anonymous included — see below. The app reads it through `documents:batchGet`, which the rules evaluate document by document as this same `get`, and only for a real account: an anonymous session is answered without a request (`app.md` §1.4).
 - **List**: never, by anyone.
 - **Create / Update / Delete**: never, by any client. Assignment is console-only; the console and the Admin SDK bypass rules entirely.
 
