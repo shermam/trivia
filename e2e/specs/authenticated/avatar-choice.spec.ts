@@ -103,8 +103,17 @@ async function accountShowing(
   };
 }
 
-/** The account chip's box, once two consecutive readings agree. */
-function chipBox(page: Page, what: string): Promise<DocumentBox> {
+/**
+ * The account chip's box, once two consecutive readings agree — read with the
+ * page scrolled to the top. The chip lives in the sticky top bar, so its
+ * document box moves with the scroll position while nothing about the layout
+ * does. Playwright scrolls a target into view before clicking it, and in one
+ * full run that left one of the three pages scrolled 11px after sign-in (the
+ * trace's snapshots say so), so its chip read 11px lower than the other two.
+ * At the top of the page the document box is the layout box.
+ */
+async function chipBox(page: Page, what: string): Promise<DocumentBox> {
+  await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
   return settledBox(page.getByTestId('auth-menu-trigger'), what);
 }
 

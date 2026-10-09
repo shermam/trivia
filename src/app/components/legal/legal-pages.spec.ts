@@ -386,13 +386,12 @@ describe('legal pages', () => {
    * **When the host is contacted is pinned exactly**, because "only if you
    * chose it" would be false: the picker's own preview tile loads the photo for
    * every account that has one — one request on `/profile`, none on `/`, as
-   * `avatar-choice.spec.ts` counts. The
-   * claims the code has to keep: what is stored (a kind, a seed, a switch that
-   * starts off), what is **not** (the photo's address, which Firebase
-   * Authentication holds and the app copies nowhere), when the host is
-   * contacted and nowhere else, the device copy and when it goes, and the
-   * account-lifecycle promises `deleteAccount` and `exportAccountData` keep by
-   * carrying the whole document.
+   * `avatar-choice.spec.ts` counts. Pinned beside it, the other claims the
+   * code has to keep: what is stored (a kind, a seed, a switch that starts
+   * off), what is **not** (the photo's address, which Firebase Authentication
+   * holds and the app copies nowhere), the device copy and when it goes, and
+   * the account-lifecycle promises `deleteAccount` and `exportAccountData`
+   * keep by carrying the whole document.
    */
   it('discloses the avatar choice and the image host a Google photo is loaded from', async () => {
     const page = await render(PrivacyPolicyComponent);
