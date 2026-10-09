@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import {
+  CONTRIBUTIONS_AUTHOR_FIELD,
+  CONTRIBUTIONS_COLLECTION,
+  CONTRIBUTIONS_ORDER,
+} from '../src/app/models/contributions-query';
 
 /**
  * Guards `firestore.indexes.json` against the one mistake that breaks the
@@ -130,6 +135,46 @@ describe('firestore.indexes.json', () => {
         expect(index.fields.at(-1)?.fieldPath).toBe('tags');
       }
     }
+  });
+
+  /**
+   * The contributions query's index — `/my-questions` (`FEAT-007`) and the
+   * reviewer's view of everything one account contributed (`FEAT-006`) send
+   * the same query, an equality on the author ordered newest first.
+   *
+   * **Derived from the query rather than restated.** The expected index is
+   * built from the constants `FirebaseService` builds the query from
+   * (`src/app/models/contributions-query.ts`): the equality field first, then
+   * each ordering field in its own direction, less the `__name__` tiebreaker
+   * Firestore appends itself — which must not be declared (the first row in
+   * this file) and which Firestore appends in the direction of the last
+   * declared field, so the query's tiebreaker has to run that way too. A query
+   * that gained a filter, or flipped its order, or an index that lost a field,
+   * fails here instead of in production, where the emulator's silence about
+   * indexes would otherwise have hidden it until a reviewer's screen never
+   * loaded.
+   */
+  it('declares the index the contributions query rides, as the query actually sends it', () => {
+    const declared = CONTRIBUTIONS_ORDER.filter((order) => order.field !== '__name__');
+    const expected: IndexField[] = [
+      { fieldPath: CONTRIBUTIONS_AUTHOR_FIELD, order: 'ASCENDING' },
+      ...declared.map((order) => ({ fieldPath: order.field, order: order.direction })),
+    ];
+
+    const matching = spec.indexes.filter(
+      (index) =>
+        index.collectionGroup === CONTRIBUTIONS_COLLECTION &&
+        JSON.stringify(index.fields) === JSON.stringify(expected),
+    );
+    expect(matching, JSON.stringify(expected)).toHaveLength(1);
+    expect(expected).toEqual([
+      { fieldPath: 'createdBy', order: 'ASCENDING' },
+      { fieldPath: 'createdAt', order: 'DESCENDING' },
+    ]);
+
+    const tiebreaker = CONTRIBUTIONS_ORDER.at(-1);
+    expect(tiebreaker?.field).toBe('__name__');
+    expect(tiebreaker?.direction).toBe(expected.at(-1)?.order);
   });
 
   it('keeps a ttl field override on every Stripe session collection', () => {
