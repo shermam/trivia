@@ -1159,6 +1159,16 @@ service cloud.firestore {
     // report is the record that somebody complained, not a task to tick off.
     // A reviewer acts on the *question*, through `custom_questions`' own
     // moderation rule.
+    //
+    // **A report does not keep its reporter for ever** (`FEAT-042`). Once the
+    // question it names is decided, the daily sweep — or, for an account being
+    // deleted, `deleteAccount` — copies it to a fresh auto-id without
+    // `reportedBy` and deletes the original, on the Admin SDK
+    // (`functions/src/report-anonymisation.ts`). Nothing here changed for it:
+    // the read covers the copy like any other report, and no create can produce
+    // one, because a create needs both the capped id and a `reportedBy` equal
+    // to the caller — a report naming nobody exists only because the server
+    // wrote it.
     match /question_reports/{reportId} {
       allow read: if isReviewer();
       allow create: if request.auth != null

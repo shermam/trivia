@@ -197,4 +197,25 @@ describe('firestore.indexes.json', () => {
       { order: 'ASCENDING', queryScope: 'COLLECTION_GROUP' },
     ]);
   });
+
+  /**
+   * The report sweeps' queries (`FEAT-042`). The daily pass reads the reports
+   * that still name somebody — `where('reportedBy','>','')`, ordered by
+   * `reportedBy` then the document id, from a cursor — and `deleteAccount` and
+   * `exportAccountData` read one account's with an equality on the same field.
+   * Firestore's automatic single-field index on `reportedBy` serves all three,
+   * so nothing needs declaring, and that is exactly why this pins that nothing
+   * takes it away: a `fieldOverrides` entry *replaces* automatic indexing for
+   * its field, and before these sweeps nothing queried this one, so exempting
+   * it looked free. The emulator enforces no index configuration at all, so
+   * every local suite would stay green while both sweeps failed in production
+   * with `FAILED_PRECONDITION` — and reporters stayed named.
+   */
+  it('leaves question_reports.reportedBy to its automatic single-field index', () => {
+    const override = spec.fieldOverrides.find(
+      (entry) => entry.collectionGroup === 'question_reports' && entry.fieldPath === 'reportedBy',
+    );
+
+    expect(override).toBeUndefined();
+  });
 });
