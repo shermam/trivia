@@ -191,12 +191,14 @@ test.describe('the mute toggle in the bar', () => {
  * suspended `AudioContext`; that is the autoplay policy working as designed.
  *
  * **`Failed to load resource`.** Chromium logs a console *error* for every
- * non-2xx response, and this app deliberately asks for documents that may not
- * exist: `ReviewerService` reads `user_roles/{uid}`, which is absent for
- * everybody who is not a reviewer, so a 404 there is the expected answer rather
- * than a fault. That message names no resource either, which is why the URL is
- * recorded for the ones that do count — without it a network failure reads as
- * an application error and gets diagnosed as one.
+ * response with an error status, and this app reads several documents whose
+ * ordinary answer is "not there" with a `GET` that says so with a `404` — a
+ * player's lifetime totals, a leaderboard row, an hourly quota counter
+ * (`FirestoreRestClient.getDocument`). Those are facts about the network rather
+ * than script going wrong, and this test is about the audio graph. The message
+ * names no resource either, which is why the URL is recorded for the ones that
+ * do count — without it a network failure reads as an application error and
+ * gets diagnosed as one.
  *
  * What is left is what a bad audio graph actually produces: an uncaught
  * exception, or a `console.error` raised by script. Scheduling a node in the

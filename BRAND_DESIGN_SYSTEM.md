@@ -2,7 +2,7 @@
 
 ### Primary Tonal System (Emerald Green)
 
-- **Primary (`#059669`)**: Logo header, focus states, icon-only badges, borders, and large-text (≥24px) headings/prices. **Not** used as a solid fill behind white text at body/button size — see the CTA note below.
+- **Primary (`#059669`)**: The logo mark (the top bar's rounded square, the favicon, `theme-color`), focus states, icon-only badges, borders, and large-text (≥24px) headings/prices. **Not** used as a solid fill behind white text at body/button size — see the CTA note below — **nor for the "Trivimind" wordmark beside the mark**, which is body-size text (18px) on a translucent header and is Emerald 800 (`#065F46`). On the home screen scrolled down, its dark gradient shows through the header, and against that Primary measures 2.9:1, Emerald 700 4.3:1 and Emerald 800 6.1:1.
 - **On Primary (`#FFFFFF`)**: Text/icons rendered over the Primary color.
 - **Primary Container (`#D1FAE5`)**: Light emerald background (segmented radio selected fills, callout cards).
 - **On Primary Container (`#064E3B`)**: Text/icons inside Primary Container elements.
@@ -41,7 +41,7 @@ Dark-mode token mapping, applied via `dark:` utility variants alongside every li
 - **Surface / Card**: `white` → `slate-900`; a secondary/inset panel (e.g. stat tiles) uses `slate-800`/`slate-800/60`.
 - **Outline / Border**: `slate-900/N%` opacity borders → `white/N%` at the same opacity step (e.g. `border-slate-900/8` → `dark:border-white/10`).
 - **On Surface (headings/body)**: `slate-900` → `slate-50`; `slate-700` → `slate-300`; `slate-600`/`slate-500` → `slate-400`; `slate-400` → `slate-500`.
-- **Primary (brand emerald)**: `emerald-600` text/headings → `dark:text-emerald-400` (better contrast against a dark surface); solid `emerald-700` CTA fills are unchanged in dark mode — they already meet contrast against white button text regardless of page theme.
+- **Primary (brand emerald)**: `emerald-600` text/headings → `dark:text-emerald-400` (better contrast against a dark surface), and the wordmark's `emerald-800` → the same `emerald-400`; solid `emerald-700` CTA fills are unchanged in dark mode — they already meet contrast against white button text regardless of page theme.
 - **Primary Container**: `emerald-50`/`emerald-100` tinted surfaces (badges, callouts, PRO pills) → `emerald-500/10`–`/20` translucent fills with `emerald-300`/`emerald-400` text, rather than a solid dark-emerald swatch — keeps them legible at low opacity over any dark surface.
 - **Status surfaces** (success/error/warning banners): same translucent-fill pattern — `{color}-50`/`{color}-200` → `dark:bg-{color}-500/10 dark:border-{color}-500/20 dark:text-{color}-300`.
 - **Inverted neutral CTA** ("Play Again", `bg-slate-900` on white text): flips to a light fill in dark mode (`dark:bg-slate-100 dark:text-slate-900`) rather than disappearing into the dark background.

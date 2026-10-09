@@ -92,7 +92,12 @@
         }
       </ul>
     } @else {
-      <p class="text-xs text-slate-400 dark:text-slate-500" [attr.data-cy]="id('no-tags')">
+      <!--
+        The same muted pair as the hint and the feedback line: 12px text needs
+        4.5:1, and slate-500 on white measures 4.8:1, slate-400 on slate-900
+        6.8:1. One step fainter in either theme falls under it.
+      -->
+      <p class="text-xs text-slate-500 dark:text-slate-400" [attr.data-cy]="id('no-tags')">
         No tags yet.
       </p>
     }

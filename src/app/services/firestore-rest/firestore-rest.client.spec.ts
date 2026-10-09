@@ -136,6 +136,86 @@ describe('FirestoreRestClient.getDocument', () => {
   });
 });
 
+/**
+ * The role read's transport (`ReviewerService`). What it exists for is the
+ * absent document: a `GET` answers that with a `404`, which Chromium logs to the
+ * console as an error, while `batchGet` answers `200` with a `missing` entry.
+ * So the tests that matter are the ones pinning that only `missing` means "no
+ * document" — a refusal, a dead network and a malformed success all throw, or
+ * a role read would turn each of them into a silent "not a reviewer".
+ */
+describe('FirestoreRestClient.batchGetDocument', () => {
+  it('POSTs one document name to :batchGet under the project root, with the key and token', async () => {
+    respondWith([{ missing: `${RESOURCE_ROOT}/user_roles/user-1`, readTime: 'now' }]);
+    await makeClient().batchGetDocument('user_roles/user-1');
+
+    const call = lastCall();
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe(`${ROOT}:batchGet?key=test-key`);
+    expect(call.headers['Authorization']).toBe('Bearer id-token-123');
+    // Bounded to the one document asked for, named by its resource name rather
+    // than by the https URL the request goes to.
+    expect(call.body).toEqual({ documents: [`${RESOURCE_ROOT}/user_roles/user-1`] });
+  });
+
+  it('decodes a found document into id, path and data', async () => {
+    respondWith([
+      {
+        found: {
+          name: `${RESOURCE_ROOT}/user_roles/user-1`,
+          fields: { reviewer: { booleanValue: true } },
+        },
+        readTime: 'now',
+      },
+    ]);
+
+    expect(await makeClient().batchGetDocument('user_roles/user-1')).toEqual({
+      id: 'user-1',
+      path: 'user_roles/user-1',
+      data: { reviewer: true },
+    });
+  });
+
+  it('returns null for a missing document, which arrives as a 200', async () => {
+    respondWith([{ missing: `${RESOURCE_ROOT}/user_roles/nobody`, readTime: 'now' }]);
+    expect(await makeClient().batchGetDocument('user_roles/nobody')).toBeNull();
+  });
+
+  it('throws rather than returning null when the read is refused', async () => {
+    respondWith(
+      { error: { status: 'PERMISSION_DENIED', message: "false for 'get'" } },
+      { ok: false, status: 403 },
+    );
+
+    await expect(makeClient().batchGetDocument('user_roles/someone-else')).rejects.toSatisfy(
+      (error: unknown) => error instanceof FirestoreRestError && error.isPermissionDenied,
+    );
+  });
+
+  it('throws rather than returning null when the network fails', async () => {
+    rejectWith(new TypeError('Failed to fetch'));
+
+    await expect(makeClient().batchGetDocument('user_roles/user-1')).rejects.toSatisfy(
+      (error: unknown) => error instanceof FirestoreRestError && error.status === 'UNAVAILABLE',
+    );
+  });
+
+  it('throws rather than returning null when a success names no document either way', async () => {
+    respondWith([{ readTime: 'now' }]);
+
+    await expect(makeClient().batchGetDocument('user_roles/user-1')).rejects.toBeInstanceOf(
+      FirestoreRestError,
+    );
+  });
+
+  it('rejects a path with an odd number of segments without a request', async () => {
+    await expect(makeClient().batchGetDocument('user_roles')).rejects.toThrow(
+      /not a document path/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('FirestoreRestClient auth headers', () => {
   it('sends the ID token as a bearer token', async () => {
     respondWith({ name: `${RESOURCE_ROOT}/products/p1` });

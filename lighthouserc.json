@@ -33,6 +33,18 @@
           {
             "minScore": 0.95
           }
+        ],
+        "color-contrast": [
+          "error",
+          {
+            "minScore": 1
+          }
+        ],
+        "errors-in-console": [
+          "error",
+          {
+            "minScore": 1
+          }
         ]
       }
     },
