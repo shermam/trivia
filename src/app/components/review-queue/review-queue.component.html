@@ -327,17 +327,29 @@
       <dd data-cy="question-status">{{ question.status ?? 'unknown' }}</dd>
     </div>
     <!--
-      One line whatever it names (`CLAUDE.md` §4.4): a uid, "Unattributed", or
-      — for a question the generation pipeline wrote (`FEAT-020`) — the
-      pipeline and its run, which is twice a uid's length and would wrap at a
-      phone's width. `min-w-0` lets the pair shrink to the row and `truncate`
-      ends the text in an ellipsis instead of a second line; the whole of it
-      stays in the DOM for a screen reader.
+      A uid, "Unattributed", or "Question pipeline" for a question the
+      generation pipeline wrote (`FEAT-020`). Nothing here is cut: a reviewer
+      reads an author to act on it, and a clipped identifier names nobody. The
+      generated value is short so that it holds one line wherever a uid does
+      (`CLAUDE.md` §4.4), and the run it came from has a line of its own below.
     -->
-    <div class="flex gap-1 min-w-0 max-w-full">
-      <dt class="shrink-0">Author:</dt>
-      <dd class="truncate" data-cy="question-author">{{ authorLine(question) }}</dd>
+    <div class="flex gap-1">
+      <dt>Author:</dt>
+      <dd data-cy="question-author">{{ authorLine(question) }}</dd>
     </div>
+    <!--
+      The run that produced a generated question, on a line of its own so it
+      is never the part of a long line a phone clips: the id is cut to 32
+      characters in code, which is one line from a 390px phone up, and
+      `break-all` wraps it rather than clipping it on anything narrower.
+      Absent on every other question.
+    -->
+    @if (runLine(question); as run) {
+      <div class="flex gap-1 min-w-0 max-w-full">
+        <dt class="shrink-0">Run:</dt>
+        <dd class="min-w-0 break-all" data-cy="question-run">{{ run }}</dd>
+      </div>
+    }
   </dl>
 
   <!--
