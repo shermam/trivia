@@ -352,3 +352,30 @@ export interface AccountState {
   /** `users/{uid}` in full, or null when the account has never finished a game. */
   gameplayStats: Record<string, unknown> | null;
 }
+
+/**
+ * Who `signInAs` signs in as (`caller-gate.spec.ts`): a guest, an email and
+ * password account in either verification state, or an account of an OAuth
+ * provider named by its Firebase id — one the app offers, or one it does not.
+ */
+export type CallerIdentity =
+  | { kind: 'anonymous' }
+  | { kind: 'password'; emailVerified: boolean }
+  | { kind: 'oauth'; providerId: string };
+
+/** A session the Auth emulator signed: the account, and the ID token a callable carries. */
+export interface SignedInCaller {
+  uid: string;
+  idToken: string;
+}
+
+/**
+ * A callable's answer as its HTTP protocol carries it: `result` when the
+ * function returned, `error` — with the HTTP status beside it — when it threw
+ * an `HttpsError`.
+ */
+export interface CallableAnswer {
+  status: number;
+  result?: unknown;
+  error?: { status?: string; message?: string };
+}

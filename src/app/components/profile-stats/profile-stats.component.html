@@ -51,9 +51,10 @@
     >
       <!--
         One grid cell holding every message this card can show, so the space it
-        takes is the tallest of them and none of the five states resizes the
-        card (`CLAUDE.md` §4.4). A hard-coded `min-h` would be a number to
-        re-measure every time one of these sentences changed.
+        takes is the tallest of them and none of the states resizes the card
+        (`CLAUDE.md` §4.4). A hard-coded `min-h` would be a number to re-measure
+        every time one of these sentences changed. Which one shows is `line()`:
+        the view, or the refused-game sentence over an empty card or a full one.
 
         `invisible` (`visibility: hidden`) rather than `hidden`: the box stays
         laid out, which is what reserves the height, while the text drops out
@@ -66,35 +67,48 @@
       <div #statusRegion tabindex="-1" data-cy="stats-status" class="grid mb-6 focus:outline-none">
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
-          [class.invisible]="view() !== 'loading'"
+          [class.invisible]="line() !== 'loading'"
           data-cy="stats-loading"
         >
           Loading your lifetime totals&hellip;
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
-          [class.invisible]="view() !== 'signedOut'"
+          [class.invisible]="line() !== 'signedOut'"
           data-cy="stats-signed-out"
         >
           Sign in and your totals start counting from the next game you finish.
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
-          [class.invisible]="view() !== 'empty'"
+          [class.invisible]="line() !== 'empty'"
           data-cy="stats-empty"
         >
           Nothing banked yet — finish a game and your totals will show up here.
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
-          [class.invisible]="view() !== 'failed'"
+          [class.invisible]="line() !== 'failed'"
           data-cy="stats-failed"
         >
           Could not load your stats just now.
         </p>
+        <!--
+          The server refused to bank this account's last game in this tab
+          (`AccountService.unbankedGame`). Shown in place of "nothing banked
+          yet" or "tracking since", because both of those promise totals that
+          are not coming; the tiles keep whatever was already banked.
+        -->
+        <p
+          class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+          [class.invisible]="line() !== 'notBanked'"
+          data-cy="stats-not-banked"
+        >
+          Your last game could not be added to your totals.
+        </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
-          [class.invisible]="view() !== 'stats'"
+          [class.invisible]="line() !== 'stats'"
           data-cy="stats-since"
         >
           @if (trackingSince(); as since) {

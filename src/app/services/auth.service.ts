@@ -364,6 +364,32 @@ export class AuthService {
   }
 
   /**
+   * The account a call made now would act as — its uid, and whether it is an
+   * anonymous session — once a persisted session has been restored, or `null`
+   * for nobody, including when auth cannot be reached.
+   *
+   * **Read from Auth itself, not from `user()`.** `authStateReady()` resolves
+   * as soon as `auth.currentUser` is populated, while the SDK delivers
+   * `onAuthStateChanged` — which is what sets `user()` — a microtask later (the
+   * race `proStatusReadyPromise` describes), so `user()` can still read `null`
+   * at the very moment a caller wants to know who it is about to act as. The
+   * Functions SDK attaches `auth.currentUser`'s token, so this is the account a
+   * callable invoked next is about.
+   *
+   * Swallows its failures for the reason `whenAuthStateReady()` does.
+   */
+  async currentAccount(): Promise<{ uid: string; isAnonymous: boolean } | null> {
+    try {
+      const { auth } = await this.getAuth();
+      await auth.authStateReady();
+      const user = auth.currentUser;
+      return user ? { uid: user.uid, isAnonymous: user.isAnonymous } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Makes sure this visitor has a session, anonymous if nothing else, and
    * keeps trying when the attempt fails.
    *
