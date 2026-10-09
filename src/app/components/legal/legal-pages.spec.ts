@@ -9,6 +9,10 @@ import {
 } from './legal';
 import { PrivacyPolicyComponent } from './privacy-policy.component';
 import { TermsOfServiceComponent } from './terms-of-service.component';
+// The sweep's own constant, imported across the package boundary on purpose:
+// the period both documents state is the one `functions/` enforces, so the two
+// cannot drift (`functions/src/report-retention.ts`, `FEAT-042`).
+import { REPORTER_RETENTION_DAYS } from '../../../../functions/src/report-retention';
 
 /**
  * These two pages are prose, not logic, so this spec deliberately does not try
@@ -481,6 +485,121 @@ describe('legal pages', () => {
     // The claim that is no longer true, in either of the forms it took.
     expect(text).not.toContain('not through the app at all');
     expect(text).not.toContain('reports are readable by nobody');
+  });
+
+  /**
+   * **A report keeps its reporter for thirty days, and loses it at once when
+   * the reporter leaves (`FEAT-042`).** The page said three things this
+   * falsified: that reports were kept "indefinitely, including your account
+   * identifier", that they were "not removed when you delete your account",
+   * and — in the reporting section — that the identifier "stays part of the
+   * record". The Terms said account termination removes everything but
+   * contributed questions, which was wrong before this and is now wrong the
+   * other way.
+   *
+   * **The number is the sweep's.** `REPORTER_RETENTION_DAYS` is the constant
+   * `functions/src/report-anonymisation.ts` enforces, so changing the period
+   * there fails this test until both documents state the new one. Pinned on the
+   * claims the code has to keep — what a report stores, how long the
+   * identifier stays and why, that a daily job then removes it, that the copy
+   * keeps the day and not the time (`startOfUtcDay`), what deletion and export
+   * do, that the report itself is kept indefinitely — in both documents, and on
+   * every retired sentence in the negative, because the half-finished edit is
+   * to fix the retention bullet and leave another section promising the
+   * opposite. Two of the retired ones were this feature's own first draft:
+   * nothing clears a report from the queue, and a copy stamped to the
+   * millisecond did not hold "nothing that ties it to you".
+   */
+  it('says a report names its reporter for the sweep’s thirty days, and what deletion does', async () => {
+    const privacy = collapse((await render(PrivacyPolicyComponent)).textContent);
+    const terms = collapse((await render(TermsOfServiceComponent)).textContent);
+    const days = `${REPORTER_RETENTION_DAYS} days`;
+
+    // What a report stores, and who may file one — every player, anonymous
+    // sessions included, which "any signed-in player" did not say.
+    expect(privacy).toContain(
+      'Any player can flag a question and file a report, whether or not they have signed in',
+    );
+    expect(privacy).toContain('when you filed it, and your account identifier');
+    expect(privacy).toContain(
+      "your account identifier is part of the record a reviewer's access reaches for as long as the report carries it",
+    );
+    // How long the identifier stays, why, and what removes it.
+    expect(privacy).toContain(
+      `We keep who filed a report for ${days}, so that we and our reviewers can follow it up while it is fresh, and then remove it`,
+    );
+    expect(privacy).toContain(
+      'A job that runs once a day copies each report older than that without your identifier and deletes the original',
+    );
+    // What the copy keeps: the day, not the time, and no identifier.
+    expect(privacy).toContain(
+      'The copy keeps the question, the reason, your words and the day you filed the report — the day, not the time — and no account identifier remains',
+    );
+    expect(privacy).toContain(
+      `keep your account identifier for ${days} from the day you file them`,
+    );
+    // Deletion: the identity goes from every report at once, and no report goes.
+    expect(privacy).toContain(
+      'If you delete your account, your identifier is removed from every report you filed at once, however recent',
+    );
+    expect(privacy).toContain(
+      'removes your account identifier from every report you have filed — the reports themselves stay, naming nobody',
+    );
+    // The report itself, which outlives its identity, indefinitely.
+    expect(privacy).toContain(
+      `Reports themselves are kept indefinitely, as the record that something needed looking at, naming nobody once those ${days} are up`,
+    );
+    expect(privacy).toContain(
+      'The report itself is kept indefinitely — the question, the reason, anything you typed and the day you filed it',
+    );
+    // Export, which returns what still names the account.
+    expect(privacy).toContain(
+      'your data export includes only the reports that still carry your identifier',
+    );
+    expect(privacy).toContain(
+      'every report you have filed that still carries your account identifier',
+    );
+    // A guest's report is a record that can point at an anonymous account.
+    expect(privacy).toContain(
+      `Two records can point at one: a report it filed, which keeps the account's identifier for ${days}`,
+    );
+
+    // The Terms, in the section a leaver reads, the reporting paragraph and
+    // termination.
+    expect(terms).toContain(
+      'Reports you filed outlive your account too, without your account identifier',
+    );
+    expect(terms).toContain(
+      'the reports themselves are kept indefinitely, as the record that something needed looking at',
+    );
+    expect(terms).toContain(
+      `A report keeps your identifier for ${days} so that it can be followed up`,
+    );
+    expect(terms).toContain('deleting your account removes it from every report you filed at once');
+    expect(terms).toContain(`A report says who filed it for ${days}`);
+    expect(terms).toContain(
+      'and the reports the account filed, which stay with its identifier removed',
+    );
+
+    // Every sentence this retired, in the form it took.
+    expect(privacy).not.toContain('are kept indefinitely, including your account identifier');
+    expect(privacy).not.toContain('are not removed when you delete your account');
+    expect(privacy).not.toContain('your account identifier stays part of the record');
+    expect(privacy).not.toContain('Any signed-in player can flag a question');
+    expect(privacy).not.toContain('no data of any kind is attached to them');
+    expect(terms).not.toContain(
+      'it is the one place where deleting your account does not delete everything',
+    );
+    expect(terms).not.toContain(
+      'everything goes except contributed questions, which stay in the bank with authorship removed.',
+    );
+    // …and the first draft's: nothing clears a report, and the copy is not
+    // free of everything that could tie it to its reporter.
+    expect(privacy).not.toContain('we clear it from the review queue');
+    expect(privacy).not.toContain('nothing in the app deletes a report automatically');
+    expect(privacy).not.toContain('holds nothing that ties it to you');
+    expect(privacy).not.toContain('your words and the time stay');
+    expect(terms).not.toContain('without anything that identifies you');
   });
 
   /**

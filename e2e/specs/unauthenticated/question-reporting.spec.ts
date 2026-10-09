@@ -228,9 +228,9 @@ test.describe('reporting a community question', () => {
     expect(report.detail).toBe('We live on Earth, not Mars.');
     // The uid is the anonymous session's — unknown in advance, but the document
     // ID must carry the volume cap and end in that same uid.
-    expect(typeof report.reportedBy).toBe('string');
-    expect(report.reportedBy.length).toBeGreaterThan(0);
-    expect(report.id).toMatch(new RegExp(`^\\d+-\\d-${report.reportedBy}$`));
+    const reporter = report.reportedBy ?? '';
+    expect(reporter.length).toBeGreaterThan(0);
+    expect(report.id).toMatch(new RegExp(`^\\d+-\\d-${reporter}$`));
     expect(Math.abs(report.createdAt - Date.now())).toBeLessThan(60_000);
   });
 

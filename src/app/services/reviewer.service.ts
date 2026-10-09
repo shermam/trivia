@@ -246,5 +246,8 @@ function toQuestionReport(id: string, data: Record<string, unknown>): QuestionRe
     reason: REPORT_REASONS.find((known) => known === reason) ?? 'other',
     ...(typeof detail === 'string' && detail.length > 0 ? { detail } : {}),
     createdAt: typeof createdAt === 'number' ? createdAt : null,
+    // Read off the reporter's presence and nothing more: an anonymised copy is
+    // the only report without one, and the uid itself never leaves here.
+    dayOnly: data['reportedBy'] === undefined,
   };
 }

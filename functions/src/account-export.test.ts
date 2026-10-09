@@ -82,6 +82,34 @@ test('represents an account with no play history as an empty list', () => {
   assert.deepEqual(buildAccountExport(base).playHistory, []);
 });
 
+/**
+ * The reports that still name the account (`FEAT-042`) — a report keeps its
+ * reporter until the daily run finds its question decided, so until then it is
+ * personal data the account can ask for. Passed through whole, `reportedBy`
+ * included: it is the reader's own identifier, and the document as held.
+ */
+test('includes the reports that still name the account, whole', () => {
+  const report = {
+    id: '5859666-0-user-1',
+    questionId: 'q1',
+    reason: 'incorrect',
+    detail: 'The answer is misspelled.',
+    reportedBy: 'user-1',
+    createdAt: 1_757_900_000_000,
+  };
+
+  assert.deepEqual(buildAccountExport({ ...base, questionReports: [report] }).questionReports, [
+    report,
+  ]);
+});
+
+test('represents an account with no such report as an empty list, not an absent key', () => {
+  const result = buildAccountExport(base);
+
+  assert.deepEqual(result.questionReports, []);
+  assert.ok(JSON.stringify(result).includes('"questionReports":[]'));
+});
+
 test('represents "nothing here" as empty rather than omitting the section', () => {
   const result = buildAccountExport(base);
   // A missing key reads as "we are not telling you"; an explicit null or []

@@ -210,7 +210,8 @@ test.describe('the review queue', () => {
     // anonymous session and is not knowable from the browser afterwards, and
     // the reviewer's screen must not show it.
     const [filed] = await firebase.getQuestionReports([questionId]);
-    expect(filed.reportedBy).toBeTruthy();
+    const reporter = filed.reportedBy ?? '';
+    expect(reporter).not.toBe('');
 
     await signInAsReviewer(page, firebase);
     await page.goto('/review');
@@ -225,7 +226,7 @@ test.describe('the review queue', () => {
     await expect(row).toContainText(detail);
     await expect(row).toContainText(approvedText);
     // The complaint, not the complainant.
-    await expect(row).not.toContainText(filed.reportedBy);
+    await expect(row).not.toContainText(reporter);
 
     // The decision the report exists to prompt, made from the report itself.
     await row.getByTestId('reject-question').click();

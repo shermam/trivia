@@ -104,13 +104,29 @@
 
   <h3>Reports you file about a question</h3>
   <p>
-    Any signed-in player can flag a question and file a report. The report stores the question's
-    identifier, the reason you chose, anything you typed in the optional detail box, and your
-    account identifier. Reports are readable by us and by the small number of players we have
-    appointed as reviewers, who read them in the app in order to act on what they say — that is how
-    a report reaches somebody who can do something about the question. No other player can read
-    them. The review screen does not show who filed a report, though your account identifier stays
-    part of the record a reviewer's access reaches.
+    Any player can flag a question and file a report, whether or not they have signed in. The report
+    stores the question's identifier, the reason you chose, anything you typed in the optional
+    detail box, when you filed it, and your account identifier. Reports are readable by us and by
+    the small number of players we have appointed as reviewers, who read them in the app in order to
+    act on what they say — that is how a report reaches somebody who can do something about the
+    question. No other player can read them. The review screen does not show who filed a report,
+    though your account identifier is part of the record a reviewer's access reaches for as long as
+    the report carries it.
+  </p>
+  <p>
+    <strong
+      >We keep who filed a report for 30 days, so that we and our reviewers can follow it up while
+      it is fresh, and then remove it.</strong
+    >
+    A job that runs once a day copies each report older than that without your identifier and
+    deletes the original. The copy keeps the question, the reason, your words and the day you filed
+    the report &mdash; the day, not the time &mdash; and no account identifier remains. It is a copy
+    rather than an edit because your identifier is also part of the original report's own reference,
+    so only deleting the original removes it. If you delete your account, your identifier is removed
+    from every report you filed at once, however recent.
+    <strong>Reports themselves are kept indefinitely</strong>, as the record that something needed
+    looking at, naming nobody once those 30 days are up. That is also why your data export includes
+    only the reports that still carry your identifier.
   </p>
 
   <h2>Information created by using the app</h2>
@@ -627,10 +643,12 @@
       <a routerLink="/terms">the Terms</a>.
     </li>
     <li>
-      <strong>Reports you file about a question</strong> are kept indefinitely, including your
-      account identifier, and are not removed when you delete your account. A report is a record
-      that something needed looking at; if it vanished when its author left, the abuse signal would
-      go with it.
+      <strong>Reports you file about a question</strong> keep your account identifier for
+      <strong>30 days</strong> from the day you file them, so that a report can be followed up; the
+      job that runs once a day then removes it, as described above, and deleting your account
+      removes it from every report you filed at once. The report itself is kept indefinitely &mdash;
+      the question, the reason, anything you typed and the day you filed it &mdash; because it is
+      the record that something needed looking at.
     </li>
     <li>
       <strong>The country your IP address maps to</strong> is not kept for any length of time,
@@ -640,9 +658,11 @@
       is, which is until you delete your account.
     </li>
     <li>
-      <strong>Anonymous accounts</strong> that are never signed in to hold no personal information,
-      and no data of any kind is attached to them. Firebase deletes them automatically after 30 days
-      without activity.
+      <strong>Anonymous accounts</strong> that are never signed in to hold no personal information.
+      Two records can point at one: a report it filed, which keeps the account's identifier for 30
+      days, and the scratch document a donation passes through on its way to Stripe, which expires
+      as described above. Firebase deletes anonymous accounts automatically after 30 days without
+      activity.
     </li>
   </ul>
 
@@ -657,15 +677,17 @@
       leaderboard entries on every board, global and country alike, your gameplay totals, your play
       history — every game we still hold, question by question, newest first — every question you
       have contributed, each one whole, so a reviewer's rejection note comes with it, every like or
-      dislike you have given a question, and your billing records. It also lists what is
-      deliberately not in it and why.
+      dislike you have given a question, every report you have filed that still carries your account
+      identifier, and your billing records. It also lists what is deliberately not in it and why.
     </li>
     <li>
       <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
       record and the payment methods stored against it, deletes your leaderboard entries on every
       board, <strong>country boards included</strong>, deletes your gameplay totals and your whole
-      play history, deletes your likes and dislikes, deletes your billing records, and deletes your
-      sign-in account itself.
+      play history, deletes your likes and dislikes, removes your account identifier from every
+      report you have filed &mdash; the reports themselves stay, naming nobody, because a reviewer
+      may still need them &mdash; deletes your billing records, and deletes your sign-in account
+      itself.
       <strong
         >Questions you contributed are kept, with your authorship replaced by a
         <code>[deleted-user]</code> marker.</strong

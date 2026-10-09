@@ -19,7 +19,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   asAnonymous,
   asSignedOut,
@@ -373,5 +373,144 @@ describe('question_reports: a report is a record, not a task', () => {
 
   it('rejects a delete by a reviewer', async () => {
     await assertFails(deleteDoc(reportRef(asVerifiedPassword(env, REVIEWER), seededId())));
+  });
+});
+
+/**
+ * A report with nobody in it (`FEAT-042`): what the daily sweep leaves thirty
+ * days after a report is filed, and `deleteAccount` the moment its reporter
+ * leaves — its four content keys copied to a fresh auto-id, with no
+ * `reportedBy`, and the original deleted
+ * (`functions/src/report-anonymisation.ts`). The Admin SDK writes it,
+ * past every rule, so these rows are about the two things the rules still
+ * decide: who may read it, and that no client can write anything like it.
+ *
+ * **No rule changed for it**, and both halves say so from opposite ends. The
+ * read rows are accept cases a reader rule that leaned on `reportedBy` — or on
+ * the `{window}-{slot}-{uid}` id — would break, which would take every
+ * anonymised complaint out of the reviewers' queue while every reject row here
+ * went on passing. The write rows pin that a document naming nobody is
+ * something only the server can produce: the create rule requires both the
+ * capped id and a `reportedBy` equal to the caller, so neither half of the
+ * anonymised shape gets in on its own.
+ */
+describe('question_reports: an anonymised report (FEAT-042)', () => {
+  /** An auto-id, as `collection.doc()` mints one: no window, no slot, no uid. */
+  const ANONYMISED_ID = 'Xq3vL9aT2bRk8mNc4PdE';
+  /** A second auto-id, free, for the creates that must be refused. */
+  const FREE_AUTO_ID = 'Lm7pQ2wZ9cVb3nRt6YkA';
+
+  const anonymisedReport = () => {
+    const { reportedBy: _reportedBy, ...content } = validReport('anon', {
+      detail: 'Two of the answers are the same.',
+    });
+    return content;
+  };
+
+  beforeEach(async () => {
+    await grantReviewer(env, REVIEWER);
+    await grantReviewer(env, DEMOTED, false);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'question_reports', ANONYMISED_ID), anonymisedReport());
+    });
+  });
+
+  it('allows a reviewer to get it', async () => {
+    await assertSucceeds(getDoc(reportRef(asVerifiedPassword(env, REVIEWER), ANONYMISED_ID)));
+  });
+
+  // The page the reports tab reads, field for field, with the anonymised
+  // report on it: the queue orders by `createdAt`, which the copy keeps, so it
+  // stays where it was in the list rather than falling out of it.
+  it('allows a reviewer the page the queue reads, and the page holds it', async () => {
+    const page = await assertSucceeds(getDocs(reportsPage(asVerifiedPassword(env, REVIEWER))));
+    expect(page.docs.map((report) => report.id)).toContain(ANONYMISED_ID);
+  });
+
+  // The list row a per-document rule would still serve — the shape
+  // `CLAUDE.md` §4.6 records — so a reviewer read narrowed to documents
+  // carrying a reporter fails here, and not only in the `get` above.
+  it('allows a reviewer a query constrained to its document id', async () => {
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(asVerifiedPassword(env, REVIEWER).firestore(), 'question_reports'),
+          where(documentId(), '==', ANONYMISED_ID),
+        ),
+      ),
+    );
+  });
+
+  it('denies a signed-in account with no role document', async () => {
+    await assertFails(getDoc(reportRef(asVerifiedPassword(env, PLAIN), ANONYMISED_ID)));
+    await assertFails(getDocs(reportsPage(asVerifiedPassword(env, PLAIN))));
+  });
+
+  it('denies an account whose role document says reviewer: false', async () => {
+    await assertFails(getDoc(reportRef(asVerifiedPassword(env, DEMOTED), ANONYMISED_ID)));
+    await assertFails(getDocs(reportsPage(asVerifiedPassword(env, DEMOTED))));
+  });
+
+  // Including the session that filed the original: losing the reporter does
+  // not hand the report back to them.
+  it('denies the anonymous session that filed the original', async () => {
+    await assertFails(getDoc(reportRef(asAnonymous(env, 'anon'), ANONYMISED_ID)));
+    await assertFails(getDocs(reportsPage(asAnonymous(env, 'anon'))));
+  });
+
+  it('denies a signed-out caller', async () => {
+    await assertFails(getDoc(reportRef(asSignedOut(env), ANONYMISED_ID)));
+    await assertFails(getDocs(reportsPage(asSignedOut(env))));
+  });
+
+  it('refuses a client creating a report in the anonymised shape: an auto-id and no reportedBy', async () => {
+    await assertFails(
+      setDoc(reportRef(asAnonymous(env, 'anon'), FREE_AUTO_ID), anonymisedReport()),
+    );
+  });
+
+  // Each half of that shape on its own, so dropping either clause of the
+  // create rule fails a row of its own rather than hiding behind the other.
+  it('refuses the anonymised shape at an id the volume cap accepts: reportedBy is required', async () => {
+    await assertFails(
+      setDoc(reportRef(asAnonymous(env, 'anon'), reportDocId('anon')), anonymisedReport()),
+    );
+  });
+
+  it('refuses a report naming its caller at an auto-id: the id has to carry the window and the uid', async () => {
+    await assertFails(
+      setDoc(reportRef(asAnonymous(env, 'anon'), FREE_AUTO_ID), validReport('anon')),
+    );
+  });
+
+  it('refuses a reviewer creating one', async () => {
+    await assertFails(
+      setDoc(reportRef(asVerifiedPassword(env, REVIEWER), FREE_AUTO_ID), anonymisedReport()),
+    );
+  });
+
+  it('refuses an update by a reviewer, putting a reporter back included', async () => {
+    await assertFails(
+      updateDoc(reportRef(asVerifiedPassword(env, REVIEWER), ANONYMISED_ID), {
+        reportedBy: REVIEWER,
+      }),
+    );
+  });
+
+  it('refuses the original reporter re-attaching themselves', async () => {
+    await assertFails(
+      updateDoc(reportRef(asAnonymous(env, 'anon'), ANONYMISED_ID), { reportedBy: 'anon' }),
+    );
+  });
+
+  it('refuses a delete by a reviewer', async () => {
+    await assertFails(deleteDoc(reportRef(asVerifiedPassword(env, REVIEWER), ANONYMISED_ID)));
+  });
+
+  // The accept case beside it: filing a report is exactly as it was.
+  it('still accepts a report in the client shape beside it', async () => {
+    await assertSucceeds(
+      setDoc(reportRef(asAnonymous(env, 'anon'), reportDocId('anon')), validReport('anon')),
+    );
   });
 });

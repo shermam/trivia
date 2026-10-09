@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '../../fixtures/test';
+import { CustomQuestionSeed, QuestionReportSeed } from '../../fixtures/types';
 import { openAuthMenu, signInViaUi } from '../../support/auth';
 import { answerQuestion, startNewGame } from '../../support/game';
 import { waitForGameplayStats } from '../../support/gameplay-stats';
@@ -196,6 +197,152 @@ test.describe('account management: export and deletion', () => {
     // The export has to say what it deliberately does not contain, otherwise a
     // missing card number reads as concealment.
     expect(exported.notHeldHere.join(' ')).toMatch(/stripe/i);
+  });
+
+  /**
+   * The reports an account filed (`FEAT-042`), against the emulator's real
+   * queries: the equality on `reportedBy` both export and deletion find them
+   * by, and the batch that copies each one without its reporter and deletes
+   * the original only if it is still there. Export first and deletion second,
+   * the order a person exercising both rights would take.
+   *
+   * Seeded rather than filed through game-over, which files one report per
+   * five-minute slot and only about a question it served. This account needs
+   * reports of several ages about questions in every state at once — none of
+   * which may matter, since deletion anonymises every report and deletes none
+   * — plus somebody else's reports on the same questions, which must come
+   * through untouched. One is older than the thirty days a report keeps its
+   * reporter: the daily pass that would have anonymised it never runs on the
+   * emulator, so it still names the account, and deletion has to reach it too.
+   */
+  test('exports the reports that still name the user, and deletion leaves none that do', async ({
+    page,
+    firebase,
+  }) => {
+    const email = `reporter-${unique()}@example.com`;
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    const other = `someone-else-${unique()}`;
+    const tag = unique();
+    const ids = {
+      approved: `reported-approved-${tag}`,
+      rejected: `reported-rejected-${tag}`,
+      pending: `reported-pending-${tag}`,
+      // Never seeded: the report outlived its question.
+      gone: `reported-gone-${tag}`,
+    };
+    const question = (id: string, status: CustomQuestionSeed['status']): CustomQuestionSeed => ({
+      id,
+      type: 'multiple',
+      difficulty: 'easy',
+      question: `A reported question (${status})`,
+      correct_answer: 'Yes',
+      incorrect_answers: ['No', 'Maybe', 'Perhaps'],
+      createdBy: `author-${tag}`,
+      createdAt: Date.now(),
+      status,
+    });
+    await firebase.seedCustomQuestions([
+      question(ids.approved, 'approved'),
+      question(ids.rejected, 'rejected'),
+      question(ids.pending, 'pending'),
+    ]);
+
+    // The id the create rule demands, `{window}-{slot}-{uid}`, in the window
+    // the client would have used.
+    const window = Math.floor(Date.now() / 300_000);
+    const day = 24 * 60 * 60 * 1000;
+    const report = (
+      by: string,
+      slot: number,
+      questionId: string,
+      extra: Partial<QuestionReportSeed> = {},
+    ): QuestionReportSeed => ({
+      id: `${window}-${slot}-${by}`,
+      questionId,
+      reason: 'incorrect',
+      reportedBy: by,
+      createdAt: Date.now(),
+      ...extra,
+    });
+    // Each about a different question, so every copy below is distinguishable
+    // by its content alone once its `createdAt` is cut to the day.
+    const now = Date.now();
+    const mine = [
+      report(uid, 0, ids.approved, { createdAt: now }),
+      report(uid, 1, ids.rejected, { createdAt: now - 10 * day, reason: 'spam' }),
+      report(uid, 2, ids.gone, { createdAt: now - 45 * day, reason: 'other' }),
+      report(uid, 3, ids.pending, {
+        createdAt: now - 60_000,
+        detail: 'Two of the answers mean the same thing.',
+      }),
+    ];
+    const theirs = [report(other, 0, ids.approved), report(other, 1, ids.pending)];
+    await firebase.seedQuestionReports([...mine, ...theirs]);
+
+    await stubOpenTrivia(page);
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+
+    await openAuthMenu(page);
+    const downloading = page.waitForEvent('download', { timeout: 30_000 });
+    await page.getByTestId('download-my-data').click();
+    const download = await downloading;
+    const exported = JSON.parse(await readFile(await download.path(), 'utf8')) as {
+      questionReports: { id: string; questionId: string; reportedBy: string }[];
+    };
+    // Every report that still names the account, and nobody else's.
+    expect(exported.questionReports.map(({ id }) => id).sort()).toEqual(
+      mine.map(({ id }) => id).sort(),
+    );
+    expect(exported.questionReports.every(({ reportedBy }) => reportedBy === uid)).toBe(true);
+
+    await page.getByTestId('delete-account').click();
+    await page.getByTestId('confirm-delete-account').click();
+    await expect(page.getByTestId('auth-menu-trigger')).toContainText('Sign in', {
+      timeout: 30_000,
+    });
+
+    const after = await firebase.getQuestionReports(Object.values(ids));
+    // Non-vacuous: the export above read four reports naming the account.
+    // None does now — not in a field, and not in a document id.
+    expect(after.filter(({ reportedBy }) => reportedBy === uid)).toEqual([]);
+    expect(after.filter(({ id }) => id.includes(uid))).toEqual([]);
+    // Somebody else's are exactly as they were.
+    expect(
+      after
+        .filter(({ reportedBy }) => reportedBy === other)
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual([...theirs].sort((a, b) => a.id.localeCompare(b.id)));
+    // All four of the account's stayed, as complaints naming nobody: deletion
+    // anonymises a report, it never removes one, whatever its age or its
+    // question's state. Each copy keeps the UTC day its report was filed and
+    // not the moment (`startOfUtcDay` in `report-anonymisation.ts`), so two
+    // filed the same day can tie: compared as sets, not in createdAt order.
+    const startOfUtcDay = (ms: number) => Math.floor(ms / day) * day;
+    const contentOf = ({ questionId, reason, detail, createdAt }: QuestionReportSeed) =>
+      JSON.stringify({
+        questionId,
+        reason,
+        ...(detail === undefined ? {} : { detail }),
+        createdAt,
+      });
+    const anonymised = after.filter((stored) => !('reportedBy' in stored));
+    expect(anonymised.map(contentOf).sort()).toEqual(
+      mine
+        .map((filed) => contentOf({ ...filed, createdAt: startOfUtcDay(filed.createdAt) }))
+        .sort(),
+    );
+    for (const stored of anonymised) {
+      expect(Object.keys(stored).sort()).toEqual(
+        [
+          'createdAt',
+          'id',
+          'questionId',
+          'reason',
+          ...('detail' in stored ? ['detail'] : []),
+        ].sort(),
+      );
+    }
   });
 
   test('can be backed out of without deleting anything', async ({ page, firebase }) => {
