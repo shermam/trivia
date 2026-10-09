@@ -5,6 +5,7 @@ import {
   OnInit,
   computed,
   inject,
+  linkedSignal,
   signal,
   viewChild,
 } from '@angular/core';
@@ -82,6 +83,14 @@ const OPEN_TRIVIA_TOPIC_MESSAGES = {
   keptNone: 'Open Trivia plays only the suggested topics, so yours were removed.',
 } as const;
 
+/** What the resume banner says about the game it offers. */
+interface ResumeOffer {
+  /** The question the saved game is on, counted from one. */
+  question: number;
+  /** How many questions it has. */
+  total: number;
+}
+
 /** `#a`, `#a and #b`, `#a, #b and #c` — for the live region, which has room for the names. */
 function listTags(tags: readonly string[]): string {
   const named = tags.map((tag) => `#${tag}`);
@@ -133,6 +142,44 @@ export class GameSetupComponent implements OnInit {
   protected readonly donationStatus = signal<DonationQueryStatus>(
     donationStatusFrom(this.route.snapshot.queryParamMap.get('donation')),
   );
+
+  /**
+   * The game the resume banner offers, or `null` — read live, except while a
+   * start is in flight, when it holds whatever it said as Start was pressed.
+   *
+   * **A start commits its game before the screen changes.** `startGame` calls
+   * `beginGame` and then navigates, and `/play` is a lazy route, so for as long
+   * as its chunk takes to download this screen is still up with a game in
+   * memory that is loaded and unfinished — exactly what `hasResumableGame()`
+   * means. Read live, the banner would arrive for the very game being
+   * started, growing the card 122px and lifting its top 61px under the pointer
+   * that had just pressed Start, at 390 and 1280 wide alike (`CLAUDE.md` §4.4).
+   *
+   * **Hidden while loading would be the same shift the other way round.** A
+   * player starting a new game over a saved one is looking at the banner when
+   * they press Start, and it vanishing would pull the card up by as much. So it
+   * holds instead, sentence and all — still naming the game that was in
+   * progress, which is the last thing it was true about — until the start ends:
+   * the route changes and takes the screen with it, or the start fails or is
+   * refused and the banner says whatever is then true. `game-resume.spec.ts`
+   * measures both with `/play`'s chunk held.
+   */
+  protected readonly resumeOffer = linkedSignal<
+    { starting: boolean; offer: ResumeOffer | null },
+    ResumeOffer | null
+  >({
+    source: () => ({
+      starting: this.gameController.isLoading(),
+      offer: this.gameController.hasResumableGame()
+        ? {
+            question: this.gameController.currentIndex() + 1,
+            total: this.gameController.totalQuestions(),
+          }
+        : null,
+    }),
+    computation: (source, previous) =>
+      source.starting && previous ? previous.value : source.offer,
+  });
 
   protected readonly form = this.fb.nonNullable.group({
     // Max 25, matching the options actually offered below. It was 50, which
