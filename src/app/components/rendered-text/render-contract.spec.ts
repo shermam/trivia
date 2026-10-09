@@ -1,14 +1,19 @@
+import { Component, signal } from '@angular/core';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import DOMPurify, { type Config, type HookName } from 'dompurify';
 import jsdomPackage from 'jsdom/package.json';
 import katex from 'katex';
 import type { Marked, TokenizerExtensionFunction, TokenizerStartFunction } from 'marked';
 import markedPackage from 'marked/package.json';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // The renderer's contract and its golden corpus, as the repository publishes
 // them for the question-generation pipeline, plus the app's own manifest for
-// the declared dependency ranges. Read by this spec and nothing else: no file
+// the declared dependency ranges. Read by specs and nothing else: no file
 // under `src/app` imports them, so none of them reaches a bundle.
 import appPackage from '../../../../package.json';
+// parse5 exports nothing but its entry point, so its manifest is reached by
+// path: the copy jsdom resolves, there being no other at the top of this tree.
+import parse5Package from '../../../../node_modules/parse5/package.json';
 import golden from '../../../../render-contract.golden.json';
 import contract from '../../../../render-contract.json';
 import {
@@ -19,8 +24,15 @@ import {
   renderMarkdown,
   sanitizeHtml,
 } from './markdown-engine';
-import { DISPLAY_MATH_BLOCK, DISPLAY_MATH_INLINE, INLINE_MATH } from './math-delimiters';
+import {
+  ANY_MATH,
+  DISPLAY_MATH_BLOCK,
+  DISPLAY_MATH_INLINE,
+  INLINE_MATH,
+  containsMath,
+} from './math-delimiters';
 import { renderMath } from './math-engine';
+import { RenderedTextComponent } from './rendered-text.component';
 
 /**
  * `render-contract.json` — what this renderer accepts and emits, published for
@@ -37,6 +49,14 @@ import { renderMath } from './math-engine';
  * mode, and the hook is found where DOMPurify keeps it. A copy restated in
  * this file would keep passing after the real one changed.
  *
+ * **All four instances, not the one a test would reach for.** Each mode has
+ * an instance built with the KaTeX renderer and one built without, and the
+ * component gives a source the first only when `containsMath` finds a
+ * delimiter in it — so most questions render through the second. Every check
+ * on `marked` runs against all four, the selection rule is published and held
+ * to the predicate the component calls, and each golden input is rendered
+ * through the instance that rule picks.
+ *
  * **Where a published value is a behaviour rather than a value** — which
  * attributes the hook confines to anchors, what a disabled tokenizer does, how
  * a delimiter becomes a token — the probes are derived from the file: the
@@ -44,19 +64,34 @@ import { renderMath } from './math-engine';
  * either side moving alone fails.
  *
  * **The golden corpus is the other half.** `render-contract.golden.json` is
- * the output of this configuration for a corpus of inputs, and the last
- * describe block re-renders every one. A configuration can match field for
- * field and still render differently — which is exactly what the pipeline's
- * copy has to be checked against — so the outputs are pinned as well as the
- * settings. When one moves on purpose, `node scripts/render-contract-golden.mjs`
- * rewrites the file and the diff is the record.
+ * the output of this configuration for a corpus of inputs, re-rendered twice
+ * below: through the engine as the file describes it, and through
+ * `RenderedTextComponent` as the app does it. A configuration can match field
+ * for field and still render differently — which is exactly what the
+ * pipeline's copy has to be checked against — so the outputs are pinned as
+ * well as the settings. When one moves on purpose,
+ * `node scripts/render-contract-golden.mjs` rewrites the file and the diff is
+ * the record.
  */
 
 type Mode = 'block' | 'inline';
 const MODES: readonly Mode[] = ['block', 'inline'];
 
-/** The very instance `renderMarkdown` parses with in this mode — `markedFor` is memoized. */
-const instanceFor = (mode: Mode): Marked => markedFor(renderMath, mode === 'inline');
+/** One of the four `marked` instances `renderMarkdown` can parse with. */
+interface Instance {
+  readonly name: string;
+  readonly mode: Mode;
+  readonly withKatex: boolean;
+}
+
+const INSTANCES: readonly Instance[] = MODES.flatMap((mode) => [
+  { name: `${mode} mode with KaTeX`, mode, withKatex: true },
+  { name: `${mode} mode without KaTeX`, mode, withKatex: false },
+]);
+
+/** The very instance `renderMarkdown` parses with for these options — `markedFor` is memoized. */
+const markedOf = ({ mode, withKatex }: Instance): Marked =>
+  markedFor(withKatex ? renderMath : undefined, mode === 'inline');
 
 interface Pattern {
   readonly source: string;
@@ -101,6 +136,42 @@ const DELIMITER_EXPORTS: Readonly<Record<string, RegExp>> = {
   inline: INLINE_MATH,
 };
 
+/**
+ * The published selection rule: a source it matches anywhere renders with
+ * KaTeX. Unanchored and without flags — the spec holds both to `ANY_MATH` —
+ * so `test` keeps no state between calls.
+ */
+const selection = new RegExp(
+  contract.math.selection.pattern.source,
+  contract.math.selection.pattern.flags,
+);
+
+/** `renderMarkdown`'s options for a source, as the published rule would set them. */
+const optionsFor = (source: string, mode: Mode) => ({
+  inline: mode === 'inline',
+  renderMath: selection.test(source) ? renderMath : undefined,
+});
+
+/**
+ * Sources a math tokenizer is offered, chosen around the edges the
+ * delimiters exist for: the newlines a block formula swallows, a display
+ * formula with text after it, whitespace inside the inline delimiters, and
+ * the prices the inline rule has to leave alone.
+ */
+const TOKEN_PROBES = [
+  '$$ x^2 $$',
+  '$$ x^2 $$\n\nafter',
+  '$$x$$ and more',
+  '$$\n\\frac{a}{b}\n$$',
+  '$x^2$ and more',
+  '$ x$',
+  '$x $',
+  '$5 and $6',
+  '$5$6',
+  '$$',
+  'no math',
+];
+
 /** The packages as they are installed — the code this suite is actually running. */
 const INSTALLED: Readonly<Record<string, string>> = {
   marked: markedPackage.version,
@@ -113,6 +184,10 @@ function series(version: string): string {
   const [major, minor] = version.split('.');
   return major === '0' ? `0.${minor}` : major;
 }
+
+const REGENERATE =
+  'differs from render-contract.golden.json — if that is meant, run ' +
+  '`node scripts/render-contract-golden.mjs` and commit the diff';
 
 describe('render-contract.json: the file itself', () => {
   // Every section is one this suite checks. A key the file gains is a claim
@@ -133,6 +208,19 @@ describe('render-contract.json: the file itself', () => {
     );
   });
 
+  it('holds exactly the keys this suite checks, in every section', () => {
+    expect(Object.keys(contract.marked).sort()).toEqual(
+      ['$comment', 'options', 'parse', 'renderer', 'tokenizer'].sort(),
+    );
+    expect(Object.keys(contract.math).sort()).toEqual(
+      ['$comment', 'delimiters', 'extensions', 'selection'].sort(),
+    );
+    expect(Object.keys(contract.katex).sort()).toEqual(['$comment', 'defaults', 'options'].sort());
+    expect(Object.keys(contract.dompurify).sort()).toEqual(
+      ['$comment', 'block', 'hooks', 'inline'].sort(),
+    );
+  });
+
   // The three files are the ones this spec imports, so a rename breaks the
   // build of this file; this keeps the published pointer moving with it.
   it('is version 1 of the format and names the modules it states', () => {
@@ -148,8 +236,8 @@ describe('render-contract.json: the file itself', () => {
 describe('render-contract.json: marked', () => {
   // The other three options are the structural ones, each published under its
   // own key and checked below; anything else marked holds must be named here.
-  it.each(MODES)('%s mode holds exactly the published options', (mode) => {
-    const options = instanceFor(mode).defaults as Record<string, unknown>;
+  it.each(INSTANCES)('$name holds exactly the published options', (instance) => {
+    const options = markedOf(instance).defaults as Record<string, unknown>;
     expect(Object.keys(options).sort()).toEqual(
       [...Object.keys(contract.marked.options), 'extensions', 'renderer', 'tokenizer'].sort(),
     );
@@ -158,9 +246,8 @@ describe('render-contract.json: marked', () => {
     }
   });
 
-  it.each(MODES)('%s mode replaces exactly the published tokenizers', (mode) => {
-    const tokenizer = instanceFor(mode).defaults.tokenizer;
-    expect(replaced(tokenizer, ['options', 'rules', 'lexer'])).toEqual(
+  it.each(INSTANCES)('$name replaces exactly the published tokenizers', (instance) => {
+    expect(replaced(markedOf(instance).defaults.tokenizer, ['options', 'rules', 'lexer'])).toEqual(
       Object.keys(contract.marked.tokenizer),
     );
   });
@@ -168,8 +255,8 @@ describe('render-contract.json: marked', () => {
   // `disabled` means the replacement claims nothing — returns no token — so the
   // run falls through to the text tokenizer and is escaped. Asked of the
   // replaced method directly, with input the built-in one would have claimed.
-  it.each(MODES)('%s mode has every published disabled tokenizer claim nothing', (mode) => {
-    const methods = instanceFor(mode).defaults.tokenizer as unknown as Record<
+  it.each(INSTANCES)('$name has every published disabled tokenizer claim nothing', (instance) => {
+    const methods = markedOf(instance).defaults.tokenizer as unknown as Record<
       string,
       (src: string) => unknown
     >;
@@ -181,33 +268,39 @@ describe('render-contract.json: marked', () => {
     }
   });
 
-  it.each(MODES)('%s mode replaces exactly the published renderers', (mode) => {
-    expect(replaced(instanceFor(mode).defaults.renderer, ['options', 'parser'])).toEqual(
-      Object.keys(contract.marked.renderer[mode]),
+  it.each(INSTANCES)('$name replaces exactly the published renderers', (instance) => {
+    expect(replaced(markedOf(instance).defaults.renderer, ['options', 'parser'])).toEqual(
+      Object.keys(contract.marked.renderer[instance.mode]),
     );
   });
 
   // `label`: the link's own inline tokens, rendered as they would be without it.
-  it('renders a link as its label where the file says label', () => {
-    expect(contract.marked.renderer.inline).toEqual({ link: 'label' });
-    const instance = instanceFor('inline');
-    expect(instance.parseInline('[**a** `b`](https://example.org/)')).toBe(
-      instance.parseInline('**a** `b`'),
-    );
-  });
+  it.each(INSTANCES.filter(({ mode }) => mode === 'inline'))(
+    '$name renders a link as its label, as the file says',
+    (instance) => {
+      expect(contract.marked.renderer.inline).toEqual({ link: 'label' });
+      const marked = markedOf(instance);
+      expect(marked.parseInline('[**a** `b`](https://example.org/)')).toBe(
+        marked.parseInline('**a** `b`'),
+      );
+    },
+  );
 
-  it.each(MODES)('%s mode parses with the published method', (mode) => {
-    const instance = instanceFor(mode);
+  it.each(INSTANCES)('$name parses with the published method', (instance) => {
+    const marked = markedOf(instance);
     const calls = {
-      parse: vi.spyOn(instance, 'parse'),
-      parseInline: vi.spyOn(instance, 'parseInline'),
+      parse: vi.spyOn(marked, 'parse'),
+      parseInline: vi.spyOn(marked, 'parseInline'),
     };
     try {
-      renderMarkdown('x', { renderMath, inline: mode === 'inline' });
+      renderMarkdown('x', {
+        renderMath: instance.withKatex ? renderMath : undefined,
+        inline: instance.mode === 'inline',
+      });
       expect({
         parse: calls.parse.mock.calls.length,
         parseInline: calls.parseInline.mock.calls.length,
-      }).toEqual({ parse: 0, parseInline: 0, [contract.marked.parse[mode]]: 1 });
+      }).toEqual({ parse: 0, parseInline: 0, [contract.marked.parse[instance.mode]]: 1 });
     } finally {
       calls.parse.mockRestore();
       calls.parseInline.mockRestore();
@@ -234,26 +327,6 @@ describe('render-contract.json: the math tokenizers', () => {
     );
   });
 
-  /**
-   * Sources a math tokenizer is offered, chosen around the edges the
-   * delimiters exist for: the newlines a block formula swallows, a display
-   * formula with text after it, whitespace inside the inline delimiters, and
-   * the prices the inline rule has to leave alone.
-   */
-  const TOKEN_PROBES = [
-    '$$ x^2 $$',
-    '$$ x^2 $$\n\nafter',
-    '$$x$$ and more',
-    '$$\n\\frac{a}{b}\n$$',
-    '$x^2$ and more',
-    '$ x$',
-    '$x $',
-    '$5 and $6',
-    '$5$6',
-    '$$',
-    'no math',
-  ];
-
   /** What the file says a tokenizer trying these delimiters, in order, makes of the source. */
   function expectedToken(names: readonly string[], source: string, mode: Mode) {
     for (const name of names) {
@@ -266,11 +339,11 @@ describe('render-contract.json: the math tokenizers', () => {
     return undefined;
   }
 
-  it.each(MODES)(
-    '%s mode carries the published extensions, in order, at their levels, tokenizing as published',
-    (mode) => {
-      const instance = instanceFor(mode);
-      const extensions = instance.defaults.extensions;
+  it.each(INSTANCES)(
+    '$name carries the published extensions, in order, at their levels, tokenizing as published',
+    (instance) => {
+      const marked = markedOf(instance);
+      const extensions = marked.defaults.extensions;
       expect(Object.keys(extensions?.renderers ?? {})).toEqual(
         contract.math.extensions.map((extension) => extension.name),
       );
@@ -285,7 +358,7 @@ describe('render-contract.json: the math tokenizers', () => {
         block: extensions?.startBlock ?? [],
         inline: extensions?.startInline ?? [],
       };
-      const context = { lexer: new instance.Lexer(instance.defaults) };
+      const context = { lexer: new marked.Lexer(marked.defaults) };
 
       for (const level of ['block', 'inline'] as const) {
         const atLevel = contract.math.extensions.filter((extension) => extension.level === level);
@@ -304,12 +377,41 @@ describe('render-contract.json: the math tokenizers', () => {
             expect(
               token && { raw: token.raw, text: token['text'], displayMode: token['displayMode'] },
               `${extension.name} on ${JSON.stringify(source)}`,
-            ).toEqual(expectedToken(extension.delimiters, source, mode));
+            ).toEqual(expectedToken(extension.delimiters, source, instance.mode));
           }
         });
       }
     },
   );
+
+  // The one place the two instances of a mode differ: what a formula token
+  // becomes. With KaTeX, MathML; without it, the formula's source.
+  it.each(INSTANCES)('$name renders a formula the way its renderer says', (instance) => {
+    const marked = markedOf(instance);
+    const html = marked[contract.marked.parse[instance.mode] as 'parse' | 'parseInline'](
+      'a $x^2$ b',
+    ) as string;
+    if (instance.withKatex) {
+      expect(html).toContain('<math');
+    } else {
+      expect(html).toContain('<code>$x^2$</code>');
+      expect(html).not.toContain('<math');
+    }
+  });
+});
+
+describe('render-contract.json: which instance a source renders through', () => {
+  it('publishes the pattern containsMath searches for', () => {
+    expect(patternOf(ANY_MATH)).toEqual(contract.math.selection.pattern);
+  });
+
+  // The component calls `containsMath`; the file publishes a pattern. Over
+  // every probe and every golden input, the two must pick the same instance.
+  it('selects exactly as the component does', () => {
+    for (const source of [...TOKEN_PROBES, ...golden.cases.map((entry) => entry.input)]) {
+      expect(containsMath(source), JSON.stringify(source)).toBe(selection.test(source));
+    }
+  });
 });
 
 describe('render-contract.json: KaTeX', () => {
@@ -374,14 +476,17 @@ describe('render-contract.json: DOMPurify', () => {
     inline: { ...block, ...contract.dompurify.inline },
   };
 
-  it.each(MODES)('%s mode sanitises with exactly the published configuration', (mode) => {
+  it.each(INSTANCES)('$name sanitises with exactly the published configuration', (instance) => {
     const sanitize = vi.spyOn(DOMPurify, 'sanitize');
     try {
-      renderMarkdown('x', { renderMath, inline: mode === 'inline' });
+      renderMarkdown('x', {
+        renderMath: instance.withKatex ? renderMath : undefined,
+        inline: instance.mode === 'inline',
+      });
       expect(sanitize).toHaveBeenCalledOnce();
       const config = sanitize.mock.calls[0][1] as Config;
-      expect(config).toBe(mode === 'inline' ? INLINE_SANITIZE_CONFIG : SANITIZE_CONFIG);
-      expect(published(config)).toStrictEqual(expected[mode]);
+      expect(config).toBe(instance.mode === 'inline' ? INLINE_SANITIZE_CONFIG : SANITIZE_CONFIG);
+      expect(published(config)).toStrictEqual(expected[instance.mode]);
     } finally {
       sanitize.mockRestore();
     }
@@ -507,14 +612,14 @@ describe('render-contract.json: dependencies', () => {
 });
 
 describe('render-contract.golden.json', () => {
-  const REGENERATE =
-    'differs from render-contract.golden.json — if that is meant, run ' +
-    '`node scripts/render-contract-golden.mjs` and commit the diff';
-
   it('is version 1 of its format and was generated with the packages installed now', () => {
     expect(Object.keys(golden).sort()).toEqual(['$comment', 'cases', 'generatedWith', 'version']);
     expect(golden.version).toBe(1);
-    expect(golden.generatedWith, REGENERATE).toEqual({ ...INSTALLED, jsdom: jsdomPackage.version });
+    expect(golden.generatedWith, REGENERATE).toEqual({
+      ...INSTALLED,
+      jsdom: jsdomPackage.version,
+      parse5: parse5Package.version,
+    });
   });
 
   it('names each case once, in one of the two modes', () => {
@@ -525,9 +630,118 @@ describe('render-contract.golden.json', () => {
     }
   });
 
-  it.each(golden.cases)('$name renders as published', ({ mode, input, output }) => {
-    expect(renderMarkdown(input, { renderMath, inline: mode === 'inline' }), REGENERATE).toBe(
-      output,
-    );
+  it('records, for each case, the instance the published rule selects', () => {
+    for (const entry of golden.cases) {
+      expect(entry.katex, entry.name).toBe(selection.test(entry.input));
+    }
   });
+
+  /**
+   * Allowlist entries no input can reach: KaTeX 0.18 never emits these, and
+   * raw HTML is escaped before the sanitiser sees it. Everything else on the
+   * list appears in some output, and this holds the corpus to that — an entry
+   * a future KaTeX starts emitting, or one the corpus stops reaching, changes
+   * the list, and the coverage `app.md` §1.4 states with it.
+   */
+  const UNREACHABLE = {
+    tags: ['ms', 'merror', 'mmultiscripts', 'mprescripts', 'none'],
+    attributes: ['symmetric', 'form', 'movablelimits'],
+  };
+
+  it('exercises every allowlisted element and attribute an input can reach', () => {
+    const seen = new Set<string>();
+    for (const entry of golden.cases) {
+      for (const element of parse(entry.output).querySelectorAll('*')) {
+        seen.add(element.localName);
+        for (const attribute of element.attributes) {
+          seen.add(`@${attribute.name}`);
+        }
+      }
+    }
+    expect(contract.dompurify.block.ALLOWED_TAGS.filter((tag) => !seen.has(tag))).toEqual(
+      UNREACHABLE.tags,
+    );
+    expect(
+      contract.dompurify.block.ALLOWED_ATTR.filter((attribute) => !seen.has(`@${attribute}`)),
+    ).toEqual(UNREACHABLE.attributes);
+  });
+
+  it.each(golden.cases)('$name renders as published', ({ mode, input, output }) => {
+    expect(renderMarkdown(input, optionsFor(input, mode as Mode)), REGENERATE).toBe(output);
+  });
+});
+
+/**
+ * The same corpus through the component itself, which is what proves "the
+ * path the app takes" rather than a description of it: the dynamic imports,
+ * the `containsMath` choice of instance and the write into the element are
+ * all the component's own.
+ */
+@Component({
+  standalone: true,
+  imports: [RenderedTextComponent],
+  template: `<app-rendered-text [text]="text()" format="markdown" [inline]="inline()" />`,
+})
+class GoldenHostComponent {
+  readonly text = signal('');
+  readonly inline = signal(false);
+}
+
+describe('render-contract.golden.json, through RenderedTextComponent', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+  });
+
+  /**
+   * The box once the component has written its markup. Waiting on the marker
+   * alone is not enough — the markup lands an `afterRenderEffect` later
+   * (`rendered-text.component.spec.ts` has the measurement) — and every
+   * output in the corpus is non-empty, so a filled box is the condition.
+   */
+  async function rendered(fixture: ComponentFixture<GoldenHostComponent>): Promise<HTMLElement> {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      fixture.detectChanges();
+      const box = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
+        '[data-cy="rendered-text"]',
+      );
+      if (box?.dataset['rendered'] === 'markdown' && box.innerHTML.length > 0) {
+        return box;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    throw new Error('the component never rendered markup');
+  }
+
+  /**
+   * Output alone cannot show which instance did the work — the two instances
+   * of a mode are configured alike, so a component that always fetched KaTeX
+   * would render every case the same. The parse methods of all four are
+   * watched instead (`markedFor` memoizes, so they are the component's own),
+   * and exactly the one the published rule selects has to be the one called.
+   */
+  it.each(golden.cases)(
+    '$name renders as published, through the instance the published rule selects',
+    async ({ mode, input, output }) => {
+      const watched = INSTANCES.map((instance) => {
+        const marked = markedOf(instance);
+        return {
+          instance,
+          spies: [vi.spyOn(marked, 'parse'), vi.spyOn(marked, 'parseInline')],
+        };
+      });
+      try {
+        const fixture = TestBed.createComponent(GoldenHostComponent);
+        fixture.componentInstance.text.set(input);
+        fixture.componentInstance.inline.set(mode === 'inline');
+        expect((await rendered(fixture)).innerHTML, REGENERATE).toBe(output);
+
+        const used = watched
+          .filter(({ spies }) => spies.some((spy) => spy.mock.calls.length > 0))
+          .map(({ instance }) => instance.name);
+        expect(used).toEqual([`${mode} mode ${selection.test(input) ? 'with' : 'without'} KaTeX`]);
+      } finally {
+        watched.forEach(({ spies }) => spies.forEach((spy) => spy.mockRestore()));
+      }
+    },
+  );
 });

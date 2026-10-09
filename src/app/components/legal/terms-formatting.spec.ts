@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 // `render-contract.spec.ts` holds to the live sanitiser. Specs read it;
 // nothing under `src/app` imports it, so it never reaches a bundle.
 import contract from '../../../../render-contract.json';
+import { renderMarkdown } from '../rendered-text/markdown-engine';
 import { TermsOfServiceComponent } from './terms-of-service.component';
 
 /**
@@ -22,6 +23,11 @@ import { TermsOfServiceComponent } from './terms-of-service.component';
  * words here and fails until the page says what it is. The opposite drift — the
  * page naming something the allowlist refuses — is not reachable from a tag
  * list, and stays a matter for review.
+ *
+ * The same section says HTML a contributor types is shown as typed, which is
+ * true of markup and not of a character reference — the renderer decodes
+ * `&amp;` to `&` — so the second test asks the renderer, and holds the page to
+ * saying so for as long as it does.
  *
  * Unlike `legal-pages.spec.ts`, this does pin copy, because the copy *is* the
  * claim: rewording a phrase means rewording its entry here, on purpose.
@@ -44,7 +50,8 @@ const WORDS_FOR: Readonly<Record<string, string>> = {
 /** Text as a reader hears it: one space between words, whatever the template did. */
 const collapse = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ');
 
-async function formattingParagraph(): Promise<string> {
+/** The text of the "Formatting a question" section: every element from its heading to the next. */
+async function formattingSection(): Promise<string> {
   TestBed.resetTestingModule();
   await TestBed.configureTestingModule({
     imports: [TermsOfServiceComponent],
@@ -56,13 +63,21 @@ async function formattingParagraph(): Promise<string> {
   const heading = [...(fixture.nativeElement as HTMLElement).querySelectorAll('h3')].find(
     (element) => element.textContent?.trim() === 'Formatting a question',
   );
-  return collapse(heading?.nextElementSibling?.textContent);
+  const texts: string[] = [];
+  for (
+    let element = heading?.nextElementSibling;
+    element && element.tagName !== 'H3';
+    element = element.nextElementSibling
+  ) {
+    texts.push(element.textContent ?? '');
+  }
+  return collapse(texts.join(' '));
 }
 
 describe('/terms: the formatting a contribution may use', () => {
   it('names every element the renderer keeps', async () => {
-    const paragraph = await formattingParagraph();
-    expect(paragraph, 'the "Formatting a question" section').not.toBe('');
+    const section = await formattingSection();
+    expect(section, 'the "Formatting a question" section').not.toBe('');
 
     // An HTML element is one the HTML parser knows; everything else on the
     // list is the MathML a formula compiles to.
@@ -72,8 +87,20 @@ describe('/terms: the formatting a contribution may use', () => {
 
     for (const tag of html) {
       expect(WORDS_FOR[tag], `<${tag}> is kept, and this file has no words for it`).toBeDefined();
-      expect(paragraph, `<${tag}>`).toContain(WORDS_FOR[tag]);
+      expect(section, `<${tag}>`).toContain(WORDS_FOR[tag]);
     }
-    expect(paragraph, 'MathML').toContain('formulas');
+    expect(section, 'MathML').toContain('formulas');
+  });
+
+  it('says a character reference is shown as its character, because the renderer decodes one', async () => {
+    // What a contributed `&amp;` becomes, through the instance a source with
+    // no formula in it renders with.
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown('&amp;');
+    expect(host.textContent?.trim()).toBe('&');
+
+    expect(await formattingSection()).toContain(
+      'a character reference such as &amp; is shown as the character it stands for',
+    );
   });
 });
