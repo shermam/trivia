@@ -57,7 +57,11 @@ interface FieldOverrideIndex {
 }
 
 interface IndexSpec {
-  indexes: { collectionGroup: string; fields: IndexField[] }[];
+  indexes: {
+    collectionGroup: string;
+    queryScope?: 'COLLECTION' | 'COLLECTION_GROUP';
+    fields: IndexField[];
+  }[];
   fieldOverrides: {
     collectionGroup: string;
     fieldPath: string;
@@ -139,6 +143,9 @@ describe('firestore.indexes.json', () => {
       if (tags) {
         expect(tags.arrayConfig).toBe('CONTAINS');
         expect(index.fields.at(-1)?.fieldPath).toBe('tags');
+        // The draw queries one collection; a collection-group index would
+        // leave it unserved however its fields read.
+        expect(index.queryScope).toBe('COLLECTION');
       }
     }
   });
@@ -167,9 +174,12 @@ describe('firestore.indexes.json', () => {
       ...declared.map((order) => ({ fieldPath: order.field, order: order.direction })),
     ];
 
+    // Collection scope too: the query reads one collection, and an index of
+    // the right fields at collection-group scope does not serve it.
     const matching = spec.indexes.filter(
       (index) =>
         index.collectionGroup === CONTRIBUTIONS_COLLECTION &&
+        index.queryScope === 'COLLECTION' &&
         JSON.stringify(index.fields) === JSON.stringify(expected),
     );
     expect(matching, JSON.stringify(expected)).toHaveLength(1);
@@ -212,6 +222,7 @@ describe('firestore.indexes.json', () => {
     const quizzes = spec.indexes.filter((index) => index.collectionGroup === 'quizzes');
 
     expect(quizzes).toHaveLength(1);
+    expect(quizzes[0].queryScope).toBe('COLLECTION');
     expect(quizzes[0].fields).toEqual([
       { fieldPath: 'isPublished', order: 'ASCENDING' },
       { fieldPath: 'createdAt', order: 'DESCENDING' },
@@ -273,9 +284,11 @@ describe('firestore.indexes.json', () => {
       order: 'ASCENDING' as const,
     }));
 
+    // Collection scope too, for the same reason as the contributions index.
     const matching = spec.indexes.filter(
       (index) =>
         index.collectionGroup === QUESTION_REPORTS_COLLECTION &&
+        index.queryScope === 'COLLECTION' &&
         JSON.stringify(index.fields) === JSON.stringify(expected),
     );
     expect(matching, JSON.stringify(expected)).toHaveLength(1);

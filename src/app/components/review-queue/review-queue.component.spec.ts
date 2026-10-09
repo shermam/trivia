@@ -680,10 +680,17 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
    * midnight (`FEAT-042`). Rendered with a time, it would claim a moment
    * nobody filed it at — and west of Greenwich, the evening of the day before.
    * A report still inside its thirty days keeps its moment, and shows it.
+   *
+   * **The spy is what makes this fail where CI runs.** CI runs in UTC, where a
+   * formatter that dropped `timeZone: 'UTC'` renders exactly the same text, so
+   * the rendered assertions alone pass against that break; they fail only for
+   * a reader west of Greenwich. Asserting the option on the call itself fails
+   * in every timezone.
    */
   it('shows an anonymised report’s filing day in UTC, with no time of day', async () => {
     const day = Date.UTC(2026, 9, 9);
     const moment = day + 13 * 60 * 60 * 1000;
+    const toLocaleDateString = vi.spyOn(Date.prototype, 'toLocaleDateString');
     const host = await renderReports({
       reports: [
         report('Xq3vL9aT2bRk8mNc4PdE', { createdAt: day, dayOnly: true }),
@@ -691,6 +698,17 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
       ],
       questionsById: [question('p1')],
     });
+
+    // Every time the anonymised report's day is formatted, it is formatted in
+    // UTC — and it is formatted at least once.
+    const formattedDay = toLocaleDateString.mock.calls
+      .map((args, call) => ({
+        at: (toLocaleDateString.mock.contexts[call] as Date).getTime(),
+        timeZone: args[1]?.timeZone,
+      }))
+      .filter(({ at }) => at === day);
+    expect(formattedDay.length).toBeGreaterThan(0);
+    expect(formattedDay.every(({ timeZone }) => timeZone === 'UTC')).toBe(true);
 
     const [anonymised, attributed] = [
       ...host.querySelectorAll<HTMLElement>('[data-cy="report-filed"]'),
