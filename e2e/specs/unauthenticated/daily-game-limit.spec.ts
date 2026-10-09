@@ -1,7 +1,10 @@
 import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
+import { waitForAnonymousSession } from '../../support/auth';
 import { optionLabel, waitForPlayRoute } from '../../support/game';
+import { expectBoxUnmoved, settledBox } from '../../support/layout';
 import { stubOpenTrivia } from '../../support/open-trivia';
+import { holdRequests, isPlayChunk } from '../../support/requests';
 
 /**
  * `FEAT-014`. Five free games a day, counted on this device.
@@ -94,6 +97,41 @@ test.describe('daily free game limit', () => {
 
     await page.getByTestId('daily-limit-upgrade').click();
     await expect(page).toHaveURL(/\/pricing$/);
+  });
+
+  /**
+   * The day's last free game. Start spends it once the questions are in hand
+   * and only then navigates, so the allowance reads zero while Start still says
+   * "Loading Questions…" and `/play`'s chunk downloads — and the Pro offer, a
+   * far taller box, took Start's place under the pointer for as long as that
+   * took (`CLAUDE.md` §4.4). The chunk is held, so the window is measured
+   * rather than caught; `curated-quiz.spec.ts` holds the same line on the quiz
+   * page.
+   */
+  test('keeps Start in place while it spends the day’s last free game', async ({ page }) => {
+    await seedDailyLimit(page, { date: todayStamp(), count: 4 });
+    await page.goto('/');
+    await expect(page.getByTestId('daily-allowance')).toHaveText('1 of 5 free games left today.');
+    // The offer is optimistic until the entitlement is known, so wait for it:
+    // the zero below is then the free tier's answer, not the window before it.
+    await waitForAnonymousSession(page);
+
+    const start = page.getByTestId('setup-card').locator('form button[type="submit"]');
+    await expect(start).toHaveText('Start Game');
+    const startBox = await settledBox(start, 'Start, with one free game left');
+
+    const playChunk = await holdRequests(page, isPlayChunk);
+    await page.getByRole('button', { name: 'Start Game', exact: true }).click();
+    await playChunk.seen;
+
+    // Spent, and saying so — the moment the offer used to arrive.
+    await expect(page.getByTestId('daily-allowance')).toHaveText('No free games left today.');
+    await expect(page.getByTestId('daily-limit-reached')).toHaveCount(0);
+    await expect(start).toHaveText('Loading Questions…');
+    await expectBoxUnmoved(start, startBox, 'Start while it spends the last free game');
+
+    playChunk.release();
+    await waitForPlayRoute(page);
   });
 
   test('starts again the next day', async ({ page }) => {

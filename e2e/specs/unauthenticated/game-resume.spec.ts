@@ -1,7 +1,10 @@
+import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
-import { answerQuestion, startGame } from '../../support/game';
+import { answerQuestion, startGame, waitForPlayRoute } from '../../support/game';
+import { expectBoxUnmoved, settledBox } from '../../support/layout';
 import { readSavedGame } from '../../support/offline-storage';
 import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
+import { holdRequests, isPlayChunk } from '../../support/requests';
 import { runTag, startTopicGame } from '../../support/topics';
 
 /**
@@ -296,3 +299,122 @@ test.describe('flagged questions survive a reload (B8 + H4)', () => {
       .toEqual([topic]);
   });
 });
+
+/** The setup screen at rest: the shortcut chips landed, the allowance resolved, the fonts in. */
+async function setupAtRest(page: Page): Promise<void> {
+  await expect(page.getByTestId('filter-tag-suggestions').getByRole('button')).not.toHaveCount(0);
+  await expect(page.getByTestId('daily-allowance')).toContainText('free games left today');
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+}
+
+/**
+ * How far the setup card sits below the top of the space it is centred in,
+ * beyond that space's padding — `tag-filter.spec.ts`'s guard, for its reason:
+ * zero means the card is pinned to the top, where a box arriving inside it
+ * moves nothing above its own bottom edge, and a check there passes for the
+ * wrong reason.
+ */
+function centringSlack(page: Page): Promise<number> {
+  return page.getByTestId('setup-card').evaluate((card) => {
+    const space = card.parentElement!;
+    const offset = card.getBoundingClientRect().top - space.getBoundingClientRect().top;
+    return offset - parseFloat(getComputedStyle(space).paddingTop);
+  });
+}
+
+/**
+ * The resume banner across a start (`CLAUDE.md` §4.4). `startGame` commits the
+ * new game before it navigates and `/play` is a lazy route, so for as long as
+ * that chunk downloads the setup screen is still up with a loaded, unfinished
+ * game in memory — which is what the banner renders on. Read live, the banner
+ * arrived for the very game being started: measured with the chunk held, the
+ * card grew 122px and its top rose 61px, at both widths below, under the
+ * pointer that had just pressed Start.
+ *
+ * **The chunk is held rather than raced** (`e2e/support/requests.ts`): from
+ * the dev server it arrives in milliseconds, and a test that waited to catch
+ * the window would mostly measure the screen after it. `seen` resolving is
+ * also the proof the game has been committed, since `beginGame` runs before
+ * the navigation that requests it.
+ *
+ * **At two widths, and tall at both**, for `tag-filter.spec.ts`'s reason: the
+ * card is 1,164px tall at 390 and 1,100px at 1280, so 1,400 is what leaves it
+ * room to move, and the slack is asserted first.
+ *
+ * **Two shapes of start, because the obvious fix for one breaks the other.** A
+ * banner hidden for the length of a start would hold still for a fresh start
+ * and vanish from under a player starting a new game over a saved one — the
+ * same shift, pulling the card the other way.
+ */
+for (const viewport of [
+  { width: 390, height: 1400 },
+  { width: 1280, height: 1400 },
+]) {
+  test.describe(`the setup card while /play loads, at ${viewport.width}×${viewport.height}`, () => {
+    test.use({ viewport });
+
+    test('raises no resume banner for the game Start is starting', async ({ page }) => {
+      await stubOpenTrivia(page);
+      await page.goto('/');
+      await setupAtRest(page);
+      const card = page.getByTestId('setup-card');
+      const start = card.locator('form button[type="submit"]');
+      await expect(start).toHaveText('Start Game');
+      await expect(page.getByTestId('resume-banner')).toHaveCount(0);
+      await expect
+        .poll(() => centringSlack(page), { message: 'the card has room to move' })
+        .toBeGreaterThan(8);
+      const cardBox = await settledBox(card, 'the setup card at rest');
+      const startBox = await settledBox(start, 'Start at rest');
+
+      const playChunk = await holdRequests(page, isPlayChunk);
+      await page.getByRole('button', { name: 'Start Game', exact: true }).click();
+      await playChunk.seen;
+
+      await expect(start).toHaveText('Loading Questions…');
+      await expect(page.getByTestId('resume-banner')).toHaveCount(0);
+      await expectBoxUnmoved(card, cardBox, 'the setup card while /play loads');
+      await expectBoxUnmoved(start, startBox, 'Start while /play loads');
+
+      playChunk.release();
+      await waitForPlayRoute(page);
+    });
+
+    test('holds a saved game’s banner as it was while another game starts', async ({ page }) => {
+      await startGame(page, 5);
+      await answerQuestion(page, CORRECT_ANSWERS[0]);
+      await expect(page.getByText('Question 2 / 5').first()).toBeVisible();
+
+      // A fresh page load rather than the logo: a document that has loaded
+      // `/play`'s chunk never requests it again, and the gate below needs it to.
+      await page.goto('/');
+      const banner = page.getByTestId('resume-banner');
+      await expect(banner).toContainText(/question\s+2\s+of\s+5/);
+      await setupAtRest(page);
+      const card = page.getByTestId('setup-card');
+      const start = card.locator('form button[type="submit"]');
+      await expect(start).toHaveText('Start Game');
+      await expect
+        .poll(() => centringSlack(page), { message: 'the card has room to move' })
+        .toBeGreaterThan(8);
+      const cardBox = await settledBox(card, 'the setup card with a saved game');
+      const startBox = await settledBox(start, 'Start with a saved game');
+
+      const playChunk = await holdRequests(page, isPlayChunk);
+      await page.getByRole('button', { name: 'Start Game', exact: true }).click();
+      await playChunk.seen;
+
+      // Still there, and still about the game that was in progress — not
+      // rewritten to describe the one replacing it.
+      await expect(start).toHaveText('Loading Questions…');
+      await expect(banner).toContainText(/question\s+2\s+of\s+5/);
+      await expectBoxUnmoved(card, cardBox, 'the setup card while /play loads');
+      await expectBoxUnmoved(start, startBox, 'Start while /play loads');
+
+      playChunk.release();
+      await waitForPlayRoute(page);
+      // ...and what Start started is the new game, from its first question.
+      await expect(page.getByText('Question 1 / 5').first()).toBeVisible();
+    });
+  });
+}

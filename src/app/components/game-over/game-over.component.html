@@ -26,7 +26,7 @@
         every tile is rendered in every state, so the card is the same size
         whatever the game did.
       -->
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-2 gap-4" data-cy="score-summary">
         <div
           class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
         >
@@ -66,12 +66,20 @@
           >
             Correct
           </p>
+          <!--
+            The denominator is muted against the count it follows, but it is
+            text at 20px, below the large-text sizes, so it still owes 4.5:1:
+            slate-500 / slate-400 is the tile's own caption pairing, 4.55:1 on
+            the light tile and 6.1:1 on the dark one. One step lighter is 2.5:1
+            and 3.3:1 — and Lighthouse never loads this screen, so
+            `color-contrast.spec.ts` is what would notice.
+          -->
           <p
             data-cy="correct-answers"
             class="text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight"
           >
             {{ gameController.correctAnswers() }}
-            <span class="text-xl font-medium text-slate-400 dark:text-slate-500"
+            <span class="text-xl font-medium text-slate-500 dark:text-slate-400"
               >/ {{ gameController.totalQuestions() }}</span
             >
           </p>

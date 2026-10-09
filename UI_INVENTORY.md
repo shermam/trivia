@@ -129,12 +129,13 @@ A hairline-bordered bar below `<main>`, hidden with the top bar in embed mode.
 
 ## 1. Route: `/` — Game Setup (`GameSetupComponent`)
 
-Full-screen centered card on an indigo/purple gradient background.
+Full-screen centered card on an emerald-to-amber gradient background.
 
 ### Hierarchy
 
-- **Title**: "Trivimind" (large, bold, indigo, centered)
+- **Title**: "Trivimind" (large, bold, emerald, centered)
 - **Subtitle**: "Configure your quiz and test your knowledge" (centered, grey)
+- **Resume banner** (emerald tint: `emerald-50` fill, `emerald-200` border, `emerald-800` text; `emerald-500/10` and `emerald-300` in the dark theme) — only while a game is in progress and unfinished: "You have a game in progress — question {n} of {total}.", a **Resume** button in the CTA fill (`emerald-700`, white text, `emerald-800` on hover — 5.4:1 in both themes) and an outlined **Discard**. While a start is in flight it holds exactly what it said when Start was pressed, so it neither appears for the game being started nor changes under a player starting another
 - **Inline error banner** (red) — only if a previous game-start attempt failed: shows the game controller's load-error message (e.g. no questions found for the filters, network failure)
 - **Form**
   - **Field: "Number of Questions"** — `<select>` labeled "Number of Questions"; options: `5`, `10`, `15`, `20`, `25` (default 10)
@@ -143,7 +144,7 @@ Full-screen centered card on an indigo/purple gradient background.
     - "Open Trivia" (default selected)
     - "Custom"
     - "Mixed"
-    - Selected segment is visually distinguished (indigo border + light indigo fill)
+    - Selected segment is visually distinguished (`emerald-100` fill, `emerald-700` text)
   - **Field: "Topics" (optional)** — the shared tag picker (`FEAT-021`), the game's only topic choice (`FEAT-052`), below the source picker and above the time limit. Nothing chosen plays every topic, for every source.
     - A helper line saying what the selection does for the source in play, reserved at the height of the tallest of them all — one Mixed variant per suggested topic — so changing the source or the selection swaps the words without rewrapping the line and moving everything below it:
       - Open Trivia: "Pick one of the suggested topics, or none to play every topic."
@@ -158,13 +159,14 @@ Full-screen centered card on an indigo/purple gradient background.
     - **For an Open Trivia game it is a single choice of the suggested topics**: picking another replaces the one chosen ("Replaced {old} with {new}." from the live region), and a typed topic outside them is refused with the reason above and left in the box. **Switching into Open Trivia** keeps the first suggested topic and removes the rest, and says so in the feedback line — "Open Trivia plays one suggested topic, so the others were removed." or, with none to keep, "Open Trivia plays only the suggested topics, so yours were removed." — while the live region names them ("Open Trivia plays one suggested topic. Kept #history; removed #my-topic and #sports.")
     - Usable offline, where the selection is a preference over the saved pool
 
+  - **Daily allowance row** (small grey line, one line in every wording): "Unlimited games with Pro." / "{n} of 5 free games left today." / "No free games left today."
   - **Short-draw notice** (amber, `role="status"`) — shown after Start when a topic-filtered draw came back short: "Only {found} of the {asked} questions you asked for match those topics. Start again to play the {found} we found."
-  - **Submit button**, full width, indigo:
+  - **Submit button**, full width, `emerald-700` with white text — or, once the day's free games are spent and no start is in flight, the amber Pro offer in its place (`role="status"`: "That's your 5 free games for today." · "They reset at midnight. Pro removes the limit entirely." · **See Pro** → `/pricing`):
     - Default label: "Start Game"
     - After a short filtered draw: "Play {found} Questions"
     - While loading questions: "Loading Questions…" (disabled)
 - **Footer link**: "+ Create custom question" → `/add-question`, with a **PRO badge** next to it (indigo/filled if the current user is Pro, grey/muted otherwise)
-- **Curated quizzes** (`QuizListComponent`, `FEAT-024`) — a section **below the card, one screen down**, on the page's light background rather than the gradient: heading "Curated quizzes", the line "Questions somebody chose, played in the order they chose them.", then a fixed-height strip of up to ten fixed-size cards, newest first, that scrolls sideways rather than wrapping. Each card links to `/quiz/:quizId` and shows the quiz's title (clamped to two lines), its description (clamped to three) and "{n} questions" ("1 question") at the foot. Nothing is read until the section is scrolled into view
+- **Curated quizzes** (`QuizListComponent`, `FEAT-024`) — a section **below the card, one screen down**, on the page's light background rather than the gradient: heading "Curated quizzes", the line "Questions somebody chose, played in the order they chose them.", then a fixed-height strip of up to ten fixed-size cards, newest first, that scrolls sideways rather than wrapping. Each card links to `/quiz/:quizId` and shows the quiz's title (clamped to two lines), its description (clamped to three) and "{n} questions" ("1 question") at the foot. Offline, each card is a disabled link instead — flat slate-100 with no shadow, a not-allowed cursor, and an amber wifi-off icon with "Needs a connection" in the count's place; a tap does nothing, and the cards come back when the connection does. Nothing is read until the section is scrolled into view
 
 ### States — donation return banner (from `?donation=success|cancelled` query param)
 
@@ -181,7 +183,7 @@ Read from the route snapshot at construction, so the banner is part of the first
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Initial load                                         | Form usable immediately; no request is made before Start or before the curated quizzes below are scrolled to, and the suggestion chips land on the first idle moment |
 | Form submitted while invalid                         | Validation errors marked (all fields touched); no navigation                                                                                                         |
-| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"                                                                                                                 |
+| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"; the resume banner and the Pro offer stay exactly as they were when Start was pressed, until the route changes  |
 | Game start failed — no questions matched the filters | Red inline error: "No questions were found for the selected options. Try a different topic, difficulty, or source."                                                  |
 | Game start failed — network/fetch error              | Red inline error: "Failed to load questions. Please check your connection and try again."                                                                            |
 | Success                                              | Navigates to `/play`                                                                                                                                                 |
@@ -194,6 +196,7 @@ One strip height in every state: the messages are laid **over** invisible placeh
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Not scrolled to yet, and loading** | Three pulsing placeholder cards (`aria-hidden`); the two look the same, so nothing changes when the read starts                                                                                                  |
 | **Loaded**                           | Up to ten quiz cards; the `sr-only` status reads "{n} quizzes." or "1 quiz."                                                                                                                                     |
+| **Loaded, offline**                  | The same cards, each a disabled link (`aria-disabled`, no `href`): flat and shadowless, "Needs a connection" with a wifi-off icon in place of the count, in the same cell; a tap does nothing                    |
 | **Empty**                            | Grey "No quizzes have been published yet." centred over the reserved strip                                                                                                                                       |
 | **Load error**                       | "The quizzes could not be loaded." — or "You're offline, and the quizzes need a connection." — and an outlined "Try again", which moves focus to the heading before it re-reads; centred over the reserved strip |
 
@@ -272,8 +275,8 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 - **Header card**: amber-gradient trophy icon badge, "Game Over!" (large, bold, dark, centered), subtitle "Here's how you did" (centered, grey)
 - **Score summary** (four stat blocks in a 2×2 grid, on their own light-slate sub-cards; all four render in every state):
   - "**{{ score }}**" — label "Score", caption "points". The multiplied total, so it can exceed the question count
-  - "**{{ percentage }}%**" — label "Accuracy", plus a derived performance label/color: "Outstanding!" (green, ≥90%) / "Great job!" (indigo, ≥70%) / "Good effort!" (amber, ≥50%) / "Keep practicing!" (red, <50%). Never multiplied, so never above 100%
-  - "**{{ correctAnswers }}** / **{{ totalQuestions }}**" — label "Correct", caption "correct answers"
+  - "**{{ percentage }}%**" — label "Accuracy", plus a derived performance label/color: "Outstanding!" (≥90%) and "Great job!" (≥70%) in `emerald-700` / "Good effort!" (≥50%) in `amber-700` / "Keep practicing!" (<50%) in `red-700` — the `-400` of each in the dark theme. The figure and its 12px label share the colour, so every tier clears 4.5:1 on the tile. Never multiplied, so never above 100%
+  - "**{{ correctAnswers }}** / **{{ totalQuestions }}**" — label "Correct", caption "correct answers"; the "/ {{ totalQuestions }}" is smaller and muted, in the caption's `slate-500` (`slate-400` dark): 4.55:1 and 6.1:1 on the tile
   - flame icon + "**{{ maxStreak }}**" — label "Best streak", caption "in a row"
 - **Save-score area** — content depends on auth state, or on the game being a curated quiz (see States below)
 - **Section heading**: "Top 10 — {{ boardLabel }} games" (with a medal icon), and under it a second, always-present line naming the population being ranked: "Worldwide", "In {{ country }}", or "Your country" when the Regional tab is selected with none set. Two lines by construction, so the header keeps one height across the toggle — the combined form wraps at 390px and not at 1024px
@@ -700,7 +703,7 @@ Grouped by screen, for quick reference when building Figma text styles / content
 
 **Game Over**: Game Over! · Here's how you did · Score · points · Accuracy · Correct · correct answers · Best streak · in a row · Outstanding! · Great job! · Good effort! · Keep practicing! · Score saved to the leaderboard! · You're ranked #{{n}} on the {{boardLabel}} leaderboard[ in {{country}}]. · Your best score is already higher ({{n}} points) — nice consistency! We kept your existing best. · Sign in to save this score to the leaderboard. · Verify your email to save this score to the leaderboard. · Enter your name · Save Score · Saving… · Country to rank in · Prefer not to say · Published beside your name and score on that country's public board, as well as the global one. Leave it unset and only the global board gets your score. · Could not save your score. Please try again. · Top 10 — {{boardLabel}} games · Which leaderboard to show · Global · Regional · Worldwide · In {{country}} · Your country · Loading leaderboard… · Could not load the leaderboard. Please try again later. · No scores yet. Be the first! · No scores in {{country}} yet. Be the first! · Choose your country in the save form above to see how you rank there. · Sign in and choose your country to see how you rank there. · Play Again · YOU (leaderboard badge for the current player's own row) · Review answers ({{n}}/{{total}} correct) · Your answers · Correct answer: · Source: · (opens in a new tab) · Justification · No answer · Time expired · You skipped this · Rate this question · Like this question · Dislike this question (and the quiz's vote announcements, numbered by the row) · Questions you flagged · Found something wrong in this game? Report it here. · Quizzes aren't ranked on a leaderboard. · Everyone plays a quiz's questions in the same order, so its score stays off the board.
 
-**Curated quizzes (on `/`)**: Curated quizzes · Questions somebody chose, played in the order they chose them. · {{n}} questions · 1 question · {{n}} quizzes. · 1 quiz. · No quizzes have been published yet. · The quizzes could not be loaded. · You're offline, and the quizzes need a connection. · Try again
+**Curated quizzes (on `/`)**: Curated quizzes · Questions somebody chose, played in the order they chose them. · {{n}} questions · 1 question · Needs a connection · {{n}} quizzes. · 1 quiz. · No quizzes have been published yet. · The quizzes could not be loaded. · You're offline, and the quizzes need a connection. · Try again
 
 **Curated quiz (`/quiz/:quizId`)**: Back to game · Curated quiz · Loading quiz… · Quiz not found · There is no published quiz at this address. It may have been taken down, or the link may be incomplete. · Play a random game · This quiz could not be loaded · Something went wrong while reading it. Please try again. · You're offline, and a quiz needs a connection to load its questions. · Try again · None of this quiz's questions can be played right now, so it cannot start. Try another quiz, or a random game. · {{n}} questions, in the order they were chosen · {{n}} of its {{total}} questions cannot be played right now, so it plays the other {{m}}. · Starting this quiz replaces the game you have in progress. · Time per Question · Suggested for this quiz: {{limit}}. · 15 seconds · 30 seconds · No limit · 15 seconds a question. Quizzes are not ranked, so pick the pace that suits you. · 30 seconds a question. Quizzes are not ranked, so pick the pace that suits you. · No countdown. Quizzes are not ranked, so take all the time you need. · Unlimited games with Pro. · {{n}} of {{max}} free games left today. · No free games left today. · That's your {{max}} free games for today. · They reset at midnight. Pro removes the limit entirely. · See Pro · Start quiz · Starting… · The quiz could not start. Please try again. · Quiz ready: {{n}} questions. · None of this quiz's questions can be played right now. · Quiz not found. · The quiz could not be loaded.
 
