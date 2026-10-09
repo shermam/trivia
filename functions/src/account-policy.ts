@@ -13,6 +13,22 @@ import type Stripe from 'stripe';
 export const ANONYMISED_AUTHOR = '[deleted-user]';
 
 /**
+ * What the question-generation pipeline (`shermam/trivia-pipeline`,
+ * `FEAT-020`) writes into `createdBy` on a question it promotes into the bank,
+ * after the precedent above: not a uid, and not a person.
+ *
+ * Nothing in this package writes or reads it, and that is the point worth
+ * stating: `deleteAccount` finds a leaver's questions by their uid and
+ * `exportAccountData` lists them the same way, so a question no person wrote
+ * is never anybody's to anonymise or to return. It lives here, beside the other
+ * sentinel, so the rules suite can pin this copy, the app's (`GENERATED_AUTHOR`
+ * in `src/app/models/question.model.ts`) and the literal `isQuestionAuthor()`
+ * refuses equal — three spellings of one value, which nothing else would
+ * notice drifting apart.
+ */
+export const GENERATED_AUTHOR = '[generated]';
+
+/**
  * Stripe subscription statuses that still represent a live billing
  * relationship and therefore have to be cancelled before an account goes
  * away.

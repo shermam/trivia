@@ -68,6 +68,21 @@ export interface CustomQuestionSeed {
    */
   answered?: number;
   correct?: number;
+  /**
+   * What the question-generation pipeline writes on a question it promotes
+   * (`FEAT-020`): `source: 'ai'` and the run behind it. Only the Admin SDK can
+   * write it — no client create admits the key — so seeding it here, beside
+   * `createdBy: '[generated]'` and no `category`, is how a spec stands in for
+   * a question the pipeline promoted.
+   */
+  provenance?: {
+    source: 'ai';
+    provider: string;
+    model: string;
+    modelVersion: string;
+    generatedAt: number;
+    runId: string;
+  };
 }
 
 /**

@@ -202,17 +202,27 @@ test.describe('per-player play history', () => {
 
     const [first] = await waitForPlayHistory(firebase, uid);
 
-    await page.reload();
-    await expect(page).toHaveURL(/\/game-over$/);
-    await expect(page.getByRole('heading', { name: 'Game Over!', exact: true })).toBeVisible();
-
     // **The reload's call has to have been made and answered before the
     // assertion means anything** — otherwise "still one" could just mean "the
     // second call has not happened yet", which would pass against the very
     // duplicate this test exists to catch. So it waits on the callable's own
-    // response rather than on a clock; a fixed delay is calibrated against
-    // whichever machine it was written on.
-    await page.waitForResponse((response) => /\/recordGameResult(\?|$)/.test(response.url()));
+    // request and response rather than on a clock; a fixed delay is calibrated
+    // against whichever machine it was written on.
+    //
+    // **Armed before the reload, not after it.** The reloaded screen can make
+    // its call and have it answered while the two assertions below are still
+    // running — measured on a quiet runner, the response arrived 28ms before a
+    // listener armed after them, which then waited for an event that had
+    // already happened. A request listener sees only calls made after it is
+    // armed, and the first game's call was made before `waitForPlayHistory`
+    // found its document, so the one this catches is the reload's.
+    const reloadCall = page.waitForRequest((request) =>
+      /\/recordGameResult(\?|$)/.test(request.url()),
+    );
+    await page.reload();
+    await expect(page).toHaveURL(/\/game-over$/);
+    await expect(page.getByRole('heading', { name: 'Game Over!', exact: true })).toBeVisible();
+    await (await reloadCall).response();
 
     const after = await firebase.getPlayHistory(uid);
     expect(after, 'the reload rewrote the same document rather than adding one').toHaveLength(1);

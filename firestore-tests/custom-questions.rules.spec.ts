@@ -22,8 +22,11 @@ import {
 } from 'firebase/firestore';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ANONYMISED_AUTHOR } from '../functions/src/account-policy';
-import { DELETED_AUTHOR } from '../src/app/models/question.model';
+import {
+  ANONYMISED_AUTHOR,
+  GENERATED_AUTHOR as FUNCTIONS_GENERATED_AUTHOR,
+} from '../functions/src/account-policy';
+import { DELETED_AUTHOR, GENERATED_AUTHOR } from '../src/app/models/question.model';
 import {
   asAnonymous,
   asOAuth,
@@ -2407,6 +2410,199 @@ describe('custom_questions: the author may edit and withdraw their own (FEAT-007
       deleteDoc(
         doc(asVerifiedPassword(env, '[deleted-user]').firestore(), 'custom_questions', 'orphaned'),
       ),
+    );
+  });
+});
+
+/**
+ * `FEAT-020`: a question the generation pipeline promoted into the bank.
+ *
+ * The pipeline writes on the Admin SDK, past every rule here, so what this
+ * block proves is everything *after* the write: what a reviewer, a player and
+ * an account can do with the document it leaves — `createdBy: '[generated]'`,
+ * a `provenance` map, tags and no `category`, `pending` (design §2 S8 in
+ * `shermam/trivia-project`, and the pipeline's `promote.ts`).
+ *
+ * Three claims, and both directions of each:
+ *
+ * - **A reviewer can decide it.** Nothing a client could write carries either
+ *   the sentinel or the map, so the only rule that ever meets this shape is the
+ *   reviewer's — which checks what a write *changes* and nothing about what is
+ *   already stored. The approval and the rejection are the accept rows a suite
+ *   of refusals could never see fail closed.
+ * - **Once approved it is public, like any other question.** Before that, no
+ *   player reads it.
+ * - **No client can make one, and nobody owns one.** `create` requires
+ *   `createdBy` to be the caller and has no room for `provenance`; and the
+ *   author's branch names the sentinel, so an account whose uid is literally
+ *   `[generated]` — which Firebase never mints, but the rule does not lean on
+ *   that — cannot rewrite or withdraw what every run promoted.
+ */
+describe('custom_questions: a question the generation pipeline promoted (FEAT-020)', () => {
+  const REVIEWER = 'reviewer-uid';
+  /** Promoted a month ago, so a create-time bound could not be what admits it. */
+  const CREATED_AT = Date.now() - 30 * 24 * 3_600_000;
+  /** Placeholders on purpose: the rules read none of these, and the suite names no real model. */
+  const PROVENANCE = {
+    source: 'ai',
+    provider: 'example-provider',
+    model: 'example-model',
+    modelVersion: 'example-model-2026-10-01',
+    generatedAt: CREATED_AT - 60_000,
+    runId: '20261009T120000Z-water',
+  };
+
+  /** What promotion writes: the content S8 built, the sentinel, `pending`, the provenance — no category. */
+  function promoted(overrides: Record<string, unknown> = {}) {
+    return validQuestion(GENERATED_AUTHOR, {
+      tags: ['chemistry', 'water'],
+      format: 'plain',
+      explanation: 'A molecule of water is two hydrogen atoms bonded to one oxygen atom.',
+      sourceUrl: 'https://en.wikipedia.org/wiki/Water',
+      sourceTitle: 'Water',
+      createdAt: CREATED_AT,
+      status: 'pending',
+      provenance: PROVENANCE,
+      ...overrides,
+    });
+  }
+
+  beforeEach(async () => {
+    await grantReviewer(env, REVIEWER);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'custom_questions', 'generated-pending'), promoted());
+      await setDoc(
+        doc(ctx.firestore(), 'custom_questions', 'generated-live'),
+        promoted({ status: 'approved' }),
+      );
+    });
+  });
+
+  const pending = (ctx: RulesTestContext) =>
+    doc(ctx.firestore(), 'custom_questions', 'generated-pending');
+
+  it('is the shape the pipeline writes — the sentinel, provenance, and no category', () => {
+    // A guard on the fixture rather than on the rules: every row below is
+    // about this shape, and a factory that drifted away from it would make
+    // them all pass for a document the pipeline never writes.
+    const shape = promoted();
+    expect(shape.createdBy).toBe('[generated]');
+    expect(shape.provenance).toMatchObject({ source: 'ai' });
+    expect(shape).not.toHaveProperty('category');
+  });
+
+  // The two accept rows. Each is exactly the patch `setQuestionStatus` sends.
+  it('lets a reviewer approve it', async () => {
+    await assertSucceeds(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'approved',
+        rejectionReason: deleteField(),
+      }),
+    );
+  });
+
+  it('lets a reviewer reject it with a reason', async () => {
+    await assertSucceeds(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'rejected',
+        rejectionReason: 'The source does not say this.',
+      }),
+    );
+  });
+
+  // The label a player reads is the map's to carry: a reviewer approving the
+  // question may not quietly make it read as a person's.
+  it('refuses a reviewer rewriting its provenance', async () => {
+    await assertFails(
+      updateDoc(pending(asVerifiedPassword(env, REVIEWER)), {
+        status: 'approved',
+        'provenance.source': 'human',
+      }),
+    );
+  });
+
+  it('serves it to a signed-out visitor once it is approved', async () => {
+    const snapshot = await assertSucceeds(
+      getDocs(query(questions(asSignedOut(env)), where('status', '==', 'approved'))),
+    );
+    expect(snapshot.docs.map((d) => d.id)).toContain('generated-live');
+    await assertSucceeds(
+      getDoc(doc(asSignedOut(env).firestore(), 'custom_questions', 'generated-live')),
+    );
+  });
+
+  it('keeps it from a player while it is pending', async () => {
+    await assertFails(getDoc(pending(asPro(env, 'pro-user'))));
+  });
+
+  // `createdBy` must be the caller, so naming the sentinel is naming somebody
+  // else. The payload is otherwise valid and carries no provenance, so this is
+  // the attribution clause and nothing else.
+  it('refuses a client creating a question attributed to the sentinel', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion(GENERATED_AUTHOR),
+      }),
+    );
+  });
+
+  // ...and the map has no place in the allowlist, so a client cannot dress its
+  // own question as a generated one either.
+  it('refuses a client creating a question that carries provenance', async () => {
+    await assertFails(
+      submitQuestion(asPro(env, 'pro-user'), {
+        uid: 'pro-user',
+        payload: validQuestion('pro-user', { provenance: PROVENANCE }),
+      }),
+    );
+  });
+
+  // The author's branch, asserted from the one direction that could go wrong:
+  // a caller whose uid is exactly what the document holds. The edit is
+  // otherwise a valid owner edit — the stored content, `pending`, attribution
+  // unchanged, no provenance to trip the shape check — so the sentinel clause
+  // is the only thing refusing it.
+  it('refuses an account whose uid is literally [generated] editing one', async () => {
+    const { provenance: _kept, ...content } = promoted();
+    await assertFails(
+      setDoc(
+        doc(
+          asVerifiedPassword(env, GENERATED_AUTHOR).firestore(),
+          'custom_questions',
+          'generated-pending',
+        ),
+        {
+          ...content,
+          question: 'Rewritten by somebody who is not the pipeline?',
+        },
+      ),
+    );
+  });
+
+  it('refuses an account whose uid is literally [generated] deleting one', async () => {
+    await assertFails(
+      deleteDoc(
+        doc(
+          asVerifiedPassword(env, GENERATED_AUTHOR).firestore(),
+          'custom_questions',
+          'generated-live',
+        ),
+      ),
+    );
+  });
+
+  /**
+   * The author line, the author view and the edit rights all turn on this one
+   * string, compared in three places that cannot import each other: the app's
+   * copy, the functions package's, and the literal `isQuestionAuthor()`
+   * refuses. Nothing but this row would notice one drifting — and a pipeline
+   * that wrote a different spelling would be refused by none of them.
+   */
+  it('agrees with the functions package and the rules on the generated-author sentinel', () => {
+    expect(GENERATED_AUTHOR).toBe(FUNCTIONS_GENERATED_AUTHOR);
+    expect(readFileSync('firestore.rules', 'utf8')).toContain(
+      `resource.data.createdBy != '${GENERATED_AUTHOR}'`,
     );
   });
 });

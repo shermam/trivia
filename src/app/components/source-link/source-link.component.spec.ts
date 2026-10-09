@@ -13,19 +13,26 @@ import { SourceLinkComponent } from './source-link.component';
 @Component({
   standalone: true,
   imports: [SourceLinkComponent],
-  template: `<app-source-link [url]="url()" [title]="title()" [showHost]="showHost()" />`,
+  template: `<app-source-link
+    [url]="url()"
+    [title]="title()"
+    [showHost]="showHost()"
+    [machineGenerated]="machineGenerated()"
+  />`,
 })
 class HostComponent {
   readonly url = signal<string | undefined>(undefined);
   readonly title = signal<string | undefined>(undefined);
   readonly showHost = signal(false);
+  readonly machineGenerated = signal(false);
 }
 
-function render(url?: string, title?: string, showHost = false) {
+function render(url?: string, title?: string, showHost = false, machineGenerated = false) {
   const fixture = TestBed.createComponent(HostComponent);
   fixture.componentInstance.url.set(url);
   fixture.componentInstance.title.set(title);
   fixture.componentInstance.showHost.set(showHost);
+  fixture.componentInstance.machineGenerated.set(machineGenerated);
   fixture.detectChanges();
   const el: HTMLElement = fixture.nativeElement;
   return {
@@ -33,6 +40,7 @@ function render(url?: string, title?: string, showHost = false) {
     root: el.querySelector<HTMLElement>('[data-cy="question-source"]'),
     anchor: el.querySelector<HTMLAnchorElement>('[data-cy="question-source-link"]'),
     host: el.querySelector<HTMLElement>('[data-cy="question-source-host"]'),
+    generated: el.querySelector<HTMLElement>('[data-cy="question-source-generated"]'),
     text: el.textContent?.replace(/\s+/g, ' ').trim() ?? '',
   };
 }
@@ -172,5 +180,95 @@ describe('SourceLinkComponent', () => {
     const { root } = render('javascript:alert(1)');
 
     expect(root).toBeNull();
+  });
+});
+
+/**
+ * `FEAT-020`: a question the generation pipeline wrote reads
+ * "Machine-generated from <source>" wherever its source is named — honest and
+ * short, and decided by the caller from the question's `provenance`.
+ */
+describe('SourceLinkComponent: a machine-generated question', () => {
+  /**
+   * The words go **before** the link and **outside** it: the anchor is still
+   * named by the page it opens, so a screen reader listing links hears
+   * "Water", not a link that claims to lead somewhere machine-generated.
+   */
+  it('reads "Machine-generated from" the source, outside the link', () => {
+    const { root, anchor, generated } = render(
+      'https://en.wikipedia.org/wiki/Water',
+      'Water',
+      false,
+      true,
+    );
+
+    expect(generated?.textContent?.trim()).toBe('Machine-generated from');
+    expect(root?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Machine-generated from Water (opens in a new tab)',
+    );
+    expect(anchor!.getAttribute('href')).toBe('https://en.wikipedia.org/wiki/Water');
+    expect(anchor!.textContent).not.toContain('Machine-generated');
+    expect(anchor!.contains(generated)).toBe(false);
+  });
+
+  // The visible words say what the "Source:" prefix said, so the prefix goes:
+  // "Source: Machine-generated from Water" would be the same fact twice.
+  it('drops the screen-reader "Source:" prefix the words now carry', () => {
+    const { root } = render('https://en.wikipedia.org/wiki/Water', 'Water', false, true);
+
+    expect(root?.textContent).not.toContain('Source:');
+  });
+
+  it('keeps the host disclosure on the reviewer card, inside the link', () => {
+    const { anchor, host, text } = render(
+      'https://en.wikipedia.org/wiki/Water',
+      'Water',
+      true,
+      true,
+    );
+
+    expect(host?.textContent).toContain('en.wikipedia.org');
+    expect(anchor!.contains(host)).toBe(true);
+    expect(text).toBe('Machine-generated from Water — en.wikipedia.org (opens in a new tab)');
+  });
+
+  it('names the host when there is a link and no title', () => {
+    const { root } = render('https://en.wikipedia.org/wiki/Water', undefined, false, true);
+
+    expect(root?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Machine-generated from en.wikipedia.org (opens in a new tab)',
+    );
+  });
+
+  it('reads the same over a citation with no usable link', () => {
+    const { anchor, text } = render('javascript:alert(1)', 'Water', false, true);
+
+    expect(anchor).toBeNull();
+    expect(text).toBe('Machine-generated from Water');
+  });
+
+  /**
+   * The label does not depend on the writer having cited anything. The
+   * pipeline always does, but the console can write a generated question
+   * with no source at all, and the Privacy Policy says such a question is
+   * labelled — so it still says what it is, rather than nothing.
+   */
+  it('still says "Machine-generated" with no source to name', () => {
+    const { root, anchor, generated } = render(undefined, undefined, false, true);
+
+    expect(anchor).toBeNull();
+    expect(root?.textContent?.trim()).toBe('Machine-generated');
+    expect(generated?.textContent?.trim()).toBe('Machine-generated');
+  });
+
+  // The common case is unchanged: a question a person wrote carries no label,
+  // and a question with no source and no provenance still renders nothing.
+  it('adds nothing to a question a person wrote', () => {
+    const cited = render('https://example.org/article', 'Example Journal');
+    expect(cited.generated).toBeNull();
+    expect(cited.text).toContain('Example Journal');
+    expect(cited.text).not.toContain('Machine-generated');
+
+    expect(render(undefined, undefined).root).toBeNull();
   });
 });
