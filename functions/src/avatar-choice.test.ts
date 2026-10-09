@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  AVATAR_PROVIDERS,
   type AvatarCaller,
   type AvatarChoice,
   applyAvatarChoice,
@@ -65,8 +64,10 @@ describe('decideAvatarChoice', () => {
   });
 
   /**
-   * Every provider the app offers, by name. The picker is shown to every
-   * signed-in account, so a provider missing here is a player shown a control
+   * Every provider the app offers, by name — written out here rather than read
+   * from the gate, so a provider dropped from `caller-gate.ts` fails this row
+   * instead of quietly shrinking it. The picker is shown to every signed-in
+   * account, so a provider missing from the gate is a player shown a control
    * the server then refuses — the client gate broader than the server's
    * (`CLAUDE.md` §4.2).
    */
@@ -86,7 +87,6 @@ describe('decideAvatarChoice', () => {
       });
       assert.equal(decision.ok, true, provider);
     }
-    assert.equal(AVATAR_PROVIDERS.size, 8);
   });
 
   it('takes the uid from the verified caller, never from the payload', () => {

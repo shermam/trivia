@@ -1,6 +1,7 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import * as logger from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { gameResultRefusal } from './caller-gate';
 import { applyGameResult } from './game-result';
 
 /**
@@ -32,27 +33,29 @@ export const recordGameResult = onCall(async (request) => {
   }
 
   /**
-   * Anonymous sessions get no document, and this is where that is enforced —
-   * there is no client write rule for the gate to live in.
+   * The shared caller gate (`caller-gate.ts`), and this is where it is applied
+   * — there is no client write rule for it to live in. Every account the app
+   * signs in is banked, a password account whose address is not verified yet
+   * included (`gameResultRefusal` says why); anonymous sessions and any
+   * provider the app does not offer get no document.
    *
-   * Not tidiness: `deleteAccount` never runs for an anonymous account, and
-   * Firebase's auto-deletion of dormant anonymous accounts removes the Auth
-   * record only. A document per guest would therefore accumulate with nothing
-   * able to delete it, and the Privacy Policy's claim that nothing is attached
-   * to an anonymous session would stop being true on the first page load after
-   * deploy.
-   *
-   * Read from the token rather than from `request.auth.token.firebase`
-   * defensively — the shape is documented, but a missing provider must fail
-   * closed rather than admit the caller.
+   * The refusal names its reason, because the client acts on the difference:
+   * an anonymous session is refused on every game by design and says nothing,
+   * while a signed-in account refused is the gap this gate once had — five of
+   * the eight providers banked nothing, silently — and the client logs it and
+   * tells the player on `/profile` (`AccountService.recordGameResult`).
    */
-  const provider = request.auth?.token?.firebase?.sign_in_provider;
-  if (provider !== 'password' && provider !== 'google.com' && provider !== 'facebook.com') {
-    // An allowlist rather than `!== 'anonymous'`: a provider this deployment
-    // has never enabled should not silently start creating documents the day
-    // somebody turns it on in the console.
-    logger.info(`recordGameResult skipped for uid=${uid}: provider=${provider}`);
-    return { recorded: false, reason: 'unsupported-provider' };
+  const refusal = gameResultRefusal(request.auth?.token);
+  if (refusal) {
+    const line = `recordGameResult skipped for uid=${uid}: ${refusal.reason}, provider=${refusal.provider}`;
+    // A guest is refused on every game they finish, so that line is routine;
+    // a signed-in account refused is never supposed to happen.
+    if (refusal.reason === 'anonymous') {
+      logger.info(line);
+    } else {
+      logger.warn(line);
+    }
+    return refusal;
   }
 
   const firestore = getFirestore();
