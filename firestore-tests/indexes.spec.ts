@@ -199,18 +199,29 @@ describe('firestore.indexes.json', () => {
   });
 
   /**
-   * The report sweeps' queries (`FEAT-042`). The daily pass reads the reports
-   * that still name somebody — `where('reportedBy','>','')`, ordered by
-   * `reportedBy` then the document id, from a cursor — and `deleteAccount` and
-   * `exportAccountData` read one account's with an equality on the same field.
-   * Firestore's automatic single-field index on `reportedBy` serves all three,
-   * so nothing needs declaring, and that is exactly why this pins that nothing
-   * takes it away: a `fieldOverrides` entry *replaces* automatic indexing for
-   * its field, and before these sweeps nothing queried this one, so exempting
-   * it looked free. The emulator enforces no index configuration at all, so
-   * every local suite would stay green while both sweeps failed in production
-   * with `FAILED_PRECONDITION` — and reporters stayed named.
+   * The report sweeps' queries (`FEAT-042`), each on one field and each served
+   * by a single-field index Firestore creates on its own — so nothing needs
+   * declaring, and that is exactly why these pin that nothing takes either
+   * away. A `fieldOverrides` entry *replaces* automatic indexing for its field,
+   * and the emulator enforces no index configuration at all, so every local
+   * suite would stay green while the sweep failed in production with
+   * `FAILED_PRECONDITION` — and reporters stayed named.
+   *
+   * - **`createdAt`**: the daily pass reads `where('createdAt', '<', cutoff)`,
+   *   ordered by `createdAt` and then the document id, from a cursor — and the
+   *   reviewers' queue already orders by the same field, descending.
+   * - **`reportedBy`**: `deleteAccount` and `exportAccountData` find one
+   *   account's reports with an equality on it. Nothing queried the field
+   *   before this feature, so exempting it would have looked free.
    */
+  it('leaves question_reports.createdAt to its automatic single-field index', () => {
+    const override = spec.fieldOverrides.find(
+      (entry) => entry.collectionGroup === 'question_reports' && entry.fieldPath === 'createdAt',
+    );
+
+    expect(override).toBeUndefined();
+  });
+
   it('leaves question_reports.reportedBy to its automatic single-field index', () => {
     const override = spec.fieldOverrides.find(
       (entry) => entry.collectionGroup === 'question_reports' && entry.fieldPath === 'reportedBy',

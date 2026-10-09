@@ -7,13 +7,13 @@ import {
   playRetentionCutoff,
   sweepExpiredPlays,
 } from './play-retention';
-import { anonymiseDecidedReports } from './report-anonymisation';
+import { anonymiseExpiredReports, reporterRetentionCutoff } from './report-anonymisation';
 import { runSweepPasses } from './sweep-passes';
 
 /**
  * The project's one scheduled job, once a day, running two independent passes:
  * play history older than twelve months is deleted (`FEAT-049`), and every
- * report whose question has been decided is copied without its reporter
+ * report filed more than thirty days ago is copied without its reporter
  * (`FEAT-042`).
  *
  * **One job carrying both, rather than a job each, is a billing decision.**
@@ -45,8 +45,8 @@ export const sweepPlayHistory = onSchedule(
     // The default is 60 seconds, and a first run facing a year's accumulation
     // has up to 20 batched deletes to get through, and the report pass up to
     // 20 pages more. Nine minutes is generous rather than necessary — each
-    // pass stops itself at its own ceiling and leaves the remainder to
-    // tomorrow.
+    // pass stops itself at its own ceiling (`play-retention.ts`,
+    // `report-anonymisation.ts` say what each does there).
     timeoutSeconds: 540,
     // One job, one instance. Two overlapping runs would both read the same
     // page and both act on it; for the plays the second delete is a no-op,
@@ -73,10 +73,15 @@ export const sweepPlayHistory = onSchedule(
         {
           name: 'report anonymisation',
           run: async () => {
-            const { examined, anonymised, kept } = await anonymiseDecidedReports(firestore);
+            const now = Date.now();
+            const { examined, anonymised, alreadyAnonymous } = await anonymiseExpiredReports(
+              firestore,
+              now,
+            );
             return (
-              `sweepPlayHistory read ${examined} report(s) still naming their reporter: ` +
-              `${anonymised} anonymised, ${kept} kept for a question still under review.`
+              `sweepPlayHistory read ${examined} report(s) filed before ` +
+              `${new Date(reporterRetentionCutoff(now)).toISOString()}: ${anonymised} anonymised, ` +
+              `${alreadyAnonymous} already naming nobody.`
             );
           },
         },

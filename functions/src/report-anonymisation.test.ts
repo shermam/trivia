@@ -6,22 +6,23 @@ import {
   QUESTION_REPORTS_COLLECTION,
   REPORT_SWEEP_MAX_PASSES,
   REPORT_SWEEP_PAGE_SIZE,
-  anonymiseDecidedReports,
+  ReportSweepIncompleteError,
+  anonymiseExpiredReports,
   anonymisedReport,
-  isDecidedQuestion,
   isStillAttributable,
-  leaverReportFate,
   questionReportsFor,
+  reporterRetentionCutoff,
   sweepLeaverReports,
   type ReportQuery,
   type ReportSnapshot,
   type ReportStore,
 } from './report-anonymisation';
+import { REPORTER_RETENTION_DAYS, REPORTER_RETENTION_MS } from './report-retention';
 
 /**
- * Report anonymisation (`FEAT-042`): when a report stops naming its reporter,
- * and the three readers that act on it — the daily pass, the leaver's pass in
- * `deleteAccount`, and the export.
+ * Report anonymisation (`FEAT-042`): when a report stops naming its reporter —
+ * thirty days after it is filed, or at once when the reporter deletes their
+ * account — and the three readers that act on it.
  *
  * **The ids are the point.** A report's id is `{window}-{slot}-{uid}`, so a
  * version that deleted `reportedBy` and left the document where it was would
@@ -29,12 +30,13 @@ import {
  * by every reviewer. The assertions below look at ids as well as fields for
  * that reason — the shape the spec's acceptance list asks for.
  *
- * Driven against a fake rather than the emulator, because the decisions
- * being pinned are which documents are read and what is written. The fake
- * applies the filters, the orderings and the cursor literally, refuses an
- * oversized batch and an empty one, and honours a delete's precondition the
- * way a real batch does — atomically, for every write in it. The e2e suite
- * runs the leaver's pass and the export against the emulator
+ * Driven against a fake rather than the emulator, because the decisions being
+ * pinned are which documents are read and what is written. The fake applies
+ * the filters, the orderings and the cursor literally — numbers as numbers, a
+ * range matching numbers only, as Firestore's does — refuses an oversized
+ * batch and an empty one, and honours a delete's precondition the way a real
+ * batch does, atomically for every write in it. The e2e suite runs the
+ * leaver's pass and the export against the emulator
  * (`account-management.spec.ts`).
  */
 
@@ -54,8 +56,8 @@ interface Ref {
 
 interface Filter {
   field: string;
-  op: '==' | '>';
-  value: string;
+  op: '==' | '<';
+  value: string | number;
 }
 
 type Order = string | FieldPath;
@@ -63,12 +65,20 @@ type Order = string | FieldPath;
 const isDocumentId = (order: Order): boolean =>
   order instanceof FieldPath && order.isEqual(FieldPath.documentId());
 
-/** Compares two ordering keys field by field, the way Firestore orders strings. */
+/** Firestore's order within one type: numbers by value, strings by code point. */
+function compareValues(x: unknown, y: unknown): number {
+  if (typeof x === 'number' && typeof y === 'number') {
+    return x - y;
+  }
+  const [a, b] = [String(x), String(y)];
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
 function compareKeys(a: unknown[], b: unknown[]): number {
   for (let i = 0; i < a.length; i += 1) {
-    const [x, y] = [String(a[i]), String(b[i])];
-    if (x !== y) {
-      return x < y ? -1 : 1;
+    const order = compareValues(a[i], b[i]);
+    if (order !== 0) {
+      return order;
     }
   }
   return 0;
@@ -82,21 +92,18 @@ interface QueryRecord {
 }
 
 /**
- * A `question_reports` collection and a `custom_questions` one, faked to the
- * depth the sweeps use them: queries on the first, `getAll` on the second,
- * batches of creates and deletes on the first.
+ * A `question_reports` collection, faked to the depth the sweeps use it.
+ *
+ * `autoIdPrefix` decides where a copy's fresh id sorts against the `{window}-…`
+ * ids reports are filed under: before them by default, which keeps the page
+ * arithmetic below readable, or after them, which is the case where a copy can
+ * come back on the page after the one that wrote it. Real auto-ids land on
+ * either side.
  */
-function fakeFirestore(seed: {
-  reports?: ({ id: string } & Doc)[];
-  questions?: Record<string, Doc>;
-}) {
-  const reports = new Map<string, Doc>(
-    (seed.reports ?? []).map(({ id, ...data }) => [id, { ...data }]),
-  );
-  const questions = new Map<string, Doc>(Object.entries(seed.questions ?? {}));
+function fakeFirestore(seed: ({ id: string } & Doc)[], { autoIdPrefix = '0' } = {}) {
+  const reports = new Map<string, Doc>(seed.map(({ id, ...data }) => [id, { ...data }]));
   const commits: { creates: string[]; deletes: string[] }[] = [];
   const queries: QueryRecord[] = [];
-  const lookups: { ids: string[]; fieldMask: unknown }[] = [];
   let nextAutoId = 0;
   let beforeCommit: (() => void) | undefined;
 
@@ -108,6 +115,12 @@ function fakeFirestore(seed: {
       data: () => ({ ...copy }),
     };
   };
+
+  const matches = (data: Doc, { field, op, value }: Filter): boolean =>
+    op === '=='
+      ? data[field] === value
+      : // A range on a number matches numbers only, as Firestore's does.
+        typeof data[field] === typeof value && compareValues(data[field], value) < 0;
 
   const queryOver = (
     path: string,
@@ -131,7 +144,7 @@ function fakeFirestore(seed: {
     get() {
       assert.equal(path, QUESTION_REPORTS_COLLECTION, 'only reports are queried');
       // Firestore's own rule: a range filter's field must be the first ordering.
-      const range = filters.find((filter) => filter.op === '>');
+      const range = filters.find((filter) => filter.op === '<');
       if (range !== undefined && orders.length > 0) {
         assert.equal(orders[0], range.field, 'a range filter is ordered on its own field first');
       }
@@ -148,13 +161,7 @@ function fakeFirestore(seed: {
         keys.map((key) => (isDocumentId(key) ? id : data[key as string]));
 
       let rows = [...reports.entries()]
-        .filter(([, data]) =>
-          filters.every(({ field, op, value }) =>
-            op === '=='
-              ? data[field] === value
-              : typeof data[field] === 'string' && data[field] > value,
-          ),
-        )
+        .filter(([, data]) => filters.every((filter) => matches(data, filter)))
         // An ordering on a field leaves out every document that lacks it.
         .filter(([, data]) =>
           orders.every((order) => isDocumentId(order) || (order as string) in data),
@@ -177,35 +184,12 @@ function fakeFirestore(seed: {
         doc(id?: string): Ref {
           if (id === undefined) {
             nextAutoId += 1;
-            return {
-              path: `${path}/auto${String(nextAutoId).padStart(16, '0')}`,
-              id: `auto${String(nextAutoId).padStart(16, '0')}`,
-            };
+            const auto = `${autoIdPrefix}auto${String(nextAutoId).padStart(15, '0')}`;
+            return { path: `${path}/${auto}`, id: auto };
           }
           return { path: `${path}/${id}`, id };
         },
       };
-    },
-    getAll(...items) {
-      const refs = items.filter((item): item is Ref => 'path' in item);
-      const options = items.find((item) => 'fieldMask' in item) as
-        { fieldMask: string[] } | undefined;
-      // The Admin SDK refuses a `getAll` with no references at all.
-      assert.ok(refs.length > 0, 'getAll is called with at least one reference');
-      for (const ref of refs) {
-        assert.ok(ref.path.startsWith('custom_questions/'), 'only questions are looked up');
-      }
-      lookups.push({ ids: refs.map((ref) => ref.id), fieldMask: options?.fieldMask });
-      return Promise.resolve(
-        refs.map((ref) => {
-          const question = questions.get(ref.id);
-          return {
-            id: ref.id,
-            exists: question !== undefined,
-            get: (field: string) => question?.[field],
-          };
-        }),
-      );
     },
     batch() {
       const ops: (
@@ -259,7 +243,6 @@ function fakeFirestore(seed: {
     store,
     commits,
     queries,
-    lookups,
     /** Every report the collection holds now, id included, in id order. */
     remaining: () =>
       [...reports.entries()]
@@ -275,73 +258,71 @@ function fakeFirestore(seed: {
 }
 
 const NOW = 1_757_900_000_000;
+const DAY = 24 * 60 * 60 * 1000;
 const WINDOW = 5_859_666;
 
 /** The id the create rule demands: `{window}-{slot}-{uid}`. */
 const reportId = (uid: string, slot = 0, window = WINDOW) => `${window}-${slot}-${uid}`;
 
-function report(uid: string, questionId: string, slot = 0, overrides: Doc = {}) {
+/** A report as filed, `daysAgo` days before {@link NOW}. */
+function report(uid: string, daysAgo: number, slot = 0, overrides: Doc = {}) {
   return {
     id: reportId(uid, slot),
-    questionId,
+    questionId: 'q1',
     reason: 'incorrect',
     reportedBy: uid,
-    createdAt: NOW,
+    createdAt: NOW - daysAgo * DAY,
     ...overrides,
   };
 }
 
-/** One question in each state a report can find its question in; `q-gone` is not here at all. */
-const QUESTIONS: Record<string, Doc> = {
-  'q-approved': { status: 'approved' },
-  'q-rejected': { status: 'rejected' },
-  'q-pending': { status: 'pending' },
-};
-
 /** The four content keys of a report, which is what an anonymised copy must still carry. */
 const contentOf = ({ id: _id, reportedBy: _by, ...content }: { id: string } & Doc) => content;
 
+const byCreatedAt = (a: Doc, b: Doc) => compareValues(a['createdAt'], b['createdAt']);
+
 // ---------------------------------------------------------------------------
-// The decision. Both directions, because a predicate that answered "decided"
-// to everything would satisfy a suite of nothing but decided cases.
+// The decision. Both sides of the boundary, because a predicate that answered
+// "expired" to everything would satisfy a suite of nothing but expired cases.
 // ---------------------------------------------------------------------------
 
-test('a report about a question awaiting review keeps its reporter', () => {
-  assert.equal(isDecidedQuestion({ status: 'pending' }), false);
-  assert.equal(isStillAttributable({ status: 'pending' }), true);
+test('a report keeps its reporter for thirty days', () => {
+  assert.equal(REPORTER_RETENTION_DAYS, 30);
+  assert.equal(REPORTER_RETENTION_MS, 30 * DAY);
+  assert.equal(reporterRetentionCutoff(NOW), NOW - 30 * DAY);
 });
 
-test('a report about an approved or a rejected question does not', () => {
-  assert.equal(isStillAttributable({ status: 'approved' }), false);
-  assert.equal(isStillAttributable({ status: 'rejected' }), false);
-});
-
-test('nor does one about a question that no longer exists', () => {
-  assert.equal(isDecidedQuestion(null), true);
-  assert.equal(isStillAttributable(null), false);
+test('a report filed a moment ago, or a day inside the period, still names its reporter', () => {
+  assert.equal(isStillAttributable(NOW, NOW), true);
+  assert.equal(isStillAttributable(NOW - DAY, NOW), true);
+  assert.equal(isStillAttributable(reporterRetentionCutoff(NOW) + DAY, NOW), true);
 });
 
 /**
- * Only the two terminal statuses are decisions. A status nobody has defined —
- * a future quarantine value, a console typo, the field missing altogether — is
- * not evidence that a reviewer has looked, so it is read the cautious way.
+ * Exactly thirty days old is **not** expired, and the direction is pinned
+ * rather than left to whichever comparison somebody writes next: the daily
+ * query is `where('createdAt', '<', cutoff)`, and a predicate disagreeing with
+ * it would describe a boundary the code does not have.
  */
-test('a status nobody has defined reads as undecided rather than as a decision', () => {
-  for (const status of ['quarantined', 'Approved', '', undefined, null, 7]) {
-    assert.equal(isStillAttributable({ status }), true, `status ${String(status)}`);
+test('a report exactly thirty days old keeps its reporter for one more run', () => {
+  assert.equal(isStillAttributable(reporterRetentionCutoff(NOW), NOW), true);
+});
+
+test('a millisecond older than that, it does not', () => {
+  assert.equal(isStillAttributable(reporterRetentionCutoff(NOW) - 1, NOW), false);
+  assert.equal(isStillAttributable(NOW - 60 * DAY, NOW), false);
+});
+
+/**
+ * The query's reading of a `createdAt` that is not a number: `<` against a
+ * number matches numbers only, so such a report is never read and keeps its
+ * reporter. Only a console edit can write one — the create rule requires a
+ * number near the time of filing — and the predicate says what the code does.
+ */
+test('a createdAt that is not a number is never expired', () => {
+  for (const createdAt of [undefined, null, '1700000000000', { seconds: 1 }]) {
+    assert.equal(isStillAttributable(createdAt, NOW), true, `createdAt ${String(createdAt)}`);
   }
-  assert.equal(isStillAttributable({}), true, 'no status at all');
-});
-
-test('a leaver’s report about a decided question goes with them', () => {
-  assert.equal(leaverReportFate({ status: 'approved' }), 'delete');
-  assert.equal(leaverReportFate({ status: 'rejected' }), 'delete');
-  assert.equal(leaverReportFate(null), 'delete');
-});
-
-test('a leaver’s report about a question still under review stays, without them', () => {
-  assert.equal(leaverReportFate({ status: 'pending' }), 'anonymise');
-  assert.equal(leaverReportFate({ status: 'quarantined' }), 'anonymise');
 });
 
 // ---------------------------------------------------------------------------
@@ -392,41 +373,37 @@ test('the allowlist is exactly the four content keys a report is filed with', ()
 // The daily pass.
 // ---------------------------------------------------------------------------
 
-test('anonymises every report whose question is decided and keeps the ones under review', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [
-      report('alice', 'q-approved', 0, { detail: 'The answer is misspelled.' }),
-      report('alice', 'q-pending', 1),
-      report('bob', 'q-rejected', 0, { reason: 'inappropriate' }),
-      report('bob', 'q-gone', 1, { reason: 'spam' }),
-    ],
-  });
+test('anonymises every report older than thirty days and leaves the younger ones alone', async () => {
+  const fake = fakeFirestore([
+    report('alice', 40, 0, { detail: 'The answer is misspelled.' }),
+    report('bob', 31, 0, { reason: 'inappropriate', questionId: 'q2' }),
+    report('carol', 5),
+    report('dave', 30),
+  ]);
 
-  const result = await anonymiseDecidedReports(fake.store);
+  const result = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(result, { examined: 4, anonymised: 3, kept: 1 });
+  assert.deepEqual(result, { examined: 2, anonymised: 2, alreadyAnonymous: 0 });
   const left = fake.remaining();
-  // The one under review is exactly where it was, reporter and all.
+  // The young one, and the one exactly thirty days old, are exactly where they were.
   assert.deepEqual(
     left.filter((doc) => 'reportedBy' in doc),
-    [report('alice', 'q-pending', 1)],
+    [report('carol', 5), report('dave', 30)].sort((a, b) => (a.id < b.id ? -1 : 1)),
   );
-  // The other three are copies carrying their content and nothing else.
+  // The other two are copies carrying their content and nothing else.
   assert.deepEqual(
     left
       .filter((doc) => !('reportedBy' in doc))
       .map(contentOf)
-      .sort((a, b) => String(a['questionId']).localeCompare(String(b['questionId']))),
+      .sort(byCreatedAt),
     [
       {
-        questionId: 'q-approved',
+        questionId: 'q1',
         reason: 'incorrect',
         detail: 'The answer is misspelled.',
-        createdAt: NOW,
+        createdAt: NOW - 40 * DAY,
       },
-      { questionId: 'q-gone', reason: 'spam', createdAt: NOW },
-      { questionId: 'q-rejected', reason: 'inappropriate', createdAt: NOW },
+      { questionId: 'q2', reason: 'inappropriate', createdAt: NOW - 31 * DAY },
     ],
   );
 });
@@ -436,17 +413,10 @@ test('anonymises every report whose question is decided and keeps the ones under
  * would satisfy every check on `reportedBy` and leave `alice` and `bob` in the
  * document names — so this one reads the ids.
  */
-test('leaves no document whose id names a reporter whose question was decided', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [
-      report('alice', 'q-approved'),
-      report('bob', 'q-rejected'),
-      report('carol', 'q-pending'),
-    ],
-  });
+test('leaves no document whose id names a reporter whose report has expired', async () => {
+  const fake = fakeFirestore([report('alice', 45), report('bob', 31), report('carol', 2)]);
 
-  await anonymiseDecidedReports(fake.store);
+  await anonymiseExpiredReports(fake.store, NOW);
 
   for (const doc of fake.remaining()) {
     for (const uid of ['alice', 'bob']) {
@@ -454,48 +424,49 @@ test('leaves no document whose id names a reporter whose question was decided', 
       assert.notEqual(doc['reportedBy'], uid, `${doc.id} still names ${uid} in a field`);
     }
   }
-  // Non-vacuous: the report still under review names its reporter both ways.
+  // Non-vacuous: the report still inside its thirty days names its reporter both ways.
   assert.ok(
     fake.remaining().some((doc) => doc.id === reportId('carol') && doc['reportedBy'] === 'carol'),
   );
 });
 
-test('is idempotent: a second run reads what it kept and writes nothing', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [report('alice', 'q-approved'), report('bob', 'q-pending')],
-  });
+test('is idempotent: a second run reads the copies and writes nothing', async () => {
+  const fake = fakeFirestore([report('alice', 40), report('bob', 3)]);
 
-  await anonymiseDecidedReports(fake.store);
+  await anonymiseExpiredReports(fake.store, NOW);
   const afterFirst = fake.remaining();
-  const second = await anonymiseDecidedReports(fake.store);
+  const second = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(second, { examined: 1, anonymised: 0, kept: 1 });
+  assert.deepEqual(second, { examined: 1, anonymised: 0, alreadyAnonymous: 1 });
   assert.deepEqual(fake.remaining(), afterFirst);
   assert.equal(fake.commits.length, 1, 'only the first run committed anything');
 });
 
-test('never reads an anonymised report, so a copy is never copied again', async () => {
+/**
+ * A copy keeps its original's `createdAt`, so it stays in the range the pass
+ * reads — and it names nobody, so there is nothing to do with it. Leaving it
+ * alone is the whole of the work.
+ */
+test('reads an anonymised copy and leaves it alone', async () => {
   const anonymised = {
     id: 'Xq3vL9aT2bRk8mNc4PdE',
-    questionId: 'q-approved',
+    questionId: 'q1',
     reason: 'other',
-    createdAt: NOW,
+    createdAt: NOW - 90 * DAY,
   };
-  const fake = fakeFirestore({ questions: QUESTIONS, reports: [anonymised] });
+  const fake = fakeFirestore([anonymised]);
 
-  const result = await anonymiseDecidedReports(fake.store);
+  const result = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(result, { examined: 0, anonymised: 0, kept: 0 });
+  assert.deepEqual(result, { examined: 1, anonymised: 0, alreadyAnonymous: 1 });
   assert.deepEqual(fake.remaining(), [anonymised]);
   assert.deepEqual(fake.commits, []);
-  assert.deepEqual(fake.lookups, [], 'an empty page looks nothing up');
 });
 
 test('copies and deletes in the same batch, the copy at a fresh id', async () => {
-  const fake = fakeFirestore({ questions: QUESTIONS, reports: [report('alice', 'q-approved')] });
+  const fake = fakeFirestore([report('alice', 40)]);
 
-  await anonymiseDecidedReports(fake.store);
+  await anonymiseExpiredReports(fake.store, NOW);
 
   assert.equal(fake.commits.length, 1);
   const [{ creates, deletes }] = fake.commits;
@@ -513,13 +484,10 @@ test('copies and deletes in the same batch, the copy at a fresh id', async () =>
  * and so is every other report in that page, which the next run reads again.
  */
 test('a report removed before the batch lands fails the batch, and nothing is copied', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [report('alice', 'q-approved'), report('bob', 'q-approved')],
-  });
+  const fake = fakeFirestore([report('alice', 40), report('bob', 40)]);
   fake.onCommit(() => fake.deleteReport(reportId('alice')));
 
-  await assert.rejects(anonymiseDecidedReports(fake.store), /NOT_FOUND/);
+  await assert.rejects(anonymiseExpiredReports(fake.store, NOW), /NOT_FOUND/);
 
   assert.deepEqual(
     fake.remaining().map((doc) => doc.id),
@@ -528,95 +496,48 @@ test('a report removed before the batch lands fails the batch, and nothing is co
   );
 });
 
-test('every read is bounded: filtered on the reporter, ordered for its cursor, limited', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [
-      report('alice', 'q-approved', 0),
-      report('alice', 'q-approved', 1),
-      report('bob', 'q-approved', 0),
-      report('bob', 'q-pending', 1),
-    ],
-  });
+test('every read is bounded: a range on createdAt, ordered for its cursor, limited', async () => {
+  const fake = fakeFirestore([report('alice', 40), report('bob', 2)]);
 
-  await anonymiseDecidedReports(fake.store);
+  await anonymiseExpiredReports(fake.store, NOW);
 
   assert.deepEqual(fake.queries, [
     {
-      filters: [{ field: 'reportedBy', op: '>', value: '' }],
-      orders: ['reportedBy', '__name__'],
+      filters: [{ field: 'createdAt', op: '<', value: reporterRetentionCutoff(NOW) }],
+      orders: ['createdAt', '__name__'],
       cursor: false,
       limit: REPORT_SWEEP_PAGE_SIZE,
     },
   ]);
-  // One read per question however many reports name it, and only the field
-  // the decision needs.
-  assert.equal(fake.lookups.length, 1);
-  assert.deepEqual([...fake.lookups[0].ids].sort(), ['q-approved', 'q-pending']);
-  assert.deepEqual(fake.lookups[0].fieldMask, ['status']);
-});
-
-/**
- * A question id that cannot name a document — empty, a path, a reserved name,
- * past Firestore's 1,500 bytes, not a string — names a question that is not
- * there. It must not reach `getAll`, which would refuse the whole page for
- * one malformed report, and nothing could ever clear it.
- */
-test('reads a report naming an unusable question id as a question that is gone', async () => {
-  const unusable = ['', 'a/b', '..', '__reserved__', 'q'.repeat(1_501), 42];
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: unusable.map((questionId, slot) => report('alice', questionId as string, slot)),
-  });
-
-  const result = await anonymiseDecidedReports(fake.store);
-
-  assert.deepEqual(result, { examined: unusable.length, anonymised: unusable.length, kept: 0 });
-  assert.deepEqual(fake.lookups, [], 'nothing usable to look up, so no lookup');
-});
-
-test('a question id of exactly 1,500 bytes is still looked up', async () => {
-  const longest = 'q'.repeat(1_500);
-  const fake = fakeFirestore({
-    questions: { [longest]: { status: 'pending' } },
-    reports: [report('alice', longest)],
-  });
-
-  const result = await anonymiseDecidedReports(fake.store);
-
-  assert.deepEqual(result, { examined: 1, anonymised: 0, kept: 1 });
-  assert.deepEqual(fake.lookups[0].ids, [longest]);
 });
 
 test('an empty collection costs one query and writes nothing', async () => {
-  const fake = fakeFirestore({ questions: QUESTIONS });
+  const fake = fakeFirestore([]);
 
-  assert.deepEqual(await anonymiseDecidedReports(fake.store), {
+  assert.deepEqual(await anonymiseExpiredReports(fake.store, NOW), {
     examined: 0,
     anonymised: 0,
-    kept: 0,
+    alreadyAnonymous: 0,
   });
   assert.equal(fake.queries.length, 1);
   assert.deepEqual(fake.commits, []);
 });
 
-test('a page of reports it keeps commits nothing', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [report('alice', 'q-pending'), report('bob', 'q-pending')],
-  });
+/** `n` reports by `n` reporters, filed `daysAgo` days back, `n` milliseconds apart. */
+const reportsFiled = (daysAgo: number, n: number, prefix: string) =>
+  Array.from({ length: n }, (_, i) => ({
+    ...report(`${prefix}${String(i).padStart(5, '0')}`, daysAgo),
+    createdAt: NOW - daysAgo * DAY + i,
+  }));
 
-  assert.deepEqual(await anonymiseDecidedReports(fake.store), {
-    examined: 2,
-    anonymised: 0,
-    kept: 2,
-  });
-  assert.deepEqual(fake.commits, []);
-});
-
-/** `n` reports by `n` reporters, each about `questionId`, sorting in the order they are numbered. */
-const reportsAbout = (questionId: string, n: number, prefix: string) =>
-  Array.from({ length: n }, (_, i) => report(`${prefix}${String(i).padStart(5, '0')}`, questionId));
+/** `n` anonymised copies filed `daysAgo` days back. */
+const copiesFiled = (daysAgo: number, n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `copy${String(i).padStart(16, '0')}`,
+    questionId: 'q1',
+    reason: 'other',
+    createdAt: NOW - daysAgo * DAY + i,
+  }));
 
 /**
  * **The batching.** 600 anonymisations are 1,200 writes, which cannot go in one
@@ -625,14 +546,11 @@ const reportsAbout = (questionId: string, n: number, prefix: string) =>
  * end of the run.
  */
 test('pages a backlog larger than one batch, 250 reports and 500 writes at a time', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: reportsAbout('q-approved', 600, 'u'),
-  });
+  const fake = fakeFirestore(reportsFiled(40, 600, 'u'));
 
-  const result = await anonymiseDecidedReports(fake.store);
+  const result = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(result, { examined: 600, anonymised: 600, kept: 0 });
+  assert.deepEqual(result, { examined: 600, anonymised: 600, alreadyAnonymous: 0 });
   assert.deepEqual(
     fake.commits.map(({ creates, deletes }) => creates.length + deletes.length),
     [500, 500, 200],
@@ -641,21 +559,16 @@ test('pages a backlog larger than one batch, 250 reports and 500 writes at a tim
 });
 
 /**
- * **The cursor.** The reports the pass keeps stay in the set it reads, so a
- * page made of them comes back first on every query that starts from the top
- * — and a pass without a cursor would read the same 250 reports about a
- * question under review twenty times and never reach the decided ones sorting
- * after them.
+ * **The cursor.** The copies older reports left behind stay in the range and
+ * sort first, so a pass that re-read from the top would read the same page of
+ * them on every query and never reach the expired reports behind it.
  */
-test('pages past a full page of reports it keeps, to the decided ones behind them', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [...reportsAbout('q-pending', 300, 'a'), ...reportsAbout('q-approved', 5, 'z')],
-  });
+test('pages past a full page of copies to the expired reports behind them', async () => {
+  const fake = fakeFirestore([...copiesFiled(90, 300), ...reportsFiled(40, 5, 'z')]);
 
-  const result = await anonymiseDecidedReports(fake.store);
+  const result = await anonymiseExpiredReports(fake.store, NOW);
 
-  assert.deepEqual(result, { examined: 305, anonymised: 5, kept: 300 });
+  assert.deepEqual(result, { examined: 305, anonymised: 5, alreadyAnonymous: 300 });
   assert.deepEqual(
     fake.queries.map((query) => query.cursor),
     [false, true],
@@ -667,66 +580,121 @@ test('pages past a full page of reports it keeps, to the decided ones behind the
  * "250 of many", so it asks once more — one empty read, no empty batch.
  */
 test('asks once more after a page that is exactly full', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: reportsAbout('q-approved', REPORT_SWEEP_PAGE_SIZE, 'u'),
-  });
+  const fake = fakeFirestore(reportsFiled(40, REPORT_SWEEP_PAGE_SIZE, 'u'));
 
-  await anonymiseDecidedReports(fake.store);
+  await anonymiseExpiredReports(fake.store, NOW);
 
   assert.equal(fake.queries.length, 2);
   assert.equal(fake.commits.length, 1);
 });
 
 /**
- * The run stops itself rather than running until the platform kills it.
- * Nothing is lost by stopping: tomorrow's run reads what is left, which is the
- * property that makes a ceiling safe at all.
+ * **The ceiling is a failure, not a pause.** Every run starts from the oldest
+ * report, and the copies keep their place in the range, so a run that stopped
+ * at the ceiling would stop at the same place the next day, with the reports
+ * behind it still naming their reporters — a published thirty days quietly not
+ * kept. So it says so, after committing what it could: the first run here
+ * anonymises 5,000 and fails, and the second reads those 5,000 copies, reaches
+ * nothing new and fails again.
  */
-test('stops after the pass ceiling, leaving the rest for the next run', async () => {
+test('fails loudly at the ceiling, and again the next day, rather than stopping quietly', async () => {
   const backlog = REPORT_SWEEP_PAGE_SIZE * (REPORT_SWEEP_MAX_PASSES + 2);
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: reportsAbout('q-approved', backlog, 'u'),
+  const fake = fakeFirestore(reportsFiled(40, backlog, 'u'));
+
+  await assert.rejects(anonymiseExpiredReports(fake.store, NOW), (error: unknown) => {
+    assert.ok(error instanceof ReportSweepIncompleteError);
+    assert.deepEqual(error.result, {
+      examined: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES,
+      anonymised: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES,
+      alreadyAnonymous: 0,
+    });
+    assert.match(error.message, /outgrown one run/);
+    return true;
   });
-
-  const first = await anonymiseDecidedReports(fake.store);
-
-  assert.equal(first.anonymised, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES);
-  assert.equal(fake.queries.length, REPORT_SWEEP_MAX_PASSES);
   assert.equal(
     fake.remaining().filter((doc) => 'reportedBy' in doc).length,
     REPORT_SWEEP_PAGE_SIZE * 2,
   );
 
-  const second = await anonymiseDecidedReports(fake.store);
-  assert.equal(second.anonymised, REPORT_SWEEP_PAGE_SIZE * 2);
+  await assert.rejects(anonymiseExpiredReports(fake.store, NOW), (error: unknown) => {
+    assert.ok(error instanceof ReportSweepIncompleteError);
+    assert.equal(error.result.anonymised, 0);
+    return true;
+  });
+});
+
+test('a range of exactly the ceiling’s size is finished, not failed', async () => {
+  const fake = fakeFirestore(
+    reportsFiled(40, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES, 'u'),
+  );
+
+  const result = await anonymiseExpiredReports(fake.store, NOW);
+
+  assert.equal(result.anonymised, REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES);
+  assert.equal(fake.queries.length, REPORT_SWEEP_MAX_PASSES + 1, 'one read past the ceiling');
+  assert.equal(fake.commits.length, REPORT_SWEEP_MAX_PASSES, 'and nothing written by it');
+});
+
+/**
+ * …even when the last original's copy sorts after the cursor and is the one
+ * document that read finds: it names nobody, and nothing is behind it. With
+ * copies sorting after their originals, every page after the first spends one
+ * slot re-reading the previous page's last copy, so twenty full pages finish
+ * 250 + 19 × 249 reports exactly.
+ */
+test('the read past the ceiling is not fooled by the copy of the last original', async () => {
+  const exactly =
+    REPORT_SWEEP_PAGE_SIZE + (REPORT_SWEEP_MAX_PASSES - 1) * (REPORT_SWEEP_PAGE_SIZE - 1);
+  const fake = fakeFirestore(reportsFiled(40, exactly, 'u'), { autoIdPrefix: 'z' });
+
+  const result = await anonymiseExpiredReports(fake.store, NOW);
+
+  assert.deepEqual(result, {
+    examined: REPORT_SWEEP_PAGE_SIZE * REPORT_SWEEP_MAX_PASSES,
+    anonymised: exactly,
+    alreadyAnonymous: REPORT_SWEEP_MAX_PASSES - 1,
+  });
   assert.ok(fake.remaining().every((doc) => !('reportedBy' in doc)));
+});
+
+/**
+ * A copy shares its original's `createdAt`, and a fresh auto-id can sort after
+ * the original's id — so the copy of a page's last report can turn up first on
+ * the next page. It names nobody, so it is counted and left alone: read twice,
+ * copied once.
+ */
+test('a copy that turns up again on the next page is left alone, not copied twice', async () => {
+  const fake = fakeFirestore(reportsFiled(40, 300, 'u'), { autoIdPrefix: 'z' });
+
+  const result = await anonymiseExpiredReports(fake.store, NOW);
+
+  assert.deepEqual(result, { examined: 301, anonymised: 300, alreadyAnonymous: 1 });
+  assert.equal(fake.remaining().length, 300, 'one copy per report, and no original left');
 });
 
 // ---------------------------------------------------------------------------
 // The leaver's pass, for `deleteAccount`.
 // ---------------------------------------------------------------------------
 
-test('deletes the leaver’s reports about decided questions and keeps the rest without them', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [
-      report('leaver', 'q-approved', 0),
-      report('leaver', 'q-rejected', 1),
-      report('leaver', 'q-gone', 2),
-      report('leaver', 'q-pending', 3, { detail: 'Two answers are right.' }),
-      report('leaver', 'q-pending', 4, { reason: 'other' }),
-      // Somebody else's, on the same questions: none of these is the leaver's.
-      report('bob', 'q-approved'),
-      report('carol', 'q-pending'),
-    ],
-  });
+/**
+ * **Never a delete.** A report is evidence about somebody else's question, so
+ * a leaver's reports all stay — however recent — and only the identity goes.
+ */
+test('anonymises every report the leaver filed, however recent, and deletes none', async () => {
+  const fake = fakeFirestore([
+    report('leaver', 0, 0),
+    report('leaver', 12, 1, { detail: 'Two answers are right.' }),
+    report('leaver', 29, 2, { reason: 'other' }),
+    // Somebody else's, of every age: none of these is the leaver's.
+    report('bob', 1),
+    report('carol', 20),
+  ]);
 
   const result = await sweepLeaverReports(fake.store, 'leaver');
 
-  assert.deepEqual(result, { deleted: 3, anonymised: 2 });
+  assert.deepEqual(result, { anonymised: 3 });
   const left = fake.remaining();
+  assert.equal(left.length, 5, 'nothing was deleted outright');
   for (const doc of left) {
     assert.ok(!doc.id.includes('leaver'), `${doc.id} still names the leaver in its id`);
     assert.notEqual(doc['reportedBy'], 'leaver');
@@ -734,28 +702,29 @@ test('deletes the leaver’s reports about decided questions and keeps the rest 
   // Nobody else's report moved.
   assert.deepEqual(
     left.filter((doc) => 'reportedBy' in doc),
-    [report('bob', 'q-approved'), report('carol', 'q-pending')],
+    [report('bob', 1), report('carol', 20)],
   );
-  // The two under review survive as complaints, content intact.
+  // The leaver's three survive as complaints, content intact.
   assert.deepEqual(
     left
       .filter((doc) => !('reportedBy' in doc))
       .map(contentOf)
-      .sort((a, b) => String(a['reason']).localeCompare(String(b['reason']))),
+      .sort(byCreatedAt),
     [
+      { questionId: 'q1', reason: 'other', createdAt: NOW - 29 * DAY },
       {
-        questionId: 'q-pending',
+        questionId: 'q1',
         reason: 'incorrect',
         detail: 'Two answers are right.',
-        createdAt: NOW,
+        createdAt: NOW - 12 * DAY,
       },
-      { questionId: 'q-pending', reason: 'other', createdAt: NOW },
-    ].sort((a, b) => a.reason.localeCompare(b.reason)),
+      { questionId: 'q1', reason: 'incorrect', createdAt: NOW },
+    ],
   );
 });
 
 test('finds the leaver’s reports by an equality on the reporter, a page at a time', async () => {
-  const fake = fakeFirestore({ questions: QUESTIONS, reports: [report('leaver', 'q-approved')] });
+  const fake = fakeFirestore([report('leaver', 1)]);
 
   await sweepLeaverReports(fake.store, 'leaver');
 
@@ -769,24 +738,24 @@ test('finds the leaver’s reports by an equality on the reporter, a page at a t
   ]);
 });
 
-/**
- * A heavy reporter can leave more than one batch's worth. Each page leaves the
- * result set whichever way its reports go, so the pass re-queries from the
- * start — no cursor — until a short page says there is nothing left.
- */
-test('pages through more reports than one batch can hold, re-querying from the start', async () => {
-  const mine = Array.from({ length: 600 }, (_, i) => ({
-    ...report('leaver', 'q-pending'),
+/** The leaver's `n` reports, ten to a five-minute window as the volume cap allows. */
+const leaverReports = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    ...report('leaver', 1),
     id: reportId('leaver', i % 10, WINDOW + Math.floor(i / 10)),
   }));
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [...mine, report('bob', 'q-pending')],
-  });
+
+/**
+ * A heavy reporter can leave more than one batch's worth. Each page leaves the
+ * result set, so the pass re-queries from the start — no cursor — until a
+ * short page says there is nothing left.
+ */
+test('pages through more reports than one batch can hold, re-querying from the start', async () => {
+  const fake = fakeFirestore([...leaverReports(600), report('bob', 1)]);
 
   const result = await sweepLeaverReports(fake.store, 'leaver');
 
-  assert.deepEqual(result, { deleted: 0, anonymised: 600 });
+  assert.deepEqual(result, { anonymised: 600 });
   assert.deepEqual(
     fake.commits.map(({ creates, deletes }) => creates.length + deletes.length),
     [500, 500, 200],
@@ -794,31 +763,25 @@ test('pages through more reports than one batch can hold, re-querying from the s
   assert.ok(fake.queries.every((query) => !query.cursor));
   assert.deepEqual(
     fake.remaining().filter((doc) => 'reportedBy' in doc),
-    [report('bob', 'q-pending')],
+    [report('bob', 1)],
   );
 });
 
 test('a full last page reads once more and commits nothing further', async () => {
-  const mine = Array.from({ length: REPORT_SWEEP_PAGE_SIZE }, (_, i) => ({
-    ...report('leaver', 'q-approved'),
-    id: reportId('leaver', i % 10, WINDOW + Math.floor(i / 10)),
-  }));
-  const fake = fakeFirestore({ questions: QUESTIONS, reports: mine });
+  const fake = fakeFirestore(leaverReports(REPORT_SWEEP_PAGE_SIZE));
 
   assert.deepEqual(await sweepLeaverReports(fake.store, 'leaver'), {
-    deleted: REPORT_SWEEP_PAGE_SIZE,
-    anonymised: 0,
+    anonymised: REPORT_SWEEP_PAGE_SIZE,
   });
   assert.equal(fake.queries.length, 2);
   assert.equal(fake.commits.length, 1);
 });
 
 test('an account that never reported anything costs one query and writes nothing', async () => {
-  const fake = fakeFirestore({ questions: QUESTIONS, reports: [report('bob', 'q-approved')] });
+  const fake = fakeFirestore([report('bob', 40)]);
 
-  assert.deepEqual(await sweepLeaverReports(fake.store, 'leaver'), { deleted: 0, anonymised: 0 });
+  assert.deepEqual(await sweepLeaverReports(fake.store, 'leaver'), { anonymised: 0 });
   assert.deepEqual(fake.commits, []);
-  assert.deepEqual(fake.lookups, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -826,31 +789,27 @@ test('an account that never reported anything costs one query and writes nothing
 // ---------------------------------------------------------------------------
 
 /**
- * Every report that still names the account, whatever its question's status:
- * one about a decided question keeps the uid until the next daily run, and an
- * export leaving it out would answer a data-access request with less than is
- * held. An anonymised one is nobody's.
+ * Every report that still names the account, whole: its last thirty days of
+ * them, and one the daily pass has not reached yet. An anonymised one is
+ * nobody's.
  */
 test('export returns every report that still names the account, whole, and nothing else', async () => {
-  const fake = fakeFirestore({
-    questions: QUESTIONS,
-    reports: [
-      report('alice', 'q-approved', 0, { detail: 'Wrong year.' }),
-      report('alice', 'q-pending', 1),
-      report('bob', 'q-pending'),
-      { id: 'Xq3vL9aT2bRk8mNc4PdE', questionId: 'q-rejected', reason: 'spam', createdAt: NOW },
-    ],
-  });
+  const fake = fakeFirestore([
+    report('alice', 3, 0, { detail: 'Wrong year.' }),
+    report('alice', 31, 1),
+    report('bob', 3),
+    { id: 'Xq3vL9aT2bRk8mNc4PdE', questionId: 'q1', reason: 'spam', createdAt: NOW - 40 * DAY },
+  ]);
 
   assert.deepEqual(await questionReportsFor(fake.store, 'alice'), [
-    report('alice', 'q-approved', 0, { detail: 'Wrong year.' }),
-    report('alice', 'q-pending', 1),
+    report('alice', 3, 0, { detail: 'Wrong year.' }),
+    report('alice', 31, 1),
   ]);
   assert.deepEqual(fake.commits, [], 'an export writes nothing');
 });
 
 test('export of an account that never reported anything is an empty list', async () => {
-  const fake = fakeFirestore({ questions: QUESTIONS, reports: [report('bob', 'q-pending')] });
+  const fake = fakeFirestore([report('bob', 3)]);
 
   assert.deepEqual(await questionReportsFor(fake.store, 'alice'), []);
 });

@@ -202,16 +202,18 @@ test.describe('account management: export and deletion', () => {
   /**
    * The reports an account filed (`FEAT-042`), against the emulator's real
    * queries: the equality on `reportedBy` both export and deletion find them
-   * by, the batched lookup of their questions, and the batch whose delete
-   * demands the original. Export first and deletion second, the order a person
-   * exercising both rights would take.
+   * by, and the batch that copies each one without its reporter and deletes
+   * the original only if it is still there. Export first and deletion second,
+   * the order a person exercising both rights would take.
    *
    * Seeded rather than filed through game-over, which files one report per
-   * five-minute slot and only about a question it served — which is to say an
-   * approved one. This account needs a report about each kind of question at
-   * once: approved and rejected (decided), one since deleted (decided — there
-   * is nothing left to review), and one under review, plus somebody else's
-   * reports on the same questions, which must come through untouched.
+   * five-minute slot and only about a question it served. This account needs
+   * reports of several ages about questions in every state at once — none of
+   * which may matter, since deletion anonymises every report and deletes none
+   * — plus somebody else's reports on the same questions, which must come
+   * through untouched. One is older than the thirty days a report keeps its
+   * reporter: the daily pass that would have anonymised it never runs on the
+   * emulator, so it still names the account, and deletion has to reach it too.
    */
   test('exports the reports that still name the user, and deletion leaves none that do', async ({
     page,
@@ -248,7 +250,7 @@ test.describe('account management: export and deletion', () => {
     // The id the create rule demands, `{window}-{slot}-{uid}`, in the window
     // the client would have used.
     const window = Math.floor(Date.now() / 300_000);
-    const createdAt = Date.now();
+    const day = 24 * 60 * 60 * 1000;
     const report = (
       by: string,
       slot: number,
@@ -259,14 +261,20 @@ test.describe('account management: export and deletion', () => {
       questionId,
       reason: 'incorrect',
       reportedBy: by,
-      createdAt,
+      createdAt: Date.now(),
       ...extra,
     });
+    // Each a distinct `createdAt`, so the copies below can be matched to their
+    // originals by sorting on it.
+    const now = Date.now();
     const mine = [
-      report(uid, 0, ids.approved),
-      report(uid, 1, ids.rejected),
-      report(uid, 2, ids.gone),
-      report(uid, 3, ids.pending, { detail: 'Two of the answers mean the same thing.' }),
+      report(uid, 0, ids.approved, { createdAt: now }),
+      report(uid, 1, ids.rejected, { createdAt: now - 10 * day, reason: 'spam' }),
+      report(uid, 2, ids.gone, { createdAt: now - 45 * day, reason: 'other' }),
+      report(uid, 3, ids.pending, {
+        createdAt: now - 60_000,
+        detail: 'Two of the answers mean the same thing.',
+      }),
     ];
     const theirs = [report(other, 0, ids.approved), report(other, 1, ids.pending)];
     await firebase.seedQuestionReports([...mine, ...theirs]);
@@ -282,9 +290,7 @@ test.describe('account management: export and deletion', () => {
     const exported = JSON.parse(await readFile(await download.path(), 'utf8')) as {
       questionReports: { id: string; questionId: string; reportedBy: string }[];
     };
-    // Every report that still names the account, whatever its question's
-    // status — the decided ones keep the uid until the daily run — and nobody
-    // else's.
+    // Every report that still names the account, and nobody else's.
     expect(exported.questionReports.map(({ id }) => id).sort()).toEqual(
       mine.map(({ id }) => id).sort(),
     );
@@ -307,17 +313,30 @@ test.describe('account management: export and deletion', () => {
         .filter(({ reportedBy }) => reportedBy === other)
         .sort((a, b) => a.id.localeCompare(b.id)),
     ).toEqual([...theirs].sort((a, b) => a.id.localeCompare(b.id)));
-    // The three about decided questions went with the account; the one under
-    // review stayed, as a complaint naming nobody.
-    const anonymised = after.filter((stored) => !('reportedBy' in stored));
-    expect(anonymised).toHaveLength(1);
-    const { id: _id, ...content } = anonymised[0];
-    expect(content).toEqual({
-      questionId: ids.pending,
-      reason: 'incorrect',
-      detail: 'Two of the answers mean the same thing.',
+    // All four of the account's stayed, as complaints naming nobody: deletion
+    // anonymises a report, it never removes one, whatever its age or its
+    // question's state.
+    const contentOf = ({ questionId, reason, detail, createdAt }: QuestionReportSeed) => ({
+      questionId,
+      reason,
+      ...(detail === undefined ? {} : { detail }),
       createdAt,
     });
+    const anonymised = after.filter((stored) => !('reportedBy' in stored));
+    expect(anonymised.map(contentOf).sort((a, b) => a.createdAt - b.createdAt)).toEqual(
+      mine.map(contentOf).sort((a, b) => a.createdAt - b.createdAt),
+    );
+    for (const stored of anonymised) {
+      expect(Object.keys(stored).sort()).toEqual(
+        [
+          'createdAt',
+          'id',
+          'questionId',
+          'reason',
+          ...('detail' in stored ? ['detail'] : []),
+        ].sort(),
+      );
+    }
   });
 
   test('can be backed out of without deleting anything', async ({ page, firebase }) => {

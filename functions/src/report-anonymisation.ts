@@ -1,5 +1,5 @@
 import { FieldPath } from 'firebase-admin/firestore';
-import { isSafeDocumentId } from './play-history';
+import { REPORTER_RETENTION_MS } from './report-retention';
 
 /**
  * When a `question_reports` document stops naming the account that filed it,
@@ -7,13 +7,15 @@ import { isSafeDocumentId } from './play-history';
  * `sweepPlayHistory` runs, the leaver's pass in `deleteAccount`, and the
  * section `exportAccountData` returns.
  *
- * **"Decided" is the reported question's own status, never the report's.** A
- * report carries no status and nothing gives it one — there is deliberately
- * no "handled" flag (`data-model.md` § `question_reports`). What finishes a
- * report is that the question it names has reached a reviewer's terminal
- * decision, `approved` or `rejected`, or no longer exists at all. Until then
- * the report keeps its reporter, because that is the window in which knowing
- * one account from many still matters to a reviewer.
+ * **A report keeps its reporter for thirty days from `createdAt`, then loses
+ * it** (`REPORTER_RETENTION_DAYS`, administrator decision, 9 October 2026).
+ * The window is for following a fresh report up; nothing about the reported
+ * question decides it, because players are only served approved questions —
+ * a rule keyed on the question's decision would strip nearly every report
+ * within a day of filing, before anybody had read it. **An account that is
+ * deleted loses its identity from every report at once**, however recent.
+ * Either way the report itself stays: it is moderation evidence about a
+ * question, and it must not vanish because the person who filed it left.
  *
  * **Anonymising is a copy and a delete, not a field edit.** A report's id is
  * `{window}-{slot}-{uid}` — the volume cap (finding A3) lives in the id — so
@@ -23,31 +25,34 @@ import { isSafeDocumentId } from './play-history';
  * the `{window}-{slot}-{uid}` id and `reportedBy`), and carries only the four
  * content keys below.
  *
- * Structural over the Admin SDK rather than tied to it, so the queries, the
- * decisions and the batching are all unit-tested against a fake that applies
- * the filters literally (`report-anonymisation.test.ts`) — the reasoning
- * `question-votes.ts` gives for the same shape.
+ * Structural over the Admin SDK rather than tied to it, so the queries and the
+ * batching are unit-tested against a fake that applies the filters literally
+ * (`report-anonymisation.test.ts`) — the reasoning `question-votes.ts` gives
+ * for the same shape.
  */
 
 export const QUESTION_REPORTS_COLLECTION = 'question_reports';
-
-const CUSTOM_QUESTIONS_COLLECTION = 'custom_questions';
 
 /**
  * How many reports one page reads and one batch commits.
  *
  * An anonymisation is **two** writes — the copy and the delete of the
  * original — and a `WriteBatch` holds 500, so 250 reports fill one batch
- * exactly. The leaver's pass reads the same page, where a report costs one
- * write or two.
+ * exactly.
  */
 export const REPORT_SWEEP_PAGE_SIZE = 250;
 
 /**
  * A ceiling on pages per daily run, so one invocation cannot run until the
- * platform kills it: 5,000 reports, far more than are filed between two runs.
- * Anything left over is the next run's, which is why stopping early is safe —
- * a report that is not anonymised today is anonymised tomorrow.
+ * platform kills it: 5,000 reports read.
+ *
+ * **Reaching it is a failure, not a pause** — the difference from the
+ * play-history pass, and the reason is the anonymised copies. A copy keeps its
+ * original's `createdAt` (the reviewers' queue orders by it), so every copy
+ * stays inside the expired range the pass reads, and the next run starts from
+ * the oldest again: a run that stopped at the ceiling would stop at the same
+ * place tomorrow. So the pass reports it ({@link ReportSweepIncompleteError})
+ * rather than leaving the rest to a run that will never reach it.
  */
 export const REPORT_SWEEP_MAX_PASSES = 20;
 
@@ -60,54 +65,25 @@ export const REPORT_SWEEP_MAX_PASSES = 20;
  */
 export const ANONYMISED_REPORT_KEYS = ['questionId', 'reason', 'detail', 'createdAt'] as const;
 
-/**
- * What a sweep knows about the question a report names: its stored status,
- * or `null` when there is no such question — deleted since the report was
- * filed, or named by an id no document can have.
- */
-export type ReportedQuestion = { status?: unknown } | null;
-
-/**
- * Whether a reviewer has decided the question, so that nothing about it is
- * still waiting on anybody.
- *
- * A question that is gone counts as decided: there is no review left for it,
- * so there is nothing the reporter's identity could still be needed for. Any
- * status other than the two terminal ones — `pending`, or a value this code
- * does not know — counts as undecided, which is the cautious reading of a
- * status nobody has defined yet.
- */
-export function isDecidedQuestion(question: ReportedQuestion): boolean {
-  return question === null || question.status === 'approved' || question.status === 'rejected';
+/** The instant before which a report has outlived {@link REPORTER_RETENTION_MS}. */
+export function reporterRetentionCutoff(nowMs: number): number {
+  return nowMs - REPORTER_RETENTION_MS;
 }
 
 /**
- * **The decision this feature turns on**: given the question a report names,
- * may the report still say who filed it?
+ * **The decision this feature turns on**: given a report's `createdAt`, may it
+ * still say who filed it?
  *
- * Only while the question is undecided. Note what that means in practice:
- * players are only ever served approved questions, so most reports name a
- * question that is decided already and lose their reporter at the first daily
- * run after they are filed. The ones that wait are about a question back under
- * review — an approved question its author has since edited returns to
- * `pending` — and they wait only until a reviewer decides it.
+ * Yes until it is strictly older than the retention period — so a report
+ * exactly thirty days old keeps its reporter for one more run — and yes for a
+ * `createdAt` that is not a number at all. The second is the daily query's
+ * reading, stated rather than left implicit: `createdAt < cutoff` matches
+ * numbers only, and a predicate that disagreed with the query would describe a
+ * rule the code does not have. The create rule requires a number near the time
+ * of filing, so only a console edit can produce anything else.
  */
-export function isStillAttributable(question: ReportedQuestion): boolean {
-  return !isDecidedQuestion(question);
-}
-
-/** What `deleteAccount` does with one of the leaver's reports. */
-export type LeaverReportFate = 'delete' | 'anonymise';
-
-/**
- * A report whose question is decided has done its job, so it goes with its
- * author. One whose question is still under review is evidence a reviewer has
- * yet to act on, so it stays — without the author — rather than letting an
- * account erase a pending complaint by leaving (administrator decision, 9
- * October 2026).
- */
-export function leaverReportFate(question: ReportedQuestion): LeaverReportFate {
-  return isDecidedQuestion(question) ? 'delete' : 'anonymise';
+export function isStillAttributable(createdAt: unknown, nowMs: number): boolean {
+  return !(typeof createdAt === 'number' && createdAt < reporterRetentionCutoff(nowMs));
 }
 
 /** The anonymised copy of a report: its content keys, and nothing else. */
@@ -131,12 +107,11 @@ export function anonymisedReport(data: Record<string, unknown>): Record<string, 
  */
 export interface ReportStore {
   collection(path: string): ReportCollection;
-  getAll(...refsOrOptions: (ReportRef | { fieldMask: string[] })[]): Promise<QuestionSnapshot[]>;
   batch(): ReportBatch;
 }
 
 export interface ReportQuery {
-  where(field: string, op: '==' | '>', value: string): ReportQuery;
+  where(field: string, op: '==' | '<', value: string | number): ReportQuery;
   orderBy(field: string | FieldPath): ReportQuery;
   startAfter(snapshot: ReportSnapshot): ReportQuery;
   limit(count: number): ReportQuery;
@@ -157,68 +132,15 @@ export interface ReportSnapshot {
   data(): Record<string, unknown>;
 }
 
-export interface QuestionSnapshot {
-  id: string;
-  exists: boolean;
-  get(field: string): unknown;
-}
-
 export interface ReportBatch {
   create(ref: ReportRef, data: Record<string, unknown>): unknown;
   delete(ref: ReportRef, precondition?: { exists: boolean }): unknown;
   commit(): Promise<unknown>;
 }
 
-/** The id of the question a report names, when it is one a document could have. */
-function questionIdOf(report: ReportSnapshot): string | null {
-  const id = report.data()['questionId'];
-  // Bounded the way Firestore bounds a document id — 1,500 bytes — rather than
-  // by the 128 characters `firestore.rules` allows on create: a console edit is
-  // not held to the rule, and a report naming an id no document can have names
-  // a question that is not there, rather than one this code may not ask about.
-  return typeof id === 'string' &&
-    id.length > 0 &&
-    Buffer.byteLength(id, 'utf8') <= 1500 &&
-    isSafeDocumentId(id)
-    ? id
-    : null;
-}
-
-/**
- * The status of every question a page of reports names, read once per
- * question however many reports name it — several complaints about one
- * question is the normal case — and only the one field the decision needs.
- *
- * A report whose question id is unusable is absent from the map, which reads
- * as `null`: a question that is not there.
- */
-async function questionsNamedBy(
-  store: ReportStore,
-  reports: ReportSnapshot[],
-): Promise<Map<string, ReportedQuestion>> {
-  const ids = [...new Set(reports.map(questionIdOf).filter((id): id is string => id !== null))];
-  const questions = new Map<string, ReportedQuestion>();
-  if (ids.length === 0) {
-    // `getAll` refuses to be called with no references at all.
-    return questions;
-  }
-  const collection = store.collection(CUSTOM_QUESTIONS_COLLECTION);
-  const snapshots = await store.getAll(...ids.map((id) => collection.doc(id)), {
-    fieldMask: ['status'],
-  });
-  for (const snapshot of snapshots) {
-    questions.set(snapshot.id, snapshot.exists ? { status: snapshot.get('status') } : null);
-  }
-  return questions;
-}
-
-function questionFor(
-  questions: Map<string, ReportedQuestion>,
-  report: ReportSnapshot,
-): ReportedQuestion {
-  const id = questionIdOf(report);
-  return id === null ? null : (questions.get(id) ?? null);
-}
+/** Whether a report still names somebody — an anonymised copy never does. */
+const namesReporter = (report: ReportSnapshot): boolean =>
+  report.data()['reportedBy'] !== undefined;
 
 /**
  * Adds one anonymisation to a batch: the copy at a fresh auto-id, and the
@@ -241,83 +163,107 @@ function anonymiseInto(batch: ReportBatch, store: ReportStore, report: ReportSna
 
 /** What one daily run did. */
 export interface ReportSweepResult {
-  /** Reports read that still named their reporter. */
+  /** Reports read, all of them filed before the cutoff. */
   examined: number;
-  /** Of those, how many were copied without it and their original deleted. */
+  /** Of those, how many still named their reporter and were copied without it. */
   anonymised: number;
-  /** Of those, how many name an undecided question and keep their reporter. */
-  kept: number;
+  /** Of those, how many were anonymised copies already, and were left alone. */
+  alreadyAnonymous: number;
 }
 
 /**
- * The daily pass: copies every report whose question is decided without its
- * reporter, and deletes the original.
- *
- * **It reads from the reports' side.** The work is the set of reports that
- * still name somebody — `reportedBy` present, which an anonymised copy never
- * has — and that set is bounded by what has been filed or decided since the
- * last run plus the few about questions under review. Walking the decided
- * *questions* instead would read the whole approved bank every day to find
- * the handful of reports that changed.
- *
- * **It pages on a cursor**, `(reportedBy, document id)`, because the reports
- * it keeps stay in the set: a page made entirely of reports about undecided
- * questions would otherwise come back first on every pass, and the decided
- * ones behind it would never be reached. The order rides the automatic
- * single-field index on `reportedBy` — no composite, and
- * `firestore-tests/indexes.spec.ts` pins that nothing exempts the field.
- *
- * Idempotent: an anonymised copy has no `reportedBy`, so the query never
- * returns it, and a page whose commit failed changed nothing and is simply
- * read again by the next run.
+ * The daily pass ran out of pages with reports past the cutoff still unread,
+ * so some report older than the retention period may still name its reporter.
+ * Thrown after everything the run could do has been committed.
  */
-export async function anonymiseDecidedReports(store: ReportStore): Promise<ReportSweepResult> {
-  const result: ReportSweepResult = { examined: 0, anonymised: 0, kept: 0 };
+export class ReportSweepIncompleteError extends Error {
+  constructor(readonly result: ReportSweepResult) {
+    super(
+      `report anonymisation read ${result.examined} report(s) — its ceiling — and stopped with ` +
+        `older ones still unread (${result.anonymised} anonymised this run). Every run starts ` +
+        `from the oldest, so it will stop at the same place tomorrow: the reports past the ` +
+        `cutoff have outgrown one run.`,
+    );
+    this.name = 'ReportSweepIncompleteError';
+  }
+}
+
+/**
+ * The daily pass: copies every report filed more than thirty days ago that
+ * still names its reporter, without the reporter, and deletes the original.
+ *
+ * **One range, on `createdAt`**: `where('createdAt', '<', cutoff)`, ordered by
+ * `createdAt` and then the document id, `REPORT_SWEEP_PAGE_SIZE` to a page,
+ * paged on a cursor within the run. That rides the automatic single-field
+ * index on `createdAt` — the one the reviewers' queue already orders by — and
+ * `firestore-tests/indexes.spec.ts` pins that nothing takes it away.
+ *
+ * **The anonymised copies are read and skipped.** A copy keeps `createdAt`, so
+ * it stays in the range; it names nobody, so there is nothing to do with it.
+ * That is also what makes the pass idempotent: a re-run finds only copies
+ * where it anonymised, and a page whose commit failed changed nothing and is
+ * read again. The cost is that a run reads every report older than the
+ * cutoff, copies included — see {@link REPORT_SWEEP_MAX_PASSES} for where that
+ * stops scaling and what happens when it does.
+ */
+export async function anonymiseExpiredReports(
+  store: ReportStore,
+  nowMs: number,
+): Promise<ReportSweepResult> {
+  const cutoff = reporterRetentionCutoff(nowMs);
+  const result: ReportSweepResult = { examined: 0, anonymised: 0, alreadyAnonymous: 0 };
   let after: ReportSnapshot | undefined;
 
-  for (let pass = 0; pass < REPORT_SWEEP_MAX_PASSES; pass += 1) {
-    let query = store
+  const expired = (limit: number) => {
+    const query = store
       .collection(QUESTION_REPORTS_COLLECTION)
-      .where('reportedBy', '>', '')
-      .orderBy('reportedBy')
+      .where('createdAt', '<', cutoff)
+      .orderBy('createdAt')
       .orderBy(FieldPath.documentId());
-    if (after !== undefined) {
-      query = query.startAfter(after);
-    }
-    const page = await query.limit(REPORT_SWEEP_PAGE_SIZE).get();
-    if (page.docs.length === 0) {
-      break;
-    }
+    return (after === undefined ? query : query.startAfter(after)).limit(limit).get();
+  };
 
-    const questions = await questionsNamedBy(store, page.docs);
+  for (let pass = 0; pass < REPORT_SWEEP_MAX_PASSES; pass += 1) {
+    const page = await expired(REPORT_SWEEP_PAGE_SIZE);
+
     const batch = store.batch();
     let anonymised = 0;
     for (const report of page.docs) {
-      if (isStillAttributable(questionFor(questions, report))) {
-        result.kept += 1;
-      } else {
+      if (namesReporter(report)) {
         anonymiseInto(batch, store, report);
         anonymised += 1;
+      } else {
+        result.alreadyAnonymous += 1;
       }
     }
     if (anonymised > 0) {
       await batch.commit();
     }
-
     result.examined += page.docs.length;
     result.anonymised += anonymised;
-    after = page.docs[page.docs.length - 1];
+
+    // A short page is the end of the range: the query asked for a full one.
     if (page.docs.length < REPORT_SWEEP_PAGE_SIZE) {
-      break;
+      return result;
     }
+    after = page.docs[page.docs.length - 1];
   }
 
-  return result;
+  // At the ceiling with a full last page, one more read says whether anything
+  // is left, so a range of exactly the ceiling's size is not reported as a
+  // failure. It reads a page rather than one document because the copies this
+  // run wrote keep their originals' `createdAt`, and an auto-id can sort after
+  // the cursor: the last original's copy may be the next document, naming
+  // nobody, with nothing behind it.
+  const rest = await expired(REPORT_SWEEP_PAGE_SIZE);
+  if (rest.docs.length < REPORT_SWEEP_PAGE_SIZE && !rest.docs.some(namesReporter)) {
+    return result;
+  }
+  throw new ReportSweepIncompleteError(result);
 }
 
 /** What `deleteAccount` did with the leaver's reports. */
 export interface LeaverReportResult {
-  deleted: number;
   anonymised: number;
 }
 
@@ -328,22 +274,24 @@ function reportsBy(store: ReportStore, uid: string): ReportQuery {
 
 /**
  * The leaver's pass, for `deleteAccount`: every report that still names the
- * account either goes ({@link leaverReportFate}: its question is decided) or
- * stays without the account's identity (its question is still under review).
- * Afterwards no report names the uid — in a field or in an id.
+ * account is copied without it and its original deleted — however recent,
+ * and whatever became of the question it is about. **Never a delete**: a
+ * report is evidence about somebody else's content, and it must not vanish
+ * because the person who filed it left (administrator decision, 9 October
+ * 2026). Afterwards no report names the uid — in a field or in an id.
  *
  * **Found by `reportedBy`, not by id.** The uid is the id's *suffix*, and
- * nothing can query a document id by its suffix; the field is on every report,
- * because the create rule requires it. Paged and batched, and re-queried from
- * the start each time, because every report a page reads leaves the result
- * set — deleted or copied without the field — so there is no cursor to carry,
- * and a short page is the end.
+ * nothing can query a document id by its suffix; the field is on every report
+ * filed, because the create rule requires it. Paged and batched, and
+ * re-queried from the start each time, because every report a page reads
+ * leaves the result set — so there is no cursor to carry, and a short page is
+ * the end.
  */
 export async function sweepLeaverReports(
   store: ReportStore,
   uid: string,
 ): Promise<LeaverReportResult> {
-  const result: LeaverReportResult = { deleted: 0, anonymised: 0 };
+  const result: LeaverReportResult = { anonymised: 0 };
 
   for (;;) {
     const page = await reportsBy(store, uid).limit(REPORT_SWEEP_PAGE_SIZE).get();
@@ -351,18 +299,12 @@ export async function sweepLeaverReports(
       return result;
     }
 
-    const questions = await questionsNamedBy(store, page.docs);
     const batch = store.batch();
     for (const report of page.docs) {
-      if (leaverReportFate(questionFor(questions, report)) === 'delete') {
-        batch.delete(report.ref);
-        result.deleted += 1;
-      } else {
-        anonymiseInto(batch, store, report);
-        result.anonymised += 1;
-      }
+      anonymiseInto(batch, store, report);
     }
     await batch.commit();
+    result.anonymised += page.docs.length;
 
     if (page.docs.length < REPORT_SWEEP_PAGE_SIZE) {
       return result;
@@ -375,14 +317,10 @@ export async function sweepLeaverReports(
  * found the way {@link sweepLeaverReports} finds them, so export and deletion
  * cannot disagree about which reports are the account's.
  *
- * **Every one that still names it, whatever its question's status.** A report
- * about a decided question keeps the uid until the next daily run, and an
- * export that left it out would answer a data-access request with less than
- * is held. Once anonymised a report is nobody's, and is not here.
- *
- * One query rather than pages: the reports that still name an account are the
- * ones about a question under review, and those filed or decided since the
- * last daily run — filing is capped at ten per five minutes by the id.
+ * One query rather than pages: a report names its reporter for thirty days,
+ * and filing is capped at ten per five minutes by the id, so the set is the
+ * account's last month of reports and no more. Once anonymised a report is
+ * nobody's, and is not here.
  */
 export async function questionReportsFor(
   store: ReportStore,

@@ -377,10 +377,11 @@ describe('question_reports: a report is a record, not a task', () => {
 });
 
 /**
- * A report with nobody in it (`FEAT-042`): what the daily sweep and
- * `deleteAccount` leave once a report's question is decided — its four content
- * keys copied to a fresh auto-id, with no `reportedBy`, and the original
- * deleted (`functions/src/report-anonymisation.ts`). The Admin SDK writes it,
+ * A report with nobody in it (`FEAT-042`): what the daily sweep leaves thirty
+ * days after a report is filed, and `deleteAccount` the moment its reporter
+ * leaves — its four content keys copied to a fresh auto-id, with no
+ * `reportedBy`, and the original deleted
+ * (`functions/src/report-anonymisation.ts`). The Admin SDK writes it,
  * past every rule, so these rows are about the two things the rules still
  * decide: who may read it, and that no client can write anything like it.
  *

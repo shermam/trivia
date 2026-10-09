@@ -69,13 +69,13 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // `question_votes` ids that begin with this uid, which is the reason those
     // ids put the uid first (`question-votes.ts`).
     await deleteQuestionVotes(firestore, uid);
-    // The reports the account filed that still name it (`FEAT-042`). The daily
-    // sweep has already taken the identity off every report whose question it
-    // found decided, so what is left was filed or decided since its last run,
-    // or is still under review: a report about a decided question goes with its
-    // author, one a reviewer has yet to act on stays without them. Either way none names the uid
-    // afterwards — not in `reportedBy`, and not in a document id, which is
-    // where `{window}-{slot}-{uid}` would otherwise leave it.
+    // The reports the account filed that still name it (`FEAT-042`) — the
+    // last thirty days' worth, since the daily sweep takes the identity off
+    // older ones. Every one is copied without the identity and its original
+    // deleted, none is removed outright: a report is evidence about somebody
+    // else's content and outlives its author. Afterwards none names the uid —
+    // not in `reportedBy`, and not in a document id, which is where
+    // `{window}-{slot}-{uid}` would otherwise leave it.
     await sweepLeaverReports(firestore, uid);
     await deleteCustomerRecord(uid);
     await getAuth().deleteUser(uid);
@@ -158,9 +158,9 @@ export const exportAccountData = onCall(async (request) => {
       // (`FEAT-027`) — so the two cannot disagree about what a player's votes
       // are.
       questionVotesFor(firestore, uid),
-      // The reports that still name the account (`FEAT-042`), by the same
-      // query deletion sweeps — whatever their question's status, because a
-      // report about a decided question keeps the uid until the next daily run.
+      // The reports that still name the account (`FEAT-042`) — its last
+      // thirty days of them — by the same query deletion sweeps, so the two
+      // cannot disagree about which reports are the account's.
       questionReportsFor(firestore, uid),
       customerRef.get(),
       customerRef.collection('subscriptions').get(),
