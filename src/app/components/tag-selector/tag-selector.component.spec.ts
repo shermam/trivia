@@ -233,6 +233,22 @@ describe('TagSelectorComponent — refusing a tag out loud', () => {
     expect(host.control.value).toEqual([]);
     expect(feedback()).toContain('at most 32');
   });
+
+  /**
+   * Seventeen characters as typed, thirty-four once every `ß` is folded to
+   * `ss`. Measuring what was typed would call that a draft with too few letters
+   * in it — a cause the selector never checked (`CLAUDE.md` §4.4).
+   */
+  it('says a draft that folds past the cap is too long, though it was typed inside it', () => {
+    const { host, type, press, feedback, status } = render();
+
+    type('ß'.repeat(17));
+    expect(feedback()).toContain('at most 32');
+
+    press('Enter');
+    expect(host.control.value).toEqual([]);
+    expect(status()).toContain('is too long');
+  });
 });
 
 describe('TagSelectorComponent — the suggestions', () => {

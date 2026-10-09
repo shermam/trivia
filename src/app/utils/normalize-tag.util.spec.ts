@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_TAGS_PER_QUESTION,
   MAX_TAG_LENGTH,
+  foldTag,
   isNormalizedTag,
   normalizeTag,
   normalizeTags,
@@ -50,6 +51,71 @@ describe('normalizeTag', () => {
     expect(normalizeTag('SÃO PAULO')).toBe('sao-paulo');
   });
 
+  it('folds the letters no decomposition reaches instead of deleting them', () => {
+    // Deleting them gave `rskbing`, `strae`, `odz` and `a-nang`.
+    expect(normalizeTag('Ærøskøbing')).toBe('aeroskobing');
+    expect(normalizeTag('Straße')).toBe('strasse');
+    expect(normalizeTag('Łódź')).toBe('lodz');
+    expect(normalizeTag('Đà Nẵng')).toBe('da-nang');
+    expect(normalizeTag('Ævar')).toBe('aevar');
+    expect(normalizeTag('Œuvre')).toBe('oeuvre');
+  });
+
+  it('folds a string made of nothing but such letters, which deleting left empty', () => {
+    expect(normalizeTag('ßß')).toBe('ssss');
+  });
+
+  /**
+   * One row per entry in the table, each letter in both cases. The table holds
+   * lower-case keys only, so it is lower-casing first that brings a capital to
+   * it — `ẞ` is the capital sharp s, and the capital of the dotless `ı` is the
+   * ASCII `I`.
+   */
+  it('folds every letter in the table, capital and small', () => {
+    const table: readonly (readonly [capital: string, small: string, folded: string])[] = [
+      ['Æ', 'æ', 'ae'],
+      ['Ø', 'ø', 'o'],
+      ['ẞ', 'ß', 'ss'],
+      ['Œ', 'œ', 'oe'],
+      ['Ł', 'ł', 'l'],
+      ['Đ', 'đ', 'd'],
+      ['Þ', 'þ', 'th'],
+      ['Ð', 'ð', 'd'],
+      ['I', 'ı', 'i'],
+      ['Ŧ', 'ŧ', 't'],
+      ['Ħ', 'ħ', 'h'],
+      ['Ŋ', 'ŋ', 'ng'],
+    ];
+    for (const [capital, small, folded] of table) {
+      expect(normalizeTag(capital + small)).toBe(folded + folded);
+    }
+  });
+
+  it('splits a ligature or another compatibility form rather than deleting it', () => {
+    expect(normalizeTag('ﬁsh')).toBe('fish');
+    expect(normalizeTag('ﬂight')).toBe('flight');
+    expect(normalizeTag('Ｆｕｌｌｗｉｄｔｈ')).toBe('fullwidth');
+    expect(normalizeTag('CO₂')).toBe('co2');
+  });
+
+  /**
+   * The decomposition would spell `™` as the letters `TM`, and a spacing accent
+   * as a space followed by the accent — so the same name with and without the
+   * symbol would be two tags. `´` is what a dead-key keyboard layout types for
+   * an apostrophe.
+   */
+  it('still removes a symbol rather than letting the decomposition spell it out', () => {
+    expect(normalizeTag('Pokémon™')).toBe('pokemon');
+    expect(normalizeTag('McDonald´s')).toBe('mcdonalds');
+    expect(normalizeTag("McDonald's")).toBe('mcdonalds');
+  });
+
+  it('applies the length cap to the folded tag, which can be longer than what was typed', () => {
+    // Every `ß` folds to two letters, so half the cap in `ß` fills it exactly.
+    expect(normalizeTag('ß'.repeat(MAX_TAG_LENGTH / 2))).toBe('s'.repeat(MAX_TAG_LENGTH));
+    expect(normalizeTag('ß'.repeat(MAX_TAG_LENGTH / 2 + 1))).toBeNull();
+  });
+
   it('drops a script that carries no ascii at all rather than storing an empty tag', () => {
     expect(normalizeTag('日本語')).toBeNull();
     expect(normalizeTag('🎉🎉')).toBeNull();
@@ -93,6 +159,18 @@ describe('normalizeTag', () => {
       const tag = normalizeTag(input);
       expect(tag === null || isNormalizedTag(tag)).toBe(true);
     }
+  });
+});
+
+describe('foldTag', () => {
+  /**
+   * What the selector measures to say whether a refused draft was too long or
+   * had nothing in it — so it must be exactly the normaliser's text, unbounded.
+   */
+  it('is normalizeTag without its two rejections', () => {
+    expect(foldTag(' World War 2 ')).toBe('world-war-2');
+    expect(foldTag('!!')).toBe('');
+    expect(foldTag('ß'.repeat(MAX_TAG_LENGTH / 2 + 1))).toBe('s'.repeat(MAX_TAG_LENGTH + 2));
   });
 });
 
