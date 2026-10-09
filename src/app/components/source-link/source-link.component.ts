@@ -40,7 +40,10 @@ import { IconComponent } from '../icon/icon.component';
  *    off by default and on only for `/review`: a player meets the link after
  *    they have already answered and after a reviewer has vouched for the
  *    question, so there the title is the useful thing and the raw host is
- *    noise.
+ *    noise. The host is in the line's own muted grey, set apart from the title
+ *    by its weight and the dash rather than by a lighter shade: one step
+ *    lighter measures 2.6:1 on the light card and 3.7:1 on the dark one,
+ *    under the 4.5:1 its 12px text needs.
  *
  * 4. **A question a machine wrote says so where its source is named.**
  *    `machineGenerated` — on for a question whose `provenance` says the
@@ -89,9 +92,7 @@ import { IconComponent } from '../icon/icon.component';
             data-cy="question-source-link"
             >{{ label() }}
             @if (shownHost(); as host) {
-              <span
-                class="font-normal text-slate-400 dark:text-slate-500"
-                data-cy="question-source-host"
+              <span class="font-normal" data-cy="question-source-host"
                 >&nbsp;&mdash; {{ host }}</span
               >
             }

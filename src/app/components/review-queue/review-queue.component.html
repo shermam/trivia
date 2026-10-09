@@ -40,12 +40,20 @@
       -->
       <div [hidden]="authorView() !== null" data-cy="review-queue-body">
         <!-- Grouped controls need the role and the label, or the group's purpose
-           is never conveyed (CLAUDE.md §4.5). Nothing audits a missing one. -->
+           is never conveyed (CLAUDE.md §4.5). Nothing audits a missing one.
+
+           Two rows of two below `sm`: the four labels in one row are 382px,
+           wider than a phone's content box (288px at 320, 358px at 390), so
+           one row would scroll the whole page sideways. A grid rather than a
+           wrapping row, so the split is always two and two and every tab is
+           the same width whichever is chosen. The chosen tab is the CTA fill,
+           white text at 5.4:1 (`BRAND_DESIGN_SYSTEM.md` §1). -->
         <h2 id="review-view-label" class="sr-only">Choose what to review</h2>
         <div
           role="radiogroup"
           aria-labelledby="review-view-label"
-          class="inline-flex rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1 mb-6"
+          data-cy="review-tabs"
+          class="grid grid-cols-2 gap-1 sm:inline-flex sm:gap-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1 mb-6"
         >
           @for (tab of tabs; track tab.view) {
             <button
@@ -57,7 +65,7 @@
               [attr.aria-checked]="activeView() === tab.view"
               (click)="select(tab.view)"
               class="px-4 py-1.5 text-sm font-semibold rounded-lg transition-colors"
-              [class.bg-emerald-600]="activeView() === tab.view"
+              [class.bg-emerald-700]="activeView() === tab.view"
               [class.text-white]="activeView() === tab.view"
               [class.text-slate-600]="activeView() !== tab.view"
               [class.dark:text-slate-300]="activeView() !== tab.view"
@@ -479,13 +487,16 @@
   </div>
 
   <div class="flex gap-2 mt-4">
+    <!-- Approve wears the CTA fill, as every solid button with white text
+         does: white on the brand `emerald-600` is 3.65:1, under the 4.5:1 its
+         14px label needs (`BRAND_DESIGN_SYSTEM.md` §1). -->
     @if (status !== 'approved') {
       <button
         type="button"
         data-cy="approve-question"
         [disabled]="pendingActionId() === question.id"
         (click)="decide(question, 'approved')"
-        class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+        class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50"
       >
         Approve
       </button>

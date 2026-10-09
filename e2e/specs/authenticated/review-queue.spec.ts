@@ -3,6 +3,7 @@ import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
 import { answerQuestion } from '../../support/game';
+import { expectBoxUnmoved, expectNoSidewaysScroll, settledBox } from '../../support/layout';
 import { stubOpenTrivia } from '../../support/open-trivia';
 import { addQuestionTopic, runTag, startTopicGame } from '../../support/topics';
 
@@ -106,6 +107,61 @@ test.describe('the review queue', () => {
     await reviewTab(page, 'approved').click();
     await expect(page.getByText(pendingText)).toBeVisible();
   });
+
+  /**
+   * The page fits its window, whichever tab is chosen. The four tabs in one
+   * row are 382px, wider than a phone's content box, so below `sm` they are
+   * two rows of two — and what a reader meets when they are not is the whole
+   * page scrolling sideways, so that is what is measured: the document's width
+   * against the window's, polled rather than read once (`CLAUDE.md` §4.6), on
+   * a page anchored on this test's own row having rendered. The tabs are
+   * measured across all four choices too, because choosing one must not
+   * resize the control just pressed (`CLAUDE.md` §4.4) — at 1280 as well,
+   * where they are one row sized by their labels and a state that changed a
+   * label's width would move its neighbours.
+   *
+   * Resized after signing in, not before: the auth menu has no business being
+   * driven at a width it is not otherwise tested at, and `/review` is then
+   * loaded fresh at the window's size.
+   */
+  for (const viewport of [
+    { width: 320, height: 640 },
+    { width: 390, height: 844 },
+    { width: 1280, height: 800 },
+  ]) {
+    test(`fits a ${viewport.width}px window on every tab, without scrolling sideways`, async ({
+      page,
+      firebase,
+    }) => {
+      await signInAsReviewer(page, firebase);
+      await page.setViewportSize(viewport);
+      await page.goto('/review');
+      await expect(myRows(page)).toHaveCount(1);
+      await expect(reviewTab(page, 'pending')).toHaveAttribute('aria-checked', 'true');
+      await expectNoSidewaysScroll(page, `/review at ${viewport.width}px`);
+
+      const tabs = page.getByTestId('review-tabs');
+      const box = await settledBox(tabs, `the tabs at ${viewport.width}px`);
+      for (const view of ['approved', 'rejected', 'reports', 'pending'] as const) {
+        await reviewTab(page, view).click();
+        await expect(reviewTab(page, view)).toHaveAttribute('aria-checked', 'true');
+        await expectBoxUnmoved(tabs, box, `the tabs with ${view} chosen, at ${viewport.width}px`);
+        await expect
+          .poll(
+            () =>
+              tabs.evaluate((node) => {
+                const rect = node.getBoundingClientRect();
+                const left = rect.left + window.scrollX;
+                return Math.max(-left, left + rect.width - window.innerWidth);
+              }),
+            { message: `the tabs past the window's edge with ${view} chosen, in pixels` },
+          )
+          .toBeLessThanOrEqual(0);
+      }
+      await expect(myRows(page)).toHaveCount(1);
+      await expectNoSidewaysScroll(page, `/review back on Pending at ${viewport.width}px`);
+    });
+  }
 
   /**
    * The answer almost every account gets, so it has to arrive as an answer and
