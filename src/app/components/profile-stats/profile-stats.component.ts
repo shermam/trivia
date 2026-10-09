@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { avatarLetter } from '../../models/avatar.model';
+import { DAILY_GAME_CEILING } from '../../models/daily-ceiling';
 import { levelFor } from '../../models/levels';
 import { AccountService } from '../../services/account.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
@@ -37,10 +38,12 @@ type ProfileView = 'loading' | 'signedOut' | 'empty' | 'stats' | 'failed';
 /**
  * Which sentence the card's status line shows: the view, or — over an empty
  * card or a full one — that the signed-in account's last game in this tab was
- * refused by the server (`AccountService.unbankedGame`). The tiles and the
- * action row go by the view alone; only the sentence changes.
+ * refused by the server (`AccountService.unbankedGame`): `dailyLimit` when the
+ * refusal was the server's daily ceiling, which has something precise to say,
+ * and `notBanked` for any other reason. The tiles and the action row go by the
+ * view alone; only the sentence changes.
  */
-type StatsLine = ProfileView | 'notBanked';
+type StatsLine = ProfileView | 'notBanked' | 'dailyLimit';
 
 /** The picker's two answers for a player whose XP is not a number yet. */
 const CHECKING_XP: XpKnowledge = { state: 'checking' };
@@ -77,6 +80,13 @@ const PERCENT_FORMAT = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 0,
 });
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'long' });
+
+/**
+ * The server's daily ceiling, as the refused-game sentence names it — the
+ * app's copy, pinned to `functions/src/daily-ceiling.ts` by
+ * `daily-ceiling.spec.ts`.
+ */
+const DAILY_CEILING_TEXT = COUNT_FORMAT.format(DAILY_GAME_CEILING);
 
 /**
  * Lifetime totals, read back and shown to the player they belong to
@@ -185,8 +195,8 @@ export class ProfileStatsComponent {
   });
 
   /**
-   * Whether the server refused to bank the last game this account finished in
-   * this tab — so the sentence that would promise totals ("finish a game and
+   * The server's refusal of the last game this account finished in this tab,
+   * or `null` — so the sentence that would promise totals ("finish a game and
    * your totals will show up here") is replaced by one saying the game was not
    * added. Scoped to the account the refused call was made as: another
    * account signed in since sees nothing of it.
@@ -196,15 +206,26 @@ export class ProfileStatsComponent {
    * — and it is the only thing that can say so: nothing is written for a
    * refused game, so there is nothing to read back.
    */
-  private readonly lastGameNotBanked = computed(() => {
+  private readonly lastGameRefusal = computed(() => {
     const unbanked = this.accountService.unbankedGame();
-    return unbanked !== null && unbanked.uid === this.signedInUid();
+    return unbanked !== null && unbanked.uid === this.signedInUid() ? unbanked : null;
   });
 
   protected readonly line = computed<StatsLine>(() => {
     const view = this.view();
-    return (view === 'empty' || view === 'stats') && this.lastGameNotBanked() ? 'notBanked' : view;
+    const refusal = this.lastGameRefusal();
+    if ((view !== 'empty' && view !== 'stats') || refusal === null) {
+      return view;
+    }
+    // The server's daily ceiling is the one refusal with something precise to
+    // say: what the limit is and when the count starts again. Every other
+    // reason gets the general sentence — including one from a newer server this
+    // build does not know, which is the honest thing to say about it.
+    return refusal.reason === 'daily-limit' ? 'dailyLimit' : 'notBanked';
   });
+
+  /** The ceiling the daily-limit sentence names. */
+  protected readonly dailyCeiling = DAILY_CEILING_TEXT;
 
   /**
    * The XP of the last game this account banked in this tab, as the callable
@@ -371,6 +392,8 @@ export class ProfileStatsComponent {
         return 'No finished games yet.';
       case 'notBanked':
         return 'Your last game could not be added to your stats.';
+      case 'dailyLimit':
+        return `Your last game was not added: you reached the daily limit of ${DAILY_CEILING_TEXT} games.`;
       case 'signedOut':
         return 'Signed out. Stats are only kept for a signed-in account.';
       case 'failed':

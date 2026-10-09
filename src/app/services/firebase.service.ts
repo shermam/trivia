@@ -272,10 +272,11 @@ export class QuestionQuotaExceededError extends Error {
  * `users/{uid}` (`docs/data-model.md`), and the XP it banks beside them.
  *
  * Only the fields `/profile` renders — the five totals, when they started, and
- * the XP its progress card draws (`FEAT-041`). The document carries four more —
- * `lastGameId`, `updatedAt` and the `rateWindowStart`/`gamesInWindow` pair —
- * which are bookkeeping for the callable rather than anything to show a
- * player, and naming them here would invite a screen to grow around them.
+ * the XP its progress card draws (`FEAT-041`). The document carries more —
+ * `recentGameIds`, `dailyGames`, `updatedAt` and the
+ * `rateWindowStart`/`gamesInWindow` pair — which are bookkeeping for the
+ * callable rather than anything to show a player, and naming them here would
+ * invite a screen to grow around them.
  *
  * `statsSince` is nullable because the reader has to survive a document
  * written before a field existed: the collection deliberately has no

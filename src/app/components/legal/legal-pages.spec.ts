@@ -1,5 +1,8 @@
 import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
+import { DAILY_GAME_CEILING } from '../../../../functions/src/daily-ceiling';
+import { MAX_GAMES_PER_WINDOW } from '../../../../functions/src/game-stats';
+import { RECENT_GAMES_KEPT } from '../../../../functions/src/recent-games';
 import {
   LEGAL_AWAITING_PROFESSIONAL_REVIEW,
   LEGAL_CONTACT_EMAIL,
@@ -248,6 +251,52 @@ describe('legal pages', () => {
     );
     expect(text).toContain('deletes your gameplay totals, your experience points and your whole');
     expect(text).toContain('your gameplay totals and experience points, your play history');
+  });
+
+  /**
+   * **The duplicate check and the two caps on `users/{uid}`.** The record holds
+   * the ids of the last games banked and two counts — the hour's and the UTC
+   * day's — so the page has to say what each is, why it is kept, how long, and
+   * that a game past a cap is not added. The numbers are the server's own,
+   * imported across the package boundary rather than restated, because they are
+   * exactly what a later change would move without noticing the page: a ring of
+   * fifty, or a different ceiling, falsifies the sentence the day it ships.
+   */
+  it('discloses the recent game ids and the hourly and daily counts: what, why and how long', async () => {
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+    const spelled: Record<number, string> = { 20: 'twenty', 60: 'sixty', 200: 'two hundred' };
+    const recent = spelled[RECENT_GAMES_KEPT];
+    const hourly = spelled[MAX_GAMES_PER_WINDOW];
+    const daily = spelled[DAILY_GAME_CEILING];
+    expect([recent, hourly, daily], 'every number the page spells out').not.toContain(undefined);
+
+    // What is kept, on the totals record.
+    expect(text).toContain(`the identifiers of the last ${recent} games you banked`);
+    expect(text).toContain(
+      'two counts of how many games you have banked: in the past hour, and on the current day as measured in Coordinated Universal Time (UTC)',
+    );
+    // Why: the same game never counted twice, and the caps.
+    expect(text).toContain('so that the same game is never counted twice');
+    expect(text).toContain(`${hourly} an hour and ${daily} a day`);
+    expect(text).toContain(
+      'to keep the totals fair and the cost of running the app in check; a game past either cap is not added',
+    );
+    // How long: the counts are written over, the identifiers kept with the account.
+    expect(text).toContain('so the daily count never holds more than one day');
+    expect(text).toContain(
+      `The ${recent} identifiers are kept for as long as your account exists, each new game taking the place of the oldest.`,
+    );
+    expect(text).toContain(
+      `The identifiers of the last ${recent} games you banked are kept on the same terms`,
+    );
+    // The lawful-basis table names both.
+    expect(text).toContain(`Keep the identifiers of the last ${recent} games you banked`);
+    expect(text).toContain(
+      'Count how many games you banked in the past hour and on the current day (UTC)',
+    );
+    expect(text).toContain('Fairness and cost control');
+    // The sentence this replaced, which named one game id and an hour's count.
+    expect(text).not.toContain('the identifier of the most recent game');
   });
 
   /**

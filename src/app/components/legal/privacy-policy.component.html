@@ -149,9 +149,17 @@
     Once you have finished a game while signed in, we keep a single record of your running totals:
     how many games you have finished, how many questions you have been asked, how many you got
     right, your longest run of correct answers within one game, your experience points, when those
-    totals started being kept, and when they were last updated. It also holds the identifier of the
-    most recent game and a short-lived count of how many games you have banked in the past hour,
-    both of which exist to stop the same game being counted twice or the totals being inflated.
+    totals started being kept, and when they were last updated. It also holds
+    <strong>the identifiers of the last twenty games you banked</strong>, so that the same game is
+    never counted twice, and <strong>two counts of how many games you have banked</strong>: in the
+    past hour, and on the current day as measured in Coordinated Universal Time (UTC), with the date
+    that count belongs to. The counts cap how many games one account can add &mdash; sixty an hour
+    and two hundred a day &mdash; to keep the totals fair and the cost of running the app in check;
+    a game past either cap is not added to your totals, your experience points, your play history or
+    any question's counts. Each count covers only its own hour or day: the first game you bank once
+    it has passed writes over it, so the daily count never holds more than one day's number. The
+    twenty identifiers are kept for as long as your account exists, each new game taking the place
+    of the oldest.
   </p>
   <p>
     <strong>Your experience points (XP) are one running total on that record.</strong> When a game
@@ -444,9 +452,19 @@
         <td>Legitimate interests</td>
       </tr>
       <tr>
-        <td>Count how many games you banked in the past hour</td>
+        <td>Keep the identifiers of the last twenty games you banked</td>
         <td>
-          So one account cannot inflate its own totals by submitting the same game over and over
+          So the same game is never counted twice &mdash; in your totals, your experience points or
+          a question's counts &mdash; however often its results are sent
+        </td>
+        <td>Legitimate interests</td>
+      </tr>
+      <tr>
+        <td>Count how many games you banked in the past hour and on the current day (UTC)</td>
+        <td>
+          Fairness and cost control: so one account cannot inflate its own totals, or run up the
+          cost of the app, by submitting games over and over. Past sixty an hour or two hundred a
+          day, a game is not added
         </td>
         <td>Legitimate interests</td>
       </tr>
@@ -688,8 +706,11 @@
       are kept for as long as your account exists. Delete your account and they go — see below. Your
       experience points are one running total, not a record of each game, so the twelve-month limit
       on your play history below does not reduce them: the points a game earned stay in the total
-      after that game's record is deleted. A like or dislike can also be removed on its own, by
-      pressing the same button again wherever that question appears.
+      after that game's record is deleted. The identifiers of the last twenty games you banked are
+      kept on the same terms, each new game replacing the oldest, while the counts of games banked
+      in an hour and in a day are written over by the first game you bank once that hour or day has
+      passed. A like or dislike can also be removed on its own, by pressing the same button again
+      wherever that question appears.
     </li>
     <li>
       <strong>Your play history</strong> — the per-game record of which questions you were asked and

@@ -104,7 +104,7 @@ test.describe('per-player play history', () => {
 
     // The document id is the game id, which is what makes the whole call
     // idempotent — and what ties this round to the lifetime totals' own
-    // `lastGameId`.
+    // `recentGameIds`.
     expect(play.id.length).toBeGreaterThan(0);
   });
 

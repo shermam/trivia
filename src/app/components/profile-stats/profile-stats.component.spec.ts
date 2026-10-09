@@ -28,7 +28,7 @@ type ProfileView = 'loading' | 'signedOut' | 'empty' | 'stats' | 'failed';
 /** The template-facing members are `protected`; the spec drives them directly. */
 interface InternalProfileStats {
   view(): ProfileView;
-  line(): ProfileView | 'notBanked';
+  line(): ProfileView | 'notBanked' | 'dailyLimit';
   tiles(): { id: string; label: string; value: string }[];
   trackingSince(): string | null;
   statusAnnouncement(): string;
@@ -394,6 +394,46 @@ describe('ProfileStatsComponent', () => {
     expect(component.line()).toBe('notBanked');
   });
 
+  /**
+   * **The server's daily ceiling has words of its own** (`daily-ceiling.ts`):
+   * what the limit is and when the count starts again, which the general
+   * sentence cannot say. Over an empty card and a full one alike, and the
+   * totals already banked stay on the tiles.
+   */
+  it('names the daily limit when the server refused the last game for it', async () => {
+    const { component } = setup({ unbanked: { uid: 'u1', reason: 'daily-limit' } });
+
+    await settle();
+
+    expect(component.line()).toBe('dailyLimit');
+    expect(component.statusAnnouncement()).toBe(
+      'Your last game was not added: you reached the daily limit of 200 games.',
+    );
+    expect(component.tiles().find((tile) => tile.id === 'games-played')?.value).toBe('3');
+  });
+
+  it('names the daily limit over an empty card too', async () => {
+    const { component } = setup({ result: null, unbanked: { uid: 'u1', reason: 'daily-limit' } });
+
+    await settle();
+
+    expect(component.view()).toBe('empty');
+    expect(component.line()).toBe('dailyLimit');
+  });
+
+  /**
+   * Any other reason keeps the general sentence — one from a newer server this
+   * build does not know included, which is the honest thing to say about it.
+   */
+  it('keeps the general sentence for every other reason', async () => {
+    for (const reason of ['unsupported-provider', 'invalid', 'rate-limited', 'some-newer-reason']) {
+      const { component } = setup({ unbanked: { uid: 'u1', reason } });
+      await settle();
+      expect(component.line(), reason).toBe('notBanked');
+      TestBed.resetTestingModule();
+    }
+  });
+
   it('shows nothing of a refused game that belongs to another account', async () => {
     const { component } = setup({ unbanked: { uid: 'someone-else', reason: 'invalid' } });
 
@@ -425,6 +465,18 @@ describe('ProfileStatsComponent', () => {
     const signedOut = setup({ user: null, unbanked });
     await settle();
     expect(signedOut.component.line()).toBe('signedOut');
+    TestBed.resetTestingModule();
+
+    // The daily-limit sentence refines the same two views and no others.
+    const dailyLimit = { uid: 'u1', reason: 'daily-limit' };
+    const failedForTheDay = setup({ fails: true, unbanked: dailyLimit });
+    await settle();
+    expect(failedForTheDay.component.line()).toBe('failed');
+    TestBed.resetTestingModule();
+
+    const signedOutForTheDay = setup({ user: null, unbanked: dailyLimit });
+    await settle();
+    expect(signedOutForTheDay.component.line()).toBe('signedOut');
   });
 });
 
@@ -674,6 +726,30 @@ describe('ProfileStatsComponent (rendered)', () => {
     );
     expect(query('[role="status"]')?.textContent?.trim()).toBe(
       'Your last game could not be added to your stats.',
+    );
+  });
+
+  /**
+   * The daily-limit sentence is one more face in the same cell: it says what
+   * the limit is and when it resets, and the general sentence, the empty one
+   * and "tracking since" are all hidden while it shows.
+   */
+  it('shows the daily-limit sentence in place of the general one', async () => {
+    const { query } = await render({ unbanked: { uid: 'u1', reason: 'daily-limit' } });
+
+    const shown = (cy: string) => !query(`[data-cy="${cy}"]`)!.classList.contains('invisible');
+    expect(shown('stats-daily-limit')).toBe(true);
+    expect(shown('stats-not-banked')).toBe(false);
+    expect(shown('stats-empty')).toBe(false);
+    expect(shown('stats-since')).toBe(false);
+    expect(query('[data-cy="stats-daily-limit"]')?.parentElement).toBe(
+      query('[data-cy="stats-status"]'),
+    );
+    expect(query('[data-cy="stats-daily-limit"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Your last game was not added: the limit is 200 games a day, reset at midnight UTC.',
+    );
+    expect(query('[role="status"]')?.textContent?.trim()).toBe(
+      'Your last game was not added: you reached the daily limit of 200 games.',
     );
   });
 

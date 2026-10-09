@@ -106,6 +106,22 @@
         >
           Your last game could not be added to your totals.
         </p>
+        <!--
+          The same, refused for the server's daily ceiling (`daily-ceiling.ts`):
+          what the limit is and when the count starts again. The day is UTC
+          because the server's is, and the sentence is fixed rather than a
+          local time so its length never changes the height this cell reserves
+          — measured, it wraps no further than the longest sentence above at
+          320, 360, 390, 414 and 1280px.
+        -->
+        <p
+          class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+          [class.invisible]="line() !== 'dailyLimit'"
+          data-cy="stats-daily-limit"
+        >
+          Your last game was not added: the limit is {{ dailyCeiling }} games a day, reset at
+          midnight UTC.
+        </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
           [class.invisible]="line() !== 'stats'"
