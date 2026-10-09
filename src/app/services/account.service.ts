@@ -97,7 +97,9 @@ export interface UnbankedGame {
   uid: string;
   /**
    * The server's reason as it gave it: `unsupported-provider`, `invalid`,
-   * `rate-limited`, or one this build does not know yet.
+   * `rate-limited`, `daily-limit` — the account has banked the most games one
+   * UTC day allows, which `/profile` names — or one this build does not know
+   * yet.
    */
   reason: string;
 }
@@ -330,7 +332,9 @@ export class AccountService {
    * account, is a game the player believes counted and the server dropped:
    * that is how five of the eight sign-in providers banked nothing, with not a
    * line anywhere saying so. So it is logged with the server's reason, and
-   * held in {@link unbankedGame} for `/profile` to tell the player.
+   * held in {@link unbankedGame} for `/profile` to tell the player — in words
+   * of its own for `daily-limit`, the server's ceiling on games a UTC day,
+   * since that one says when games count again.
    *
    * **And a banked game's XP is kept for the tab** (`FEAT-041`): the answer
    * says what the player's XP came to and what this game added, held in

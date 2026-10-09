@@ -1,8 +1,8 @@
-import type { DocumentReference, Transaction } from 'firebase-admin/firestore';
+import { type DocumentReference, FieldValue, type Transaction } from 'firebase-admin/firestore';
 import {
   type GameResultSubmission,
   type StatsDecision,
-  type UserStats,
+  type StoredUserStats,
   nextUserStats,
 } from './game-stats';
 import { XP_QUESTION_FIELDS, gameXp } from './game-xp';
@@ -11,7 +11,7 @@ import { nextQuestionCounters } from './question-counters';
 
 /** The documents one banked game touches, named by the caller. */
 export interface GameResultRefs {
-  /** `users/{uid}` — the lifetime totals, and the duplicate check's `lastGameId`. */
+  /** `users/{uid}` — the lifetime totals, the ring of recent game ids and the daily counter. */
   user: DocumentReference;
   /** `users/{uid}/plays/{gameId}` — the round itself (`FEAT-049`). */
   play: (gameId: string) => DocumentReference;
@@ -52,11 +52,14 @@ export type GameResultOutcome =
  * it writes is what `nextUserStats` decided; what is only testable here is the
  * order things happen in and what is left alone.
  *
- * **The duplicate and rate checks come first, and a refusal touches nothing.**
- * The decision is made from the totals document alone, and a refused one
- * returns before any question is read or any document written — so the
- * `lastGameId` that stops a reload of `/game-over` banking a game twice stops it
- * counting the game twice into a question's counters too (`FEAT-023`).
+ * **The duplicate check and both budgets come first, and a refusal touches
+ * nothing.** The decision is made from the totals document alone, and a
+ * refused one returns before any question is read or any document written — so
+ * the ring of recent game ids that stops a reload of `/game-over` banking a
+ * game twice stops it counting the game twice into a question's counters too
+ * (`FEAT-023`), and a call over the daily ceiling or the hourly window writes
+ * nothing at all: not the totals, not the XP, not the play history, not the
+ * counters, and not the ring or the day's count either.
  *
  * **Every read before any write**, which a Firestore transaction requires: the
  * totals, then the questions this game named, then the writes.
@@ -77,8 +80,15 @@ export type GameResultOutcome =
  * **XP rides the same transaction and the same refusals** (`FEAT-041`). It is
  * priced from the questions' counters as read here, before this game's answers
  * are added to them, and merged into `users/{uid}` beside the totals — so a
- * duplicate or a rate-limited call, which returns before anything is read,
- * adds nothing to it either.
+ * duplicate or a call over either budget, which returns before anything else
+ * is read, adds nothing to it either.
+ *
+ * **The ring replaces `lastGameId` in place.** A document that still carries
+ * the old field is read as a ring of one (`recentGameIdsOf`), and the write
+ * that banks its next game deletes the field beside writing the ring — so no
+ * migration runs over the collection, and an account that never plays again
+ * keeps a field nothing reads, which deleting the account removes with the
+ * document.
  */
 export async function applyGameResult(
   transaction: Transaction,
@@ -89,9 +99,7 @@ export async function applyGameResult(
   const snapshot = await transaction.get(refs.user);
   // `Partial`, because the document can exist with no totals in it — an
   // avatar chosen before the first finished game creates it (`FEAT-038`).
-  const current = snapshot.exists
-    ? (snapshot.data() as Partial<UserStats> & { xp?: unknown })
-    : null;
+  const current = snapshot.exists ? (snapshot.data() as StoredUserStats & { xp?: unknown }) : null;
 
   // `submission` is `request.data`, which is anything at all; `nextUserStats`
   // validates it before trusting a field of it.
@@ -127,19 +135,29 @@ export async function applyGameResult(
   // choice beside them (`FEAT-038`), and a plain `set` would erase it with
   // every game banked. The decision always carries every totals field, so
   // merging loses nothing the replace used to guarantee — it only stops
-  // reaching past them.
-  transaction.set(refs.user, { ...decision.stats, xp: xp.total }, { merge: true });
+  // reaching past them. The ring is an array, which a merge replaces whole
+  // rather than combining, and the day's count a map of two keys both written.
+  transaction.set(
+    refs.user,
+    {
+      ...decision.stats,
+      xp: xp.total,
+      ...(decision.dropsLastGameId ? { lastGameId: FieldValue.delete() } : {}),
+    },
+    { merge: true },
+  );
   // The play history, in the same transaction and under the same game id
-  // (`FEAT-049`). `lastGameId` *is* that id, so nothing here re-reads the
-  // payload — the decision already validated it, and the duplicate check that
-  // protects the totals therefore protects this document too.
+  // (`FEAT-049`). The ring's newest entry *is* that id, so nothing here
+  // re-reads the payload — the decision already validated it, and the
+  // duplicate check that protects the totals therefore protects this document
+  // too.
   //
   // `null` whenever the submission carried no per-answer records: a pre-feature
   // client, or a game restored from a save whose history could not be lined up
   // with its questions. Those games bank their totals and leave no history,
   // which is the right way round.
   if (decision.play) {
-    transaction.set(refs.play(decision.stats.lastGameId), decision.play);
+    transaction.set(refs.play(decision.gameId), decision.play);
   }
   decision.counters.forEach((increment, index) => {
     if (!questions[index].exists) {

@@ -1,7 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { computed, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, provideRouter } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
+import { DAILY_FREE_GAME_LIMIT } from '../../services/daily-game-limit.service';
 import {
   type ProPriceOption,
   SubscriptionError,
@@ -172,6 +173,58 @@ describe('PricingComponent checkout failure message', () => {
  * either, since R$ 5,90 rendered with US conventions reads as a different
  * number.
  */
+/**
+ * **What each card promises is what the app gives.** Starter is the free tier,
+ * and the free tier is `DailyGameLimitService`'s allowance — five games a day,
+ * counted on the device — so its card states that number, from the same
+ * constant; unlimited games are Pro's, and the Pro card says so. Rendered,
+ * because the claim is the template's text and nothing else holds it.
+ */
+describe('PricingComponent plan cards', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('promises Starter the daily allowance and Pro unlimited games', () => {
+    TestBed.configureTestingModule({
+      imports: [PricingComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: SubscriptionService,
+          useValue: {
+            isProUser: signal(false),
+            awaitProActivation: vi.fn(() => Promise.resolve()),
+            startProCheckout: vi.fn(() => Promise.resolve()),
+            loadProPrices: vi.fn(() => Promise.resolve()),
+            prepareCheckout: vi.fn(() => Promise.resolve()),
+            proPriceOptions: signal<readonly ProPriceOption[]>([]),
+            selectedCurrency: signal<string | null>(null),
+            selectedProPrice: signal<ProPriceOption | null>(null),
+            selectCurrency: vi.fn(),
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            authReady: signal(false),
+            isAnonymous: signal(true),
+            isFullyAuthenticated: signal(false),
+          },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(PricingComponent);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const text = (cy: string) => el.querySelector(`[data-cy="${cy}"]`)?.textContent?.trim();
+
+    expect(text('starter-games')).toBe(`Play ${DAILY_FREE_GAME_LIMIT} games a day`);
+    expect(text('pro-games')).toBe('Play unlimited games');
+    // Only the Pro card promises unlimited games.
+    const starter = el.querySelector('[data-cy="starter-games"]')?.closest('ul');
+    expect(starter?.textContent).not.toMatch(/unlimited/i);
+  });
+});
+
 describe('PricingComponent price and currency', () => {
   const usd: ProPriceOption = { priceId: 'price_usd', currency: 'usd', unitAmount: 99 };
   const brl: ProPriceOption = { priceId: 'price_brl', currency: 'brl', unitAmount: 590 };
