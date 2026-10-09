@@ -36,6 +36,16 @@ function setup(
     refresh: vi.fn(() => Promise.resolve()),
     consumeGame: vi.fn(() => Promise.resolve(true)),
   };
+  // The controller's state as a start moves it, held out of the stub so a test
+  // can play one through: `isLoading` for the press, the game signals for the
+  // moment `beginGame` commits a game, `limitReached` for a refusal.
+  const controller = {
+    isLoading: signal(false),
+    limitReached: signal(false),
+    hasResumableGame: signal(false),
+    currentIndex: signal(0),
+    totalQuestions: signal(0),
+  };
 
   TestBed.configureTestingModule({
     providers: [
@@ -44,12 +54,8 @@ function setup(
         useValue: {
           startGame,
           discardSavedGame: vi.fn(),
-          isLoading: signal(false),
           loadError: signal<string | null>(null),
-          hasResumableGame: signal(false),
-          currentIndex: signal(0),
-          totalQuestions: signal(0),
-          limitReached: signal(false),
+          ...controller,
           shortDraw,
           clearShortDrawNotice: () => shortDraw.set(null),
         },
@@ -74,7 +80,7 @@ function setup(
 
   const fixture = TestBed.createComponent(GameSetupComponent);
   fixture.detectChanges();
-  return { fixture, startGame, dailyLimit, isOnline, shortDraw };
+  return { fixture, startGame, dailyLimit, isOnline, shortDraw, controller };
 }
 
 /** Picks an option the way a player does — through the DOM, not through `setValue`. */
@@ -192,6 +198,109 @@ describe('GameSetupComponent — the daily allowance', () => {
 
     expect(card(fixture)).not.toBeNull();
     expect(startButton(fixture)).toBeNull();
+    fixture.destroy();
+  });
+
+  /**
+   * Start spends the day's last free game before the play screen has loaded,
+   * so the allowance reads zero while Start still says "Loading Questions…" —
+   * and the offer, a far taller box, replaced the button under the pointer for
+   * as long as `/play`'s chunk took (`CLAUDE.md` §4.4; `daily-game-limit.spec.ts`
+   * measures it). A start the allowance refused still ends on the offer.
+   */
+  it('keeps Start while its own start spends the last free game, and offers Pro after a refusal', () => {
+    const { fixture, dailyLimit, controller } = setup({ remaining: 1 });
+
+    controller.isLoading.set(true);
+    dailyLimit.remaining.set(0);
+    dailyLimit.hasGamesLeft.set(false);
+    fixture.detectChanges();
+
+    expect(startButton(fixture)?.textContent?.trim()).toBe('Loading Questions…');
+    expect(card(fixture), 'no upsell while the start that spent the game is in flight').toBeNull();
+
+    controller.limitReached.set(true);
+    controller.isLoading.set(false);
+    fixture.detectChanges();
+
+    expect(startButton(fixture)).toBeNull();
+    expect(card(fixture)).not.toBeNull();
+    fixture.destroy();
+  });
+});
+
+/**
+ * The resume banner across a start. `startGame` commits the new game before it
+ * navigates and `/play` is a lazy route, so for as long as that chunk takes the
+ * setup screen is still up holding a loaded, unfinished game — which is what
+ * `hasResumableGame()` means. Read live, the banner arrived for the very game
+ * being started and moved the card under the pointer (`CLAUDE.md` §4.4;
+ * `game-resume.spec.ts` measures it). These drive the controller's signals in
+ * the order a start moves them.
+ */
+describe('GameSetupComponent — the resume banner while a start is in flight', () => {
+  const banner = (fixture: ReturnType<typeof setup>['fixture']) =>
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('[data-cy="resume-banner"]');
+  const sentence = (fixture: ReturnType<typeof setup>['fixture']) =>
+    banner(fixture)?.querySelector('p')?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+
+  /** What `beginGame` does to the signals the banner reads, before the route changes. */
+  function commitNewGame(controller: ReturnType<typeof setup>['controller'], total = 5): void {
+    controller.hasResumableGame.set(true);
+    controller.currentIndex.set(0);
+    controller.totalQuestions.set(total);
+  }
+
+  it('raises no banner for the game its own start commits', () => {
+    const { fixture, controller } = setup();
+    expect(banner(fixture)).toBeNull();
+
+    controller.isLoading.set(true);
+    fixture.detectChanges();
+    commitNewGame(controller);
+    fixture.detectChanges();
+
+    expect(banner(fixture), 'the game being started is not one to resume').toBeNull();
+    fixture.destroy();
+  });
+
+  it('holds a saved game’s banner as it was, sentence and all, until the start ends', () => {
+    const { fixture, controller } = setup();
+    controller.hasResumableGame.set(true);
+    controller.currentIndex.set(2);
+    controller.totalQuestions.set(10);
+    fixture.detectChanges();
+    expect(sentence(fixture)).toBe('You have a game in progress — question 3 of 10.');
+
+    controller.isLoading.set(true);
+    commitNewGame(controller);
+    fixture.detectChanges();
+
+    // Neither hidden — which would pull the card up by the banner's height —
+    // nor rewritten to describe the game that is about to replace it.
+    expect(sentence(fixture)).toBe('You have a game in progress — question 3 of 10.');
+
+    // A start that ends without leaving the screen (a navigation that failed)
+    // leaves its game committed, and the banner then says what is true.
+    controller.isLoading.set(false);
+    fixture.detectChanges();
+    expect(sentence(fixture)).toBe('You have a game in progress — question 1 of 5.');
+    fixture.destroy();
+  });
+
+  it('follows the controller live when no start is in flight', () => {
+    const { fixture, controller } = setup();
+
+    // A restore that lands after the first paint, then a discard.
+    controller.hasResumableGame.set(true);
+    controller.currentIndex.set(1);
+    controller.totalQuestions.set(5);
+    fixture.detectChanges();
+    expect(sentence(fixture)).toBe('You have a game in progress — question 2 of 5.');
+
+    controller.hasResumableGame.set(false);
+    fixture.detectChanges();
+    expect(banner(fixture)).toBeNull();
     fixture.destroy();
   });
 });

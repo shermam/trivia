@@ -1,10 +1,11 @@
-import { Page, Request, Route } from '@playwright/test';
+import { Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
 import { expectRadiosAreGrouped } from '../../support/a11y';
 import { waitForAnonymousSession } from '../../support/auth';
 import { answerQuestion, optionLabel, waitForPlayRoute } from '../../support/game';
 import { expectBoxUnmoved, expectUnmoved, settledBox } from '../../support/layout';
+import { holdRequests } from '../../support/requests';
 import { runTag } from '../../support/topics';
 
 /**
@@ -93,41 +94,6 @@ function countReads(page: Page): ReadCounts {
     }
   });
   return counts;
-}
-
-/**
- * Holds every request `matches` accepts until `release()` — a gate the test
- * opens, not a timer — so a transient state can be measured for exactly as
- * long as the measurement takes.
- *
- * `seen` resolves on the first held request, which is what proves the gate was
- * load-bearing: a gate that silently stopped matching would let the state it
- * exists to hold flash past, and the test would measure whatever came next.
- */
-async function holdRequests(
-  page: Page,
-  matches: (request: Request) => boolean,
-): Promise<{ seen: Promise<void>; release: () => void }> {
-  let open!: () => void;
-  const opened = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-  let sawOne!: () => void;
-  const seen = new Promise<void>((resolve) => {
-    sawOne = resolve;
-  });
-
-  await page.route('**/*', async (route: Route) => {
-    if (!matches(route.request())) {
-      await route.fallback();
-      return;
-    }
-    sawOne();
-    await opened;
-    await route.fallback();
-  });
-
-  return { seen, release: () => open() };
 }
 
 /**
