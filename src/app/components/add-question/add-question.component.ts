@@ -8,6 +8,8 @@ import { AuthService } from '../../services/auth.service';
 import { FirebaseService, QuestionQuotaExceededError } from '../../services/firebase.service';
 import { isFirestorePermissionDenied } from '../../services/firestore-rest/firestore-rest.client';
 import { SubscriptionService } from '../../services/subscription.service';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionFieldsComponent } from '../question-form/question-fields.component';
 import {
@@ -19,12 +21,13 @@ import {
   questionFields,
   resetQuestionForm,
   toQuestionContent,
+  TRUE_FALSE_REQUIRED,
 } from '../question-form/question-form';
 
 @Component({
   selector: 'app-add-question',
   standalone: true,
-  imports: [ReactiveFormsModule, IconComponent, QuestionFieldsComponent],
+  imports: [ReactiveFormsModule, IconComponent, QuestionFieldsComponent, TPipe],
   templateUrl: './add-question.component.html',
   styleUrl: './add-question.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -38,7 +41,7 @@ export class AddQuestionComponent {
   protected readonly subscriptionService = inject(SubscriptionService);
 
   protected readonly isSubmitting = signal(false);
-  protected readonly submitError = signal<string | null>(null);
+  protected readonly submitError = signal<Message | null>(null);
   protected readonly hasSubmitted = signal(false);
 
   /**
@@ -53,7 +56,7 @@ export class AddQuestionComponent {
    * to the button *and* announced, because the failure this exists for is a
    * user clicking Save repeatedly while nothing whatsoever happens.
    */
-  protected readonly validationSummary = signal<string | null>(null);
+  protected readonly validationSummary = signal<Message | null>(null);
 
   constructor() {
     applyIncorrectAnswerValidators(this.form, this.form.controls.type.value);
@@ -71,7 +74,9 @@ export class AddQuestionComponent {
     try {
       await this.authService.resendVerificationEmail();
     } catch {
-      this.submitError.set('Could not send the verification email. Please try again.');
+      this.submitError.set(
+        msg('add.verificationFailed', 'Could not send the verification email. Please try again.'),
+      );
     }
   }
 
@@ -103,7 +108,7 @@ export class AddQuestionComponent {
     // question's correct answer has to be one of exactly two literals.
     if (invalidBoolean) {
       this.form.controls.correctAnswer.markAsTouched();
-      this.validationSummary.set('Choose whether the statement is true or false.');
+      this.validationSummary.set(TRUE_FALSE_REQUIRED);
       return;
     }
     if (duplicate) {
@@ -170,22 +175,22 @@ export class AddQuestionComponent {
    * bound more tightly than the form does, a network failure — stays generic
    * rather than being narrated wrongly.
    */
-  private explainSubmitFailure(error: unknown): string {
+  private explainSubmitFailure(error: unknown): Message {
     // Checked, not guessed. `FirebaseService` only raises this after reading
     // the counter back and finding the hour genuinely full — a refusal on its
     // own would not license the claim, since a stale counter is refused
     // identically (`CLAUDE.md` §4.4, finding B4).
     if (error instanceof QuestionQuotaExceededError) {
-      return error.message;
+      return error.display;
     }
     const isPermissionDenied = isFirestorePermissionDenied(error);
     if (isPermissionDenied && !this.authService.isProUser()) {
-      return (
-        'Your account does not have Pro access right now, so the question was rejected. ' +
-        'If you just subscribed, sign out and back in — it can take a moment to apply.'
+      return msg(
+        'add.notPro',
+        'Your account does not have Pro access right now, so the question was rejected. If you just subscribed, sign out and back in — it can take a moment to apply.',
       );
     }
-    return 'Could not save your question. Please try again.';
+    return msg('add.saveFailed', 'Could not save your question. Please try again.');
   }
 
   protected addAnother(): void {

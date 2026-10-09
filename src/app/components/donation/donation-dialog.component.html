@@ -32,12 +32,12 @@
           class="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-slate-50"
         >
           <app-icon name="coffee" [size]="18" class="text-amber-700 dark:text-amber-400" />
-          Buy me a coffee
+          {{ 'donate.title' | t: 'Buy me a coffee' }}
         </h2>
         <button
           type="button"
           data-cy="close-donation-dialog"
-          aria-label="Close"
+          [attr.aria-label]="'donate.close' | t: 'Close'"
           (click)="close()"
           class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
         >
@@ -47,7 +47,11 @@
 
       <div class="px-6 py-5">
         <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
-          Trivimind is free to play and always will be. A one-off tip helps pay for the servers.
+          {{
+            'donate.intro'
+              | t
+                : 'Trivimind is free to play and always will be. A one-off tip helps pay for the servers.'
+          }}
         </p>
 
         @if (isUnavailable()) {
@@ -56,8 +60,7 @@
             class="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-500/25 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
           >
             <app-icon name="triangle-alert" [size]="16" class="shrink-0 mt-0.5" />
-            Donations aren't available right now — no donation amounts are set up. Please try again
-            later.
+            {{ unavailableMessage | t }}
           </p>
         } @else {
           <!-- Currency row, same shape as the Pro card's: the label on the
@@ -69,7 +72,7 @@
             <span
               id="donation-currency-label"
               class="text-sm font-semibold text-slate-500 dark:text-slate-400"
-              >Currency</span
+              >{{ 'donate.currency' | t: 'Currency' }}</span
             >
             @if (hasCurrencyChoice()) {
               <app-currency-switch
@@ -95,7 +98,7 @@
             id="donation-amount-label"
             class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2"
           >
-            Amount
+            {{ 'donate.amount' | t: 'Amount' }}
           </p>
 
           <!-- Three cells whatever the state, so the row that holds the
@@ -158,8 +161,11 @@
               class="flex items-start gap-2 mt-4 text-sm text-slate-500 dark:text-slate-400"
             >
               <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-              You're not signed in, so this donation won't be recorded against an account. Sign in
-              first if you'd like it linked to yours.
+              {{
+                'donate.guest'
+                  | t
+                    : "You're not signed in, so this donation won't be recorded against an account. Sign in first if you'd like it linked to yours."
+              }}
             </p>
           }
 
@@ -171,16 +177,19 @@
             class="mt-5 w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (isDonating()) {
-              Redirecting&hellip;
+              {{ 'donate.redirecting' | t: 'Redirecting…' }}
             } @else {
               <app-icon name="coffee" [size]="16" />
-              {{ donateLabel() }}
+              {{ donateLabel() | t }}
             }
           </button>
 
           <p class="mt-3 text-center text-xs text-slate-400 dark:text-slate-500">
-            A one-off payment through Stripe. It buys nothing and is not refundable by default — see
-            the Terms.
+            {{
+              'donate.terms'
+                | t
+                  : 'A one-off payment through Stripe. It buys nothing and is not refundable by default — see the Terms.'
+            }}
           </p>
         }
 
@@ -190,7 +199,7 @@
              missed by screen readers (§4.5). The visible box below is the
              sighted half of the same message and is deliberately not a second
              live region, which would announce it twice. -->
-        <p role="status" aria-live="polite" class="sr-only">{{ errorMessage() }}</p>
+        <p role="status" aria-live="polite" class="sr-only">{{ errorMessage() | t }}</p>
 
         @if (errorMessage()) {
           <p
@@ -198,7 +207,7 @@
             class="flex items-start gap-2 mt-3 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
           >
             <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-            {{ errorMessage() }}
+            {{ errorMessage() | t }}
           </p>
         }
       </div>

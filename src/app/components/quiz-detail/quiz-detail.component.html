@@ -6,7 +6,7 @@
       class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
     >
       <app-icon name="arrow-left" [size]="15" />
-      Back to game
+      {{ 'quiz.back' | t: 'Back to game' }}
     </a>
 
     <!--
@@ -14,7 +14,7 @@
       has anything to say (G3) — everything on this card arrives after a round
       trip, which is otherwise silent to assistive tech (`CLAUDE.md` §4.5).
     -->
-    <p role="status" class="sr-only" data-cy="quiz-status">{{ announcement() }}</p>
+    <p role="status" class="sr-only" data-cy="quiz-status">{{ announcement() | t }}</p>
 
     <!--
       **What can move, and what cannot** (`CLAUDE.md` §4.4). The link above and
@@ -34,7 +34,7 @@
       <p
         class="text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-400 mb-2"
       >
-        Curated quiz
+        {{ 'quiz.eyebrow' | t: 'Curated quiz' }}
       </p>
       <!--
         The heading in every state — "Loading quiz…", "Quiz not found", the
@@ -48,28 +48,38 @@
         data-cy="quiz-title"
         class="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight break-words focus:outline-none"
       >
-        {{ title() }}
+        @if (stateTitle(); as state) {
+          {{ state | t }}
+        } @else {
+          {{ quiz()?.title ?? '' }}
+        }
       </h1>
 
       @switch (view()) {
         @case ('notFound') {
           <p class="mt-3 text-slate-600 dark:text-slate-400" data-cy="quiz-not-found">
-            There is no published quiz at this address. It may have been taken down, or the link may
-            be incomplete.
+            {{
+              'quiz.notFound'
+                | t
+                  : 'There is no published quiz at this address. It may have been taken down, or the link may be incomplete.'
+            }}
           </p>
           <a
             routerLink="/"
             class="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 font-bold text-white shadow-cta transition-colors"
           >
-            Play a random game
+            {{ 'quiz.randomGame' | t: 'Play a random game' }}
           </a>
         }
         @case ('failed') {
           <p class="mt-3 text-slate-600 dark:text-slate-400" data-cy="quiz-load-failed">
             @if (connectivity.isOnline()) {
-              Something went wrong while reading it. Please try again.
+              {{ 'quiz.failed' | t: 'Something went wrong while reading it. Please try again.' }}
             } @else {
-              You're offline, and a quiz needs a connection to load its questions.
+              {{
+                'quiz.failedOffline'
+                  | t: "You're offline, and a quiz needs a connection to load its questions."
+              }}
             }
           </p>
           <button
@@ -79,7 +89,7 @@
             class="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 font-bold text-white shadow-cta transition-colors"
           >
             <app-icon name="rotate-ccw" [size]="16" />
-            Try again
+            {{ 'quiz.retry' | t: 'Try again' }}
           </button>
         }
         @case ('empty') {
@@ -96,14 +106,17 @@
             data-cy="quiz-empty"
           >
             <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-            None of this quiz's questions can be played right now, so it cannot start. Try another
-            quiz, or a random game.
+            {{
+              'quiz.empty'
+                | t
+                  : "None of this quiz's questions can be played right now, so it cannot start. Try another quiz, or a random game."
+            }}
           </p>
           <a
             routerLink="/"
             class="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 font-bold text-white shadow-cta transition-colors"
           >
-            Play a random game
+            {{ 'quiz.randomGame' | t: 'Play a random game' }}
           </a>
         }
         @case ('ready') {
@@ -119,7 +132,12 @@
             class="mt-4 text-sm font-semibold text-slate-700 dark:text-slate-300"
             data-cy="quiz-question-count"
           >
-            {{ countLabel(playableCount()) }}, in the order they were chosen
+            {{
+              'quiz.countInOrder'
+                | t
+                  : '{n, plural, one {# question, in the order they were chosen} other {# questions, in the order they were chosen} }'
+                  : { n: playableCount() }
+            }}
           </p>
           <!--
             Said before Start, not discovered after it. A question that was
@@ -130,13 +148,20 @@
           -->
           @if (unavailable(); as missing) {
             <p class="mt-1 text-sm text-amber-800 dark:text-amber-300" data-cy="quiz-unavailable">
-              {{ missing.count }} of its {{ missing.total }} questions cannot be played right now,
-              so it plays the other {{ playableCount() }}.
+              {{
+                'quiz.unavailable'
+                  | t
+                    : '{count, plural, one {# of its {total} questions cannot be played right now, so it plays the other {playable}.} other {# of its {total} questions cannot be played right now, so it plays the other {playable}.} }'
+                    : { count: missing.count, total: missing.total, playable: playableCount() }
+              }}
             </p>
           }
           @if (replacesGame()) {
             <p class="mt-1 text-sm text-slate-500 dark:text-slate-400" data-cy="quiz-replaces-game">
-              Starting this quiz replaces the game you have in progress.
+              {{
+                'quiz.replacesGame'
+                  | t: 'Starting this quiz replaces the game you have in progress.'
+              }}
             </p>
           }
 
@@ -144,14 +169,16 @@
             <span
               id="quiz-time-limit-label"
               class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-              >Time per Question</span
+              >{{ 'quiz.timeLimit' | t: 'Time per Question' }}</span
             >
             @if (suggestion(); as suggested) {
               <p
                 class="-mt-1 mb-1.5 text-xs text-slate-500 dark:text-slate-400"
                 data-cy="quiz-suggested-limit"
               >
-                Suggested for this quiz: {{ suggested }}.
+                {{
+                  'quiz.suggested' | t: 'Suggested for this quiz: {limit}.' : { limit: suggested }
+                }}
               </p>
             }
             <!--
@@ -189,7 +216,7 @@
                     [checked]="timeLimit() === choice.value"
                     (change)="chooseTimeLimit(choice.value)"
                   />
-                  {{ choice.label }}
+                  {{ choice.label | t }}
                 </label>
               }
             </div>
@@ -203,7 +230,7 @@
                   class="col-start-1 row-start-1 text-xs text-slate-500 dark:text-slate-400"
                   [class.invisible]="timeLimit() !== note.value"
                 >
-                  {{ note.text }}
+                  {{ note.text | t }}
                 </p>
               }
             </div>
@@ -220,11 +247,16 @@
             data-cy="quiz-daily-allowance"
           >
             @if (dailyLimit.isUnlimited()) {
-              Unlimited games with Pro.
+              {{ 'quiz.unlimited' | t: 'Unlimited games with Pro.' }}
             } @else if (dailyLimit.remaining() > 0) {
-              {{ dailyLimit.remaining() }} of {{ dailyGameLimit }} free games left today.
+              {{
+                'quiz.gamesLeft'
+                  | t
+                    : '{limit, plural, one {{left} of # free game left today.} other {{left} of # free games left today.} }'
+                    : { left: dailyLimit.remaining(), limit: dailyGameLimit }
+              }}
             } @else {
-              No free games left today.
+              {{ 'quiz.noGamesLeft' | t: 'No free games left today.' }}
             }
           </p>
 
@@ -246,10 +278,17 @@
               class="rounded-xl border-[1.5px] border-amber-300 bg-amber-50 px-4 py-3.5 text-center dark:border-amber-500/40 dark:bg-amber-500/10"
             >
               <p class="font-semibold text-slate-900 dark:text-slate-50">
-                That's your {{ dailyGameLimit }} free games for today.
+                {{
+                  'quiz.limitReached'
+                    | t
+                      : "{limit, plural, one {That's your # free game for today.} other {That's your # free games for today.} }"
+                      : { limit: dailyGameLimit }
+                }}
               </p>
               <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                They reset at midnight. Pro removes the limit entirely.
+                {{
+                  'quiz.limitResets' | t: 'They reset at midnight. Pro removes the limit entirely.'
+                }}
               </p>
               <a
                 routerLink="/pricing"
@@ -258,7 +297,7 @@
                 class="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-2.5 font-bold text-white shadow-cta transition-colors hover:bg-emerald-800"
               >
                 <app-icon name="sparkles" [size]="16" />
-                See Pro
+                {{ 'quiz.seePro' | t: 'See Pro' }}
               </a>
             </div>
           } @else {
@@ -270,10 +309,10 @@
               class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-colors"
             >
               @if (gameController.isLoading()) {
-                Starting&hellip;
+                {{ 'quiz.starting' | t: 'Starting…' }}
               } @else {
                 <app-icon name="sparkles" [size]="16" />
-                Start quiz
+                {{ 'quiz.start' | t: 'Start quiz' }}
               }
             </button>
           }
@@ -282,7 +321,7 @@
             class="mt-2 text-center text-sm text-red-700 dark:text-red-300"
             data-cy="quiz-start-error"
           >
-            {{ startError() }}
+            {{ startError() | t }}
           </p>
         }
       }

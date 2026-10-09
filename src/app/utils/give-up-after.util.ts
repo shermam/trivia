@@ -45,7 +45,7 @@
 export function giveUpAfter<T>(
   promise: Promise<T>,
   ms: number,
-  message = 'Request timed out',
+  message = 'Request timed out', // i18n-exempt: an Error's message, for logs; nothing renders it
 ): Promise<T> {
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 

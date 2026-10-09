@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
+import { english } from '../i18n/testing';
 import {
   ALL_LIFELINES_AVAILABLE,
   Answer,
@@ -1364,9 +1365,9 @@ describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () =>
     await service.startGame(config({ tags: ['world-war-2'] }));
 
     expect(service.shortDraw()).toBeNull();
-    expect(service.loadError()).toContain('No questions were found');
+    expect(english(service.loadError())).toContain('No questions were found');
     // A topic, never a category (`FEAT-052`): the screen has no category to change.
-    expect(service.loadError()).toContain('Try a different topic, difficulty, or source.');
+    expect(english(service.loadError())).toContain('Try a different topic, difficulty, or source.');
   });
 
   it('clears a stale notice when the next draw is fine', async () => {

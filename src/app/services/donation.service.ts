@@ -1,4 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { msg } from '../i18n/message';
 import { preferredCurrency } from '../utils/currency-preference.util';
 import { AuthService } from './auth.service';
 import { FirestoreRestClient, type RestDocument } from './firestore-rest/firestore-rest.client';
@@ -51,8 +52,10 @@ const MAX_PRESETS_PER_CURRENCY = 3;
  * (`docs/stack.md` §2.4). Same shape, and the same reasoning, as
  * `NO_PRO_PRICE_MESSAGE`.
  */
-export const NO_DONATION_PRICE_MESSAGE =
-  "Donations aren't available right now — no donation amounts are set up. Please try again later.";
+export const NO_DONATION_PRICE_MESSAGE = msg(
+  'donation.unavailable',
+  "Donations aren't available right now — no donation amounts are set up. Please try again later.",
+);
 
 /** One preset the tip jar offers — a single mirrored one-time Stripe Price. */
 export interface DonationPreset {
@@ -292,7 +295,9 @@ export class DonationService {
       // the only way to be here is that auth could not be reached at all.
       // Generic, because this cannot tell offline from misconfigured and a
       // message must not narrate a cause it did not check (`CLAUDE.md` §4.4).
-      throw new SubscriptionError('Could not start the donation. Please try again.');
+      throw new SubscriptionError(
+        msg('donation.startFailed', 'Could not start the donation. Please try again.'),
+      );
     }
     const priceId = this.selectedPriceIdSignal();
     if (!priceId) {
@@ -302,8 +307,14 @@ export class DonationService {
     const url = await this.handshake.run(uid, {
       collectionName: 'donation_sessions',
       payload: { price: priceId, origin: window.location.origin },
-      timeoutMessage: 'Timed out waiting for the donation page to open. Please try again.',
-      failureMessage: 'The donation could not be started. Please try again.',
+      timeoutMessage: msg(
+        'donation.timedOut',
+        'Timed out waiting for the donation page to open. Please try again.',
+      ),
+      failureMessage: msg(
+        'donation.notStarted',
+        'The donation could not be started. Please try again.',
+      ),
     });
     window.location.assign(url);
   }

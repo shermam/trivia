@@ -14,6 +14,7 @@ import { buildLabel } from '../../build-info';
 import { DonationDialogStateService } from '../../services/donation-dialog-state.service';
 import { isGameplayRoute } from '../../utils/gameplay-route.util';
 import { DonationDialogComponent } from '../donation/donation-dialog.component';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 
 /**
@@ -36,7 +37,7 @@ import { IconComponent } from '../icon/icon.component';
 @Component({
   selector: 'app-footer',
   standalone: true,
-  imports: [RouterLink, DonationDialogComponent, IconComponent],
+  imports: [RouterLink, DonationDialogComponent, IconComponent, TPipe],
   templateUrl: './footer.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

@@ -1,3 +1,4 @@
+import { msg, type Message } from '../i18n/message';
 import { Injectable, inject, signal } from '@angular/core';
 import { DISLIKE, LIKE, VoteValue } from '../models/question-vote';
 import { AuthService } from './auth.service';
@@ -38,24 +39,34 @@ export type VoteOutcome =
  * the write could have been refused, timed out or never left the device, and
  * the client cannot tell which (`CLAUDE.md` §4.4).
  */
-export function describeVoteOutcome(outcome: VoteOutcome, position: number): string | null {
-  const question = `Question ${position}:`;
+export function describeVoteOutcome(outcome: VoteOutcome, position: number): Message | null {
+  const n = position;
   switch (outcome.kind) {
     case 'saved':
       if (outcome.value === LIKE) {
-        return `${question} you liked this question.`;
+        return msg('vote.saidLiked', 'Question {n}: you liked this question.', { n });
       }
       return outcome.value === DISLIKE
-        ? `${question} you disliked this question.`
-        : `${question} your vote was removed.`;
+        ? msg('vote.saidDisliked', 'Question {n}: you disliked this question.', { n })
+        : msg('vote.saidRemoved', 'Question {n}: your vote was removed.', { n });
     case 'failed':
       return outcome.attempted === null
-        ? `${question} your vote could not be removed. Please try again.`
-        : `${question} your vote could not be saved. Please try again.`;
+        ? msg(
+            'vote.saidRemoveFailed',
+            'Question {n}: your vote could not be removed. Please try again.',
+            { n },
+          )
+        : msg(
+            'vote.saidSaveFailed',
+            'Question {n}: your vote could not be saved. Please try again.',
+            { n },
+          );
     case 'needs-account':
       return outcome.reason === 'verify'
-        ? `${question} verify your email to like or dislike questions.`
-        : `${question} sign in to like or dislike questions.`;
+        ? msg('vote.saidVerify', 'Question {n}: verify your email to like or dislike questions.', {
+            n,
+          })
+        : msg('vote.saidSignIn', 'Question {n}: sign in to like or dislike questions.', { n });
     case 'superseded':
       return null;
   }

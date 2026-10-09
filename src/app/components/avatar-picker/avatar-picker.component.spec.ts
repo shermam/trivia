@@ -5,6 +5,7 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { AvatarSaveOutcome, AvatarService, AvatarStatus } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
+import { english } from '../../i18n/testing';
 import { builtAvatar } from '../avatar/built-avatar';
 import { AvatarPickerComponent, XpKnowledge } from './avatar-picker.component';
 
@@ -93,8 +94,8 @@ function render(options: Options = {}) {
   if (options.xp !== undefined) {
     fixture.componentRef.setInput('xp', options.xp);
   }
-  const announced: string[] = [];
-  fixture.componentInstance.announce.subscribe((text) => announced.push(text));
+  const announced: (string | null)[] = [];
+  fixture.componentInstance.announce.subscribe((message) => announced.push(english(message)));
   fixture.detectChanges();
   const host = fixture.nativeElement as HTMLElement;
   const q = <T extends HTMLElement = HTMLElement>(cy: string) =>
@@ -435,12 +436,12 @@ describe('AvatarPickerComponent', () => {
       const h = render();
       h.q('avatar-save')!.click();
       await h.settle();
-      expect(h.announced).toEqual(['']);
+      expect(h.announced).toEqual([null]);
 
       h.finishSave('saved');
       await h.settle();
 
-      expect(h.announced).toEqual(['', 'Avatar saved.']);
+      expect(h.announced).toEqual([null, 'Avatar saved.']);
       expect(h.line()).toEqual(['avatar-saved']);
     });
 

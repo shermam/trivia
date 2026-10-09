@@ -22,6 +22,10 @@ import { IconComponent } from '../icon/icon.component';
 import { QuestionFieldsComponent } from '../question-form/question-fields.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
+import { msg, type Message } from '../../i18n/message';
+import { RichTextComponent } from '../../i18n/rich-text.component';
+import { TPipe } from '../../i18n/t.pipe';
+import { difficultyLabel } from '../../utils/difficulty-label.util';
 import {
   applyIncorrectAnswerValidators,
   createQuestionForm,
@@ -31,6 +35,7 @@ import {
   patchQuestionForm,
   questionFields,
   toQuestionContent,
+  TRUE_FALSE_REQUIRED,
 } from '../question-form/question-form';
 
 /** One of the author's own questions, as this screen holds it. */
@@ -50,10 +55,10 @@ interface OpenDialog {
   question: MyQuestion;
 }
 
-const STATUS_LABELS: Record<QuestionStatus, string> = {
-  pending: 'Pending review',
-  approved: 'Approved',
-  rejected: 'Rejected',
+const STATUS_LABELS: Record<QuestionStatus, Message> = {
+  pending: msg('mine.statusPending', 'Pending review'),
+  approved: msg('mine.statusApproved', 'Approved'),
+  rejected: msg('mine.statusRejected', 'Rejected'),
 };
 
 /**
@@ -83,6 +88,8 @@ const STATUS_LABELS: Record<QuestionStatus, string> = {
     QuestionFieldsComponent,
     QuestionTagsComponent,
     RenderedTextComponent,
+    RichTextComponent,
+    TPipe,
   ],
   templateUrl: './my-questions.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -98,7 +105,7 @@ export class MyQuestionsComponent {
   protected readonly cursor = signal<UserQuestionCursor | null>(null);
   protected readonly hasMore = computed(() => this.cursor() !== null);
   protected readonly isLoading = signal(true);
-  protected readonly loadError = signal<string | null>(null);
+  protected readonly loadError = signal<Message | null>(null);
 
   /**
    * Which uid the rows on screen belong to.
@@ -151,7 +158,7 @@ export class MyQuestionsComponent {
    * dialog (`dialogError`), where the reader already is and where the retry
    * is: an error banner behind the dialog would be one nobody is looking at.
    */
-  protected readonly actionResult = signal('');
+  protected readonly actionResult = signal<Message | null>(null);
 
   protected readonly dialog = signal<OpenDialog | null>(null);
 
@@ -166,8 +173,16 @@ export class MyQuestionsComponent {
     return open?.kind === kind && open.question.id === question.id;
   }
   protected readonly isSaving = signal(false);
-  protected readonly dialogError = signal<string | null>(null);
-  protected readonly validationSummary = signal<string | null>(null);
+  protected readonly dialogError = signal<Message | null>(null);
+  protected readonly validationSummary = signal<Message | null>(null);
+
+  protected readonly difficultyLabel = difficultyLabel;
+
+  /** The remove dialog's note, which links the Terms from inside its sentence. */
+  protected readonly removeNote = msg(
+    'mine.removeNote',
+    'It stops being served in games straight away. It does not withdraw the licence you granted when you contributed it, and it cannot reach copies already played or saved offline. See <terms>the Terms</terms>.',
+  );
 
   /** The shared question form, filled from the row being edited. */
   protected readonly form = createQuestionForm(this.fb);
@@ -273,7 +288,9 @@ export class MyQuestionsComponent {
       // to the empty state — "you have not contributed anything" is a claim,
       // and a read that failed is not evidence for it.
       if (this.loadedUid === uid) {
-        this.loadError.set('Could not load your questions. Please try again.');
+        this.loadError.set(
+          msg('mine.loadFailed', 'Could not load your questions. Please try again.'),
+        );
       }
     } finally {
       if (this.loadedUid === uid) {
@@ -317,7 +334,9 @@ export class MyQuestionsComponent {
       }
     } catch {
       if (this.loadedUid === uid) {
-        this.loadError.set('Could not load more of your questions. Please try again.');
+        this.loadError.set(
+          msg('mine.loadMoreFailed', 'Could not load more of your questions. Please try again.'),
+        );
       }
     } finally {
       if (this.loadedUid === uid) {
@@ -373,7 +392,7 @@ export class MyQuestionsComponent {
     const { content, duplicate, invalidBoolean } = toQuestionContent(this.form.getRawValue());
     if (invalidBoolean) {
       this.form.controls.correctAnswer.markAsTouched();
-      this.validationSummary.set('Choose whether the statement is true or false.');
+      this.validationSummary.set(TRUE_FALSE_REQUIRED);
       return;
     }
     if (duplicate) {
@@ -406,9 +425,11 @@ export class MyQuestionsComponent {
         ),
       );
       this.dialog.set(null);
-      this.actionResult.set('Question updated. It is pending review again.');
+      this.actionResult.set(msg('mine.updated', 'Question updated. It is pending review again.'));
     } catch {
-      this.dialogError.set('Could not save your changes. Please try again.');
+      this.dialogError.set(
+        msg('mine.saveFailed', 'Could not save your changes. Please try again.'),
+      );
     } finally {
       this.isSaving.set(false);
     }
@@ -425,9 +446,11 @@ export class MyQuestionsComponent {
       await this.firebaseService.deleteUserQuestion(open.question.id);
       this.questions.update((rows) => rows.filter((row) => row.id !== open.question.id));
       this.dialog.set(null);
-      this.actionResult.set('Question removed from the app.');
+      this.actionResult.set(msg('mine.removed', 'Question removed from the app.'));
     } catch {
-      this.dialogError.set('Could not remove that question. Please try again.');
+      this.dialogError.set(
+        msg('mine.removeFailed', 'Could not remove that question. Please try again.'),
+      );
     } finally {
       this.isSaving.set(false);
     }
@@ -443,11 +466,12 @@ export class MyQuestionsComponent {
     return topicTagsOf(question);
   }
 
-  protected statusLabel(question: MyQuestion): string {
-    return question.status ? STATUS_LABELS[question.status] : 'Unknown';
+  protected statusLabel(question: MyQuestion): Message {
+    return question.status ? STATUS_LABELS[question.status] : msg('mine.statusUnknown', 'Unknown');
   }
 
-  protected submittedAt(question: MyQuestion): string {
-    return question.createdAt ? new Date(question.createdAt).toLocaleString() : 'Unknown';
+  /** When it was submitted, or `null` for a document that does not say. */
+  protected submittedAt(question: MyQuestion): string | null {
+    return question.createdAt ? new Date(question.createdAt).toLocaleString() : null;
   }
 }

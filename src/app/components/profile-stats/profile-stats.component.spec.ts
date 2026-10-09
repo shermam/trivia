@@ -9,6 +9,8 @@ import { AvatarService } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, GameplayStats } from '../../services/firebase.service';
 import { ProfileStatsComponent } from './profile-stats.component';
+import { msg, type Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 
 /**
  * `/profile` renders numbers it did not compute and cannot check, so what is
@@ -31,7 +33,7 @@ interface InternalProfileStats {
   line(): ProfileView | 'notBanked' | 'dailyLimit';
   tiles(): { id: string; label: string; value: string }[];
   trackingSince(): string | null;
-  statusAnnouncement(): string;
+  statusAnnouncement(): Message | null;
   progressXp(): number | null;
   progressState(): string;
   levelUp(): number | null;
@@ -176,7 +178,7 @@ describe('ProfileStatsComponent', () => {
     expect(component.view()).toBe('loading');
     // The announcement is empty on purpose: "loading" is not an outcome, and a
     // live region that says it announces something on every visit.
-    expect(component.statusAnnouncement()).toBe('');
+    expect(component.statusAnnouncement()).toBeNull();
     expect(getGameplayStats).not.toHaveBeenCalled();
   });
 
@@ -204,7 +206,7 @@ describe('ProfileStatsComponent', () => {
     await settle();
 
     expect(component.view()).toBe('signedOut');
-    expect(component.statusAnnouncement()).toBe(
+    expect(english(component.statusAnnouncement())).toBe(
       'Signed out. Stats are only kept for a signed-in account.',
     );
     // An anonymous session has no document by design — the callable refuses to
@@ -239,7 +241,7 @@ describe('ProfileStatsComponent', () => {
     // Placeholders rather than `0`: zero is a fact about a finished game, and
     // this player has not finished one.
     expect(component.tiles().every((tile) => tile.value === '—')).toBe(true);
-    expect(component.statusAnnouncement()).toBe('No finished games yet.');
+    expect(english(component.statusAnnouncement())).toBe('No finished games yet.');
   });
 
   /**
@@ -255,7 +257,7 @@ describe('ProfileStatsComponent', () => {
     await settle();
 
     expect(component.view()).toBe('failed');
-    expect(component.statusAnnouncement()).toBe('Could not load your stats.');
+    expect(english(component.statusAnnouncement())).toBe('Could not load your stats.');
   });
 
   it('re-reads on retry, and recovers when the second read works', async () => {
@@ -372,7 +374,9 @@ describe('ProfileStatsComponent', () => {
 
     expect(component.view()).toBe('empty');
     expect(component.line()).toBe('notBanked');
-    expect(component.statusAnnouncement()).toBe('Your last game could not be added to your stats.');
+    expect(english(component.statusAnnouncement())).toBe(
+      'Your last game could not be added to your stats.',
+    );
   });
 
   it('says it over a full card too, and keeps the totals already banked', async () => {
@@ -406,7 +410,7 @@ describe('ProfileStatsComponent', () => {
     await settle();
 
     expect(component.line()).toBe('dailyLimit');
-    expect(component.statusAnnouncement()).toBe(
+    expect(english(component.statusAnnouncement())).toBe(
       'Your last game was not added: you reached the daily limit of 200 games.',
     );
     expect(component.tiles().find((tile) => tile.id === 'games-played')?.value).toBe('3');
@@ -440,7 +444,7 @@ describe('ProfileStatsComponent', () => {
     await settle();
 
     expect(component.line()).toBe('stats');
-    expect(component.statusAnnouncement()).toBe('Your stats are ready.');
+    expect(english(component.statusAnnouncement())).toBe('Your stats are ready.');
   });
 
   /**
@@ -571,7 +575,7 @@ describe('ProfileStatsComponent — level and XP', () => {
     await settle();
 
     expect(component.levelUp()).toBe(3);
-    expect(component.statusAnnouncement()).toBe(
+    expect(english(component.statusAnnouncement())).toBe(
       'Your stats are ready. Your last game took you to level 3.',
     );
   });
@@ -585,7 +589,7 @@ describe('ProfileStatsComponent — level and XP', () => {
     await settle();
 
     expect(component.levelUp()).toBeNull();
-    expect(component.statusAnnouncement()).toBe('Your stats are ready.');
+    expect(english(component.statusAnnouncement())).toBe('Your stats are ready.');
   });
 
   it('says nothing of another account’s game', async () => {
@@ -677,8 +681,8 @@ describe('ProfileStatsComponent (rendered)', () => {
     expect(region()).toBe('Your stats are ready.');
 
     const picker = fixture.debugElement.query((node) => node.name === 'app-avatar-picker')
-      .componentInstance as { announce: { emit(text: string): void } };
-    picker.announce.emit('Avatar saved.');
+      .componentInstance as { announce: { emit(message: Message): void } };
+    picker.announce.emit(msg('avatar.saidSaved', 'Avatar saved.'));
     fixture.detectChanges();
 
     expect(region()).toBe('Avatar saved.');

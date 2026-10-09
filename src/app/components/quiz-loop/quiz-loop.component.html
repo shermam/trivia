@@ -10,15 +10,16 @@
         class="flex items-center justify-between px-6 py-5 border-b border-slate-900/6 dark:border-white/10 text-sm sm:text-base"
       >
         <span class="font-semibold text-slate-600 dark:text-slate-400">
-          Question
-          <span class="text-slate-900 dark:text-slate-50 font-extrabold">{{
-            gameController.currentIndex() + 1
-          }}</span>
-          / {{ gameController.totalQuestions() }}
+          <app-rich-text [message]="position()" [tags]="{ n: positionNumber }" />
+          <ng-template #positionNumber let-text
+            ><span class="text-slate-900 dark:text-slate-50 font-extrabold">{{
+              text
+            }}</span></ng-template
+          >
         </span>
-        <span class="font-semibold text-emerald-600 dark:text-emerald-400"
-          >Score: {{ gameController.score() }}</span
-        >
+        <span class="font-semibold text-emerald-600 dark:text-emerald-400">{{
+          'play.score' | t: 'Score: {score}' : { score: gameController.score() }
+        }}</span>
 
         <!--
           No ring for an unlimited game (G7): there is no deadline to draw, and
@@ -61,14 +62,14 @@
               [class.dark:text-emerald-400]="timeLeft() > 5"
               [class.text-red-700]="timeLeft() <= 5"
               [class.dark:text-red-400]="timeLeft() <= 5"
-              >{{ timeLeft() }}s</span
+              >{{ 'play.secondsLeft' | t: '{n}s' : { n: timeLeft() } }}</span
             >
           </div>
         } @else {
           <span
             data-cy="no-time-limit"
             class="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-            >No time limit</span
+            >{{ 'play.noLimit' | t: 'No time limit' }}</span
           >
         }
       </div>
@@ -85,7 +86,9 @@
           class="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/20 px-6 py-2.5"
         >
           <app-icon name="wifi-off" [size]="16" class="shrink-0" />
-          You're offline — these questions are from your saved offline pool.
+          {{
+            'play.offline' | t: "You're offline — these questions are from your saved offline pool."
+          }}
         </p>
       }
 
@@ -109,7 +112,7 @@
           <span
             class="text-[11px] font-bold uppercase tracking-wide bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-full px-2.5 py-1"
           >
-            {{ question.difficulty }}
+            {{ difficultyLabel(question.difficulty) | t }}
           </span>
 
           <!--
@@ -150,7 +153,7 @@
              the running count on top of it would bury the part that matters
              (G3, `CLAUDE.md` §4.5). -->
         <p role="status" aria-live="polite" data-cy="streak-status" class="sr-only">
-          {{ streakAnnouncement() }}
+          {{ streakAnnouncement() | t }}
         </p>
 
         <div class="flex items-start justify-between gap-3 mb-6">
@@ -184,8 +187,10 @@
                 [attr.aria-pressed]="isFlagged(question.id)"
                 [attr.aria-label]="
                   isFlagged(question.id)
-                    ? 'Flagged for reporting. You will be asked for details after the game. Select to remove the flag.'
-                    : 'Report this question'
+                    ? ('play.flagged'
+                      | t
+                        : 'Flagged for reporting. You will be asked for details after the game. Select to remove the flag.')
+                    : ('play.report' | t: 'Report this question')
                 "
                 (click)="toggleFlag(question.id)"
                 class="rounded-lg p-2 transition-colors"
@@ -210,7 +215,11 @@
                 aria-hidden="true"
                 class="pointer-events-none absolute right-0 top-full z-10 mt-1 hidden whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-white shadow-lg group-hover:block group-focus-within:block"
               >
-                {{ isFlagged(question.id) ? 'Flagged — select to undo' : 'Report this question' }}
+                {{
+                  isFlagged(question.id)
+                    ? ('play.flaggedTip' | t: 'Flagged — select to undo')
+                    : ('play.report' | t: 'Report this question')
+                }}
               </span>
             </div>
           }
@@ -221,7 +230,7 @@
              screen reader — and this is the message that promises the detail
              form at the end, so it is the part that must not be missed. -->
         <p role="status" aria-live="polite" data-cy="flag-status" class="sr-only">
-          {{ flagAnnouncement() }}
+          {{ flagAnnouncement() | t }}
         </p>
 
         @if (flagNotice()) {
@@ -230,7 +239,11 @@
             class="flex items-start gap-2 -mt-3 mb-5 text-sm text-red-700 dark:text-red-300"
           >
             <app-icon name="flag-filled" [size]="15" class="shrink-0 mt-0.5" />
-            Flagged. You'll be asked for details about this question at the end of the game.
+            {{
+              'play.flagNotice'
+                | t
+                  : "Flagged. You'll be asked for details about this question at the end of the game."
+            }}
           </p>
         }
 
@@ -315,7 +328,7 @@
         <div
           class="mt-5 flex items-stretch gap-2"
           role="group"
-          aria-label="Lifelines"
+          [attr.aria-label]="'play.lifelines' | t: 'Lifelines'"
           data-cy="lifelines"
         >
           <button
@@ -326,9 +339,11 @@
             [attr.aria-label]="
               lifelines().fiftyFifty
                 ? canUseFiftyFifty()
-                  ? 'Fifty-fifty: remove every wrong answer but one. One use per game.'
-                  : 'Fifty-fifty is unavailable on a question with two options.'
-                : 'Fifty-fifty already used.'
+                  ? ('play.fiftyFifty'
+                    | t: 'Fifty-fifty: remove every wrong answer but one. One use per game.')
+                  : ('play.fiftyFiftyUnavailable'
+                    | t: 'Fifty-fifty is unavailable on a question with two options.')
+                : ('play.fiftyFiftyUsed' | t: 'Fifty-fifty already used.')
             "
             [ngClass]="lifelineClass(lifelines().fiftyFifty && canUseFiftyFifty())"
           >
@@ -344,13 +359,14 @@
               [disabled]="!canUseLifeline('extraTime')"
               [attr.aria-label]="
                 lifelines().extraTime
-                  ? 'Extra time: add 15 seconds to this question. One use per game.'
-                  : 'Extra time already used.'
+                  ? ('play.extraTime'
+                    | t: 'Extra time: add 15 seconds to this question. One use per game.')
+                  : ('play.extraTimeUsed' | t: 'Extra time already used.')
               "
               [ngClass]="lifelineClass(lifelines().extraTime)"
             >
               <app-icon name="clock-plus" [size]="16" />
-              <span>+15s</span>
+              <span>{{ 'play.extraTimeLabel' | t: '+15s' }}</span>
             </button>
           }
 
@@ -361,20 +377,22 @@
             [disabled]="!canUseLifeline('skip')"
             [attr.aria-label]="
               lifelines().skip
-                ? 'Skip: move to the next question. It still counts toward your total. One use per game.'
-                : 'Skip already used.'
+                ? ('play.skip'
+                  | t
+                    : 'Skip: move to the next question. It still counts toward your total. One use per game.')
+                : ('play.skipUsed' | t: 'Skip already used.')
             "
             [ngClass]="lifelineClass(lifelines().skip)"
           >
             <app-icon name="skip-forward" [size]="16" />
-            <span>Skip</span>
+            <span>{{ 'play.skipLabel' | t: 'Skip' }}</span>
           </button>
         </div>
 
         <!-- Spending a lifeline is otherwise a silent visual change: options
              grey out, a number jumps, the question changes. (G3) -->
         <p role="status" aria-live="polite" data-cy="lifeline-status" class="sr-only">
-          {{ lifelineAnnouncement() }}
+          {{ lifelineAnnouncement() | t }}
         </p>
 
         <!--
@@ -385,7 +403,7 @@
           container is permanent and only its text changes (G3).
         -->
         <p role="status" aria-live="polite" data-cy="result-status" class="sr-only">
-          {{ resultAnnouncement() }}
+          {{ resultAnnouncement() | t }}
         </p>
 
         <!--
@@ -419,9 +437,9 @@
             [class.invisible]="resultKind() !== 'correct'"
           >
             <span class="text-lg">&#127881;</span>
-            <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300"
-              >Correct! Well done.</span
-            >
+            <span class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">{{
+              'play.bannerCorrect' | t: 'Correct! Well done.'
+            }}</span>
           </div>
           <!--
             No answer text in any of these, and no pointer to it either. Naming
@@ -443,14 +461,18 @@
             [class.invisible]="resultKind() !== 'timeout'"
           >
             <span class="text-lg">&#9200;</span>
-            <span class="text-sm font-semibold text-red-800 dark:text-red-300">Time's up!</span>
+            <span class="text-sm font-semibold text-red-800 dark:text-red-300">{{
+              'play.bannerTimeout' | t: "Time's up!"
+            }}</span>
           </div>
           <div
             class="col-start-1 row-start-1 flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
             [class.invisible]="resultKind() !== 'incorrect'"
           >
             <span class="text-lg">&#10060;</span>
-            <span class="text-sm font-semibold text-red-800 dark:text-red-300">Incorrect.</span>
+            <span class="text-sm font-semibold text-red-800 dark:text-red-300">{{
+              'play.bannerIncorrect' | t: 'Incorrect.'
+            }}</span>
           </div>
         </div>
 
@@ -483,7 +505,7 @@
         <!-- Permanent, and outside the row above: a vote's write can settle
              after the quiz has moved on to a question that has no row. -->
         <p role="status" aria-live="polite" data-cy="vote-status" class="sr-only">
-          {{ voteAnnouncement() }}
+          {{ voteAnnouncement() | t }}
         </p>
       </div>
     </div>

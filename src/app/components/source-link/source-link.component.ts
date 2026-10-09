@@ -1,4 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { msg, type Message } from '../../i18n/message';
+import { RichTextComponent } from '../../i18n/rich-text.component';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 
 /**
@@ -72,8 +75,19 @@ import { IconComponent } from '../icon/icon.component';
   selector: 'app-source-link',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, RichTextComponent, TPipe],
   template: `
+    <!--
+      Each line is one message with its markup named inside it — "Machine-generated
+      from <link>…</link>" — so a translation can put the source where its grammar
+      wants it; the templates below are that markup.
+    -->
+    <ng-template #generated let-text
+      ><span data-cy="question-source-generated">{{ text }}</span></ng-template
+    >
+    <ng-template #sourceLabel let-text
+      ><span class="sr-only">{{ text }}</span></ng-template
+    >
     @if (safeHref(); as href) {
       <p
         class="mt-1 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400"
@@ -81,39 +95,40 @@ import { IconComponent } from '../icon/icon.component';
       >
         <app-icon name="external-link" [size]="13" class="mt-0.5 shrink-0" />
         <span>
-          @if (machineGenerated()) {
-            <span data-cy="question-source-generated">Machine-generated from </span>
-          } @else {
-            <span class="sr-only">Source:</span>
-          }
-          <a
-            [href]="href"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="font-medium hover:underline"
-            data-cy="question-source-link"
-            >{{ label() }}
-            @if (shownHost(); as host) {
-              <span class="font-normal" data-cy="question-source-host"
-                >&nbsp;&mdash; {{ host }}</span
-              >
-            }
-            <span class="sr-only"> (opens in a new tab)</span></a
+          <app-rich-text
+            [message]="linkLine()"
+            [tags]="{ generated: generated, sr: sourceLabel, link: link }"
+          />
+          <ng-template #link let-text
+            ><a
+              [href]="href"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="font-medium hover:underline"
+              data-cy="question-source-link"
+              >{{ text }}
+              @if (shownHost(); as host) {
+                <span class="font-normal" data-cy="question-source-host"
+                  >&nbsp;&mdash; {{ host }}</span
+                >
+              }
+              <span class="sr-only"> {{ 'source.newTab' | t: '(opens in a new tab)' }}</span></a
+            ></ng-template
           >
         </span>
       </p>
     } @else if (label(); as text) {
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" data-cy="question-source">
-        @if (machineGenerated()) {
-          <span data-cy="question-source-generated">Machine-generated from</span>
-        } @else {
-          <span class="sr-only">Source:</span>
-        }
-        {{ text }}
+        <app-rich-text
+          [message]="textLine(text)"
+          [tags]="{ generated: generated, sr: sourceLabel }"
+        />
       </p>
     } @else if (machineGenerated()) {
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" data-cy="question-source">
-        <span data-cy="question-source-generated">Machine-generated</span>
+        <span data-cy="question-source-generated">{{
+          'source.generated' | t: 'Machine-generated'
+        }}</span>
       </p>
     }
   `,
@@ -177,6 +192,29 @@ export class SourceLinkComponent {
    * which is the no-title case, and repeating it would be noise rather than
    * disclosure.
    */
+  /** The linked line: "Machine-generated from <the source>", or the source after a hidden "Source:". */
+  protected readonly linkLine = computed<Message>(() => {
+    const title = this.label() ?? '';
+    return this.machineGenerated()
+      ? msg(
+          'source.generatedLink',
+          '<generated>Machine-generated from </generated><link>{title}</link>',
+          {
+            title,
+          },
+        )
+      : msg('source.sourceLink', '<sr>Source:</sr><link>{title}</link>', { title });
+  });
+
+  /** The same line for a source that is a title with no usable link. */
+  protected textLine(title: string): Message {
+    return this.machineGenerated()
+      ? msg('source.generatedText', '<generated>Machine-generated from</generated> {title}', {
+          title,
+        })
+      : msg('source.sourceText', '<sr>Source:</sr> {title}', { title });
+  }
+
   readonly shownHost = computed(() => {
     const host = this.host();
     if (!this.showHost() || !host || host === this.label()) {

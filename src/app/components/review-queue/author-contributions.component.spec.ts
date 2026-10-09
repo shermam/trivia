@@ -14,6 +14,8 @@ import {
   SelectionLineView,
   describeOutcome,
 } from './author-contributions.component';
+import { verbatim, type Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 
 /**
  * Everything one account contributed, for a reviewer (`FEAT-006`).
@@ -67,10 +69,10 @@ interface InternalView {
   selected(): ReadonlySet<string>;
   allSelected(): boolean;
   someSelected(): boolean;
-  reasonError(): string | null;
-  selectionError(): string | null;
-  outcome(): string | null;
-  announcement(): string | null;
+  reasonError(): Message | null;
+  selectionError(): Message | null;
+  outcome(): Message | null;
+  announcement(): Message | null;
   inFlight(): boolean;
   toggle(question: Q, checked: boolean): void;
   toggleAll(): void;
@@ -118,7 +120,7 @@ function setup(
     'anchor',
     question('anchor', { question: 'The one it came from?' }),
   );
-  fixture.componentRef.setInput('returnLabel', 'Pending');
+  fixture.componentRef.setInput('returnLabel', verbatim('Pending'));
 
   const emitted: BulkRejection[] = [];
   fixture.componentInstance.rejected.subscribe((event) => emitted.push(event));
@@ -321,7 +323,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     await view.rejectSelected();
 
     expect(rejectQuestions).not.toHaveBeenCalled();
-    expect(view.selectionError()).toBe('Select at least one question to reject.');
+    expect(english(view.selectionError())).toBe('Select at least one question to reject.');
     expect(view.selectionLine()).toBe('error');
     expect(document.activeElement).toBe(face(host, 'select-all'));
   });
@@ -335,7 +337,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     await settle();
 
     expect(rejectQuestions).not.toHaveBeenCalled();
-    expect(view.reasonError()).toMatch(/Give a reason/);
+    expect(english(view.reasonError())).toMatch(/Give a reason/);
     const box = face(host, 'bulk-reason');
     expect(box.getAttribute('aria-invalid')).toBe('true');
     expect(box.getAttribute('aria-describedby')).toContain('author-bulk-reason-error');
@@ -350,7 +352,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     await view.rejectSelected();
 
     expect(rejectQuestions).not.toHaveBeenCalled();
-    expect(view.reasonError()).toBe('A reason must be 500 characters or fewer.');
+    expect(english(view.reasonError())).toBe('A reason must be 500 characters or fewer.');
   });
 
   /**
@@ -383,7 +385,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     const error = face(host, 'bulk-reason-error');
     expect(error.parentElement).toBe(line);
     expect(error.className).toContain('col-start-1 row-start-1');
-    expect(error.textContent?.trim()).toBe(view.reasonError());
+    expect(error.textContent?.trim()).toBe(english(view.reasonError()));
   });
 
   it('sends the selection with the one trimmed reason', async () => {
@@ -414,7 +416,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     expect([...emitted[0].ids].sort()).toEqual(['a1', 'p1']);
     expect(emitted[0].reason).toBe('Spam account.');
     expect(view.selected().size).toBe(0);
-    expect(view.announcement()).toBe('Rejected 2 questions.');
+    expect(english(view.announcement())).toBe('Rejected 2 questions.');
     expect(view.selectionLine()).toBe('outcome');
   });
 
@@ -441,7 +443,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
     ]);
     expect([...view.selected()]).toEqual(['a1']);
     expect(emitted.map((event) => [...event.ids])).toEqual([['p1']]);
-    expect(view.outcome()).toBe(
+    expect(english(view.outcome())).toBe(
       'Rejected 1 of 2. 1 could not be confirmed and is still selected — try again.',
     );
   });
@@ -458,7 +460,7 @@ describe('AuthorContributionsComponent: rejecting the selection', () => {
 
     expect(emitted).toHaveLength(0);
     expect(view.rows().map((row) => row.status)).toEqual(['pending', 'approved']);
-    expect(view.outcome()).toBe(
+    expect(english(view.outcome())).toBe(
       'None of the 2 could be confirmed. They are still selected — try again.',
     );
   });
@@ -653,20 +655,20 @@ describe('AuthorContributionsComponent: paging', () => {
 
 describe('describeOutcome', () => {
   it('counts a whole success', () => {
-    expect(describeOutcome(1, 1)).toBe('Rejected 1 question.');
-    expect(describeOutcome(12, 12)).toBe('Rejected 12 questions.');
+    expect(english(describeOutcome(1, 1))).toBe('Rejected 1 question.');
+    expect(english(describeOutcome(12, 12))).toBe('Rejected 12 questions.');
   });
 
   it('separates a partial failure from the success beside it', () => {
-    expect(describeOutcome(10, 12)).toBe(
+    expect(english(describeOutcome(10, 12))).toBe(
       'Rejected 10 of 12. 2 could not be confirmed and are still selected — try again.',
     );
   });
 
   it('never says a write was not saved — only that it could not be confirmed', () => {
     for (const sentence of [describeOutcome(0, 1), describeOutcome(0, 3), describeOutcome(2, 3)]) {
-      expect(sentence).toMatch(/could (not )?be confirmed/);
-      expect(sentence).not.toMatch(/not saved|failed/);
+      expect(english(sentence)).toMatch(/could (not )?be confirmed/);
+      expect(english(sentence)).not.toMatch(/not saved|failed/);
     }
   });
 });

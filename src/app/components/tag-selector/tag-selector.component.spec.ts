@@ -2,6 +2,7 @@ import { Component, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { afterEach, vi } from 'vitest';
+import { type Message, verbatim } from '../../i18n/message';
 import { TagSelectorComponent } from './tag-selector.component';
 
 /**
@@ -18,6 +19,8 @@ import { TagSelectorComponent } from './tag-selector.component';
   imports: [ReactiveFormsModule, TagSelectorComponent],
   template: `<app-tag-selector
     [formControl]="control"
+    [label]="'Topics'"
+    [chosenLabel]="'Topics chosen'"
     [max]="max()"
     [suggestions]="suggestions()"
     [allowedTags]="allowedTags()"
@@ -35,13 +38,13 @@ class HostComponent {
   readonly max = signal(8);
   readonly suggestions = signal<readonly string[]>(['world-war-2', 'calculus']);
   readonly allowedTags = signal<readonly string[] | null>(null);
-  readonly notAllowedMessage = signal('Only the suggested topics work here.');
-  readonly feedbackVariants = signal<readonly string[]>([]);
+  readonly notAllowedMessage = signal<Message>(verbatim('Only the suggested topics work here.'));
+  readonly feedbackVariants = signal<readonly Message[]>([]);
   readonly required = signal(false);
-  readonly errorMessage = signal<string | null>(null);
+  readonly errorMessage = signal<Message | null>(null);
   readonly deferSuggestions = signal(false);
-  readonly hint = signal('');
-  readonly hintVariants = signal<readonly string[]>([]);
+  readonly hint = signal<Message | null>(null);
+  readonly hintVariants = signal<readonly Message[]>([]);
   readonly picker = viewChild.required(TagSelectorComponent);
 }
 
@@ -394,7 +397,13 @@ describe('TagSelectorComponent — a change the caller makes', () => {
     enter('cold-war');
     enter('calculus');
 
-    host.picker().replaceSelection(['calculus'], 'One topic only here.', 'Removed #cold-war.');
+    host
+      .picker()
+      .replaceSelection(
+        ['calculus'],
+        verbatim('One topic only here.'),
+        verbatim('Removed #cold-war.'),
+      );
     fixture.detectChanges();
 
     expect(host.control.value).toEqual(['calculus']);
@@ -405,7 +414,9 @@ describe('TagSelectorComponent — a change the caller makes', () => {
   it('withdraws the notice at the reader’s next move', () => {
     const { host, fixture, type, feedback } = render();
 
-    host.picker().replaceSelection([], 'One topic only here.', 'Removed everything.');
+    host
+      .picker()
+      .replaceSelection([], verbatim('One topic only here.'), verbatim('Removed everything.'));
     fixture.detectChanges();
     type('alg');
     type('');
@@ -416,7 +427,9 @@ describe('TagSelectorComponent — a change the caller makes', () => {
   it('withdraws it when the caller says it no longer applies', () => {
     const { host, fixture, feedback } = render();
 
-    host.picker().replaceSelection([], 'One topic only here.', 'Removed everything.');
+    host
+      .picker()
+      .replaceSelection([], verbatim('One topic only here.'), verbatim('Removed everything.'));
     fixture.detectChanges();
     host.picker().clearNotice();
     fixture.detectChanges();
@@ -446,7 +459,7 @@ describe('TagSelectorComponent — required', () => {
 
   it('renders the caller’s error and names it first in the input’s description', () => {
     const { host, fixture, el, input } = render();
-    host.errorMessage.set('Add at least one topic.');
+    host.errorMessage.set(verbatim('Add at least one topic.'));
     fixture.detectChanges();
 
     const error = el.querySelector<HTMLElement>('[data-cy="tag-error"]')!;
@@ -520,8 +533,8 @@ describe('TagSelectorComponent — reserved lines', () => {
   it('stacks an invisible copy of every hint it may be given', () => {
     const variants = ['The short one.', 'The considerably longer one, which wraps.'];
     const { host, fixture, el } = render();
-    host.hint.set(variants[0]);
-    host.hintVariants.set(variants);
+    host.hint.set(verbatim(variants[0]));
+    host.hintVariants.set(variants.map(verbatim));
     fixture.detectChanges();
 
     const twins = [...el.querySelectorAll<HTMLElement>('[data-cy="tag-hint-reserve"]')];
@@ -534,7 +547,7 @@ describe('TagSelectorComponent — reserved lines', () => {
     expect(el.querySelector('[data-cy="tag-hint"]')?.className).toContain('row-start-1');
 
     // The hint the reader sees still follows the input it was given.
-    host.hint.set(variants[1]);
+    host.hint.set(verbatim(variants[1]));
     fixture.detectChanges();
     expect(el.querySelector('[data-cy="tag-hint"]')?.textContent?.trim()).toBe(variants[1]);
   });
@@ -542,7 +555,7 @@ describe('TagSelectorComponent — reserved lines', () => {
   /** …and a caller whose hint never changes reserves nothing extra for it. */
   it('stacks no copies for a hint that cannot change', () => {
     const { host, fixture, el } = render();
-    host.hint.set('A few words for what this question is about.');
+    host.hint.set(verbatim('A few words for what this question is about.'));
     fixture.detectChanges();
 
     expect(el.querySelectorAll('[data-cy="tag-hint-reserve"]')).toHaveLength(0);
@@ -560,7 +573,7 @@ describe('TagSelectorComponent — reserved lines', () => {
   it('stacks an invisible copy of every feedback message the caller may need', () => {
     const variants = ['Removed the topics this game cannot play.', 'Only the suggested topics.'];
     const { host, fixture, el } = render();
-    host.feedbackVariants.set(variants);
+    host.feedbackVariants.set(variants.map(verbatim));
     fixture.detectChanges();
 
     const twins = [...el.querySelectorAll<HTMLElement>('[data-cy="tag-feedback-reserve"]')];

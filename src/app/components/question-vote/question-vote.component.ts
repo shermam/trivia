@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { DISLIKE, LIKE, VoteValue } from '../../models/question-vote';
 import { QuestionVoteService } from '../../services/question-vote.service';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 
 /** Makes each instance's caption id unique — the recap renders one of these per question. */
@@ -38,7 +39,7 @@ let nextCaptionId = 0;
 @Component({
   selector: 'app-question-vote',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, TPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -48,13 +49,13 @@ let nextCaptionId = 0;
       data-cy="question-vote"
     >
       <span [id]="captionId" class="text-sm font-semibold text-slate-500 dark:text-slate-400">
-        Rate this question
+        {{ 'vote.caption' | t: 'Rate this question' }}
       </span>
       <div class="flex shrink-0 items-center gap-2">
         <button
           type="button"
           data-cy="vote-like"
-          aria-label="Like this question"
+          [attr.aria-label]="'vote.like' | t: 'Like this question'"
           [attr.aria-pressed]="value() === like"
           (click)="voted.emit(like)"
           [class]="buttonClass(value() === like, 'like')"
@@ -64,7 +65,7 @@ let nextCaptionId = 0;
         <button
           type="button"
           data-cy="vote-dislike"
-          aria-label="Dislike this question"
+          [attr.aria-label]="'vote.dislike' | t: 'Dislike this question'"
           [attr.aria-pressed]="value() === dislike"
           (click)="voted.emit(dislike)"
           [class]="buttonClass(value() === dislike, 'dislike')"

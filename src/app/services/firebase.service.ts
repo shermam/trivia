@@ -22,6 +22,7 @@ import {
   CONTRIBUTIONS_COLLECTION,
   CONTRIBUTIONS_ORDER,
 } from '../models/contributions-query';
+import { MessageError, msg } from '../i18n/message';
 import { readXp } from '../models/xp';
 import { QUIZZES_COLLECTION, QUIZ_MAX_QUESTIONS } from '../models/quiz.model';
 import { isDocumentReference } from '../utils/quiz-definition.util';
@@ -246,9 +247,14 @@ export interface RawDocument {
  * therefore advises without diagnosing (`CLAUDE.md` §4.4): "try again in a
  * few minutes" is the right move for the cap, and harmless for the rest.
  */
-export class QuestionReportRejectedError extends Error {
+export class QuestionReportRejectedError extends MessageError {
   constructor() {
-    super('Could not send the report just now. Please try again in a few minutes.');
+    super(
+      msg(
+        'report.rejected',
+        'Could not send the report just now. Please try again in a few minutes.',
+      ),
+    );
   }
 }
 
@@ -258,11 +264,14 @@ export class QuestionReportRejectedError extends Error {
  * justify the claim, since the rules refuse a stale counter identically
  * (`CLAUDE.md` §4.4).
  */
-export class QuestionQuotaExceededError extends Error {
+export class QuestionQuotaExceededError extends MessageError {
   constructor() {
     super(
-      `You have added ${MAX_QUESTIONS_PER_HOUR} questions in the past hour, which is the limit. ` +
-        'Please try again later.',
+      msg(
+        'add.quotaExceeded',
+        '{max, plural, one {You have added # question in the past hour, which is the limit. Please try again later.} other {You have added # questions in the past hour, which is the limit. Please try again later.}}',
+        { max: MAX_QUESTIONS_PER_HOUR },
+      ),
     );
   }
 }

@@ -58,8 +58,8 @@ import { readTags } from '../../utils/normalize-tag.util';
 export class QuestionTagsComponent {
   readonly tags = input<readonly string[] | undefined>(undefined);
 
-  /** The list's accessible name. */
-  readonly label = input('Tags');
+  /** The list's accessible name, translated by the caller. */
+  readonly label = input.required<string>();
 
   /** A `data-cy` for the list itself, so a spec can scope to one card's chips. */
   readonly testId = input('question-tags');

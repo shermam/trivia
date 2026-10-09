@@ -13,7 +13,7 @@ import { QuestionTagsComponent } from './question-tags.component';
 @Component({
   standalone: true,
   imports: [QuestionTagsComponent],
-  template: `<app-question-tags [tags]="tags()" />`,
+  template: `<app-question-tags [tags]="tags()" [label]="'Tags'" />`,
 })
 class HostComponent {
   readonly tags = signal<readonly string[] | undefined>(undefined);

@@ -2,6 +2,7 @@ import { Component, afterNextRender, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { FooterComponent } from './components/footer/footer.component';
 import { TopBarComponent } from './components/top-bar/top-bar.component';
+import { TPipe } from './i18n/t.pipe';
 import { AuthService } from './services/auth.service';
 import { EmbedModeService } from './services/embed-mode.service';
 import { RouteAnnouncerService } from './services/route-announcer.service';
@@ -17,7 +18,7 @@ const BOOTSTRAP_IDLE_FALLBACK_MS = 500;
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, TopBarComponent, FooterComponent],
+  imports: [RouterOutlet, TopBarComponent, FooterComponent, TPipe],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })

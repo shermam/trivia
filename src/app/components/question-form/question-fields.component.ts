@@ -11,7 +11,11 @@ import { AbstractControl, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
+import { msg, type Message } from '../../i18n/message';
+import { RichTextComponent } from '../../i18n/rich-text.component';
+import { TPipe } from '../../i18n/t.pipe';
 import {
+  FIELD_MESSAGES,
   MAX_ANSWER_LENGTH,
   MAX_INCORRECT_ANSWERS,
   MAX_QUESTION_LENGTH,
@@ -21,6 +25,7 @@ import {
   canAddIncorrectAnswer,
   canRemoveIncorrectAnswer,
   fieldErrorFor,
+  incorrectAnswerMessages,
   optionCount,
   removeIncorrectAnswer,
   showsFieldError,
@@ -52,7 +57,14 @@ import {
 @Component({
   selector: 'app-question-fields',
   standalone: true,
-  imports: [ReactiveFormsModule, IconComponent, RenderedTextComponent, TagSelectorComponent],
+  imports: [
+    ReactiveFormsModule,
+    IconComponent,
+    RenderedTextComponent,
+    TagSelectorComponent,
+    RichTextComponent,
+    TPipe,
+  ],
   templateUrl: './question-fields.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -66,7 +78,7 @@ export class QuestionFieldsComponent {
    * by the host because it is announced from a live region that has to exist
    * before it has anything to say (finding G3).
    */
-  readonly validationSummary = input<string | null>(null);
+  readonly validationSummary = input<Message | null>(null);
 
   protected readonly maxQuestionLength = MAX_QUESTION_LENGTH;
   protected readonly maxAnswerLength = MAX_ANSWER_LENGTH;
@@ -77,7 +89,17 @@ export class QuestionFieldsComponent {
    * a screen reader — and so is the "Add an answer" button going unavailable
    * at six, which this says in words when it happens.
    */
-  protected readonly rowsAnnouncement = signal('');
+  protected readonly rowsAnnouncement = signal<Message | null>(null);
+
+  protected readonly topicsHint = msg(
+    'form.topicsHint',
+    'A few words for what this question is about, so players can ask for exactly this subject. Reviewers see them too.',
+  );
+
+  protected readonly markdownHelp = msg(
+    'form.markdownHelp',
+    'Paragraphs and line breaks, bold, italics, strikethrough, lists, quotes, links, inline code and code blocks, plus LaTeX between <code>$…$</code> and <code>$$…$$</code>. Anything else is removed rather than shown.',
+  );
 
   protected id(name: string): string {
     return `${this.idPrefix()}${name}`;
@@ -87,8 +109,15 @@ export class QuestionFieldsComponent {
     return showsFieldError(control);
   }
 
-  protected errorFor(control: AbstractControl, label: string, maxLength: number): string {
-    return fieldErrorFor(control, label, maxLength);
+  /** A field's error, by the field's name in {@link FIELD_MESSAGES} — or row `n`'s, counted from one. */
+  protected errorFor(
+    control: AbstractControl,
+    field: keyof typeof FIELD_MESSAGES | number,
+    maxLength: number,
+  ): Message | null {
+    const messages =
+      typeof field === 'number' ? incorrectAnswerMessages(field) : FIELD_MESSAGES[field];
+    return fieldErrorFor(control, messages, maxLength);
   }
 
   /**
@@ -96,8 +125,10 @@ export class QuestionFieldsComponent {
    * Its own sentence rather than `fieldErrorFor`'s "Topics is required.": the
    * fix is to add one, and saying so is what makes the message actionable.
    */
-  protected topicsError(): string | null {
-    return showsFieldError(this.form().controls.tags) ? 'Add at least one topic.' : null;
+  protected topicsError(): Message | null {
+    return showsFieldError(this.form().controls.tags)
+      ? msg('form.topicsRequired', 'Add at least one topic.')
+      : null;
   }
 
   protected canAddAnswer(): boolean {
@@ -127,7 +158,12 @@ export class QuestionFieldsComponent {
     if (index === null) {
       return;
     }
-    this.rowsAnnouncement.set(`Incorrect answer ${index + 1} added. ${this.countSentence()}`);
+    this.rowsAnnouncement.set(
+      msg('form.answerAdded', 'Incorrect answer {n} added. {status}', {
+        n: index + 1,
+        status: this.countSentence(),
+      }),
+    );
     this.focusAfterRender(this.id(`incorrect-answer-${index}`));
   }
 
@@ -144,22 +180,39 @@ export class QuestionFieldsComponent {
     if (!removeIncorrectAnswer(form, index)) {
       return;
     }
-    this.rowsAnnouncement.set(`Incorrect answer ${index + 1} removed. ${this.countSentence()}`);
+    this.rowsAnnouncement.set(
+      msg('form.answerRemoved', 'Incorrect answer {n} removed. {status}', {
+        n: index + 1,
+        status: this.countSentence(),
+      }),
+    );
     const remaining = form.controls.incorrectAnswers.length;
     this.focusAfterRender(
       index < remaining ? this.id(`incorrect-answer-${index}`) : this.id('add-answer'),
     );
   }
 
-  private countSentence(): string {
+  private countSentence(): Message {
     const count = optionCount(this.form());
-    const limit =
-      count >= MAX_INCORRECT_ANSWERS + 1
-        ? ' That is the most a question can have.'
-        : count <= MIN_INCORRECT_ANSWERS + 1
-          ? ' That is the fewest a question can have.'
-          : '';
-    return `The question now has ${count} answers.${limit}`;
+    if (count >= MAX_INCORRECT_ANSWERS + 1) {
+      return msg(
+        'form.answersMost',
+        '{count, plural, one {The question now has # answer. That is the most a question can have.} other {The question now has # answers. That is the most a question can have.}}',
+        { count },
+      );
+    }
+    if (count <= MIN_INCORRECT_ANSWERS + 1) {
+      return msg(
+        'form.answersFewest',
+        '{count, plural, one {The question now has # answer. That is the fewest a question can have.} other {The question now has # answers. That is the fewest a question can have.}}',
+        { count },
+      );
+    }
+    return msg(
+      'form.answers',
+      '{count, plural, one {The question now has # answer.} other {The question now has # answers.}}',
+      { count },
+    );
   }
 
   /**

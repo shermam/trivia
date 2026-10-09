@@ -22,6 +22,8 @@ import { GameControllerService } from '../../services/game-controller.service';
 import { QuizLoad, QuizService } from '../../services/quiz.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { IconComponent } from '../icon/icon.component';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 
 /**
  * Which of the screen's five states is showing.
@@ -33,11 +35,16 @@ import { IconComponent } from '../icon/icon.component';
 type QuizView = 'loading' | 'notFound' | 'empty' | 'failed' | 'ready';
 
 /** The picker's options, labelled in words — "No limit" is what is being chosen. */
-const TIME_LIMIT_CHOICES: readonly { value: TimeLimitOption; label: string }[] = [
-  { value: 15, label: '15 seconds' },
-  { value: 30, label: '30 seconds' },
-  { value: 'unlimited', label: 'No limit' },
+const TIME_LIMIT_CHOICES: readonly { value: TimeLimitOption; label: Message }[] = [
+  { value: 15, label: secondsLabel(15) },
+  { value: 30, label: secondsLabel(30) },
+  { value: 'unlimited', label: msg('quiz.noLimit', 'No limit') },
 ];
+
+/** "15 seconds" — an option of the time-limit picker. */
+function secondsLabel(seconds: number): Message {
+  return msg('quiz.seconds', '{n, plural, one {# second} other {# seconds}}', { n: seconds });
+}
 
 /**
  * What the line under the picker says for each limit — every one of them, so
@@ -48,11 +55,23 @@ const TIME_LIMIT_CHOICES: readonly { value: TimeLimitOption; label: string }[] =
  * quiz has none, so the limit changes the pace and nothing else. A player who
  * learned that only at the results screen would have been misled by omission.
  */
-const TIME_LIMIT_NOTES: Readonly<Record<string, string>> = {
-  '15': '15 seconds a question. Quizzes are not ranked, so pick the pace that suits you.',
-  '30': '30 seconds a question. Quizzes are not ranked, so pick the pace that suits you.',
-  unlimited: 'No countdown. Quizzes are not ranked, so take all the time you need.',
+const TIME_LIMIT_NOTES: Readonly<Record<string, Message>> = {
+  '15': timedNote(15),
+  '30': timedNote(30),
+  unlimited: msg(
+    'quiz.noteUnlimited',
+    'No countdown. Quizzes are not ranked, so take all the time you need.',
+  ),
 };
+
+/** What a timed choice means for a quiz, which ranks nowhere. */
+function timedNote(seconds: number): Message {
+  return msg(
+    'quiz.noteTimed',
+    '{n, plural, one {# second a question. Quizzes are not ranked, so pick the pace that suits you.} other {# seconds a question. Quizzes are not ranked, so pick the pace that suits you.}}',
+    { n: seconds },
+  );
+}
 
 /**
  * One curated quiz, ready to start (`FEAT-024`) — `/quiz/:quizId`.
@@ -77,7 +96,7 @@ const TIME_LIMIT_NOTES: Readonly<Record<string, string>> = {
 @Component({
   selector: 'app-quiz-detail',
   standalone: true,
-  imports: [RouterLink, IconComponent],
+  imports: [RouterLink, IconComponent, TPipe],
   templateUrl: './quiz-detail.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -121,7 +140,7 @@ export class QuizDetailComponent implements OnInit {
   protected readonly timeLimit = signal<TimeLimitOption>(DEFAULT_TIME_LIMIT);
 
   /** Set when Start was pressed and the game did not begin for a reason other than the allowance. */
-  protected readonly startError = signal('');
+  protected readonly startError = signal<Message | null>(null);
 
   /**
    * Whether a game was already in progress when the quiz was read — captured
@@ -173,16 +192,17 @@ export class QuizDetailComponent implements OnInit {
   });
 
   /** The page heading, in every state — the quiz's own title once there is one. */
-  protected readonly title = computed(() => {
+  /** The heading while there is no quiz to name — or `null`, and the quiz's own title shows. */
+  protected readonly stateTitle = computed<Message | null>(() => {
     switch (this.view()) {
       case 'loading':
-        return 'Loading quiz…';
+        return msg('quiz.loadingTitle', 'Loading quiz…');
       case 'notFound':
-        return 'Quiz not found';
+        return msg('quiz.notFoundTitle', 'Quiz not found');
       case 'failed':
-        return 'This quiz could not be loaded';
+        return msg('quiz.failedTitle', 'This quiz could not be loaded');
       default:
-        return this.quiz()?.title ?? '';
+        return null;
     }
   });
 
@@ -200,18 +220,20 @@ export class QuizDetailComponent implements OnInit {
    * sentence on screen, so a screen reader is not read the same paragraph
    * twice (`CLAUDE.md` §4.5). Empty while loading: "loading" is not an outcome.
    */
-  protected readonly announcement = computed(() => {
+  protected readonly announcement = computed<Message | null>(() => {
     switch (this.view()) {
       case 'ready':
-        return `Quiz ready: ${this.countLabel(this.playableCount())}.`;
+        return msg('quiz.saidReady', 'Quiz ready: {count}.', {
+          count: this.countLabel(this.playableCount()),
+        });
       case 'empty':
-        return "None of this quiz's questions can be played right now.";
+        return msg('quiz.saidEmpty', "None of this quiz's questions can be played right now.");
       case 'notFound':
-        return 'Quiz not found.';
+        return msg('quiz.saidNotFound', 'Quiz not found.');
       case 'failed':
-        return 'The quiz could not be loaded.';
+        return msg('quiz.saidFailed', 'The quiz could not be loaded.');
       default:
-        return '';
+        return null;
     }
   });
 
@@ -223,8 +245,8 @@ export class QuizDetailComponent implements OnInit {
     });
   }
 
-  protected countLabel(count: number): string {
-    return count === 1 ? '1 question' : `${count} questions`;
+  protected countLabel(count: number): Message {
+    return msg('quiz.questions', '{n, plural, one {# question} other {# questions}}', { n: count });
   }
 
   protected chooseTimeLimit(value: TimeLimitOption): void {
@@ -258,14 +280,14 @@ export class QuizDetailComponent implements OnInit {
     if (!quiz || questions.length === 0 || this.gameController.isLoading()) {
       return;
     }
-    this.startError.set('');
+    this.startError.set(null);
     const started = await this.gameController.startQuiz(
       { id: quiz.id, title: quiz.title },
       questions,
       this.timeLimit(),
     );
     if (!started && !this.gameController.limitReached()) {
-      this.startError.set('The quiz could not start. Please try again.');
+      this.startError.set(msg('quiz.startFailed', 'The quiz could not start. Please try again.'));
     }
   }
 
@@ -273,7 +295,7 @@ export class QuizDetailComponent implements OnInit {
     const sequence = ++this.readSequence;
     this.loadSignal.set(null);
     this.failedSignal.set(false);
-    this.startError.set('');
+    this.startError.set(null);
 
     let load: QuizLoad | null = null;
     let failed = false;

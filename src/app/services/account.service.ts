@@ -1,3 +1,4 @@
+import { MessageError, msg, type Message } from '../i18n/message';
 import { Injectable, inject, signal } from '@angular/core';
 import { environment } from '../../environments/environment';
 import { AvatarChoice, readAvatarChoice } from '../models/avatar.model';
@@ -118,22 +119,56 @@ export interface UnbankedGame {
  * This is the `CLAUDE.md` §4.4 guardrail — an error message must not narrate a
  * cause it hasn't verified — applied to the one code we *can* verify.
  */
-function accountErrorMessage(error: unknown, action: string): string {
+function accountErrorMessage(error: unknown, action: AccountAction): Message {
   const code = (error as { code?: string } | null)?.code;
   if (code === 'functions/not-found') {
-    return `This feature isn't available on this deployment yet. Cloud Functions only go live when a change is merged, so it will work on the live site but not on a preview.`;
+    return msg(
+      'account.notDeployed',
+      "This feature isn't available on this deployment yet. Cloud Functions only go live when a change is merged, so it will work on the live site but not on a preview.",
+    );
   }
   if (code === 'functions/unauthenticated') {
-    return 'Your session expired. Sign in again and retry.';
+    return msg('account.sessionExpired', 'Your session expired. Sign in again and retry.');
   }
   // Raised by the callable's own `timeout` option once it stops waiting — it
   // does not cancel the request, which runs on and may still succeed — so the
   // message deliberately doesn't claim it failed.
   if (code === 'functions/deadline-exceeded') {
-    return `This is taking longer than expected. Check back in a moment before trying to ${action} again.`;
+    return ACTION_MESSAGES[action].slow;
   }
-  return `Could not ${action}. Please try again.`;
+  return ACTION_MESSAGES[action].failed;
 }
+
+/** The three things a callable is asked to do here. */
+type AccountAction = 'export' | 'delete' | 'avatar';
+
+/**
+ * What each action's failure says — a sentence per action rather than one
+ * frame around a verb phrase, because the phrase is the sentence's grammar.
+ */
+const ACTION_MESSAGES: Record<AccountAction, { slow: Message; failed: Message }> = {
+  export: {
+    slow: msg(
+      'account.slowExport',
+      'This is taking longer than expected. Check back in a moment before trying to prepare your data again.',
+    ),
+    failed: msg('account.exportFailed', 'Could not prepare your data. Please try again.'),
+  },
+  delete: {
+    slow: msg(
+      'account.slowDelete',
+      'This is taking longer than expected. Check back in a moment before trying to delete your account again.',
+    ),
+    failed: msg('account.deleteFailed', 'Could not delete your account. Please try again.'),
+  },
+  avatar: {
+    slow: msg(
+      'account.slowAvatar',
+      'This is taking longer than expected. Check back in a moment before trying to save your avatar again.',
+    ),
+    failed: msg('account.avatarFailed', 'Could not save your avatar. Please try again.'),
+  },
+};
 
 /**
  * The XP a banked game's answer carries, read field by field: both whole,
@@ -237,7 +272,7 @@ export class AccountService {
     try {
       result = await callable();
     } catch (error) {
-      throw new Error(accountErrorMessage(error, 'prepare your data'), { cause: error });
+      throw new MessageError(accountErrorMessage(error, 'export'), { cause: error });
     }
 
     const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
@@ -272,7 +307,7 @@ export class AccountService {
     try {
       await callable();
     } catch (error) {
-      throw new Error(accountErrorMessage(error, 'delete your account'), { cause: error });
+      throw new MessageError(accountErrorMessage(error, 'delete'), { cause: error });
     }
     await this.authService.signOut();
   }
@@ -311,7 +346,7 @@ export class AccountService {
       const result = await callable(payload);
       return readAvatarChoice(result.data?.avatar);
     } catch (error) {
-      throw new Error(accountErrorMessage(error, 'save your avatar'), { cause: error });
+      throw new MessageError(accountErrorMessage(error, 'avatar'), { cause: error });
     }
   }
 

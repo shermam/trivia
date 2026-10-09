@@ -30,7 +30,7 @@
       [attr.aria-expanded]="isNavOpen()"
       aria-haspopup="dialog"
       [attr.aria-controls]="navPanelId"
-      aria-label="Site menu"
+      [attr.aria-label]="'bar.siteMenu' | t: 'Site menu'"
       class="flex h-9 w-9 shrink-0 items-center justify-center justify-self-start rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors sm:hidden"
     >
       <app-icon name="menu" [size]="18" />
@@ -72,10 +72,12 @@
         the brand shade the favicon and `theme-color` hard-code
         (`BRAND_DESIGN_SYSTEM.md` §1).
       -->
+      <!-- eslint-disable @angular-eslint/template/i18n -- the brand is never translated -->
       <span
         class="font-extrabold text-emerald-800 dark:text-emerald-400 text-lg tracking-tight max-[359px]:text-sm"
         >Trivimind</span
       >
+      <!-- eslint-enable @angular-eslint/template/i18n -->
       <!--
         Which backend is this? In production, nothing — the badge is absent
         rather than blank, because production is the one environment where the
@@ -113,7 +115,7 @@
           data-cy="environment-badge"
           class="hidden rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 sm:inline-block"
         >
-          <span class="sr-only">Environment:</span>
+          <span class="sr-only">{{ 'bar.environment' | t: 'Environment:' }}</span>
           {{ environmentLabel }}
         </span>
       }
@@ -132,7 +134,7 @@
           data-cy="review-queue-link"
           class="hidden sm:inline text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
         >
-          Review
+          {{ 'bar.review' | t: 'Review' }}
         </a>
       }
 
@@ -149,14 +151,16 @@
         (focus)="subscriptionService.primePricing()"
         class="hidden sm:inline text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50 transition-colors"
       >
-        Pricing
+        {{ 'bar.pricing' | t: 'Pricing' }}
       </a>
 
       <button
         type="button"
         (click)="toggleTheme()"
         [attr.aria-label]="
-          themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+          themeService.currentTheme() === 'dark'
+            ? ('bar.toLight' | t: 'Switch to light mode')
+            : ('bar.toDark' | t: 'Switch to dark mode')
         "
         class="hidden sm:flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
       >
@@ -181,7 +185,11 @@
         (click)="toggleSound()"
         data-cy="top-bar-sound-toggle"
         [attr.aria-pressed]="audioService.isMuted()"
-        [attr.aria-label]="audioService.isMuted() ? 'Unmute sounds' : 'Mute sounds'"
+        [attr.aria-label]="
+          audioService.isMuted()
+            ? ('bar.unmute' | t: 'Unmute sounds')
+            : ('bar.mute' | t: 'Mute sounds')
+        "
         class="hidden sm:flex h-9 w-9 items-center justify-center rounded-full border border-slate-900/10 dark:border-white/10 text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
       >
         <app-icon [name]="audioService.isMuted() ? 'volume-x' : 'volume-2'" [size]="16" />
@@ -223,7 +231,7 @@
               aria-hidden="true"
               class="h-7 w-7 shrink-0 rounded-full bg-slate-200 motion-safe:animate-pulse dark:bg-slate-700"
             ></span>
-            <span class="sr-only">Loading&hellip;</span>
+            <span class="sr-only">{{ 'bar.loading' | t: 'Loading…' }}</span>
           } @else if (!showsRealAccount()) {
             <span
               class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm"
@@ -286,6 +294,7 @@
             <span class="sr-only">
               {{ authService.user()?.displayName || authService.user()?.email }}
               @if (subscriptionService.isProUser()) {
+                <!-- eslint-disable-next-line @angular-eslint/template/i18n -- the plan's name -->
                 PRO
               }
             </span>
@@ -350,7 +359,7 @@
               -->
               <span
                 class="ml-2 block whitespace-nowrap text-sm font-medium text-slate-700 dark:text-slate-300"
-                >Sign in</span
+                >{{ 'bar.signIn' | t: 'Sign in' }}</span
               >
             }
           </span>
@@ -387,7 +396,7 @@
             [id]="panelId"
             data-cy="auth-menu-panel"
             role="dialog"
-            aria-label="Account menu"
+            [attr.aria-label]="'bar.accountMenu' | t: 'Account menu'"
             tabindex="-1"
             class="absolute right-0 mt-2 focus:outline-none"
           >
@@ -507,18 +516,20 @@
     #navPanel
     [id]="navPanelId"
     role="dialog"
-    aria-label="Site menu"
+    [attr.aria-label]="'bar.siteMenu' | t: 'Site menu'"
     tabindex="-1"
     data-cy="nav-menu-panel"
     class="relative flex w-72 max-w-[80%] flex-col gap-1 bg-white dark:bg-slate-900 p-4 shadow-card-lg focus:outline-none motion-safe:transition-transform motion-safe:duration-250 ease-out"
     [ngClass]="isNavOpen() ? 'translate-x-0' : '-translate-x-full'"
   >
     <div class="mb-2 flex items-center justify-between">
-      <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Menu</span>
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{
+        'bar.menu' | t: 'Menu'
+      }}</span>
       <button
         type="button"
         (click)="closeNav()"
-        aria-label="Close menu"
+        [attr.aria-label]="'bar.closeMenu' | t: 'Close menu'"
         data-cy="nav-menu-close"
         class="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
       >
@@ -533,7 +544,7 @@
         data-cy="nav-menu-review-link"
         class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
       >
-        Review
+        {{ 'bar.review' | t: 'Review' }}
       </a>
     }
 
@@ -547,7 +558,7 @@
       data-cy="nav-menu-stats-link"
       class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
     >
-      Your stats
+      {{ 'bar.stats' | t: 'Your stats' }}
     </a>
 
     <a
@@ -558,7 +569,7 @@
       data-cy="nav-menu-pricing-link"
       class="rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
     >
-      Pricing
+      {{ 'bar.pricing' | t: 'Pricing' }}
     </a>
 
     <!-- Deliberately does *not* close the drawer: the whole page changes
@@ -569,12 +580,18 @@
       (click)="toggleTheme()"
       data-cy="nav-menu-theme-toggle"
       [attr.aria-label]="
-        themeService.currentTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+        themeService.currentTheme() === 'dark'
+          ? ('bar.toLight' | t: 'Switch to light mode')
+          : ('bar.toDark' | t: 'Switch to dark mode')
       "
       class="mt-1 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
     >
       <app-icon [name]="themeService.currentTheme() === 'dark' ? 'sun' : 'moon'" [size]="16" />
-      {{ themeService.currentTheme() === 'dark' ? 'Light mode' : 'Dark mode' }}
+      {{
+        themeService.currentTheme() === 'dark'
+          ? ('bar.lightMode' | t: 'Light mode')
+          : ('bar.darkMode' | t: 'Dark mode')
+      }}
     </button>
 
     <!--
@@ -604,7 +621,11 @@
       class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors"
     >
       <app-icon [name]="audioService.isMuted() ? 'volume-x' : 'volume-2'" [size]="16" />
-      {{ audioService.isMuted() ? 'Unmute sounds' : 'Mute sounds' }}
+      {{
+        audioService.isMuted()
+          ? ('bar.unmute' | t: 'Unmute sounds')
+          : ('bar.mute' | t: 'Mute sounds')
+      }}
     </button>
   </div>
 </div>

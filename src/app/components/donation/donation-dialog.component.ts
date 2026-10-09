@@ -12,8 +12,10 @@ import {
   viewChild,
 } from '@angular/core';
 import { DonationDialogStateService } from '../../services/donation-dialog-state.service';
-import { DonationService } from '../../services/donation.service';
+import { DonationService, NO_DONATION_PRICE_MESSAGE } from '../../services/donation.service';
 import { subscriptionFailureMessage } from '../../services/session-handshake.service';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 import { formatUnitAmount } from '../../utils/money.util';
 import { CurrencySwitchComponent } from '../currency-switch/currency-switch.component';
 import { IconComponent } from '../icon/icon.component';
@@ -54,7 +56,7 @@ import { IconComponent } from '../icon/icon.component';
 @Component({
   selector: 'app-donation-dialog',
   standalone: true,
-  imports: [CurrencySwitchComponent, IconComponent],
+  imports: [CurrencySwitchComponent, IconComponent, TPipe],
   templateUrl: './donation-dialog.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -76,9 +78,10 @@ export class DonationDialogComponent {
   protected readonly isGuest = this.donationService.isGuest;
   protected readonly isUnavailable = this.donationService.isUnavailable;
   protected readonly catalogResolved = this.donationService.catalogResolved;
+  protected readonly unavailableMessage = NO_DONATION_PRICE_MESSAGE;
 
   protected readonly isDonating = signal(false);
-  protected readonly errorMessage = signal<string | null>(null);
+  protected readonly errorMessage = signal<Message | null>(null);
 
   /** Whether there is a currency choice to offer. One currency is not a choice. */
   protected readonly hasCurrencyChoice = computed(() => this.currencies().length > 1);
@@ -91,7 +94,9 @@ export class DonationDialogComponent {
    */
   protected readonly donateLabel = computed(() => {
     const amount = this.selectedAmount();
-    return amount ? `Donate ${amount}` : 'Donate';
+    return amount
+      ? msg('donate.donateAmount', 'Donate {amount}', { amount })
+      : msg('donate.donate', 'Donate');
   });
 
   private readonly dialog = viewChild<ElementRef<HTMLElement>>('donationDialog');
@@ -189,7 +194,10 @@ export class DonationDialogComponent {
       // out — and that message is shown as is. Only a failure it could not
       // explain gets the generic line (`CLAUDE.md` §4.4).
       this.errorMessage.set(
-        subscriptionFailureMessage(error, 'Could not start the donation. Please try again.'),
+        subscriptionFailureMessage(
+          error,
+          msg('donate.failed', 'Could not start the donation. Please try again.'),
+        ),
       );
       this.isDonating.set(false);
     }

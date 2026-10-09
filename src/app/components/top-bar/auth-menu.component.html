@@ -5,7 +5,7 @@
     type="button"
     (click)="closeRequested.emit()"
     class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-    aria-label="Close"
+    [attr.aria-label]="'auth.close' | t: 'Close'"
   >
     <app-icon name="x" [size]="14" />
   </button>
@@ -15,14 +15,18 @@
        carrying its message is routinely missed — the same reason the quiz
        result region works this way (G3). The visual banners below stay purely
        visual. -->
-  <p class="sr-only" role="status">{{ errorMessage() ?? infoMessage() ?? '' }}</p>
+  <p class="sr-only" role="status">{{ errorMessage() ?? infoMessage() | t }}</p>
 
   @if (!authService.authReady()) {
-    <p class="text-sm text-slate-500 dark:text-slate-400">Loading&hellip;</p>
+    <p class="text-sm text-slate-500 dark:text-slate-400">{{ 'auth.loading' | t: 'Loading…' }}</p>
   } @else if (authService.isAnonymous()) {
     <!-- Signed-out / anonymous: sign-in & sign-up -->
     <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-3 pr-6">
-      {{ emailFormMode() === 'signup' ? 'Create an account' : 'Sign in' }}
+      {{
+        emailFormMode() === 'signup'
+          ? ('auth.createAccount' | t: 'Create an account')
+          : ('auth.signIn' | t: 'Sign in')
+      }}
     </h2>
 
     <button
@@ -32,12 +36,15 @@
       class="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60 text-slate-700 dark:text-slate-300 font-medium py-2.5 mb-3 transition-colors"
     >
       <app-provider-icon providerId="google.com" />
-      Continue with Google
+      {{
+        'auth.continueWith'
+          | t: 'Continue with {provider}' : { provider: providerLabels['google.com'] }
+      }}
     </button>
 
     <div class="flex items-center gap-2 mb-3">
       <div class="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
-      <span class="text-xs text-slate-400 dark:text-slate-500">or</span>
+      <span class="text-xs text-slate-400 dark:text-slate-500">{{ 'auth.or' | t: 'or' }}</span>
       <div class="h-px flex-1 bg-slate-200 dark:bg-white/10"></div>
     </div>
 
@@ -46,7 +53,7 @@
         type="email"
         name="email"
         [(ngModel)]="email"
-        placeholder="Email"
+        [placeholder]="'auth.email' | t: 'Email'"
         required
         autocomplete="email"
         class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-900 transition-colors"
@@ -55,7 +62,7 @@
         type="password"
         name="password"
         [(ngModel)]="password"
-        placeholder="Password"
+        [placeholder]="'auth.password' | t: 'Password'"
         required
         minlength="6"
         [autocomplete]="emailFormMode() === 'signup' ? 'new-password' : 'current-password'"
@@ -67,9 +74,13 @@
         class="w-full rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-semibold py-2.5 text-sm transition-colors"
       >
         @if (isSubmitting()) {
-          Please wait&hellip;
+          {{ 'auth.wait' | t: 'Please wait…' }}
         } @else {
-          {{ emailFormMode() === 'signup' ? 'Sign up' : 'Sign in' }}
+          {{
+            emailFormMode() === 'signup'
+              ? ('auth.signUp' | t: 'Sign up')
+              : ('auth.signIn' | t: 'Sign in')
+          }}
         }
       </button>
     </form>
@@ -81,7 +92,7 @@
         [disabled]="isSubmitting()"
         class="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 disabled:opacity-60 mt-2"
       >
-        Forgot password?
+        {{ 'auth.forgot' | t: 'Forgot password?' }}
       </button>
     }
 
@@ -92,8 +103,8 @@
     >
       {{
         emailFormMode() === 'signup'
-          ? 'Already have an account? Sign in'
-          : "Don't have an account? Sign up"
+          ? ('auth.haveAccount' | t: 'Already have an account? Sign in')
+          : ('auth.needAccount' | t: "Don't have an account? Sign up")
       }}
     </button>
 
@@ -102,7 +113,11 @@
       (click)="toggleMoreProviders()"
       class="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 mt-3 pt-3 border-t border-slate-100 dark:border-white/10"
     >
-      {{ showMoreProviders() ? 'Hide other sign-in options' : 'More sign-in options' }}
+      {{
+        showMoreProviders()
+          ? ('auth.fewerOptions' | t: 'Hide other sign-in options')
+          : ('auth.moreOptions' | t: 'More sign-in options')
+      }}
     </button>
 
     @if (showMoreProviders()) {
@@ -126,7 +141,7 @@
         class="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-alert" [size]="14" class="shrink-0 mt-0.5" />
-        {{ errorMessage() }}
+        {{ errorMessage() | t }}
       </p>
     }
     @if (infoMessage()) {
@@ -134,7 +149,7 @@
         class="flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-check-big" [size]="14" class="shrink-0 mt-0.5" />
-        {{ infoMessage() }}
+        {{ infoMessage() | t }}
       </p>
     }
   } @else if (!authService.isFullyAuthenticated()) {
@@ -143,32 +158,34 @@
       class="text-base font-bold text-slate-900 dark:text-slate-50 mb-2 pr-6 flex items-center gap-2"
     >
       <app-icon name="mail" [size]="16" class="text-emerald-600 dark:text-emerald-400" />
-      Verify your email
+      {{ 'auth.verifyTitle' | t: 'Verify your email' }}
     </h2>
     <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
-      We sent a verification link to <span class="font-medium">{{ authService.user()?.email }}</span
-      >. Verify it to finish signing in and save scores to the leaderboard.
+      <app-rich-text [message]="verificationSentTo()" [tags]="{ email: emailTag }" />
+      <ng-template #emailTag let-text
+        ><span class="font-medium">{{ text }}</span></ng-template
+      >
     </p>
     <button
       type="button"
       (click)="resendVerification()"
       class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium py-2.5 mb-2 transition-colors"
     >
-      Resend verification email
+      {{ 'auth.resend' | t: 'Resend verification email' }}
     </button>
     <button
       type="button"
       (click)="signOut()"
       class="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
     >
-      Sign out
+      {{ 'auth.signOut' | t: 'Sign out' }}
     </button>
     @if (errorMessage()) {
       <p
         class="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-alert" [size]="14" class="shrink-0 mt-0.5" />
-        {{ errorMessage() }}
+        {{ errorMessage() | t }}
       </p>
     }
     @if (infoMessage()) {
@@ -176,17 +193,19 @@
         class="flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-check-big" [size]="14" class="shrink-0 mt-0.5" />
-        {{ infoMessage() }}
+        {{ infoMessage() | t }}
       </p>
     }
   } @else {
     <!-- Fully authenticated: profile management -->
-    <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-3 pr-6">Your profile</h2>
+    <h2 class="text-base font-bold text-slate-900 dark:text-slate-50 mb-3 pr-6">
+      {{ 'auth.profile' | t: 'Your profile' }}
+    </h2>
 
     <label
       for="displayName"
       class="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1"
-      >Display name</label
+      >{{ 'auth.displayName' | t: 'Display name' }}</label
     >
     <div class="flex gap-2 mb-3">
       <input
@@ -204,16 +223,16 @@
         [class.hover:bg-emerald-800]="!nameSaved()"
       >
         <app-icon [name]="nameSaved() ? 'check' : 'save'" [size]="13" />
-        {{ nameSaved() ? 'Saved!' : 'Save' }}
+        {{ nameSaved() ? ('auth.saved' | t: 'Saved!') : ('auth.save' | t: 'Save') }}
       </button>
     </div>
 
     <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
       {{ authService.user()?.email }}
       @if (authService.isEmailPasswordAccount()) {
-        <span class="ml-1 text-emerald-700 dark:text-emerald-400 font-medium"
-          >&check; Verified</span
-        >
+        <span class="ml-1 text-emerald-700 dark:text-emerald-400 font-medium">{{
+          'auth.verified' | t: '✓ Verified'
+        }}</span>
       }
     </p>
 
@@ -224,7 +243,7 @@
       class="flex items-center justify-center gap-1.5 w-full text-center rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium py-2.5 mb-2 transition-colors"
     >
       <app-icon name="trophy" [size]="15" />
-      Your stats
+      {{ 'auth.stats' | t: 'Your stats' }}
     </a>
 
     <a
@@ -234,7 +253,7 @@
       class="flex items-center justify-center gap-1.5 w-full text-center rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium py-2.5 mb-2 transition-colors"
     >
       <app-icon name="pencil" [size]="15" />
-      Your questions
+      {{ 'auth.myQuestions' | t: 'Your questions' }}
     </a>
 
     <a
@@ -243,11 +262,13 @@
       class="flex items-center justify-center gap-1.5 w-full text-center rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold py-2.5 mb-2 transition-colors"
     >
       <app-icon name="plus-circle" [size]="15" />
-      Add a question
+      {{ 'auth.addQuestion' | t: 'Add a question' }}
+      <!-- eslint-disable @angular-eslint/template/i18n -- the plan's name -->
       <span
         class="rounded-full bg-white/25 text-white text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
         >PRO</span
       >
+      <!-- eslint-enable @angular-eslint/template/i18n -->
     </a>
     @if (!subscriptionService.isProUser()) {
       <a
@@ -257,7 +278,7 @@
         (focus)="subscriptionService.primePricing()"
         class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 mb-3"
       >
-        Upgrade to Pro to add questions
+        {{ 'auth.upgrade' | t: 'Upgrade to Pro to add questions' }}
       </a>
     } @else {
       <button
@@ -267,9 +288,9 @@
         class="block w-full text-center text-xs text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 disabled:opacity-60 mb-3"
       >
         @if (isOpeningPortal()) {
-          Opening billing portal&hellip;
+          {{ 'auth.openingPortal' | t: 'Opening billing portal…' }}
         } @else {
-          Manage subscription
+          {{ 'auth.manage' | t: 'Manage subscription' }}
         }
       </button>
     }
@@ -281,7 +302,7 @@
       class="w-full flex items-center justify-center gap-2 rounded-xl border border-red-200 dark:border-red-500/25 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 text-sm font-medium py-2 transition-colors"
     >
       <app-icon name="log-out" [size]="14" />
-      Sign out
+      {{ 'auth.signOut' | t: 'Sign out' }}
     </button>
 
     <button
@@ -292,9 +313,9 @@
       class="mt-2 block w-full text-center text-xs text-slate-600 transition-colors hover:text-slate-900 disabled:opacity-60 dark:text-slate-400 dark:hover:text-slate-50"
     >
       @if (isExporting()) {
-        Preparing your data&hellip;
+        {{ 'auth.exporting' | t: 'Preparing your data…' }}
       } @else {
-        Download my data
+        {{ 'auth.export' | t: 'Download my data' }}
       }
     </button>
 
@@ -309,12 +330,14 @@
           id="delete-account-heading"
           class="mb-1 text-sm font-bold text-red-800 dark:text-red-300"
         >
-          Delete your account?
+          {{ 'auth.deleteTitle' | t: 'Delete your account?' }}
         </p>
         <p id="delete-account-detail" class="mb-3 text-xs text-red-900/90 dark:text-red-200/90">
-          This cannot be undone. Your leaderboard score and any active subscription are removed
-          immediately. Questions you contributed stay in the shared bank, but are no longer linked
-          to you.
+          {{
+            'auth.deleteBody'
+              | t
+                : 'This cannot be undone. Your leaderboard score and any active subscription are removed immediately. Questions you contributed stay in the shared bank, but are no longer linked to you.'
+          }}
         </p>
         <div class="flex gap-2">
           <button
@@ -325,9 +348,9 @@
             class="flex-1 rounded-lg bg-red-700 py-2 text-xs font-bold text-white transition-colors hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
           >
             @if (isDeleting()) {
-              Deleting&hellip;
+              {{ 'auth.deleting' | t: 'Deleting…' }}
             } @else {
-              Yes, delete everything
+              {{ 'auth.deleteConfirm' | t: 'Yes, delete everything' }}
             }
           </button>
           <button
@@ -336,7 +359,7 @@
             [disabled]="isDeleting()"
             class="flex-1 rounded-lg border border-slate-900/15 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-white disabled:opacity-60 dark:border-white/15 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            Keep my account
+            {{ 'auth.keep' | t: 'Keep my account' }}
           </button>
         </div>
       </div>
@@ -347,7 +370,7 @@
         (click)="startDelete()"
         class="mt-2 block w-full text-center text-xs text-slate-500 transition-colors hover:text-red-700 dark:text-slate-400 dark:hover:text-red-300"
       >
-        Delete my account
+        {{ 'auth.delete' | t: 'Delete my account' }}
       </button>
     }
 
@@ -356,7 +379,7 @@
         class="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2 mt-3"
       >
         <app-icon name="circle-alert" [size]="14" class="shrink-0 mt-0.5" />
-        {{ errorMessage() }}
+        {{ errorMessage() | t }}
       </p>
     }
   }
@@ -382,7 +405,7 @@
       class="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-amber-200 py-2 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-50 dark:border-amber-500/25 dark:text-amber-300 dark:hover:bg-amber-500/10"
     >
       <app-icon name="coffee" [size]="14" />
-      Buy me a coffee
+      {{ 'auth.donate' | t: 'Buy me a coffee' }}
     </button>
   }
 </div>

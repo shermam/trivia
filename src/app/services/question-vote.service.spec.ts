@@ -4,6 +4,7 @@ import { DISLIKE, LIKE, VoteValue } from '../models/question-vote';
 import { AuthService } from './auth.service';
 import { FirebaseService } from './firebase.service';
 import { QuestionVoteService, VoteOutcome, describeVoteOutcome } from './question-vote.service';
+import { english } from '../i18n/testing';
 
 /**
  * `FEAT-027`. The optimistic half of the private vote: a tap moves the button
@@ -347,37 +348,37 @@ describe('QuestionVoteService: one account at a time', () => {
 
 describe('describeVoteOutcome', () => {
   it('says what was saved, naming the question by its position', () => {
-    expect(describeVoteOutcome({ kind: 'saved', value: LIKE }, 3)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'saved', value: LIKE }, 3))).toBe(
       'Question 3: you liked this question.',
     );
-    expect(describeVoteOutcome({ kind: 'saved', value: DISLIKE }, 3)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'saved', value: DISLIKE }, 3))).toBe(
       'Question 3: you disliked this question.',
     );
-    expect(describeVoteOutcome({ kind: 'saved', value: null }, 3)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'saved', value: null }, 3))).toBe(
       'Question 3: your vote was removed.',
     );
   });
 
   // `CLAUDE.md` §4.4: the cause is not known, so none is narrated.
   it('says a failure did not save, and nothing about why', () => {
-    expect(describeVoteOutcome({ kind: 'failed', attempted: LIKE, value: null }, 2)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'failed', attempted: LIKE, value: null }, 2))).toBe(
       'Question 2: your vote could not be saved. Please try again.',
     );
-    expect(describeVoteOutcome({ kind: 'failed', attempted: null, value: LIKE }, 2)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'failed', attempted: null, value: LIKE }, 2))).toBe(
       'Question 2: your vote could not be removed. Please try again.',
     );
   });
 
   it('says what a vote needs when there is no real account', () => {
-    expect(describeVoteOutcome({ kind: 'needs-account', reason: 'sign-in' }, 1)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'needs-account', reason: 'sign-in' }, 1))).toBe(
       'Question 1: sign in to like or dislike questions.',
     );
-    expect(describeVoteOutcome({ kind: 'needs-account', reason: 'verify' }, 1)).toBe(
+    expect(english(describeVoteOutcome({ kind: 'needs-account', reason: 'verify' }, 1))).toBe(
       'Question 1: verify your email to like or dislike questions.',
     );
   });
 
   it('says nothing for a tap a later one overtook', () => {
-    expect(describeVoteOutcome({ kind: 'superseded' }, 1)).toBeNull();
+    expect(english(describeVoteOutcome({ kind: 'superseded' }, 1))).toBeNull();
   });
 });

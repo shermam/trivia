@@ -322,6 +322,7 @@ export class FirestoreRestClient {
     throw new FirestoreRestError(
       'UNKNOWN',
       200,
+      // i18n-exempt: a transport error's message is for the console; a screen keeps its own sentence
       `batchGet answered without a found or missing entry for ${documentPath}`,
     );
   }
@@ -603,17 +604,20 @@ function toTransportError(error: unknown): FirestoreRestError {
     error instanceof DOMException &&
     (error.name === 'TimeoutError' || error.name === 'AbortError')
   ) {
+    // i18n-exempt: a transport error's message is for the console; a screen keeps its own sentence
     return new FirestoreRestError('DEADLINE_EXCEEDED', 0, 'Request timed out');
   }
   return new FirestoreRestError(
     'UNAVAILABLE',
     0,
+    // i18n-exempt: a transport error's message is for the console; a screen keeps its own sentence
     error instanceof Error ? error.message : 'Firestore request failed',
   );
 }
 
 async function toResponseError(response: Response): Promise<FirestoreRestError> {
   let status = 'UNKNOWN';
+  // i18n-exempt: a transport error's message is for the console; a screen keeps its own sentence
   let message = `Firestore request failed with HTTP ${response.status}`;
   try {
     const body: unknown = await response.json();

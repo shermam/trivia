@@ -36,6 +36,10 @@ import { QuestionJustificationComponent } from '../question-justification/questi
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
+import { msg, verbatim, type Message } from '../../i18n/message';
+import { RichTextComponent } from '../../i18n/rich-text.component';
+import { TPipe } from '../../i18n/t.pipe';
+import { difficultyLabel } from '../../utils/difficulty-label.util';
 
 type ReviewQuestion = CustomQuestionDoc & { id: string };
 
@@ -62,19 +66,40 @@ interface AuthorViewState {
 }
 
 /** The views, in the order the picker offers them. */
-export const REVIEW_TABS: readonly { view: ReviewView; label: string }[] = [
-  { view: 'pending', label: 'Pending' },
-  { view: 'approved', label: 'Approved' },
-  { view: 'rejected', label: 'Rejected' },
-  { view: 'reports', label: 'Reports' },
+export const REVIEW_TABS: readonly { view: ReviewView; label: Message }[] = [
+  { view: 'pending', label: msg('review.tabPending', 'Pending') },
+  { view: 'approved', label: msg('review.tabApproved', 'Approved') },
+  { view: 'rejected', label: msg('review.tabRejected', 'Rejected') },
+  { view: 'reports', label: msg('review.tabReports', 'Reports') },
 ];
 
 /** What a reader chose, in words a reviewer reads rather than a stored enum. */
-const REASON_LABELS: Record<QuestionReportReason, string> = {
-  incorrect: 'The answer is wrong',
-  inappropriate: 'Inappropriate or offensive',
-  spam: 'Spam or nonsense',
-  other: 'Something else',
+const REASON_LABELS: Record<QuestionReportReason, Message> = {
+  incorrect: msg('review.reasonIncorrect', 'The answer is wrong'),
+  inappropriate: msg('review.reasonInappropriate', 'Inappropriate or offensive'),
+  spam: msg('review.reasonSpam', 'Spam or nonsense'),
+  other: msg('review.reasonOther', 'Something else'),
+};
+
+/** A question's status as the card states it, lower-case: what the stored value means, not the value. */
+const STATUS_LABELS: Record<QuestionStatus, Message> = {
+  pending: msg('review.statusPending', 'pending'),
+  approved: msg('review.statusApproved', 'approved'),
+  rejected: msg('review.statusRejected', 'rejected'),
+};
+
+/** "Nothing pending right now." — a sentence per tab, since the tab's word is its grammar. */
+const EMPTY_TAB: Record<Exclude<ReviewView, 'reports'>, Message> = {
+  pending: msg('review.emptyPending', 'Nothing pending right now.'),
+  approved: msg('review.emptyApproved', 'Nothing approved right now.'),
+  rejected: msg('review.emptyRejected', 'Nothing rejected right now.'),
+};
+
+/** What a decision did, announced — a sentence per status for the same reason. */
+const MARKED: Record<QuestionStatus, Message> = {
+  pending: msg('review.markedPending', 'Question marked pending.'),
+  approved: msg('review.markedApproved', 'Question marked approved.'),
+  rejected: msg('review.markedRejected', 'Question marked rejected.'),
 };
 
 /**
@@ -104,6 +129,8 @@ const REASON_LABELS: Record<QuestionReportReason, string> = {
     QuestionJustificationComponent,
     QuestionTagsComponent,
     RenderedTextComponent,
+    RichTextComponent,
+    TPipe,
   ],
   templateUrl: './review-queue.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -127,7 +154,7 @@ export class ReviewQueueComponent implements OnInit {
   protected readonly activeView = signal<ReviewView>('pending');
   protected readonly questions = signal<ReviewQuestion[]>([]);
   protected readonly isLoading = signal(false);
-  protected readonly loadError = signal<string | null>(null);
+  protected readonly loadError = signal<Message | null>(null);
 
   /**
    * The rows on screen, and where the next page starts.
@@ -176,14 +203,14 @@ export class ReviewQueueComponent implements OnInit {
    * about one question, whose buttons are all the same write.
    */
   protected readonly pendingActionId = signal<string | null>(null);
-  protected readonly actionError = signal<string | null>(null);
+  protected readonly actionError = signal<Message | null>(null);
 
   /**
    * Announced, not just rendered. The list mutates under the reviewer as a
    * decision removes a row, and a screen reader user would otherwise be told
    * nothing at all about what just happened (`CLAUDE.md` §4.5).
    */
-  protected readonly actionResult = signal<string | null>(null);
+  protected readonly actionResult = signal<Message | null>(null);
 
   protected readonly isFull = computed(() => this.questions().length >= this.pageSize);
 
@@ -274,8 +301,8 @@ export class ReviewQueueComponent implements OnInit {
       if (this.activeView() === view) {
         this.loadError.set(
           view === 'reports'
-            ? 'Could not load the reports. Please try again.'
-            : 'Could not load the queue. Please try again.',
+            ? msg('review.reportsFailed', 'Could not load the reports. Please try again.')
+            : msg('review.queueFailed', 'Could not load the queue. Please try again.'),
         );
       }
     } finally {
@@ -309,7 +336,9 @@ export class ReviewQueueComponent implements OnInit {
       }
     } catch {
       if (this.activeView() === 'reports') {
-        this.loadError.set('Could not load more reports. Please try again.');
+        this.loadError.set(
+          msg('review.moreReportsFailed', 'Could not load more reports. Please try again.'),
+        );
       }
     } finally {
       if (this.activeView() === 'reports') {
@@ -367,7 +396,9 @@ export class ReviewQueueComponent implements OnInit {
     // than the bare `permission-denied` the rules would answer with.
     if (status === 'rejected' && this.isReasonTooLong(question)) {
       this.actionError.set(
-        `A rejection reason has to be ${MAX_REJECTION_REASON_LENGTH} characters or fewer.`,
+        msg('review.reasonTooLong', 'A rejection reason has to be {max} characters or fewer.', {
+          max: MAX_REJECTION_REASON_LENGTH,
+        }),
       );
       return;
     }
@@ -450,12 +481,14 @@ export class ReviewQueueComponent implements OnInit {
       this.actionResult.set(
         question.status === status && status === 'rejected'
           ? reason
-            ? 'Reason updated.'
-            : 'Reason cleared.'
-          : `Question marked ${status}.`,
+            ? msg('review.reasonUpdated', 'Reason updated.')
+            : msg('review.reasonCleared', 'Reason cleared.')
+          : MARKED[status],
       );
     } catch {
-      this.actionError.set('Could not save that decision. Please try again.');
+      this.actionError.set(
+        msg('review.decideFailed', 'Could not save that decision. Please try again.'),
+      );
     } finally {
       this.pendingActionId.set(null);
     }
@@ -474,21 +507,44 @@ export class ReviewQueueComponent implements OnInit {
     return topicTagsOf(question);
   }
 
-  protected submittedAt(question: ReviewQuestion): string {
-    return question.createdAt ? new Date(question.createdAt).toLocaleString() : 'Unknown';
+  protected submittedAt(question: ReviewQuestion): Message {
+    return question.createdAt
+      ? verbatim(new Date(question.createdAt).toLocaleString())
+      : msg('review.unknownDate', 'Unknown');
   }
 
-  protected reportedAt(report: QuestionReport): string {
-    return report.createdAt ? new Date(report.createdAt).toLocaleString() : 'Unknown';
+  protected reportedAt(report: QuestionReport): string | null {
+    return report.createdAt ? new Date(report.createdAt).toLocaleString() : null;
   }
 
-  protected reasonLabel(report: QuestionReport): string {
+  protected reasonLabel(report: QuestionReport): Message {
     return REASON_LABELS[report.reason];
   }
 
+  protected statusLabel(status: QuestionStatus | undefined): Message {
+    return status ? STATUS_LABELS[status] : msg('review.statusUnknown', 'unknown');
+  }
+
+  protected emptyTab(view: ReviewView): Message | null {
+    return view === 'reports' ? null : EMPTY_TAB[view];
+  }
+
+  protected readonly difficultyLabel = difficultyLabel;
+
+  /** The question named in a report that is gone — its id set apart as code. */
+  protected missingQuestion(id: string): Message {
+    return msg(
+      'review.reportedGone',
+      'Question <id>{id}</id> is no longer in the bank, so there is nothing left to act on.',
+      { id },
+    );
+  }
+
   /** A tab's name, as the picker shows it — what the per-author view's Back button names. */
-  protected tabLabel(view: ReviewView): string {
-    return REVIEW_TABS.find((tab) => tab.view === view)?.label ?? 'the queue';
+  protected tabLabel(view: ReviewView): Message {
+    return (
+      REVIEW_TABS.find((tab) => tab.view === view)?.label ?? msg('review.theQueue', 'the queue')
+    );
   }
 
   /**
@@ -530,11 +586,13 @@ export class ReviewQueueComponent implements OnInit {
    * by the question pipeline" and a run id together were not. The run gets a
    * line of its own ({@link runLine}).
    */
-  protected authorLine(question: ReviewQuestion): string {
+  protected authorLine(question: ReviewQuestion): Message {
     if (this.isGenerated(question)) {
-      return 'Question pipeline';
+      return msg('review.pipeline', 'Question pipeline');
     }
-    return question.createdBy ?? 'Unattributed (predates attribution)';
+    return question.createdBy
+      ? verbatim(question.createdBy)
+      : msg('review.unattributed', 'Unattributed (predates attribution)');
   }
 
   /**

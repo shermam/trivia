@@ -8,6 +8,8 @@ import {
   SubscriptionError,
   SubscriptionService,
 } from '../../services/subscription.service';
+import { verbatim, type Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 import { PricingComponent } from './pricing.component';
 
 /**
@@ -131,7 +133,7 @@ describe('PricingComponent checkout failure message', () => {
   const view = (component: PricingComponent) =>
     component as unknown as {
       subscribe(): Promise<void>;
-      errorMessage(): string | null;
+      errorMessage(): Message | null;
       isSubscribing(): boolean;
     };
 
@@ -142,12 +144,16 @@ describe('PricingComponent checkout failure message', () => {
 
   it('shows the cause the service verified, word for word', async () => {
     const { component } = setup(null, () =>
-      Promise.reject(new SubscriptionError('Timed out waiting for Stripe checkout to start.')),
+      Promise.reject(
+        new SubscriptionError(verbatim('Timed out waiting for Stripe checkout to start.')),
+      ),
     );
 
     await view(component).subscribe();
 
-    expect(view(component).errorMessage()).toBe('Timed out waiting for Stripe checkout to start.');
+    expect(english(view(component).errorMessage())).toBe(
+      'Timed out waiting for Stripe checkout to start.',
+    );
     expect(view(component).isSubscribing()).toBe(false);
   });
 
@@ -158,7 +164,9 @@ describe('PricingComponent checkout failure message', () => {
 
     await view(component).subscribe();
 
-    expect(view(component).errorMessage()).toBe('Could not start checkout. Please try again.');
+    expect(english(view(component).errorMessage())).toBe(
+      'Could not start checkout. Please try again.',
+    );
     expect(view(component).isSubscribing()).toBe(false);
     expect(consoleError).toHaveBeenCalledWith(expect.any(String), error);
   });
@@ -232,7 +240,7 @@ describe('PricingComponent price and currency', () => {
   const view = (component: PricingComponent) =>
     component as unknown as {
       priceAmount(): string | null;
-      subscribeLabel(): string;
+      subscribeLabel(): Message;
       hasCurrencyChoice(): boolean;
       currencyLabel(): string;
       selectCurrency(currency: string): void;
@@ -252,7 +260,7 @@ describe('PricingComponent price and currency', () => {
     const { component } = setup(null, () => Promise.resolve(), [usd]);
 
     expect(view(component).priceAmount()).toBe('$0.99');
-    expect(view(component).subscribeLabel()).toBe('Subscribe — $0.99/mo');
+    expect(english(view(component).subscribeLabel())).toBe('Subscribe — $0.99/mo');
   });
 
   // The conventions belong to the currency, not to the reader's browser: a
@@ -263,7 +271,7 @@ describe('PricingComponent price and currency', () => {
 
     // A non-breaking space is what `pt-BR` puts after the symbol.
     expect(view(component).priceAmount()).toBe('R$\u00A05,90');
-    expect(view(component).subscribeLabel()).toBe('Subscribe — R$\u00A05,90/mo');
+    expect(english(view(component).subscribeLabel())).toBe('Subscribe — R$\u00A05,90/mo');
   });
 
   it('switches the quoted amount when another currency is chosen', () => {
@@ -301,7 +309,7 @@ describe('PricingComponent price and currency', () => {
     const { component } = setup(null, () => Promise.resolve(), []);
 
     expect(view(component).priceAmount()).toBeNull();
-    expect(view(component).subscribeLabel()).toBe('Subscribe');
+    expect(english(view(component).subscribeLabel())).toBe('Subscribe');
     expect(view(component).currencyLabel()).toBe('\u00A0');
   });
 

@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
 import { DonationService, NO_DONATION_PRICE_MESSAGE, presetsByCurrency } from './donation.service';
+import { englishText } from '../i18n/message';
 import { FirebaseAppService } from './firebase-app.service';
 import { GeoService } from './geo.service';
 import { SubscriptionError } from './session-handshake.service';
@@ -671,7 +672,7 @@ describe('DonationService handshake', () => {
     const service = configure({ uid: 'user-1', isAnonymous: false });
     await service.loadPresets();
 
-    await expect(service.startDonation()).rejects.toThrow(NO_DONATION_PRICE_MESSAGE);
+    await expect(service.startDonation()).rejects.toThrow(englishText(NO_DONATION_PRICE_MESSAGE));
   });
 
   it('refuses before auth has produced any account at all', async () => {

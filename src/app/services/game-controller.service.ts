@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { msg, type Message } from '../i18n/message';
 import { Router } from '@angular/router';
 import {
   ALL_LIFELINES_AVAILABLE,
@@ -102,7 +103,7 @@ export class GameControllerService {
   readonly maxStreak = signal(0);
 
   readonly isLoading = signal(false);
-  readonly loadError = signal<string | null>(null);
+  readonly loadError = signal<Message | null>(null);
   /** True once the final question has been answered — i.e. the player belongs on `/game-over`. */
   readonly isComplete = signal(false);
 
@@ -518,7 +519,10 @@ export class GameControllerService {
 
       if (questions.length === 0) {
         this.loadError.set(
-          'No questions were found for the selected options. Try a different topic, difficulty, or source.',
+          msg(
+            'game.noQuestions',
+            'No questions were found for the selected options. Try a different topic, difficulty, or source.',
+          ),
         );
         return;
       }
@@ -541,7 +545,12 @@ export class GameControllerService {
       this.beginGame(config, questions, null);
       await this.router.navigateByUrl('/play');
     } catch {
-      this.loadError.set('Failed to load questions. Please check your connection and try again.');
+      this.loadError.set(
+        msg(
+          'game.loadFailed',
+          'Failed to load questions. Please check your connection and try again.',
+        ),
+      );
     } finally {
       this.isLoading.set(false);
     }

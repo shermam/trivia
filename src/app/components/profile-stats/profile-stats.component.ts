@@ -23,6 +23,8 @@ import { AvatarPickerComponent, XpKnowledge } from '../avatar-picker/avatar-pick
 import { AvatarComponent } from '../avatar/avatar.component';
 import { IconComponent, IconName } from '../icon/icon.component';
 import { ProgressCardComponent, ProgressState } from '../progress-card/progress-card.component';
+import { msg, sameMessage, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 
 /**
  * Which of the screen's five states is showing.
@@ -52,7 +54,7 @@ const FAILED_XP: XpKnowledge = { state: 'failed' };
 /** One number on the card. `id` is the `@for` track key, never the label (`CLAUDE.md` §4.4). */
 interface StatTile {
   id: string;
-  label: string;
+  label: Message;
   icon: IconName;
   /** Already formatted, or the placeholder — the template never does arithmetic. */
   value: string;
@@ -112,6 +114,7 @@ const DAILY_CEILING_TEXT = COUNT_FORMAT.format(DAILY_GAME_CEILING);
     AvatarComponent,
     AvatarPickerComponent,
     ProgressCardComponent,
+    TPipe,
   ],
   templateUrl: './profile-stats.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -306,25 +309,25 @@ export class ProfileStatsComponent {
     return [
       {
         id: 'games-played',
-        label: 'Games played',
+        label: msg('profile.gamesPlayed', 'Games played'),
         icon: 'trophy',
         value: stats ? COUNT_FORMAT.format(stats.gamesPlayed) : UNKNOWN,
       },
       {
         id: 'questions-answered',
-        label: 'Questions answered',
+        label: msg('profile.questionsAnswered', 'Questions answered'),
         icon: 'sparkles',
         value: stats ? COUNT_FORMAT.format(stats.questionsAnswered) : UNKNOWN,
       },
       {
         id: 'correct-answers',
-        label: 'Correct answers',
+        label: msg('profile.correctAnswers', 'Correct answers'),
         icon: 'check',
         value: stats ? COUNT_FORMAT.format(stats.correctAnswers) : UNKNOWN,
       },
       {
         id: 'accuracy',
-        label: 'Accuracy',
+        label: msg('profile.accuracy', 'Accuracy'),
         icon: 'percent',
         // Zero questions answered is a real state — a game can be banked with
         // every question skipped or timed out — and `0/0` is `NaN`, which is
@@ -336,7 +339,7 @@ export class ProfileStatsComponent {
       },
       {
         id: 'best-streak',
-        label: 'Best streak',
+        label: msg('profile.bestStreak', 'Best streak'),
         icon: 'zap',
         value: stats ? COUNT_FORMAT.format(stats.bestStreak) : UNKNOWN,
       },
@@ -374,32 +377,45 @@ export class ProfileStatsComponent {
   protected readonly statusAnnouncement = computed(() => {
     const stats = this.statsAnnouncement();
     const notice = this.avatarNotice();
-    return notice !== null && notice.over === stats ? notice.text : stats;
+    return notice !== null && sameMessage(notice.over, stats) ? notice.text : stats;
   });
 
   /** The picker's last announcement, and the stats line it was made over. */
-  private readonly avatarNotice = signal<{ text: string; over: string } | null>(null);
+  private readonly avatarNotice = signal<{ text: Message | null; over: Message | null } | null>(
+    null,
+  );
 
-  private readonly statsAnnouncement = computed(() => {
+  private readonly statsAnnouncement = computed<Message | null>(() => {
     switch (this.line()) {
       case 'stats': {
         const level = this.levelUp();
         return level === null
-          ? 'Your stats are ready.'
-          : `Your stats are ready. Your last game took you to level ${level}.`;
+          ? msg('profile.saidReady', 'Your stats are ready.')
+          : msg(
+              'profile.saidLevelUp',
+              'Your stats are ready. Your last game took you to level {level}.',
+              { level },
+            );
       }
       case 'empty':
-        return 'No finished games yet.';
+        return msg('profile.saidEmpty', 'No finished games yet.');
       case 'notBanked':
-        return 'Your last game could not be added to your stats.';
+        return msg('profile.saidNotBanked', 'Your last game could not be added to your stats.');
       case 'dailyLimit':
-        return `Your last game was not added: you reached the daily limit of ${DAILY_CEILING_TEXT} games.`;
+        return msg(
+          'profile.saidDailyLimit',
+          'Your last game was not added: you reached the daily limit of {limit} games.',
+          { limit: DAILY_CEILING_TEXT },
+        );
       case 'signedOut':
-        return 'Signed out. Stats are only kept for a signed-in account.';
+        return msg(
+          'profile.saidSignedOut',
+          'Signed out. Stats are only kept for a signed-in account.',
+        );
       case 'failed':
-        return 'Could not load your stats.';
+        return msg('profile.saidFailed', 'Could not load your stats.');
       default:
-        return '';
+        return null;
     }
   });
 
@@ -455,7 +471,7 @@ export class ProfileStatsComponent {
   }
 
   /** The avatar picker's outcome, said through this page's one live region. */
-  protected onAvatarNotice(text: string): void {
+  protected onAvatarNotice(text: Message | null): void {
     this.avatarNotice.set({ text, over: untracked(this.statsAnnouncement) });
   }
 

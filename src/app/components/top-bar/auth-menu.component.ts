@@ -26,6 +26,9 @@ import {
   subscriptionFailureMessage,
 } from '../../services/subscription.service';
 import { isGameplayRoute } from '../../utils/gameplay-route.util';
+import { messageOf, msg, type Message } from '../../i18n/message';
+import { RichTextComponent } from '../../i18n/rich-text.component';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 import { ProviderIconComponent } from './provider-icon.component';
 
@@ -34,7 +37,14 @@ type EmailFormMode = 'signup' | 'signin';
 @Component({
   selector: 'app-auth-menu',
   standalone: true,
-  imports: [FormsModule, ProviderIconComponent, RouterLink, IconComponent],
+  imports: [
+    FormsModule,
+    ProviderIconComponent,
+    RouterLink,
+    IconComponent,
+    RichTextComponent,
+    TPipe,
+  ],
   templateUrl: './auth-menu.component.html',
   styleUrl: './auth-menu.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -59,9 +69,18 @@ export class AuthMenuComponent {
   protected readonly showMoreProviders = signal(false);
   protected readonly isSubmitting = signal(false);
   protected readonly isOpeningPortal = signal(false);
-  protected readonly errorMessage = signal<string | null>(null);
-  protected readonly infoMessage = signal<string | null>(null);
+  protected readonly errorMessage = signal<Message | null>(null);
+  protected readonly infoMessage = signal<Message | null>(null);
   protected readonly nameSaved = signal(false);
+
+  /** "We sent a verification link to <email>…", the address set apart by its markup. */
+  protected readonly verificationSentTo = computed(() =>
+    msg(
+      'auth.verifyBody',
+      'We sent a verification link to <email>{email}</email>. Verify it to finish signing in and save scores to the leaderboard.',
+      { email: this.authService.user()?.email ?? '' },
+    ),
+  );
 
   protected email = '';
   protected password = '';
@@ -128,14 +147,16 @@ export class AuthMenuComponent {
     try {
       if (this.emailFormMode() === 'signup') {
         await this.authService.signUpWithEmail(this.email, this.password);
-        this.infoMessage.set("Account created! We've sent a verification link to your email.");
+        this.infoMessage.set(
+          msg('auth.created', "Account created! We've sent a verification link to your email."),
+        );
       } else {
         await this.authService.signInWithEmail(this.email, this.password);
         this.closeRequested.emit();
       }
       this.password = '';
     } catch (error) {
-      this.errorMessage.set(error instanceof Error ? error.message : 'Something went wrong.');
+      this.errorMessage.set(messageOf(error, msg('auth.failed', 'Something went wrong.')));
     } finally {
       this.isSubmitting.set(false);
     }
@@ -154,7 +175,9 @@ export class AuthMenuComponent {
     const email = this.email.trim();
     if (!email) {
       this.infoMessage.set(null);
-      this.errorMessage.set('Enter your email above first, then use "Forgot password?".');
+      this.errorMessage.set(
+        msg('auth.resetNeedsEmail', 'Enter your email above first, then use "Forgot password?".'),
+      );
       return;
     }
     this.isSubmitting.set(true);
@@ -163,10 +186,13 @@ export class AuthMenuComponent {
     try {
       await this.authService.sendPasswordReset(email);
       this.infoMessage.set(
-        'If an account exists for that email, a password-reset link is on its way.',
+        msg(
+          'auth.resetSent',
+          'If an account exists for that email, a password-reset link is on its way.',
+        ),
       );
     } catch (error) {
-      this.errorMessage.set(error instanceof Error ? error.message : 'Something went wrong.');
+      this.errorMessage.set(messageOf(error, msg('auth.failed', 'Something went wrong.')));
     } finally {
       this.isSubmitting.set(false);
     }
@@ -183,7 +209,7 @@ export class AuthMenuComponent {
       await this.authService.signInWithOAuth(providerId);
       this.closeRequested.emit();
     } catch (error) {
-      this.errorMessage.set(error instanceof Error ? error.message : 'Something went wrong.');
+      this.errorMessage.set(messageOf(error, msg('auth.failed', 'Something went wrong.')));
     } finally {
       this.isSubmitting.set(false);
     }
@@ -194,9 +220,13 @@ export class AuthMenuComponent {
     this.infoMessage.set(null);
     try {
       await this.authService.resendVerificationEmail();
-      this.infoMessage.set('Verification email sent — check your inbox.');
+      this.infoMessage.set(
+        msg('auth.verificationSent', 'Verification email sent — check your inbox.'),
+      );
     } catch {
-      this.errorMessage.set('Could not send the verification email. Please try again.');
+      this.errorMessage.set(
+        msg('auth.verificationFailed', 'Could not send the verification email. Please try again.'),
+      );
     }
   }
 
@@ -210,7 +240,9 @@ export class AuthMenuComponent {
       this.nameSaved.set(true);
       setTimeout(() => this.nameSaved.set(false), 2000);
     } catch {
-      this.errorMessage.set('Could not update your name. Please try again.');
+      this.errorMessage.set(
+        msg('auth.nameFailed', 'Could not update your name. Please try again.'),
+      );
     }
   }
 
@@ -228,7 +260,10 @@ export class AuthMenuComponent {
       // Same rule as `downloadMyData` below: the service's own message when it
       // has verified a cause, the generic line only when it has not.
       this.errorMessage.set(
-        subscriptionFailureMessage(error, 'Could not open the billing portal. Please try again.'),
+        subscriptionFailureMessage(
+          error,
+          msg('auth.portalFailed', 'Could not open the billing portal. Please try again.'),
+        ),
       );
       this.isOpeningPortal.set(false);
     }
@@ -247,7 +282,10 @@ export class AuthMenuComponent {
       // distinguishes a missing deployment (retrying can never help) from a
       // transient failure (retrying is exactly right).
       this.errorMessage.set(
-        error instanceof Error ? error.message : 'Could not prepare your data. Please try again.',
+        messageOf(
+          error,
+          msg('auth.exportFailed', 'Could not prepare your data. Please try again.'),
+        ),
       );
     } finally {
       this.isExporting.set(false);
@@ -283,7 +321,10 @@ export class AuthMenuComponent {
       // retrying is safe — leave the panel open. The service's message says
       // whether retrying is worth it.
       this.errorMessage.set(
-        error instanceof Error ? error.message : 'Could not delete your account. Please try again.',
+        messageOf(
+          error,
+          msg('auth.deleteFailed', 'Could not delete your account. Please try again.'),
+        ),
       );
     } finally {
       this.isDeleting.set(false);

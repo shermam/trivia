@@ -27,6 +27,8 @@ import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 import { QuizListComponent } from '../quiz-list/quiz-list.component';
 import { TagSelectorComponent } from '../tag-selector/tag-selector.component';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 
 /** What `createDonationSession` sends the browser back to `/` carrying. */
 type DonationQueryStatus = 'success' | 'cancelled' | null;
@@ -54,17 +56,29 @@ function donationStatusFrom(value: string | null): DonationQueryStatus {
  * take is in {@link TOPIC_HINT_VARIANTS}, one per seed tag.
  */
 const TOPIC_HINTS = {
-  openTrivia: 'Pick one of the suggested topics, or none to play every topic.',
-  custom: 'Pick topics to play questions about exactly those subjects.',
-  mixedEmpty: 'Pick topics to narrow the community half; a suggested one narrows Open Trivia too.',
-  mixedUnseeded:
+  openTrivia: msg(
+    'setup.hintOpenTrivia',
+    'Pick one of the suggested topics, or none to play every topic.',
+  ),
+  custom: msg('setup.hintCustom', 'Pick topics to play questions about exactly those subjects.'),
+  mixedEmpty: msg(
+    'setup.hintMixed',
+    'Pick topics to narrow the community half; a suggested one narrows Open Trivia too.',
+  ),
+  mixedUnseeded: msg(
+    'setup.hintMixedAny',
     'Community questions match any of these; Open Trivia ones cover every topic until you add a suggested one.',
+  ),
   mixedSeeded: (tag: string) =>
-    `Community questions match any of these; Open Trivia ones follow #${tag}.`,
+    msg(
+      'setup.hintMixedTag',
+      'Community questions match any of these; Open Trivia ones follow #{tag}.',
+      { tag },
+    ),
 } as const;
 
 /** Every hint the picker can be given, so it reserves the tallest (`CLAUDE.md` §4.4). */
-const TOPIC_HINT_VARIANTS: readonly string[] = [
+const TOPIC_HINT_VARIANTS: readonly Message[] = [
   TOPIC_HINTS.openTrivia,
   TOPIC_HINTS.custom,
   TOPIC_HINTS.mixedEmpty,
@@ -78,10 +92,24 @@ const TOPIC_HINT_VARIANTS: readonly string[] = [
  * switching into the source removed.
  */
 const OPEN_TRIVIA_TOPIC_MESSAGES = {
-  notAllowed: 'Open Trivia plays only the suggested topics — Custom and Mixed take any.',
-  keptOne: 'Open Trivia plays one suggested topic, so the others were removed.',
-  keptNone: 'Open Trivia plays only the suggested topics, so yours were removed.',
+  notAllowed: msg(
+    'setup.topicNotAllowed',
+    'Open Trivia plays only the suggested topics — Custom and Mixed take any.',
+  ),
+  keptOne: msg(
+    'setup.topicKeptOne',
+    'Open Trivia plays one suggested topic, so the others were removed.',
+  ),
+  keptNone: msg(
+    'setup.topicKeptNone',
+    'Open Trivia plays only the suggested topics, so yours were removed.',
+  ),
 } as const;
+
+/** "15 seconds" — an option of the time-limit picker. */
+function secondsLabel(seconds: number): Message {
+  return msg('setup.seconds', '{n, plural, one {# second} other {# seconds}}', { n: seconds });
+}
 
 /** What the resume banner says about the game it offers. */
 interface ResumeOffer {
@@ -109,6 +137,7 @@ function listTags(tags: readonly string[]): string {
     LogoComponent,
     QuizListComponent,
     TagSelectorComponent,
+    TPipe,
   ],
   templateUrl: './game-setup.component.html',
   styleUrl: './game-setup.component.css',
@@ -221,10 +250,10 @@ export class GameSetupComponent implements OnInit {
     void this.router.navigate([], { queryParams: {}, replaceUrl: true });
   }
 
-  protected readonly timeLimitOptions: { value: TimeLimitOption; label: string }[] = [
-    { value: 15, label: '15 seconds' },
-    { value: 30, label: '30 seconds' },
-    { value: 'unlimited', label: 'No limit' },
+  protected readonly timeLimitOptions: { value: TimeLimitOption; label: Message }[] = [
+    { value: 15, label: secondsLabel(15) },
+    { value: 30, label: secondsLabel(30) },
+    { value: 'unlimited', label: msg('setup.noLimit', 'No limit') },
   ];
 
   /**
@@ -238,8 +267,12 @@ export class GameSetupComponent implements OnInit {
   protected readonly timeLimitNote = computed(() => {
     const chosen = this.timeLimit();
     return chosen === 'unlimited'
-      ? 'No countdown. Ranks on the separate no-limit leaderboard.'
-      : `Ranks on the ${chosen}-second leaderboard — each time limit has its own.`;
+      ? msg('setup.noteUnlimited', 'No countdown. Ranks on the separate no-limit leaderboard.')
+      : msg(
+          'setup.noteTimed',
+          'Ranks on the {seconds}-second leaderboard — each time limit has its own.',
+          { seconds: chosen },
+        );
   });
 
   /** Mirrors the form control into a signal so `timeLimitNote` recomputes. */
@@ -363,8 +396,14 @@ export class GameSetupComponent implements OnInit {
       keptTags,
       kept === null ? OPEN_TRIVIA_TOPIC_MESSAGES.keptNone : OPEN_TRIVIA_TOPIC_MESSAGES.keptOne,
       kept === null
-        ? `Open Trivia plays only the suggested topics. Removed ${listTags(removed)}.`
-        : `Open Trivia plays one suggested topic. Kept #${kept}; removed ${listTags(removed)}.`,
+        ? msg('setup.saidRemoved', 'Open Trivia plays only the suggested topics. Removed {tags}.', {
+            tags: listTags(removed),
+          })
+        : msg(
+            'setup.saidKept',
+            'Open Trivia plays one suggested topic. Kept #{kept}; removed {tags}.',
+            { kept, tags: listTags(removed) },
+          ),
     );
   }
 

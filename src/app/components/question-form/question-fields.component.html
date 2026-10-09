@@ -20,17 +20,18 @@
   <app-tag-selector
     formControlName="tags"
     [idPrefix]="idPrefix()"
-    label="Topics"
+    [label]="'form.topics' | t: 'Topics'"
+    [chosenLabel]="'form.topicsChosen' | t: 'Topics chosen'"
     [required]="true"
     [errorMessage]="topicsError()"
-    hint="A few words for what this question is about, so players can ask for exactly this subject. Reviewers see them too."
+    [hint]="topicsHint"
   />
 
   <div>
     <label
       [attr.for]="id('difficulty')"
       class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-      >Difficulty</label
+      >{{ 'form.difficulty' | t: 'Difficulty' }}</label
     >
     <div class="relative">
       <select
@@ -38,9 +39,9 @@
         formControlName="difficulty"
         class="w-full appearance-none rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 pr-10 text-slate-900 dark:text-slate-50 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
       >
-        <option value="easy">Easy</option>
-        <option value="medium">Medium</option>
-        <option value="hard">Hard</option>
+        <option value="easy">{{ 'form.easy' | t: 'Easy' }}</option>
+        <option value="medium">{{ 'form.medium' | t: 'Medium' }}</option>
+        <option value="hard">{{ 'form.hard' | t: 'Hard' }}</option>
       </select>
       <app-icon
         name="chevron-down"
@@ -54,7 +55,7 @@
     <span
       [id]="id('question-type-label')"
       class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-      >Question Type</span
+      >{{ 'form.type' | t: 'Question Type' }}</span
     >
     <!-- Grouped controls need the role and the label, or the group's purpose is
          never conveyed to a screen reader (CLAUDE.md §4.5, finding G4). The
@@ -74,7 +75,7 @@
         [class.dark:text-slate-400]="form().value.type !== 'multiple'"
       >
         <input type="radio" formControlName="type" value="multiple" class="sr-only" />
-        Multiple Choice
+        {{ 'form.multiple' | t: 'Multiple Choice' }}
       </label>
       <label
         class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
@@ -86,7 +87,7 @@
         [class.dark:text-slate-400]="form().value.type !== 'boolean'"
       >
         <input type="radio" formControlName="type" value="boolean" class="sr-only" />
-        True / False
+        {{ 'form.trueFalse' | t: 'True / False' }}
       </label>
     </div>
   </div>
@@ -95,13 +96,13 @@
     <label
       [attr.for]="id('question')"
       class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-      >Question</label
+      >{{ 'form.question' | t: 'Question' }}</label
     >
     <textarea
       [id]="id('question')"
       formControlName="question"
       rows="3"
-      placeholder="What is the question?"
+      [placeholder]="'form.questionPlaceholder' | t: 'What is the question?'"
       [attr.aria-invalid]="showsError(form().controls.question)"
       [attr.aria-describedby]="questionDescribedBy()"
       class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
@@ -112,7 +113,7 @@
         [attr.data-cy]="id('question-error')"
         class="mt-1.5 text-sm text-red-700 dark:text-red-300"
       >
-        {{ errorFor(form().controls.question, 'Question', maxQuestionLength) }}
+        {{ errorFor(form().controls.question, 'question', maxQuestionLength) | t }}
       </p>
     }
     <!--
@@ -135,7 +136,12 @@
       [class.text-red-700]="form().controls.question.value.length > maxQuestionLength"
       [class.dark:text-red-300]="form().controls.question.value.length > maxQuestionLength"
     >
-      {{ form().controls.question.value.length }} of {{ maxQuestionLength }} characters
+      {{
+        'form.charCount'
+          | t
+            : '{count} of {max} characters'
+            : { count: form().controls.question.value.length, max: maxQuestionLength }
+      }}
     </p>
   </div>
 
@@ -156,7 +162,7 @@
     <span
       [id]="id('format-label')"
       class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-      >Formatting</span
+      >{{ 'form.format' | t: 'Formatting' }}</span
     >
     <div
       role="radiogroup"
@@ -179,7 +185,7 @@
           class="sr-only"
           [attr.data-cy]="id('format-plain')"
         />
-        Plain text
+        {{ 'form.plain' | t: 'Plain text' }}
       </label>
       <label
         class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
@@ -197,15 +203,16 @@
           class="sr-only"
           [attr.data-cy]="id('format-markdown')"
         />
-        Markdown &amp; math
+        {{ 'form.markdown' | t: 'Markdown & math' }}
       </label>
     </div>
 
     @if (form().value.format === 'markdown') {
       <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-        Paragraphs and line breaks, bold, italics, strikethrough, lists, quotes, links, inline code
-        and code blocks, plus LaTeX between <code>$…$</code> and <code>$$…$$</code>. Anything else
-        is removed rather than shown.
+        <app-rich-text [message]="markdownHelp" [tags]="{ code: codeTag }" />
+        <ng-template #codeTag let-text
+          ><code>{{ text }}</code></ng-template
+        >
       </p>
 
       <!--
@@ -234,7 +241,7 @@
           [id]="id('preview-label')"
           class="mb-1 text-xs font-semibold text-slate-500 dark:text-slate-400"
         >
-          Preview
+          {{ 'form.preview' | t: 'Preview' }}
         </p>
         <div
           class="min-h-10 text-sm text-slate-900 dark:text-slate-50"
@@ -251,7 +258,7 @@
       <span
         [id]="id('correct-answer-label')"
         class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-        >Correct Answer</span
+        >{{ 'form.correctAnswer' | t: 'Correct Answer' }}</span
       >
       <div
         role="radiogroup"
@@ -268,7 +275,7 @@
           [class.dark:text-slate-400]="form().value.correctAnswer !== 'True'"
         >
           <input type="radio" formControlName="correctAnswer" value="True" class="sr-only" />
-          True
+          {{ 'form.true' | t: 'True' }}
         </label>
         <label
           class="flex-1 flex items-center justify-center rounded-lg px-2 py-2 text-sm font-semibold cursor-pointer transition-colors"
@@ -280,7 +287,7 @@
           [class.dark:text-slate-400]="form().value.correctAnswer !== 'False'"
         >
           <input type="radio" formControlName="correctAnswer" value="False" class="sr-only" />
-          False
+          {{ 'form.false' | t: 'False' }}
         </label>
       </div>
     </div>
@@ -289,7 +296,7 @@
       <label
         [attr.for]="id('correctAnswer')"
         class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-        >Correct Answer</label
+        >{{ 'form.correctAnswer' | t: 'Correct Answer' }}</label
       >
       <input
         [id]="id('correctAnswer')"
@@ -307,7 +314,7 @@
           [attr.data-cy]="id('correct-answer-error')"
           class="mt-1.5 text-sm text-red-700 dark:text-red-300"
         >
-          {{ errorFor(form().controls.correctAnswer, 'Correct answer', maxAnswerLength) }}
+          {{ errorFor(form().controls.correctAnswer, 'correctAnswer', maxAnswerLength) | t }}
         </p>
       }
     </div>
@@ -340,7 +347,7 @@
       <span
         [id]="id('incorrect-answers-label')"
         class="block text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1.5"
-        >Incorrect Answers</span
+        >{{ 'form.incorrectAnswers' | t: 'Incorrect Answers' }}</span
       >
       <div
         role="group"
@@ -351,14 +358,14 @@
         @for (control of form().controls.incorrectAnswers.controls; track control; let i = $index) {
           <div [attr.data-cy]="id('incorrect-answer-row')">
             <div class="flex items-center gap-2">
-              <label [attr.for]="id('incorrect-answer-' + i)" class="sr-only"
-                >Incorrect answer {{ i + 1 }}</label
-              >
+              <label [attr.for]="id('incorrect-answer-' + i)" class="sr-only">{{
+                'form.incorrectN' | t: 'Incorrect answer {n}' : { n: i + 1 }
+              }}</label>
               <input
                 [id]="id('incorrect-answer-' + i)"
                 type="text"
                 [formControl]="control"
-                [placeholder]="'Incorrect answer ' + (i + 1)"
+                [placeholder]="'form.incorrectN' | t: 'Incorrect answer {n}' : { n: i + 1 }"
                 [attr.aria-invalid]="showsError(control)"
                 [attr.aria-describedby]="
                   showsError(control) ? id('incorrect-answer-error-' + i) : null
@@ -376,7 +383,9 @@
                 <button
                   type="button"
                   (click)="removeAnswer(i)"
-                  [attr.aria-label]="'Remove incorrect answer ' + (i + 1)"
+                  [attr.aria-label]="
+                    'form.removeIncorrect' | t: 'Remove incorrect answer {n}' : { n: i + 1 }
+                  "
                   [attr.data-cy]="id('remove-incorrect-answer-' + i)"
                   class="flex w-11 shrink-0 self-stretch items-center justify-center rounded-xl border border-slate-900/15 dark:border-white/15 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-red-700 dark:hover:text-red-300 transition-colors"
                 >
@@ -390,7 +399,7 @@
                 [attr.data-cy]="id('incorrect-answer-error-' + i)"
                 class="mt-1.5 text-sm text-red-700 dark:text-red-300"
               >
-                {{ errorFor(control, 'Incorrect answer ' + (i + 1), maxAnswerLength) }}
+                {{ errorFor(control, i + 1, maxAnswerLength) | t }}
               </p>
             }
           </div>
@@ -414,21 +423,21 @@
           class="flex items-center gap-1.5 rounded-xl border border-slate-900/15 dark:border-white/15 px-3.5 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:text-slate-400 dark:disabled:text-slate-600 disabled:hover:bg-transparent transition-colors"
         >
           <app-icon name="plus-circle" [size]="16" />
-          Add an answer
+          {{ 'form.addAnswer' | t: 'Add an answer' }}
         </button>
         <p
           [id]="id('answer-count-hint')"
           [attr.data-cy]="id('answer-count-hint')"
           class="text-xs text-slate-500 dark:text-slate-400"
         >
-          Two to six answers in all, counting the correct one.
+          {{ 'form.answerCountHint' | t: 'Two to six answers in all, counting the correct one.' }}
         </p>
       </div>
 
       <!-- Rendered always, text swapped in — a live region inserted while
            already carrying its message is routinely missed (finding G3). -->
       <p role="status" [attr.data-cy]="id('answer-rows-status')" class="sr-only">
-        {{ rowsAnnouncement() }}
+        {{ rowsAnnouncement() | t }}
       </p>
     </div>
   }
@@ -438,7 +447,7 @@
        This is what tells a screen-reader user that Save did something,
        which is precisely what a silently-rejected submit did not. -->
   <p role="status" [attr.data-cy]="id('validation-summary')" class="sr-only">
-    {{ validationSummary() }}
+    {{ validationSummary() | t }}
   </p>
   @if (validationSummary()) {
     <p
@@ -446,7 +455,7 @@
       class="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-3 py-2"
     >
       <app-icon name="triangle-alert" [size]="16" class="shrink-0 mt-0.5" />
-      {{ validationSummary() }}
+      {{ validationSummary() | t }}
     </p>
   }
 
@@ -461,8 +470,10 @@
       [attr.for]="id('sourceUrl')"
       class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
     >
-      Source link
-      <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+      {{ 'form.sourceUrl' | t: 'Source link' }}
+      <span class="font-normal text-slate-500 dark:text-slate-400">{{
+        'form.optional' | t: '(optional)'
+      }}</span>
     </label>
     <input
       [id]="id('sourceUrl')"
@@ -470,7 +481,7 @@
       formControlName="sourceUrl"
       [attr.data-cy]="id('source-url')"
       inputmode="url"
-      placeholder="https://en.wikipedia.org/wiki/..."
+      [placeholder]="'form.sourceUrlPlaceholder' | t: 'https://en.wikipedia.org/wiki/...'"
       [attr.aria-invalid]="showsError(form().controls.sourceUrl)"
       [attr.aria-describedby]="
         showsError(form().controls.sourceUrl)
@@ -485,7 +496,7 @@
         [attr.data-cy]="id('source-url-error')"
         class="mt-1.5 text-sm text-red-700 dark:text-red-300"
       >
-        {{ errorFor(form().controls.sourceUrl, 'Source link', 500) }}
+        {{ errorFor(form().controls.sourceUrl, 'sourceUrl', 500) | t }}
       </p>
     }
     <!--
@@ -496,7 +507,10 @@
       list when there is one, because it is the part they need.
     -->
     <p [id]="id('sourceUrl-hint')" class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-      Where the answer comes from. Reviewers see it, and so do players after they answer.
+      {{
+        'form.sourceUrlHint'
+          | t: 'Where the answer comes from. Reviewers see it, and so do players after they answer.'
+      }}
     </p>
   </div>
 
@@ -505,15 +519,17 @@
       [attr.for]="id('sourceTitle')"
       class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
     >
-      Source name
-      <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+      {{ 'form.sourceTitle' | t: 'Source name' }}
+      <span class="font-normal text-slate-500 dark:text-slate-400">{{
+        'form.optional' | t: '(optional)'
+      }}</span>
     </label>
     <input
       [id]="id('sourceTitle')"
       type="text"
       formControlName="sourceTitle"
       [attr.data-cy]="id('source-title')"
-      placeholder="MDN Web Docs, CRC Handbook 95th ed., …"
+      [placeholder]="'form.sourceTitlePlaceholder' | t: 'MDN Web Docs, CRC Handbook 95th ed., …'"
       [attr.aria-invalid]="showsError(form().controls.sourceTitle)"
       [attr.aria-describedby]="
         showsError(form().controls.sourceTitle) ? id('sourceTitle-error') : null
@@ -526,7 +542,7 @@
         [attr.data-cy]="id('source-title-error')"
         class="mt-1.5 text-sm text-red-700 dark:text-red-300"
       >
-        {{ errorFor(form().controls.sourceTitle, 'Source name', 200) }}
+        {{ errorFor(form().controls.sourceTitle, 'sourceTitle', 200) | t }}
       </p>
     }
   </div>
@@ -548,15 +564,20 @@
       [attr.for]="id('explanation')"
       class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
     >
-      Justification
-      <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+      {{ 'form.explanation' | t: 'Justification' }}
+      <span class="font-normal text-slate-500 dark:text-slate-400">{{
+        'form.optional' | t: '(optional)'
+      }}</span>
     </label>
     <textarea
       [id]="id('explanation')"
       rows="3"
       formControlName="explanation"
       [attr.data-cy]="id('justification')"
-      placeholder="Why is the right answer right, and why are the others wrong?"
+      [placeholder]="
+        'form.explanationPlaceholder'
+          | t: 'Why is the right answer right, and why are the others wrong?'
+      "
       [attr.aria-invalid]="showsError(form().controls.explanation)"
       [attr.aria-describedby]="
         showsError(form().controls.explanation)
@@ -571,12 +592,15 @@
         [attr.data-cy]="id('justification-error')"
         class="mt-1.5 text-sm text-red-700 dark:text-red-300"
       >
-        {{ errorFor(form().controls.explanation, 'Justification', 1000) }}
+        {{ errorFor(form().controls.explanation, 'explanation', 1000) | t }}
       </p>
     }
     <p [id]="id('explanation-hint')" class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-      Only needed for a tricky question — where knowing the subject still isn't enough to see why
-      the right answer is right. Reviewers see it, and so do players after they answer.
+      {{
+        'form.explanationHint'
+          | t
+            : "Only needed for a tricky question — where knowing the subject still isn't enough to see why the right answer is right. Reviewers see it, and so do players after they answer."
+      }}
     </p>
   </div>
 </div>

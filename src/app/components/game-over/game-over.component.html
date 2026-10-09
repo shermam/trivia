@@ -9,9 +9,11 @@
         <app-icon name="trophy" [size]="28" class="text-white" />
       </div>
       <h1 class="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-1">
-        Game Over!
+        {{ 'over.title' | t: 'Game Over!' }}
       </h1>
-      <p class="text-slate-500 dark:text-slate-400 mb-6">Here's how you did</p>
+      <p class="text-slate-500 dark:text-slate-400 mb-6">
+        {{ 'over.subtitle' | t: "Here's how you did" }}
+      </p>
 
       <!--
         Four tiles rather than two, because the multiplier (`FEAT-004`) split
@@ -33,7 +35,7 @@
           <p
             class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2"
           >
-            Score
+            {{ 'over.score' | t: 'Score' }}
           </p>
           <p
             data-cy="final-score"
@@ -41,7 +43,9 @@
           >
             {{ gameController.score() }}
           </p>
-          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">points</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {{ 'over.points' | t: 'points' }}
+          </p>
         </div>
         <div
           class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
@@ -49,13 +53,13 @@
           <p
             class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2"
           >
-            Accuracy
+            {{ 'over.accuracy' | t: 'Accuracy' }}
           </p>
           <p class="text-4xl font-extrabold tracking-tight" [ngClass]="performanceColorClass()">
             {{ gameController.percentage() }}%
           </p>
           <p class="text-xs font-semibold mt-1" [ngClass]="performanceColorClass()">
-            {{ performanceLabel() }}
+            {{ performanceLabel() | t }}
           </p>
         </div>
         <div
@@ -64,7 +68,7 @@
           <p
             class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2"
           >
-            Correct
+            {{ 'over.correct' | t: 'Correct' }}
           </p>
           <!--
             The denominator is muted against the count it follows, but it is
@@ -83,7 +87,9 @@
               >/ {{ gameController.totalQuestions() }}</span
             >
           </p>
-          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">correct answers</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {{ 'over.correctAnswers' | t: 'correct answers' }}
+          </p>
         </div>
         <div
           class="rounded-2xl border border-slate-900/7 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60 px-4 py-5"
@@ -91,7 +97,7 @@
           <p
             class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2"
           >
-            Best streak
+            {{ 'over.bestStreak' | t: 'Best streak' }}
           </p>
           <p
             data-cy="max-streak"
@@ -100,7 +106,9 @@
             <app-icon name="flame" [size]="26" class="shrink-0" />
             {{ gameController.maxStreak() }}
           </p>
-          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">in a row</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {{ 'over.inARow' | t: 'in a row' }}
+          </p>
         </div>
       </div>
     </div>
@@ -145,10 +153,14 @@
         data-cy="score-quiz"
       >
         <p class="font-semibold text-slate-900 dark:text-slate-50">
-          Quizzes aren't ranked on a leaderboard.
+          {{ 'over.quizUnranked' | t: "Quizzes aren't ranked on a leaderboard." }}
         </p>
         <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Everyone plays a quiz's questions in the same order, so its score stays off the board.
+          {{
+            'over.quizUnrankedWhy'
+              | t
+                : "Everyone plays a quiz's questions in the same order, so its score stays off the board."
+          }}
         </p>
       </div>
 
@@ -163,16 +175,16 @@
         <div class="flex items-start gap-2.5">
           <app-icon name="circle-check-big" [size]="18" class="shrink-0 mt-0.5" />
           <div>
-            <p class="font-semibold">Score saved to the leaderboard!</p>
+            <p class="font-semibold">{{ 'over.saved' | t: 'Score saved to the leaderboard!' }}</p>
             <!--
               The rank is read off whichever board is on screen, so the claim
               has to name that board: "#3 on the 15-second leaderboard" is a
               statement about the world, and it would be false for a player
               sitting third in Portugal.
             -->
-            @if (playerRank(); as rank) {
+            @if (rankMessage(); as rank) {
               <p class="text-sm text-emerald-800/80 dark:text-emerald-300/80">
-                You're ranked #{{ rank }} on the {{ rankBoardLabel() }}.
+                {{ rank | t }}
               </p>
             }
           </div>
@@ -187,7 +199,7 @@
       >
         <div class="flex items-start gap-2.5">
           <app-icon name="triangle-alert" [size]="18" class="shrink-0 mt-0.5" />
-          <p>{{ saveError() }}</p>
+          <p>{{ saveError() | t }}</p>
         </div>
       </div>
 
@@ -205,7 +217,7 @@
         data-cy="score-sign-in"
       >
         <p class="text-slate-700 dark:text-slate-300 mb-3">
-          Sign in to save this score to the leaderboard.
+          {{ 'over.signInToSave' | t: 'Sign in to save this score to the leaderboard.' }}
         </p>
         @if (!embedMode.isEmbedded()) {
           <button
@@ -214,7 +226,7 @@
             (click)="openSignIn()"
             class="mx-auto rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
           >
-            Sign in
+            {{ 'over.signIn' | t: 'Sign in' }}
           </button>
         }
       </div>
@@ -226,14 +238,14 @@
         data-cy="score-verify"
       >
         <p class="text-slate-700 dark:text-slate-300 mb-3">
-          Verify your email to save this score to the leaderboard.
+          {{ 'over.verifyToSave' | t: 'Verify your email to save this score to the leaderboard.' }}
         </p>
         <button
           type="button"
           (click)="resendVerification()"
           class="mx-auto rounded-xl border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold px-5 py-2.5 transition-colors"
         >
-          Resend verification email
+          {{ 'over.resend' | t: 'Resend verification email' }}
         </button>
       </div>
 
@@ -249,7 +261,7 @@
           class="flex items-center gap-1.5 text-sm font-bold text-emerald-900 dark:text-emerald-200 mb-3"
         >
           <app-icon name="save" [size]="15" />
-          Save your score to the {{ boardLabel() }} leaderboard
+          {{ saveHeading() | t }}
         </p>
         <!--
           The country the entry is published under (`FEAT-028`).
@@ -287,7 +299,7 @@
             for="save-score-region"
             class="block text-xs font-semibold text-emerald-900 dark:text-emerald-200 mb-1"
           >
-            Country to rank in
+            {{ 'over.country' | t: 'Country to rank in' }}
           </label>
           <select
             id="save-score-region"
@@ -297,7 +309,9 @@
             aria-describedby="save-score-region-hint"
             class="w-full rounded-xl border border-emerald-600/25 dark:border-emerald-400/25 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors"
           >
-            <option value="" [selected]="selectedRegion() === ''">Prefer not to say</option>
+            <option value="" [selected]="selectedRegion() === ''">
+              {{ 'over.noCountry' | t: 'Prefer not to say' }}
+            </option>
             @for (option of regionOptions; track option.code) {
               <option [value]="option.code" [selected]="option.code === selectedRegion()">
                 {{ option.name }}
@@ -308,8 +322,11 @@
             id="save-score-region-hint"
             class="mt-1 text-xs text-emerald-900/70 dark:text-emerald-200/70"
           >
-            Published beside your name and score on that country's public board, as well as the
-            global one. Leave it unset and only the global board gets your score.
+            {{
+              'over.countryHint'
+                | t
+                  : "Published beside your name and score on that country's public board, as well as the global one. Leave it unset and only the global board gets your score."
+            }}
           </p>
         </div>
         <form (ngSubmit)="saveScore()" class="flex flex-col sm:flex-row gap-2">
@@ -317,7 +334,7 @@
             type="text"
             name="playerName"
             [(ngModel)]="playerName"
-            placeholder="Enter your name"
+            [placeholder]="'over.namePlaceholder' | t: 'Enter your name'"
             maxlength="30"
             required
             autocomplete="nickname"
@@ -329,9 +346,9 @@
             class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 transition-colors whitespace-nowrap"
           >
             @if (isSaving()) {
-              Saving&hellip;
+              {{ 'over.saving' | t: 'Saving…' }}
             } @else {
-              Save Score
+              {{ 'over.save' | t: 'Save Score' }}
             }
           </button>
         </form>
@@ -342,7 +359,7 @@
         class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl px-4 py-3"
       >
         <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-        {{ saveError() }}
+        {{ saveError() | t }}
       </p>
     }
 
@@ -370,7 +387,7 @@
               class="text-base font-bold text-slate-900 dark:text-slate-50"
               data-cy="leaderboard-title"
             >
-              Top 10 — {{ boardLabel() }} games
+              {{ boardHeading() | t }}
             </h2>
             <!--
               Which population is being ranked (`FEAT-028`) — eight names on a
@@ -384,7 +401,7 @@
               one place a check at a convenient window size would call fixed.
             -->
             <p class="text-xs text-slate-500 dark:text-slate-400" data-cy="leaderboard-scope">
-              {{ boardScopeLabel() }}
+              {{ boardScopeLabel() | t }}
             </p>
           </div>
         </div>
@@ -419,7 +436,9 @@
         <div
           class="flex items-center gap-2 px-6 py-3 border-b border-slate-900/6 dark:border-white/10"
         >
-          <span id="board-scope-label" class="sr-only">Which leaderboard to show</span>
+          <span id="board-scope-label" class="sr-only">{{
+            'over.boardPicker' | t: 'Which leaderboard to show'
+          }}</span>
           <div
             role="radiogroup"
             aria-labelledby="board-scope-label"
@@ -446,7 +465,7 @@
                   [checked]="boardScope() === option.scope"
                   (change)="onBoardScopeChange(option.scope)"
                 />
-                {{ option.label }}
+                {{ option.label | t }}
               </label>
             }
           </div>
@@ -468,7 +487,7 @@
         -->
         <div class="relative py-2" data-cy="leaderboard-body">
           <p role="status" aria-live="polite" class="sr-only" data-cy="leaderboard-status">
-            {{ leaderboardStatus() }}
+            {{ leaderboardStatus() | t }}
           </p>
 
           @if (isLoadingLeaderboard()) {
@@ -546,7 +565,7 @@
                     @if (entry.uid === authService.user()?.uid) {
                       <span
                         class="ml-1.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 leading-none tracking-wide"
-                        >YOU</span
+                        >{{ 'over.you' | t: 'YOU' }}</span
                       >
                     }
                   </span>
@@ -566,7 +585,12 @@
                     [class.text-emerald-600]="entry.uid === authService.user()?.uid"
                     [class.dark:text-emerald-400]="entry.uid === authService.user()?.uid"
                   >
-                    {{ entry.score }} pts &middot; {{ entry.percentage }}%
+                    {{
+                      'over.row'
+                        | t
+                          : '{score} pts · {percentage}%'
+                          : { score: entry.score, percentage: entry.percentage }
+                    }}
                   </span>
                 </li>
               }
@@ -600,7 +624,7 @@
               [class.dark:text-red-300]="leaderboardError()"
               data-cy="leaderboard-message"
             >
-              {{ message }}
+              {{ message | t }}
             </p>
           }
         </div>
@@ -611,7 +635,7 @@
          be sent from the dialog when no question is flagged, so a live region
          living inside the flagged-questions card would not exist at the moment
          it has something to say (finding G3). -->
-    <p role="status" data-cy="report-status" class="sr-only">{{ reportStatus() }}</p>
+    <p role="status" data-cy="report-status" class="sr-only">{{ reportStatus() | t }}</p>
 
     <!-- One row, used by both the flagged list and the dialog. Keeping a
          single copy is what stops the two drifting into different
@@ -632,7 +656,7 @@
             tabindex="-1"
             class="shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-1"
           >
-            Reported
+            {{ 'over.reported' | t: 'Reported' }}
           </span>
         } @else {
           <button
@@ -643,7 +667,7 @@
             (click)="toggleReportForm(question)"
             class="shrink-0 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold px-2.5 py-1.5 transition-colors"
           >
-            Report
+            {{ 'over.report' | t: 'Report' }}
           </button>
         }
       </div>
@@ -652,7 +676,7 @@
           #reportPanel
           [id]="'report-panel-' + question.id"
           role="group"
-          aria-label="Report this question"
+          [attr.aria-label]="'over.reportLabel' | t: 'Report this question'"
           tabindex="-1"
           (keydown.escape)="closeReportForm()"
           class="mt-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-4 py-4 focus:outline-none"
@@ -661,7 +685,7 @@
             [id]="'report-reason-label-' + question.id"
             class="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-2"
           >
-            What's wrong with this question?
+            {{ 'over.reportReason' | t: "What's wrong with this question?" }}
           </p>
           <div
             role="radiogroup"
@@ -677,7 +701,7 @@
                   [(ngModel)]="reportReason"
                   class="h-4 w-4 accent-emerald-600"
                 />
-                {{ option.label }}
+                {{ option.label | t }}
               </label>
             }
           </div>
@@ -689,8 +713,10 @@
             [(ngModel)]="reportDetail"
             maxlength="500"
             rows="2"
-            placeholder="Anything else we should know? (optional)"
-            aria-label="More detail about the problem (optional)"
+            [placeholder]="'over.reportDetail' | t: 'Anything else we should know? (optional)'"
+            [attr.aria-label]="
+              'over.reportDetailLabel' | t: 'More detail about the problem (optional)'
+            "
             class="w-full rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors mb-3"
           ></textarea>
           @if (reportError()) {
@@ -699,7 +725,7 @@
               [attr.data-cy]="'report-error-' + question.id"
             >
               <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-              {{ reportError() }}
+              {{ reportError() | t }}
             </p>
           }
           <div class="flex justify-end gap-2">
@@ -708,7 +734,7 @@
               (click)="closeReportForm()"
               class="rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-semibold px-4 py-2 transition-colors"
             >
-              Cancel
+              {{ 'over.cancel' | t: 'Cancel' }}
             </button>
             <button
               type="button"
@@ -718,9 +744,9 @@
               class="rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-sm font-bold px-4 py-2 transition-colors"
             >
               @if (isSubmittingReport()) {
-                Sending&hellip;
+                {{ 'over.sending' | t: 'Sending…' }}
               } @else {
-                Send report
+                {{ 'over.send' | t: 'Send report' }}
               }
             </button>
           </div>
@@ -798,9 +824,14 @@
         >
           <app-icon name="rotate-ccw" [size]="18" class="text-slate-400" />
           <span class="flex-1 font-bold text-slate-900 dark:text-slate-50">
-            Review answers
+            {{ 'over.recap' | t: 'Review answers' }}
             <span class="font-normal text-slate-500 dark:text-slate-400">
-              ({{ recapCorrectCount() }}/{{ recap().length }} correct)
+              {{
+                'over.recapCount'
+                  | t
+                    : '({correct}/{total} correct)'
+                    : { correct: recapCorrectCount(), total: recap().length }
+              }}
             </span>
           </span>
           <app-icon
@@ -821,7 +852,7 @@
           -->
           <ol
             [id]="recapPanelId"
-            aria-label="Your answers"
+            [attr.aria-label]="'over.recapLabel' | t: 'Your answers'"
             data-cy="recap-panel"
             class="border-t border-slate-900/6 dark:border-white/10"
           >
@@ -883,7 +914,7 @@
                       <span
                         data-cy="recap-difficulty"
                         class="rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 capitalize text-slate-600 dark:text-slate-300"
-                        >{{ row.difficulty }}</span
+                        >{{ difficultyLabel(row.difficulty) | t }}</span
                       >
                       @if (row.outcome === 'timedOut') {
                         <span
@@ -891,7 +922,7 @@
                           data-cy="recap-timed-out"
                         >
                           <app-icon name="clock" [size]="12" />
-                          Time expired
+                          {{ 'over.timeExpired' | t: 'Time expired' }}
                         </span>
                       } @else if (row.outcome === 'skipped') {
                         <!-- Its own badge, not the timeout one. Both score
@@ -903,7 +934,7 @@
                           data-cy="recap-skipped"
                         >
                           <app-icon name="skip-forward" [size]="12" />
-                          Skipped
+                          {{ 'over.skipped' | t: 'Skipped' }}
                         </span>
                       }
                     </p>
@@ -921,14 +952,18 @@
                           [size]="15"
                           class="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400"
                         />
-                        <span class="text-slate-500 dark:text-slate-400">No answer</span>
+                        <span class="text-slate-500 dark:text-slate-400">{{
+                          'over.noAnswer' | t: 'No answer'
+                        }}</span>
                       } @else if (row.outcome === 'skipped') {
                         <app-icon
                           name="skip-forward"
                           [size]="15"
                           class="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400"
                         />
-                        <span class="text-slate-500 dark:text-slate-400">You skipped this</span>
+                        <span class="text-slate-500 dark:text-slate-400">{{
+                          'over.youSkipped' | t: 'You skipped this'
+                        }}</span>
                       } @else if (row.wasRight) {
                         <app-icon
                           name="circle-check-big"
@@ -966,7 +1001,9 @@
                           class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
                         />
                         <span class="min-w-0 text-emerald-800 dark:text-emerald-300">
-                          <span class="sr-only">Correct answer:</span>
+                          <span class="sr-only">{{
+                            'over.correctAnswer' | t: 'Correct answer:'
+                          }}</span>
                           <app-rendered-text
                             [text]="row.correct.text"
                             [format]="row.question.format"
@@ -987,7 +1024,10 @@
                       as a mistake.
                     -->
                     @if (row.topics.length > 1) {
-                      <app-question-tags [tags]="row.topics" label="Topics" />
+                      <app-question-tags
+                        [tags]="row.topics"
+                        [label]="'over.topics' | t: 'Topics'"
+                      />
                     }
 
                     <!--
@@ -1051,7 +1091,7 @@
          while it is open: a vote's write can settle after the card has
          been collapsed (G3). -->
     <p role="status" aria-live="polite" data-cy="recap-vote-status" class="sr-only">
-      {{ voteAnnouncement() }}
+      {{ voteAnnouncement() | t }}
     </p>
 
     @if (flaggedQuestions().length > 0 && !isReportDialogOpen()) {
@@ -1061,11 +1101,11 @@
         >
           <app-icon name="flag-filled" [size]="18" class="text-red-600 dark:text-red-400" />
           <h2 class="text-base font-bold text-slate-900 dark:text-slate-50">
-            Questions you flagged
+            {{ 'over.flaggedTitle' | t: 'Questions you flagged' }}
           </h2>
         </div>
         <p class="px-6 pt-3 text-sm text-slate-500 dark:text-slate-400">
-          Tell us what was wrong and we'll take a look.
+          {{ 'over.flaggedIntro' | t: "Tell us what was wrong and we'll take a look." }}
         </p>
         <ul class="py-2">
           @for (question of flaggedQuestions(); track question.id) {
@@ -1090,7 +1130,7 @@
         (click)="openReportDialog()"
         class="w-full rounded-2xl border border-slate-900/10 dark:border-white/10 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 px-5 py-3.5 text-sm font-semibold text-slate-600 dark:text-slate-300 transition-colors"
       >
-        Found something wrong in this game? Report it here.
+        {{ 'over.reportAny' | t: 'Found something wrong in this game? Report it here.' }}
       </button>
     }
 
@@ -1126,12 +1166,12 @@
               id="report-dialog-title"
               class="text-base font-bold text-slate-900 dark:text-slate-50"
             >
-              Report a question from this game
+              {{ 'over.reportDialogTitle' | t: 'Report a question from this game' }}
             </h2>
             <button
               type="button"
               data-cy="close-report-dialog"
-              aria-label="Close"
+              [attr.aria-label]="'over.close' | t: 'Close'"
               (click)="closeReportDialog()"
               class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 transition-colors"
             >
@@ -1140,8 +1180,11 @@
           </div>
 
           <p class="px-6 pt-3 text-sm text-slate-500 dark:text-slate-400">
-            Only community-contributed questions can be reported — questions from Open Trivia DB
-            aren't ours to change.
+            {{
+              'over.reportScope'
+                | t
+                  : "Only community-contributed questions can be reported — questions from Open Trivia DB aren't ours to change."
+            }}
           </p>
 
           <ul class="py-2 max-h-[60vh] overflow-y-auto">
@@ -1166,7 +1209,7 @@
       class="w-full flex items-center justify-center gap-2 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-white font-bold py-4 shadow-[0_4px_16px_rgba(15,23,42,0.2)] transition-colors"
     >
       <app-icon name="rotate-ccw" [size]="18" />
-      Play Again
+      {{ 'over.playAgain' | t: 'Play Again' }}
     </button>
   </div>
 </div>

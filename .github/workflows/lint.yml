@@ -107,6 +107,17 @@ jobs:
       - name: Verify animations respect prefers-reduced-motion
         run: npm run motion:verify
 
+      # The half of the i18n guard that ESLint cannot reach (`docs/ci-cd.md`
+      # §4.5). The template rule above sees text in markup; this sees prose in
+      # TypeScript and in template expressions — a sentence in a string
+      # literal, a signal set to English — and fails unless the literal is
+      # exempted with a reason. It also re-extracts `en.json` in memory and
+      # fails when the committed file is stale, so a new message cannot ship
+      # without the catalogue a translator works from.
+      # Reasoning: `scripts/verify-i18n.mjs`.
+      - name: Verify interface text goes through the translation layer
+        run: npm run i18n:verify
+
       # Fails when anything non-production can reach the production Firebase
       # project. Here rather than in a workflow of its own for the reason
       # given at the top of this file: `lint` is required today, so a step

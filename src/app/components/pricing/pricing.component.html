@@ -5,17 +5,17 @@
       class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
     >
       <app-icon name="arrow-left" [size]="15" />
-      Back to game
+      {{ 'pricing.back' | t: 'Back to game' }}
     </a>
 
     <div class="text-center mb-10">
       <h1
         class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-2"
       >
-        Pricing
+        {{ 'pricing.title' | t: 'Pricing' }}
       </h1>
       <p class="text-slate-500 dark:text-slate-400">
-        Play free forever, or go Pro to contribute your own questions.
+        {{ 'pricing.intro' | t: 'Play free forever, or go Pro to contribute your own questions.' }}
       </p>
     </div>
 
@@ -25,16 +25,21 @@
       >
         <span class="flex items-center gap-2">
           <app-icon name="circle-check-big" [size]="16" class="shrink-0" />
-          Subscription started! It may take a few seconds to finish activating.
+          {{
+            'pricing.started'
+              | t: 'Subscription started! It may take a few seconds to finish activating.'
+          }}
         </span>
         <div class="flex items-center gap-3 shrink-0">
-          <a routerLink="/" class="font-semibold hover:underline">Start playing</a>
+          <a routerLink="/" class="font-semibold hover:underline">{{
+            'pricing.startPlaying' | t: 'Start playing'
+          }}</a>
           <button
             type="button"
             (click)="dismissCheckoutStatus()"
             class="font-semibold hover:underline"
           >
-            Dismiss
+            {{ 'pricing.dismiss' | t: 'Dismiss' }}
           </button>
         </div>
       </div>
@@ -45,14 +50,14 @@
       >
         <span class="flex items-center gap-2">
           <app-icon name="triangle-alert" [size]="16" class="shrink-0" />
-          Checkout was cancelled — no charge was made.
+          {{ 'pricing.cancelled' | t: 'Checkout was cancelled — no charge was made.' }}
         </span>
         <button
           type="button"
           (click)="dismissCheckoutStatus()"
           class="font-semibold hover:underline shrink-0"
         >
-          Dismiss
+          {{ 'pricing.dismiss' | t: 'Dismiss' }}
         </button>
       </div>
     }
@@ -67,15 +72,18 @@
         >
           <app-icon name="zap" [size]="22" class="text-slate-500 dark:text-slate-400" />
         </div>
+        <!-- eslint-disable-next-line @angular-eslint/template/i18n -- the plan's name -->
         <h2 class="text-xl font-extrabold text-slate-900 dark:text-slate-50 mb-1">Starter</h2>
         <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
-          Everything you need to play and compete.
+          {{ 'pricing.starterIntro' | t: 'Everything you need to play and compete.' }}
         </p>
         <p class="flex items-baseline gap-1 mb-6">
           <span class="text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight"
             >$0</span
           >
-          <span class="text-sm font-medium text-slate-400 dark:text-slate-500">/month</span>
+          <span class="text-sm font-medium text-slate-400 dark:text-slate-500">{{
+            'pricing.perMonth' | t: '/month'
+          }}</span>
         </p>
 
         <div class="h-px bg-slate-900/6 dark:bg-white/10 mb-6"></div>
@@ -92,9 +100,12 @@
                 class="text-emerald-700 dark:text-emerald-400"
               />
             </span>
-            <span class="text-sm" data-cy="starter-games"
-              >Play {{ dailyFreeGames }} games a day</span
-            >
+            <span class="text-sm" data-cy="starter-games">{{
+              'pricing.starterGames'
+                | t
+                  : '{n, plural, one {Play # game a day} other {Play # games a day} }'
+                  : { n: dailyFreeGames }
+            }}</span>
           </li>
           <li class="flex items-start gap-2.5 py-1.5">
             <span
@@ -107,7 +118,9 @@
                 class="text-emerald-700 dark:text-emerald-400"
               />
             </span>
-            <span class="text-sm">Submit scores to the global leaderboard</span>
+            <span class="text-sm">{{
+              'pricing.leaderboard' | t: 'Submit scores to the global leaderboard'
+            }}</span>
           </li>
         </ul>
 
@@ -116,7 +129,7 @@
             class="flex items-center justify-center gap-2 rounded-xl border-[1.5px] border-slate-900/20 dark:border-white/20 text-slate-900 dark:text-slate-50 text-center font-bold py-3"
           >
             <app-icon name="check" [size]="16" [strokeWidth]="2.5" />
-            Your current plan
+            {{ 'pricing.currentPlan' | t: 'Your current plan' }}
           </div>
         }
       </div>
@@ -129,16 +142,19 @@
         <div
           class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-600 to-amber-600"
         ></div>
+        <!-- eslint-disable @angular-eslint/template/i18n -- the plan's name -->
         <span
           class="absolute top-5 right-5 rounded-full bg-emerald-700 text-white text-[11px] font-extrabold px-2.5 py-1 tracking-wide"
         >
           PRO
         </span>
+        <!-- eslint-enable @angular-eslint/template/i18n -->
 
         <app-logo [size]="48" class="self-start rounded-2xl shadow-cta mb-5 text-emerald-600" />
+        <!-- eslint-disable-next-line @angular-eslint/template/i18n -- the plan's name -->
         <h2 class="text-xl font-extrabold text-slate-900 dark:text-slate-50 mb-1">Pro</h2>
         <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
-          Contribute questions and shape the game.
+          {{ 'pricing.proIntro' | t: 'Contribute questions and shape the game.' }}
         </p>
         <!--
           The amount comes from the mirrored Stripe catalog, never from this
@@ -153,7 +169,9 @@
             class="text-4xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight"
             >{{ priceAmount() ?? '—' }}</span
           >
-          <span class="text-sm font-medium text-slate-400 dark:text-slate-500">/month</span>
+          <span class="text-sm font-medium text-slate-400 dark:text-slate-500">{{
+            'pricing.perMonth' | t: '/month'
+          }}</span>
         </p>
 
         <!--
@@ -175,7 +193,7 @@
           <span
             id="pro-currency-label"
             class="text-sm font-semibold text-slate-500 dark:text-slate-400"
-            >Currency</span
+            >{{ 'pricing.currency' | t: 'Currency' }}</span
           >
           @if (hasCurrencyChoice()) {
             <app-currency-switch
@@ -211,7 +229,9 @@
                 class="text-emerald-700 dark:text-emerald-400"
               />
             </span>
-            <span class="text-sm">Everything in Starter</span>
+            <span class="text-sm">{{
+              'pricing.everythingStarter' | t: 'Everything in Starter'
+            }}</span>
           </li>
           <li class="flex items-start gap-2.5 py-1.5">
             <span
@@ -224,7 +244,9 @@
                 class="text-emerald-700 dark:text-emerald-400"
               />
             </span>
-            <span class="text-sm" data-cy="pro-games">Play unlimited games</span>
+            <span class="text-sm" data-cy="pro-games">{{
+              'pricing.unlimited' | t: 'Play unlimited games'
+            }}</span>
           </li>
           <li class="flex items-start gap-2.5 py-1.5">
             <span
@@ -237,10 +259,11 @@
                 class="text-emerald-700 dark:text-emerald-400"
               />
             </span>
-            <span class="text-sm"
-              >Create and add custom questions to the global question bank, published once
-              reviewed</span
-            >
+            <span class="text-sm">{{
+              'pricing.contribute'
+                | t
+                  : 'Create and add custom questions to the global question bank, published once reviewed'
+            }}</span>
           </li>
           <li class="flex items-start gap-2.5 py-1.5 text-slate-400 dark:text-slate-500">
             <span
@@ -253,7 +276,7 @@
                 class="text-slate-400 dark:text-slate-500"
               />
             </span>
-            <span class="text-sm">More features coming soon</span>
+            <span class="text-sm">{{ 'pricing.comingSoon' | t: 'More features coming soon' }}</span>
           </li>
         </ul>
 
@@ -262,7 +285,7 @@
             class="flex items-center justify-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-center font-bold py-3"
           >
             <app-icon name="check" [size]="16" [strokeWidth]="2.5" />
-            You're subscribed
+            {{ 'pricing.subscribed' | t: "You're subscribed" }}
           </div>
         } @else {
           <button
@@ -272,14 +295,14 @@
             class="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (!authReady()) {
-              Loading&hellip;
+              {{ 'pricing.loading' | t: 'Loading…' }}
             } @else if (isSubscribing()) {
-              Redirecting&hellip;
+              {{ 'pricing.redirecting' | t: 'Redirecting…' }}
             } @else if (needsSignIn()) {
-              Sign in to subscribe
+              {{ 'pricing.signIn' | t: 'Sign in to subscribe' }}
             } @else {
               <app-icon name="sparkles" [size]="16" />
-              {{ subscribeLabel() }}
+              {{ subscribeLabel() | t }}
             }
           </button>
         }
@@ -289,14 +312,14 @@
             class="flex items-start gap-2 mt-3 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
           >
             <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-            {{ errorMessage() }}
+            {{ errorMessage() | t }}
           </p>
         }
       </div>
     </div>
 
     <p class="text-center text-xs text-slate-400 dark:text-slate-500 mt-10">
-      Cancel anytime. No hidden fees.
+      {{ 'pricing.cancelAnytime' | t: 'Cancel anytime. No hidden fees.' }}
     </p>
   </div>
 </div>

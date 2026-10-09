@@ -4,7 +4,7 @@
   class="mt-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-900/8 dark:border-white/10 shadow-card p-6 sm:p-8"
 >
   <h2 id="progress-heading" class="text-lg font-bold text-slate-900 dark:text-slate-50 mb-1">
-    Your level
+    {{ 'progress.title' | t: 'Your level' }}
   </h2>
 
   <!--
@@ -23,43 +23,53 @@
       [class.invisible]="line() !== 'loading'"
       data-cy="progress-loading"
     >
-      Loading your level&hellip;
+      {{ 'progress.loading' | t: 'Loading your level…' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="line() !== 'signedOut'"
       data-cy="progress-signed-out"
     >
-      Sign in to earn experience points (XP) from the games you finish. Guest games earn none.
+      {{
+        'progress.signedOut'
+          | t
+            : 'Sign in to earn experience points (XP) from the games you finish. Guest games earn none.'
+      }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
       [class.invisible]="line() !== 'failed'"
       data-cy="progress-failed"
     >
-      Could not load your level just now.
+      {{ 'progress.failed' | t: 'Could not load your level just now.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="line() !== 'ready'"
       data-cy="progress-ready"
     >
-      Right answers earn experience points (XP) — more for harder questions, and for a run of them
-      in a row. Only you can see them.
+      {{
+        'progress.ready'
+          | t
+            : 'Right answers earn experience points (XP) — more for harder questions, and for a run of them in a row. Only you can see them.'
+      }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm font-semibold text-emerald-700 dark:text-emerald-400"
       [class.invisible]="line() !== 'levelUp'"
       data-cy="progress-level-up"
     >
-      Your last game took you to level {{ levelUp() }}.
+      {{
+        'progress.levelUp' | t: 'Your last game took you to level {level}.' : { level: levelUp() }
+      }}
     </p>
   </div>
 
   <div class="flex items-baseline justify-between gap-4">
     <p class="flex items-baseline gap-2">
-      <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-        >Level</span
+      <span
+        class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+        >{{ 'progress.level' | t: 'Level' }}</span
       >
       <span
         data-cy="progress-level"
@@ -86,7 +96,7 @@
     data-cy="progress-bar"
     class="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
     [attr.role]="progress() ? 'progressbar' : null"
-    [attr.aria-label]="progress() ? 'Progress to the next level' : null"
+    [attr.aria-label]="progress() ? ('progress.barLabel' | t: 'Progress to the next level') : null"
     [attr.aria-valuemin]="progress() ? 0 : null"
     [attr.aria-valuemax]="progress()?.span ?? null"
     [attr.aria-valuenow]="progress()?.into ?? null"
@@ -121,7 +131,7 @@
     />
     <div class="min-w-0 flex-1">
       <p class="text-sm font-semibold text-slate-900 dark:text-slate-50">
-        {{ featuredLabel() }}
+        {{ featuredLabel() | t }}
       </p>
       <div class="grid text-xs text-slate-500 dark:text-slate-400">
         <p
@@ -129,21 +139,21 @@
           [class.invisible]="unlockLine() !== 'opensAt'"
           data-cy="progress-unlock-opens"
         >
-          Opens at level {{ featuredLevel() }}
+          {{ 'progress.opensAt' | t: 'Opens at level {level}' : { level: featuredLevel() } }}
         </p>
         <p
           class="col-start-1 row-start-1"
           [class.invisible]="unlockLine() !== 'locked'"
           data-cy="progress-unlock-locked"
         >
-          Unlock at level {{ featuredLevel() }}
+          {{ 'progress.unlockAt' | t: 'Unlock at level {level}' : { level: featuredLevel() } }}
         </p>
         <p
           class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
           [class.invisible]="unlockLine() !== 'unlocked'"
           data-cy="progress-unlock-unlocked"
         >
-          Unlocked — choose one below
+          {{ 'progress.unlocked' | t: 'Unlocked — choose one below' }}
         </p>
       </div>
     </div>

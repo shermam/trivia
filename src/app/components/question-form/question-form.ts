@@ -12,6 +12,7 @@ import {
   QuestionFormat,
   QuestionType,
 } from '../../models/question.model';
+import { msg, type Message } from '../../i18n/message';
 import { topicTagsOf } from '../../utils/category-tags';
 import { normalizeTags } from '../../utils/normalize-tag.util';
 
@@ -260,7 +261,64 @@ export interface QuestionField {
   control: AbstractControl;
   /** The DOM id, already carrying the host's prefix. */
   id: string;
-  label: string;
+  /** The field's name inside a list of fields — "source link". */
+  name: Message;
+  /** The summary when it is the only field in the wrong — a sentence of its own, not a name in a frame. */
+  attention: Message;
+}
+
+/**
+ * What one field's errors say. A sentence per field and error rather than
+ * `${label} is required.`, because the field's name is the sentence's subject
+ * and decides its grammar in a language with gender; a field carries only the
+ * errors its validators can raise.
+ */
+export interface FieldMessages {
+  readonly required?: Message;
+  readonly tooLong?: (max: number) => Message;
+  readonly https?: Message;
+}
+
+/** The contribute form's field errors, by field. */
+export const FIELD_MESSAGES = {
+  question: {
+    required: msg('form.questionRequired', 'Question is required.'),
+    tooLong: (max: number) =>
+      msg('form.questionTooLong', 'Question must be {max} characters or fewer.', { max }),
+  },
+  correctAnswer: {
+    required: msg('form.correctRequired', 'Correct answer is required.'),
+    tooLong: (max: number) =>
+      msg('form.correctTooLong', 'Correct answer must be {max} characters or fewer.', { max }),
+  },
+  sourceUrl: {
+    https: msg(
+      'form.sourceUrlHttps',
+      'Source link has to be a full address starting with https://.',
+    ),
+    tooLong: (max: number) =>
+      msg('form.sourceUrlTooLong', 'Source link must be {max} characters or fewer.', { max }),
+  },
+  sourceTitle: {
+    tooLong: (max: number) =>
+      msg('form.sourceTitleTooLong', 'Source name must be {max} characters or fewer.', { max }),
+  },
+  explanation: {
+    tooLong: (max: number) =>
+      msg('form.explanationTooLong', 'Justification must be {max} characters or fewer.', { max }),
+  },
+} satisfies Record<string, FieldMessages>;
+
+/** The errors of wrong-answer row `n`, counted from one. */
+export function incorrectAnswerMessages(n: number): FieldMessages {
+  return {
+    required: msg('form.incorrectRequired', 'Incorrect answer {n} is required.', { n }),
+    tooLong: (max: number) =>
+      msg('form.incorrectTooLong', 'Incorrect answer {n} must be {max} characters or fewer.', {
+        n,
+        max,
+      }),
+  };
 }
 
 /**
@@ -274,35 +332,82 @@ export function questionFields(form: QuestionForm, idPrefix = ''): QuestionField
   return [
     // The picker's text box, which is where a contributor adds a topic — and
     // first, because the picker is the first field on the form.
-    { control: form.controls.tags, id: `${idPrefix}tag-input`, label: 'Topics' },
-    { control: form.controls.question, id: `${idPrefix}question`, label: 'Question' },
+    {
+      control: form.controls.tags,
+      id: `${idPrefix}tag-input`,
+      name: msg('form.nameTopics', 'topics'),
+      attention: msg('form.attnTopics', 'Topics needs your attention before this can be saved.'),
+    },
+    {
+      control: form.controls.question,
+      id: `${idPrefix}question`,
+      name: msg('form.nameQuestion', 'question'),
+      attention: msg(
+        'form.attnQuestion',
+        'Question needs your attention before this can be saved.',
+      ),
+    },
     {
       control: form.controls.correctAnswer,
       id: `${idPrefix}correctAnswer`,
-      label: 'Correct answer',
+      name: msg('form.nameCorrect', 'correct answer'),
+      attention: msg(
+        'form.attnCorrect',
+        'Correct answer needs your attention before this can be saved.',
+      ),
     },
     ...form.controls.incorrectAnswers.controls.map((control, index) => ({
       control,
       id: `${idPrefix}incorrect-answer-${index}`,
-      label: `Incorrect answer ${index + 1}`,
+      name: msg('form.nameIncorrect', 'incorrect answer {n}', { n: index + 1 }),
+      attention: msg(
+        'form.attnIncorrect',
+        'Incorrect answer {n} needs your attention before this can be saved.',
+        { n: index + 1 },
+      ),
     })),
-    { control: form.controls.sourceUrl, id: `${idPrefix}sourceUrl`, label: 'Source link' },
-    { control: form.controls.sourceTitle, id: `${idPrefix}sourceTitle`, label: 'Source name' },
-    { control: form.controls.explanation, id: `${idPrefix}explanation`, label: 'Justification' },
+    {
+      control: form.controls.sourceUrl,
+      id: `${idPrefix}sourceUrl`,
+      name: msg('form.nameSourceUrl', 'source link'),
+      attention: msg(
+        'form.attnSourceUrl',
+        'Source link needs your attention before this can be saved.',
+      ),
+    },
+    {
+      control: form.controls.sourceTitle,
+      id: `${idPrefix}sourceTitle`,
+      name: msg('form.nameSourceTitle', 'source name'),
+      attention: msg(
+        'form.attnSourceTitle',
+        'Source name needs your attention before this can be saved.',
+      ),
+    },
+    {
+      control: form.controls.explanation,
+      id: `${idPrefix}explanation`,
+      name: msg('form.nameExplanation', 'justification'),
+      attention: msg(
+        'form.attnExplanation',
+        'Justification needs your attention before this can be saved.',
+      ),
+    },
   ];
 }
 
-export function describeInvalidFields(fields: QuestionField[]): string {
+export function describeInvalidFields(fields: QuestionField[]): Message {
   const invalid = fields.filter((field) => field.control.invalid);
   if (invalid.length === 0) {
-    return 'Please check the form and try again.';
+    return msg('form.checkForm', 'Please check the form and try again.');
   }
   if (invalid.length === 1) {
-    return `${invalid[0].label} needs your attention before this can be saved.`;
+    return invalid[0].attention;
   }
-  return `${invalid.length} fields need your attention: ${invalid
-    .map((field) => field.label.toLowerCase())
-    .join(', ')}.`;
+  return msg('form.attnMany', '{count} fields need your attention: {fields}.', {
+    count: invalid.length,
+    fields: invalid.map((field) => field.name),
+  });
 }
 
 /**
@@ -322,17 +427,21 @@ export function showsFieldError(control: AbstractControl): boolean {
   return control.invalid && (control.touched || control.dirty);
 }
 
-export function fieldErrorFor(control: AbstractControl, label: string, maxLength: number): string {
+export function fieldErrorFor(
+  control: AbstractControl,
+  messages: FieldMessages,
+  maxLength: number,
+): Message | null {
   if (control.hasError('required')) {
-    return `${label} is required.`;
+    return messages.required ?? null;
   }
   if (control.hasError('maxlength')) {
-    return `${label} must be ${maxLength} characters or fewer.`;
+    return messages.tooLong?.(maxLength) ?? null;
   }
   if (control.hasError('httpsUrl')) {
-    return `${label} has to be a full address starting with https://.`;
+    return messages.https ?? null;
   }
-  return '';
+  return null;
 }
 
 /**
@@ -363,10 +472,17 @@ export function findDuplicateAnswer(
   return null;
 }
 
-export function duplicateAnswerMessage(duplicate: string): string {
-  return (
-    `"${duplicate}" is listed more than once. Every answer has to be different, ` +
-    `or the question would have two right answers.`
+/** A true/false question submitted with neither picked. */
+export const TRUE_FALSE_REQUIRED = msg(
+  'form.chooseTrueFalse',
+  'Choose whether the statement is true or false.',
+);
+
+export function duplicateAnswerMessage(duplicate: string): Message {
+  return msg(
+    'form.duplicate',
+    '"{answer}" is listed more than once. Every answer has to be different, or the question would have two right answers.',
+    { answer: duplicate },
   );
 }
 
@@ -394,7 +510,8 @@ export function toQuestionContent(raw: ReturnType<QuestionForm['getRawValue']>):
 
   const correctAnswer = raw.correctAnswer.trim();
   const incorrectAnswers = isBoolean
-    ? [correctAnswer === 'True' ? 'False' : 'True']
+    ? // i18n-exempt: the stored values a true/false question carries; the picker's labels are translated
+      [correctAnswer === 'True' ? 'False' : 'True']
     : raw.incorrectAnswers.map((answer) => answer.trim());
 
   const duplicate = findDuplicateAnswer(correctAnswer, incorrectAnswers);

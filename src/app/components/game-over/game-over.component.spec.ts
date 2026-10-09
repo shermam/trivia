@@ -26,6 +26,8 @@ import { RegionService } from '../../services/region.service';
 import { LIKE, VoteValue } from '../../models/question-vote';
 import { QuizContext } from '../../models/quiz.model';
 import { GameOverComponent } from './game-over.component';
+import { verbatim, type Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 
 /**
  * `FEAT-027`'s service, faked for the setups whose recap holds community
@@ -152,7 +154,7 @@ function setup(options: {
   const component = fixture.componentInstance as unknown as {
     playerName: string;
     saveScore: () => Promise<void>;
-    saveError: () => string | null;
+    saveError: () => Message | null;
     hasSaved: () => boolean;
   };
   component.playerName = 'Ada';
@@ -173,7 +175,7 @@ describe('GameOverComponent save failures', () => {
     await component.saveScore();
 
     expect(getLeaderboardEntry).toHaveBeenCalledWith('player-1', '15');
-    expect(component.saveError()).toMatch(/already higher/);
+    expect(english(component.saveError())).toMatch(/already higher/);
     // Retry is suppressed here on purpose: the rules will refuse the same
     // write every time, so offering the form again would only mislead.
     expect(component.hasSaved()).toBe(true);
@@ -189,7 +191,7 @@ describe('GameOverComponent save failures', () => {
 
     await component.saveScore();
 
-    expect(component.saveError()).toBe('Could not save your score. Please try again.');
+    expect(english(component.saveError())).toBe('Could not save your score. Please try again.');
     expect(component.hasSaved()).toBe(false);
   });
 
@@ -202,7 +204,7 @@ describe('GameOverComponent save failures', () => {
 
     await component.saveScore();
 
-    expect(component.saveError()).toMatch(/Please try again/);
+    expect(english(component.saveError())).toMatch(/Please try again/);
     expect(component.hasSaved()).toBe(false);
   });
 
@@ -217,7 +219,7 @@ describe('GameOverComponent save failures', () => {
 
     await component.saveScore();
 
-    expect(component.saveError()).toMatch(/already higher/);
+    expect(english(component.saveError())).toMatch(/already higher/);
     expect(component.hasSaved()).toBe(true);
   });
 
@@ -227,7 +229,7 @@ describe('GameOverComponent save failures', () => {
 
     await component.saveScore();
 
-    expect(component.saveError()).toMatch(/Please try again/);
+    expect(english(component.saveError())).toMatch(/Please try again/);
     expect(component.hasSaved()).toBe(false);
   });
 
@@ -237,7 +239,7 @@ describe('GameOverComponent save failures', () => {
     await component.saveScore();
 
     expect(getLeaderboardEntry).not.toHaveBeenCalled();
-    expect(component.saveError()).toMatch(/Please try again/);
+    expect(english(component.saveError())).toMatch(/Please try again/);
     expect(component.hasSaved()).toBe(false);
   });
 });
@@ -269,8 +271,8 @@ interface ReportingComponent {
   reportableQuestions: () => TriviaQuestion[];
   openReportQuestionId: () => string | null;
   reportedQuestionIds: () => ReadonlySet<string>;
-  reportError: () => string | null;
-  reportStatus: () => string;
+  reportError: () => Message | null;
+  reportStatus: () => Message | null;
   reportReason: string;
   reportDetail: string;
   toggleReportForm: (question: TriviaQuestion) => void;
@@ -422,8 +424,8 @@ describe('GameOverComponent question reporting (H4)', () => {
 
     expect(component.reportedQuestionIds().has('q-custom-1')).toBe(true);
     expect(component.openReportQuestionId()).toBeNull();
-    expect(component.reportStatus()).toMatch(/Report sent/);
-    expect(component.reportError()).toBeNull();
+    expect(english(component.reportStatus())).toMatch(/Report sent/);
+    expect(english(component.reportError())).toBeNull();
   });
 
   it("surfaces the service's own advice when every slot was refused, and keeps the form open", async () => {
@@ -436,10 +438,10 @@ describe('GameOverComponent question reporting (H4)', () => {
 
     await component.submitReport(custom);
 
-    expect(component.reportError()).toMatch(/try again in a few minutes/);
+    expect(english(component.reportError())).toMatch(/try again in a few minutes/);
     // Announced too — the visible paragraph alone is silent to a screen
     // reader mid-flow (G3 pattern).
-    expect(component.reportStatus()).toMatch(/try again in a few minutes/);
+    expect(english(component.reportStatus())).toMatch(/try again in a few minutes/);
     expect(component.openReportQuestionId()).toBe('q-custom-1');
     expect(component.reportedQuestionIds().has('q-custom-1')).toBe(false);
   });
@@ -454,7 +456,7 @@ describe('GameOverComponent question reporting (H4)', () => {
 
     await component.submitReport(custom);
 
-    expect(component.reportError()).toBe('Could not send the report. Please try again.');
+    expect(english(component.reportError())).toBe('Could not send the report. Please try again.');
     expect(component.openReportQuestionId()).toBe('q-custom-1');
   });
 
@@ -468,17 +470,17 @@ describe('GameOverComponent question reporting (H4)', () => {
     component.toggleReportForm(custom);
     component.reportReason = 'spam';
     await component.submitReport(custom);
-    expect(component.reportStatus()).toMatch(/Report sent/);
+    expect(english(component.reportStatus())).toMatch(/Report sent/);
 
     let resolveWrite!: () => void;
     reportQuestion.mockReturnValue(new Promise<void>((resolve) => (resolveWrite = resolve)));
     const secondSubmit = component.submitReport(custom);
 
-    expect(component.reportStatus()).toBe('');
+    expect(english(component.reportStatus())).toBeNull();
 
     resolveWrite();
     await secondSubmit;
-    expect(component.reportStatus()).toMatch(/Report sent/);
+    expect(english(component.reportStatus())).toMatch(/Report sent/);
   });
 
   /**
@@ -1194,7 +1196,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
     const component = fixture.componentInstance as unknown as {
       scoreAction: () => string;
       hasSaved: { set: (value: boolean) => void };
-      saveError: { set: (value: string | null) => void };
+      saveError: { set: (value: Message | null) => void };
     };
     fixture.detectChanges();
     return { fixture, component };
@@ -1284,7 +1286,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
     });
 
     component.hasSaved.set(true);
-    component.saveError.set('Something went wrong.');
+    component.saveError.set(verbatim('Something went wrong.'));
     fixture.detectChanges();
 
     expect(component.scoreAction()).toBe('saveFailed');
@@ -2442,7 +2444,7 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
       playerName: string;
       saveScore(): Promise<void>;
       hasSaved(): boolean;
-      saveError(): string | null;
+      saveError(): Message | null;
       selectedRegion(): string;
       onRegionChange(region: string): void;
       onBoardScopeChange(scope: 'global' | 'regional'): void;
@@ -2621,7 +2623,7 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
     await component.saveScore();
 
     expect(component.hasSaved()).toBe(true);
-    expect(component.saveError()).toBeNull();
+    expect(english(component.saveError())).toBeNull();
   });
 
   it('counts as saved when the country board refuses but the global one accepts', async () => {
@@ -2634,7 +2636,7 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
     await component.saveScore();
 
     expect(component.hasSaved()).toBe(true);
-    expect(component.saveError()).toBeNull();
+    expect(english(component.saveError())).toBeNull();
   });
 
   // Only a round that published nothing gets an explanation, and it is still
@@ -2650,7 +2652,7 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
     await component.saveScore();
 
     expect(component.hasSaved()).toBe(false);
-    expect(component.saveError()).toBe('Could not save your score. Please try again.');
+    expect(english(component.saveError())).toBe('Could not save your score. Please try again.');
   });
 
   it('reads the country board when the toggle is switched to it', async () => {
