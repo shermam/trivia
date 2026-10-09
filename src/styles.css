@@ -213,6 +213,13 @@ app-rendered-text {
      makes the overflow containers below able to scroll instead of stretching
      the card they are in (§4.4). */
   min-width: 0;
+  /* A word longer than the line — a long term, a pasted token, markup typed
+     as text — breaks where it has to, in prose and in an answer alike, rather
+     than running past the card and widening the page. `anywhere` rather than
+     `break-word`, so the word stops counting toward the box's minimum width
+     as well: a flex or grid column sized to its content gets narrower instead
+     of overflowing. A code block and a display formula opt out below. */
+  overflow-wrap: anywhere;
 }
 
 /* The plain branch, and the fallback a Markdown question shows until its
@@ -290,6 +297,8 @@ app-rendered-text {
   margin-block: 0.5em;
   max-width: 100%;
   overflow-x: auto;
+  /* Scrolls; never broken by the prose's wrapping above. */
+  overflow-wrap: normal;
   border-radius: 0.5rem;
   background: var(--color-slate-100);
   padding: 0.625rem 0.75rem;
@@ -309,6 +318,12 @@ app-rendered-text {
   margin-block: 0.5em;
   max-width: 100%;
   overflow-x: auto;
+}
+
+/* A formula is laid out as one piece — it scrolls when it is a display
+   formula and stays whole inline — so the prose's wrapping above stops at it. */
+.rendered-text math {
+  overflow-wrap: normal;
 }
 
 .dark .rendered-text blockquote {

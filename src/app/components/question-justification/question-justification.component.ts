@@ -29,6 +29,12 @@ import { RenderedTextComponent } from '../rendered-text/rendered-text.component'
  * No layout-stability concern (`CLAUDE.md` §4.4): both callers render this from
  * data that has already resolved, so the block does not appear or disappear
  * under a reader mid-view.
+ *
+ * **The heading is `slate-600`, not the muted `slate-500` labels elsewhere
+ * wear**, because it sits on the block's tint rather than on the card: there
+ * `slate-500` measures 4.47:1, under the 4.5:1 that 12px text needs, and every
+ * generated question carries a justification. `slate-600` is 7.1:1; the dark
+ * theme's `slate-400` is 6.0:1 on its own tint.
  */
 @Component({
   selector: 'app-question-justification',
@@ -41,7 +47,7 @@ import { RenderedTextComponent } from '../rendered-text/rendered-text.component'
         class="mt-2 rounded-lg bg-slate-100/70 dark:bg-white/5 px-3 py-2 text-xs text-slate-600 dark:text-slate-300"
         data-cy="question-justification"
       >
-        <p class="font-semibold text-slate-500 dark:text-slate-400 mb-0.5">Justification</p>
+        <p class="font-semibold text-slate-600 dark:text-slate-400 mb-0.5">Justification</p>
         <app-rendered-text [text]="text" [format]="format()" />
       </div>
     }

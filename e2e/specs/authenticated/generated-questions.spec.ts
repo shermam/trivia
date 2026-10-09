@@ -3,6 +3,7 @@ import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { signInViaUi } from '../../support/auth';
 import { installAuthUidTracker } from '../../support/auth-uid-tracker';
+import { expectNoAxeViolations } from '../../support/axe';
 import { answerQuestion } from '../../support/game';
 import { expectSameHeight, expectUnclipped, settledHeight } from '../../support/layout';
 import { stubOpenTrivia } from '../../support/open-trivia';
@@ -220,6 +221,117 @@ test.describe('a machine-generated question', () => {
       await context.close();
     }
   });
+
+  /**
+   * The two places a generated question is read, held to WCAG AA by axe in
+   * both themes: the reviewer's card, with the tabs above it, and the recap row
+   * of the round that served it. Lighthouse loads neither screen
+   * (`docs/ci-cd.md` §4.4), and every generated question carries a
+   * justification and a source, so the card's justification heading, its
+   * source's host and its Approve button — each once under its minimum — are
+   * on every one of them, and the heading is on the recap row as well. The
+   * glyph beside the source, which axe cannot judge, is pinned to its link's
+   * colour on both.
+   *
+   * The theme is the browser's: with nothing stored, `public/theme-init.js`
+   * follows `prefers-color-scheme` before the app boots, and the root's `dark`
+   * class is asserted before anything is judged, so a test that silently ran
+   * in the other theme fails there rather than passing. Everything axe judges
+   * is asserted on screen first, because it reads the DOM once.
+   */
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test.describe(`in the ${colorScheme} theme`, () => {
+      test.use({ colorScheme });
+
+      test('its card, the tabs above it and its recap row pass axe', async ({
+        page,
+        browser,
+        baseURL,
+        firebase,
+      }) => {
+        const email = `reviewer-${tag}@example.com`;
+        const { uid } = await firebase.createVerifiedUser({ email, password, displayName: 'Rev' });
+        await firebase.seedReviewer({ uid, reviewer: true });
+        await page.goto('/');
+        await signInViaUi(page, email, password);
+        await page.goto('/review');
+        await expectTheme(page, colorScheme);
+
+        const generated = card(page, generatedText);
+        await expect(generated.getByTestId('question-justification')).toBeVisible();
+        await expect(generated.getByTestId('question-source-host')).toContainText(
+          'en.wikipedia.org',
+        );
+        await expect(generated.getByTestId('approve-question')).toBeVisible();
+        const tabs = page.getByTestId('review-tabs');
+        await expect(tabs.locator('[aria-checked="true"]')).toHaveText('Pending');
+        await expectNoAxeViolations(generated, `the generated card, ${colorScheme}`);
+        await expectGlyphInLinkColour(generated.getByTestId('question-source'));
+        await expectNoAxeViolations(tabs, `the review tabs, ${colorScheme}`);
+
+        // Approved, so the round below can serve it.
+        await generated.getByTestId('approve-question').click();
+        await expect(
+          page.getByRole('status').filter({ hasText: 'Question marked approved.' }),
+        ).toHaveCount(1);
+
+        const context = await browser.newContext({ baseURL, colorScheme });
+        const tracker = await installAuthUidTracker(context);
+        try {
+          const player = await context.newPage();
+          await stubOpenTrivia(player);
+          await player.goto('/');
+          await expectTheme(player, colorScheme);
+          await startTopicGame(player, { topics: [topic], found: 1 });
+          await answerQuestion(player, 'Oxygen');
+          await expect(player).toHaveURL(/\/game-over$/);
+          await player.getByTestId('recap-toggle').click();
+          const row = player.getByTestId('recap-row').filter({ hasText: generatedText });
+          await expect(row.getByTestId('question-justification')).toBeVisible();
+          await expect(row.getByTestId('question-source-generated')).toBeVisible();
+          await expectNoAxeViolations(row, `the generated question's recap row, ${colorScheme}`);
+          await expectGlyphInLinkColour(row.getByTestId('question-source'));
+        } finally {
+          firebase.trackAuthUids(tracker.take());
+          await context.close();
+        }
+      });
+    });
+  }
+
+  /**
+   * The source line's external-link glyph is drawn in the link's own colour.
+   *
+   * The glyph says the link leaves the app, which the words do not, so it is a
+   * graphic WCAG 1.4.11 holds to 3:1 — and axe's contrast rule reads text
+   * only, so it cannot judge it. Pinned to the link's computed colour instead,
+   * on the same line and the same card, the glyph is exactly as readable as
+   * the link text axe has just passed at 4.5:1. A glyph a shade lighter than
+   * its link is what this catches.
+   */
+  async function expectGlyphInLinkColour(line: Locator): Promise<void> {
+    await expect
+      .poll(
+        () =>
+          line.evaluate((node) => {
+            const glyph = getComputedStyle(node.querySelector('app-icon svg')!).stroke;
+            const link = getComputedStyle(node.querySelector('a')!).color;
+            return glyph === link ? 'the same' : `glyph ${glyph}, link ${link}`;
+          }),
+        { message: 'the external-link glyph is drawn in the link’s colour' },
+      )
+      .toBe('the same');
+  }
+
+  /** The page is in the theme the test asked the browser for, from its first frame. */
+  async function expectTheme(page: Page, colorScheme: 'light' | 'dark'): Promise<void> {
+    const root = page.locator('html');
+    if (colorScheme === 'dark') {
+      await expect(root).toHaveClass(/(^|\s)dark(\s|$)/);
+    } else {
+      await expect(root).not.toHaveClass(/(^|\s)dark(\s|$)/);
+    }
+  }
 
   /** This test's card for a question, in whichever tab is showing. */
   function card(page: Page, text: string): Locator {

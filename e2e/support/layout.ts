@@ -1,4 +1,4 @@
-import { expect, Locator } from '@playwright/test';
+import { expect, Locator, Page } from '@playwright/test';
 
 /**
  * Shared layout measurement, for the guardrail in `CLAUDE.md` §4.4: a
@@ -179,6 +179,27 @@ export async function expectUnclipped(element: Locator, what: string): Promise<v
   await expect
     .poll(() => element.evaluate((node) => node.scrollWidth - node.clientWidth), {
       message: `${what} (its content wider than its box, in pixels)`,
+    })
+    .toBeLessThanOrEqual(0);
+}
+
+/**
+ * Fails unless the page is no wider than its window — the document's
+ * `scrollWidth` at most `window.innerWidth` — so nothing on it scrolls the
+ * whole page sideways.
+ *
+ * The page rather than one element, because what a reader meets is the page
+ * scrolling, whichever element is too wide. Polled rather than read once
+ * (`CLAUDE.md` §4.6), so a frame caught mid-layout cannot fail it for a width
+ * no reader saw — and the only value it can settle to is a page that fits.
+ * Assert the state under test first: a page read before its content has
+ * rendered fits trivially. A failure reports how many pixels too wide the
+ * page is.
+ */
+export async function expectNoSidewaysScroll(page: Page, what: string): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), {
+      message: `${what} (the page wider than its window, in pixels)`,
     })
     .toBeLessThanOrEqual(0);
 }
