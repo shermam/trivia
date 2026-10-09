@@ -174,7 +174,8 @@ export const INLINE_ALLOWED_TAGS: readonly string[] = ALLOWED_TAGS.filter((tag) 
  *
  * `start` is here so a numbered list written from 3 is numbered from 3:
  * `marked` writes `<ol start="3">`, and without it the list renumbers itself
- * from 1 and the reader sees numbers the contributor never wrote. Being on a
+ * from 1 and the reader sees numbers the contributor never wrote. The hook
+ * below keeps it only up to four digits ({@link START_KEEP}). Being on a
  * per-document list, it is legal on every other allowed element too, where it
  * does nothing — HTML gives `start` a meaning on `<ol>` alone, and MathML none
  * at all.
@@ -257,6 +258,23 @@ export const ALLOWED_URI_REGEXP = /^(?:https:|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/
  * Exported for `render-contract.spec.ts`, which holds the published pattern to it.
  */
 export const LANGUAGE_CLASS = /^language-[A-Za-z0-9#+._-]*$/;
+
+/**
+ * The `start` a numbered list may keep: one to four digits. Past that the
+ * marker is wider than the list's gutter and the card's padding together — a
+ * list written from `999999999.` puts its number over the card's left edge —
+ * so a longer value is dropped and the list is numbered from 1. Exported for
+ * `render-contract.spec.ts`, which holds the published pattern to it.
+ */
+export const START_KEEP = /^[0-9]{1,4}$/;
+
+/**
+ * Elements inside which nothing is a link: an `<a>` with one of these as an
+ * ancestor is treated like any element that is not a link — it loses `href`
+ * and `title`, and is given no `target` or `rel`. Exported for
+ * `render-contract.spec.ts`.
+ */
+export const NO_LINK_WITHIN: readonly string[] = ['math'];
 
 /**
  * The elements DOMPurify removes *together with* their content when they are
@@ -380,7 +398,7 @@ function isHttpsUrl(value: string): boolean {
 let hooksInstalled = false;
 
 /**
- * The three things the allowlist alone cannot express, all applied after
+ * The five things the allowlist alone cannot express, all applied after
  * DOMPurify has finished with an element's attributes.
  *
  * **Classes are narrowed to the fence language.** `class` has to be allowed for
@@ -401,6 +419,18 @@ let hooksInstalled = false;
  * raw HTML and KaTeX runs untrusted, so `\href` compiles to an error — but
  * this file is the boundary, and a boundary that holds only because of what is
  * upstream of it is not one.
+ *
+ * **Nothing inside a formula is a link**, not even an HTML `<a>`
+ * ({@link NO_LINK_WITHIN}). A MathML token element is a text integration
+ * point, so `<math><mtext><a href="https://evil.example">` parses as an HTML
+ * anchor inside the formula; DOMPurify's namespace check admits HTML there,
+ * and the allowlist admits `<a>` and `href`, so without this the sanitiser
+ * would keep a live link in a formula. `marked` escapes raw HTML and KaTeX
+ * escapes its text, so nothing upstream writes one today; this is what keeps
+ * the sanitiser a second line here too.
+ *
+ * **`start` is kept to four digits** ({@link START_KEEP}): a longer one puts
+ * the list's number past the card's left edge.
  *
  * **`target="_blank"` is added here, with its `rel`, and never trusted from the
  * source.** A contributed link leaves the app, so it opens in a new tab; a new
@@ -429,12 +459,23 @@ function installHooks(): void {
       }
     }
 
-    // An HTML `<a>`, and only that: DOMPurify refuses an `a` in the MathML
-    // namespace outright, so anything reaching the branch below is a real
-    // anchor rather than a MathML element wearing the name.
-    if (node.tagName.toLowerCase() !== 'a') {
+    const start = node.getAttribute('start');
+    if (start !== null && !START_KEEP.test(start)) {
+      node.removeAttribute('start');
+    }
+
+    // An HTML `<a>` outside a formula, and only that: DOMPurify refuses an `a`
+    // in the MathML namespace outright, so anything reaching the branch below
+    // is a real anchor rather than a MathML element wearing the name — and an
+    // anchor inside a formula is no link either.
+    if (
+      node.tagName.toLowerCase() !== 'a' ||
+      NO_LINK_WITHIN.some((name) => node.closest(name) !== null)
+    ) {
       node.removeAttribute('href');
       node.removeAttribute('title');
+      node.removeAttribute('target');
+      node.removeAttribute('rel');
       return;
     }
     const href = node.getAttribute('href');

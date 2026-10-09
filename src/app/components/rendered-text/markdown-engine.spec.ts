@@ -15,7 +15,7 @@ import {
   renderMarkdown,
   sanitizeHtml,
 } from './markdown-engine';
-import { TOKEN_ELEMENTS, renderMath } from './math-engine';
+import { LARGEST_SIZE, TOKEN_ELEMENTS, postprocessMathML, renderMath } from './math-engine';
 
 /**
  * The security suite for `FEAT-019`.
@@ -325,6 +325,34 @@ describe('markdown engine: the allowlist is per document, not per element', () =
     }
   });
 
+  /**
+   * A MathML token element is a text integration point, so an `<a>` written
+   * inside one parses as an HTML anchor inside the formula; DOMPurify's
+   * namespace check admits HTML there and the allowlist admits `<a>` and
+   * `href`, so the hook is what keeps it from being a live link. Nothing
+   * upstream writes one today — `marked` escapes raw HTML, KaTeX escapes its
+   * text — and this is the second line for the day something does.
+   */
+  it('makes an anchor inside a formula no link', () => {
+    for (const payload of [
+      '<math><mtext><a href="https://evil.example" title="go">x</a></mtext></math>',
+      '<math><mi><a href="https://evil.example">x</a></mi></math>',
+      '<math><semantics><mrow><mo><a href="https://evil.example">x</a></mo></mrow></semantics></math>',
+    ]) {
+      for (const inline of [false, true]) {
+        const out = parse(sanitizeHtml(payload, { inline }));
+        expect(attributePairs(out), `${payload} (${inline ? 'inline' : 'block'})`).toEqual([]);
+        expect(out.textContent, payload).toBe('x');
+      }
+    }
+    // Outside a formula an anchor is still a link.
+    expect(
+      parse(sanitizeHtml('<p><a href="https://example.org/">x</a></p>'))
+        .querySelector('a')
+        ?.getAttribute('href'),
+    ).toBe('https://example.org/');
+  });
+
   it('strips href from a prose element that is not a link', () => {
     for (const payload of ['<p href="https://evil.example">x</p>', '<code href="/x">y</code>']) {
       for (const out of bothLayers(payload)) {
@@ -565,6 +593,28 @@ describe('markdown engine: attributes kept for what they mean', () => {
     expect(parse(render('1. one\n2. two')).querySelector('ol')?.hasAttribute('start')).toBe(false);
   });
 
+  /**
+   * Four digits at most: past that the number is wider than the list's gutter
+   * and the card's padding, and `999999999.` sits over the card's left edge.
+   * The list is then numbered from 1 — wrong, but on the card.
+   */
+  it('keeps a start of up to four digits and drops a longer one', () => {
+    expect(parse(render('9999. four')).querySelector('ol')?.getAttribute('start')).toBe('9999');
+    expect(parse(render('0. zero')).querySelector('ol')?.getAttribute('start')).toBe('0');
+    for (const source of ['10000. five', '999999999. nine']) {
+      const list = parse(render(source)).querySelector('ol');
+      expect(list?.hasAttribute('start'), source).toBe(false);
+      expect(list?.textContent?.trim(), source).toBe(source.split(' ')[1]);
+    }
+  });
+
+  it('strips a start that is not one to four digits, wherever it comes from', () => {
+    for (const value of ['10000', '-1', '3.5', '+3', '1e3', 'x', '']) {
+      const list = parse(sanitizeHtml(`<ol start="${value}"><li>x</li></ol>`)).querySelector('ol');
+      expect(list?.hasAttribute('start'), JSON.stringify(value)).toBe(false);
+    }
+  });
+
   /** `start` is the one attribute of `<ol>` on the list; `reversed` and `type` stay off it. */
   it("keeps start and nothing else of a list's attributes", () => {
     const list = parse(
@@ -585,6 +635,43 @@ describe('markdown engine: attributes kept for what they mean', () => {
           ?.getAttribute('mathsize'),
         tex,
       ).toBe(size);
+    }
+  });
+
+  /**
+   * The size a browser draws a formula's innermost element at: the product of
+   * every `mathsize` on the way down, since an `em` is the parent's size.
+   */
+  function drawnSize(element: Element): number {
+    let size = 1;
+    for (let at: Element | null = element; at; at = at.parentElement) {
+      const value = at.getAttribute('mathsize');
+      if (value !== null) {
+        size *= Number.parseFloat(value);
+      }
+    }
+    return size;
+  }
+
+  /**
+   * KaTeX writes each sizing command's size as a multiple of the formula's,
+   * and an `em` is the parent's, so as written `\Huge{\Huge{\Huge x}}` draws
+   * at 2.488³ — 246 px at 16 px in Chromium 141 — and ten levels reach its
+   * largest font. Each size is made relative to the one around it, and none
+   * comes to more than `\Huge`'s.
+   */
+  it("draws a nested size at KaTeX's own size, and never larger than \\Huge", () => {
+    for (const [tex, size] of [
+      [String.raw`\Huge{\Huge{\Huge x}}`, 2.488],
+      [String.raw`\tiny{\Huge x}`, 2.488],
+      [String.raw`\Huge{\tiny x}`, 0.5],
+      [String.raw`\large{\small{\Large x}}`, 1.44],
+      [`${String.raw`\Huge{`.repeat(10)}x${'}'.repeat(10)}`, 2.488],
+    ] as const) {
+      const x = parse(render(`$${tex}$`)).querySelector('mi');
+      expect(x, tex).not.toBeNull();
+      expect(drawnSize(x!), tex).toBeCloseTo(size, 3);
+      expect(drawnSize(x!), tex).toBeLessThanOrEqual(LARGEST_SIZE + 1e-9);
     }
   });
 
@@ -984,28 +1071,28 @@ describe('markdown engine: the allowlist covers what KaTeX emits', () => {
 });
 
 /**
- * **A formula must not render as less than it says**, and without the rename
+ * **A formula must not render as less than it says**, and without the rewrite
  * these would — silently. KaTeX builds them by wrapping a whole expression in
  * a token element (`mi` or `mo`), which the HTML parser treats as a text
  * integration point: whatever is inside is parsed as HTML, so a `<mover>` in
  * an `<mo>` arrives as an HTML element with a MathML name, and DOMPurify's
- * namespace check removes it with everything in it. `renderMath` renames each
- * such token `mrow` before anything parses the markup.
+ * namespace check removes it with everything in it. `renderMath` collapses or
+ * renames each such token before anything parses the markup.
  *
- * Asked of each construct against KaTeX's own tree, read with an XML parser,
- * which keeps namespaces as written: that KaTeX really does wrap it (or the
- * case proves nothing about the rename); that the sanitised formula is that
- * tree element for element, in order, with nothing lost or added but each
- * token that held an element read as an `mrow` — so an empty `<mspace/>` that
- * went missing fails as surely as a letter; that every character of it is
- * still there; and that nothing inside the `<math>` is anything but MathML,
- * which is the property DOMPurify's check protects and the rename must not
- * trade away.
+ * Asked of each construct against KaTeX's own tree and the rewritten one,
+ * both read with an XML parser, which keeps namespaces as written: that KaTeX
+ * really does wrap it (or the case proves nothing about the rewrite); that the
+ * rewrite leaves no token holding an element; that the sanitised formula is
+ * the rewritten tree element for element, in order — so an empty `<mspace/>`
+ * that went missing fails as surely as a letter; that every character KaTeX
+ * wrote is still there; and that nothing inside the `<math>` is anything but
+ * MathML, which is the property DOMPurify's check protects and the rewrite
+ * must not trade away.
  */
 describe('markdown engine: constructs KaTeX builds inside a token element', () => {
   const MATHML = 'http://www.w3.org/1998/Math/MathML';
 
-  /** KaTeX's own markup for a formula, as `renderMath` received it, before the rename. */
+  /** KaTeX's own markup for a formula, as `renderMath` received it, before the rewrite. */
   function katexMarkup(tex: string, displayMode: boolean): string {
     const renderToString = vi.spyOn(katex, 'renderToString');
     try {
@@ -1037,31 +1124,30 @@ describe('markdown engine: constructs KaTeX builds inside a token element', () =
     ['\\approxcolon, whose token holds a self-closing <mspace/>', String.raw`a \approxcolon b`],
     ['\\boldsymbol over two letters', String.raw`\boldsymbol{xy}`],
     ['\\mathrel over two letters', String.raw`a \mathrel{xy} b`],
+    ['\\llcorner and \\lrcorner', String.raw`\llcorner x \lrcorner`],
   ];
+
+  /** Whether any token element in an XML-parsed tree holds an element. */
+  const holdsElementInToken = (tree: Document): boolean =>
+    TOKEN_ELEMENTS.some((name) =>
+      [...tree.getElementsByTagNameNS(MATHML, name)].some((token) => token.children.length > 0),
+    );
+
+  const xml = (markup: string): Document =>
+    new DOMParser().parseFromString(markup, 'application/xml');
 
   it.each(CONSTRUCTS)('keeps every character of %s, all of it MathML', (_name, tex) => {
     for (const displayMode of [false, true]) {
-      const written = new DOMParser().parseFromString(
-        katexMarkup(tex, displayMode),
-        'application/xml',
-      );
-      const tokens: Element[] = TOKEN_ELEMENTS.flatMap((name) => [
-        ...written.getElementsByTagNameNS(MATHML, name),
-      ]);
-      expect(
-        tokens.some((token) => token.children.length > 0),
-        'KaTeX wraps it in a token',
-      ).toBe(true);
+      const raw = katexMarkup(tex, displayMode);
+      const written = xml(raw);
+      expect(holdsElementInToken(written), 'KaTeX wraps it in a token').toBe(true);
+      const rewritten = xml(postprocessMathML(raw));
+      expect(holdsElementInToken(rewritten), 'a token still holds an element').toBe(false);
 
       const math = parse(sanitizeHtml(renderMath(tex, displayMode))).querySelector('math');
       expect(math).not.toBeNull();
-      const wrote = formula(written);
       expect(elementNames(formula(math!)), 'the formula, sanitised').toEqual(
-        wrote
-          ? [wrote, ...wrote.querySelectorAll('*')].map((element) =>
-              tokens.includes(element) && element.children.length > 0 ? 'mrow' : element.localName,
-            )
-          : [],
+        elementNames(formula(rewritten)),
       );
       expect(formulaText(math!), 'its text').toBe(formulaText(written));
       expect(
@@ -1074,11 +1160,11 @@ describe('markdown engine: constructs KaTeX builds inside a token element', () =
   });
 
   /**
-   * The rename reads KaTeX's markup, and a contributor writes TeX: markup
+   * The rewrite reads KaTeX's markup, and a contributor writes TeX: markup
    * typed inside a formula reaches it already escaped as text, so it can
-   * neither make an element nor choose which ones are renamed. The third
-   * source is a real wrapper — `\mathrel` around a text run — holding
-   * typed markup.
+   * neither make an element nor choose which ones are collapsed or renamed.
+   * The third source is a real wrapper — `\mathrel` around a text run —
+   * holding typed markup, and three characters are not one, so it is renamed.
    */
   it('cannot be steered by markup typed inside a formula, which KaTeX escapes first', () => {
     for (const [tex, text, names] of [
@@ -1094,6 +1180,25 @@ describe('markdown engine: constructs KaTeX builds inside a token element', () =
       expect(formulaText(math!), tex).toBe(text);
       expect(elementNames(formula(math!)), tex).toEqual(names);
     }
+  });
+
+  /**
+   * One upright character in an `mo` wrapper becomes that `mo`'s own text, so
+   * `\coloneqq` is the relation KaTeX meant — spaced as one in a browser —
+   * and a bare letter, which an `mo` would set upright, is renamed instead.
+   */
+  it('collapses an operator around one upright character, and nothing that would change a glyph', () => {
+    const out = (tex: string) => parse(render(`$${tex}$`)).querySelector('semantics');
+    expect(out(String.raw`a \coloneqq b`)?.querySelector('mo')?.outerHTML).toBe('<mo>≔</mo>');
+    expect(out(String.raw`\llcorner x`)?.querySelector('mo')?.outerHTML).toBe('<mo>⌞</mo>');
+    expect(elementNames(formula(parse(render(String.raw`$\mathop{x}\limits_{1}^{2}$`))))).toEqual([
+      'mrow',
+      'msubsup',
+      'mrow',
+      'mi',
+      'mn',
+      'mn',
+    ]);
   });
 
   it('keeps a token wrapper through the full pipeline, in prose and in an answer', () => {

@@ -19,7 +19,9 @@ import contract from '../../../../render-contract.json';
 import {
   INLINE_SANITIZE_CONFIG,
   LANGUAGE_CLASS,
+  NO_LINK_WITHIN,
   SANITIZE_CONFIG,
+  START_KEEP,
   markedFor,
   renderMarkdown,
   sanitizeHtml,
@@ -31,7 +33,14 @@ import {
   INLINE_MATH,
   containsMath,
 } from './math-delimiters';
-import { TOKEN_ELEMENTS, renameTokensHoldingElements, renderMath } from './math-engine';
+import {
+  COLLAPSE,
+  LARGEST_SIZE,
+  RENAME_TO,
+  TOKEN_ELEMENTS,
+  postprocessMathML,
+  renderMath,
+} from './math-engine';
 import { RenderedTextComponent } from './rendered-text.component';
 
 /**
@@ -218,7 +227,23 @@ describe('render-contract.json: the file itself', () => {
     expect(Object.keys(contract.katex).sort()).toEqual(
       ['$comment', 'defaults', 'options', 'postprocess'].sort(),
     );
-    expect(Object.keys(contract.katex.postprocess)).toEqual(['renameTokensHoldingElements']);
+    expect(Object.keys(contract.katex.postprocess).sort()).toEqual(
+      ['mathsize', 'tokensHoldingElements'].sort(),
+    );
+    expect(Object.keys(contract.katex.postprocess.tokensHoldingElements).sort()).toEqual(
+      ['collapse', 'renameTo', 'tokens'].sort(),
+    );
+    expect(Object.keys(contract.katex.postprocess.mathsize).sort()).toEqual(['max', 'unit']);
+    expect(Object.keys(contract.dompurify.hooks.afterSanitizeAttributes).sort()).toEqual(
+      [
+        'anchorOnly',
+        'classKeep',
+        'linkAttributes',
+        'linkProtocol',
+        'noLinkWithin',
+        'startKeep',
+      ].sort(),
+    );
     expect(Object.keys(contract.dompurify).sort()).toEqual(
       ['$comment', 'block', 'hooks', 'inline'].sort(),
     );
@@ -473,39 +498,130 @@ describe('render-contract.json: KaTeX', () => {
 });
 
 describe("render-contract.json: what is done to KaTeX's markup", () => {
-  const step = contract.katex.postprocess.renameTokensHoldingElements;
+  const { tokensHoldingElements: step, mathsize } = contract.katex.postprocess;
 
-  it('names the token elements the rewrite reads', () => {
+  it('names the token elements, the collapse and the rename the code applies', () => {
     expect(TOKEN_ELEMENTS).toEqual(step.tokens);
+    expect(COLLAPSE).toEqual(step.collapse);
+    expect(RENAME_TO).toBe(step.renameTo);
+  });
+
+  /** The five references KaTeX escapes with, decoded as the file says. */
+  const decoded = (text: string): string =>
+    text.replace(
+      /&(?:amp|lt|gt|quot|#x27);/g,
+      (reference) =>
+        ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#x27;': "'" })[reference]!,
+    );
+
+  /**
+   * A behaviour, so derived rather than compared. Every element the published
+   * allowlist names, and every published token, goes through the rewrite
+   * holding each shape of child — a token or not, with no attribute, with the
+   * one a collapse allows and with others, around one character, two or an
+   * escaped one, and a self-closing element — and holding only text, and the
+   * expected output is computed from the file: collapsed exactly when it says,
+   * renamed to the name it gives otherwise, left alone when it holds no element.
+   */
+  it('collapses or renames exactly as the file says, and only a token holding an element', () => {
+    const inner = step.collapse.inner as Record<string, Record<string, string>>;
+    const children = [...step.tokens, 'mrow', 'mstyle'].flatMap((child) =>
+      (
+        [{}, { mathvariant: 'normal' }, { mathvariant: 'italic' }, { stretchy: 'false' }] as Record<
+          string,
+          string
+        >[]
+      ).flatMap((attributes) =>
+        ['x', 'xy', '&lt;', '𝔸'].map((text) => ({ child, attributes, text })),
+      ),
+    );
+    const tag = (name: string, attributes: Record<string, string>) =>
+      `<${name}${Object.entries(attributes)
+        .map(([key, value]) => ` ${key}="${value}"`)
+        .join('')}>`;
+
+    let collapsed = 0;
+    for (const wrapper of new Set([...contract.dompurify.block.ALLOWED_TAGS, ...step.tokens])) {
+      const open = tag(wrapper, { lspace: '0em' });
+      for (const { child, attributes, text } of children) {
+        const inside = `${tag(child, attributes)}${text}</${child}>`;
+        const input = `<math>${open}${inside}</${wrapper}></math>`;
+        const allowed = inner[child];
+        const collapses =
+          wrapper === step.collapse.wrapper &&
+          allowed !== undefined &&
+          [...decoded(text)].length === 1 &&
+          Object.keys(attributes).length === Object.keys(allowed).length &&
+          Object.entries(attributes).every(([key, value]) => allowed[key] === value);
+        const renamed = step.tokens.includes(wrapper) ? step.renameTo : wrapper;
+        const expected = collapses
+          ? `<math>${open}${text}</${wrapper}></math>`
+          : `<math>${open.replace(wrapper, renamed)}${inside}</${renamed}></math>`;
+        expect(postprocessMathML(input), input).toBe(expected);
+        collapsed += collapses ? 1 : 0;
+      }
+      const selfClosing = `<math>${open}<mspace width="1em"/></${wrapper}></math>`;
+      const renamed = step.tokens.includes(wrapper) ? step.renameTo : wrapper;
+      expect(postprocessMathML(selfClosing), selfClosing).toBe(
+        `<math>${open.replace(wrapper, renamed)}<mspace width="1em"/></${renamed}></math>`,
+      );
+      const textOnly = `<math>${open}x &lt; y</${wrapper}></math>`;
+      expect(postprocessMathML(textOnly), textOnly).toBe(textOnly);
+    }
+    // Some of the probes collapse, so the check is not vacuous in either direction.
+    expect(collapsed).toBeGreaterThan(0);
   });
 
   /**
-   * A behaviour, so derived rather than compared: every element the published
-   * allowlist names, and every published token, goes through the rewrite
-   * holding an element — a self-closing one among them — and holding only
-   * text, and must come out renamed exactly when the file says so, to the
-   * name it gives, with its attributes and children as they were.
+   * Derived the same way: chains of nested sizes, valid and not, too large and
+   * not, the expected value of each computed from the file — the smaller of
+   * the written size and max, over the size in force around it, written as
+   * KaTeX writes a length — or its removal.
    */
-  it('renames exactly the published tokens, and only when they hold an element', () => {
-    const holding = (tag: string) =>
-      `<math><${tag} lspace="0em"><mi>x</mi>y<mspace width="1em"/></${tag}></math>`;
-    const holdingSelfClosing = (tag: string) =>
-      `<math><${tag} lspace="0em"><mspace width="1em"/></${tag}></math>`;
-    const text = (tag: string) => `<math><${tag} lspace="0em">x &lt; y</${tag}></math>`;
-    for (const name of new Set([...contract.dompurify.block.ALLOWED_TAGS, ...step.tokens])) {
-      const renamed = step.tokens.includes(name) ? step.to : name;
-      expect(renameTokensHoldingElements(holding(name)), name).toBe(holding(renamed));
-      expect(renameTokensHoldingElements(holdingSelfClosing(name)), name).toBe(
-        holdingSelfClosing(renamed),
-      );
-      expect(renameTokensHoldingElements(text(name)), name).toBe(text(name));
+  it('makes every mathsize relative and caps it, exactly as the file says', () => {
+    const values = ['0.5', '1', '1.2', '2.074', String(mathsize.max), '3', '10'].map(
+      (n) => `${n}${mathsize.unit}`,
+    );
+    const invalid = ['2px', '0em', '-1em', 'big'];
+    const length = (n: number) => `${+n.toFixed(4)}${mathsize.unit}`;
+    const pattern = new RegExp(`^(\\d+(?:\\.\\d+)?)${mathsize.unit}$`);
+    const chains = values.flatMap((a) =>
+      [...values, ...invalid].flatMap((b) => [
+        [a, b],
+        [b, a],
+        [a, b, a],
+      ]),
+    );
+    for (const chain of chains) {
+      const input =
+        chain.map((value) => `<mstyle mathsize="${value}">`).join('') +
+        '<mi>x</mi>' +
+        '</mstyle>'.repeat(chain.length);
+      let enclosing = 1;
+      const expected =
+        chain
+          .map((value) => {
+            const written = pattern.exec(value);
+            if (written === null || Number(written[1]) <= 0) {
+              return '<mstyle>';
+            }
+            const size = Math.min(Number(written[1]), mathsize.max);
+            const relative = length(size / enclosing);
+            enclosing = size;
+            return `<mstyle mathsize="${relative}">`;
+          })
+          .join('') +
+        '<mi>x</mi>' +
+        '</mstyle>'.repeat(chain.length);
+      expect(postprocessMathML(input), chain.join(' > ')).toBe(expected);
     }
+    expect(LARGEST_SIZE).toBe(mathsize.max);
   });
 
   /**
    * Applied to exactly what `renderToString` returned, captured on the call,
-   * in both display modes — over formulas KaTeX wraps in a token and one it
-   * does not, so the check cannot pass by the rewrite never firing.
+   * in both display modes — over formulas each rewrite changes and one
+   * neither does, so the check cannot pass by a rewrite never firing.
    */
   it('is applied to the string renderToString returns, and to nothing else', () => {
     const renderToString = vi.spyOn(katex, 'renderToString');
@@ -513,21 +629,26 @@ describe("render-contract.json: what is done to KaTeX's markup", () => {
       const rewritten: string[] = [];
       for (const tex of [
         String.raw`a \overset{!}{=} b`,
-        String.raw`\varliminf_{n} x_n`,
+        String.raw`a \coloneqq b`,
+        String.raw`\tiny{\Huge x}`,
         String.raw`\frac{a}{b}`,
       ]) {
         for (const displayMode of [true, false]) {
           renderToString.mockClear();
           const out = renderMath(tex, displayMode);
           const returned = renderToString.mock.results[0].value as string;
-          expect(out, tex).toBe(renameTokensHoldingElements(returned));
+          expect(out, tex).toBe(postprocessMathML(returned));
           if (out !== returned) {
             rewritten.push(tex);
           }
         }
       }
       expect(new Set(rewritten)).toEqual(
-        new Set([String.raw`a \overset{!}{=} b`, String.raw`\varliminf_{n} x_n`]),
+        new Set([
+          String.raw`a \overset{!}{=} b`,
+          String.raw`a \coloneqq b`,
+          String.raw`\tiny{\Huge x}`,
+        ]),
       );
     } finally {
       renderToString.mockRestore();
@@ -657,6 +778,59 @@ describe('render-contract.json: DOMPurify', () => {
     expect(
       parse(sanitizeHtml('<a href="/account">x</a>')).querySelector('a')?.attributes,
     ).toHaveLength(0);
+  });
+});
+
+describe('render-contract.json: the hook, past the link', () => {
+  const hook = contract.dompurify.hooks.afterSanitizeAttributes;
+
+  it('keeps exactly the list starts the published pattern matches', () => {
+    expect(patternOf(START_KEEP)).toEqual(hook.startKeep);
+    const keep = new RegExp(hook.startKeep.source, hook.startKeep.flags);
+    for (const value of [
+      '0',
+      '3',
+      '42',
+      '9999',
+      '10000',
+      '999999999',
+      '-1',
+      '3.5',
+      '+3',
+      '03',
+      'x',
+    ]) {
+      const list = parse(sanitizeHtml(`<ol start="${value}"><li>x</li></ol>`)).querySelector('ol');
+      expect(list?.getAttribute('start') ?? null, JSON.stringify(value)).toBe(
+        keep.test(value) ? value : null,
+      );
+    }
+  });
+
+  /**
+   * An `<a>` inside each published element keeps none of the anchor-only or
+   * link attributes, in block mode, where `<a>` is allowed at all. A MathML
+   * token element is a text integration point, so the anchor is an HTML one
+   * and the allowlist alone would keep it live.
+   */
+  it('makes nothing a link inside the published elements', () => {
+    expect(NO_LINK_WITHIN).toEqual(hook.noLinkWithin);
+    for (const name of hook.noLinkWithin) {
+      const anchor = '<a href="https://example.org/" title="t">x</a>';
+      const html =
+        name === 'math' ? `<math><mtext>${anchor}</mtext></math>` : `<${name}>${anchor}</${name}>`;
+      const link = parse(sanitizeHtml(html)).querySelector('a');
+      expect(link, name).not.toBeNull();
+      const kept = [...(link?.attributes ?? [])].map(({ name: attribute }) => attribute);
+      expect(
+        kept.filter(
+          (attribute) =>
+            hook.anchorOnly.includes(attribute) ||
+            Object.keys(hook.linkAttributes).includes(attribute),
+        ),
+        name,
+      ).toEqual([]);
+    }
   });
 });
 

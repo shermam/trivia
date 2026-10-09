@@ -120,6 +120,13 @@ const CORPUS = [
     input: '3. three\n4. four',
   },
   {
+    name: 'ordered-list-start-past-four-digits',
+    mode: 'block',
+    about:
+      "A start of four digits is kept and a longer one dropped, so that list is numbered from 1: past four digits the number is wider than the gutter and the card's padding together, and would sit over the card's edge. The ) starts a second list.",
+    input: '9999. four digits\n\n10000) five digits',
+  },
+  {
     name: 'https-links',
     mode: 'block',
     about:
@@ -255,8 +262,22 @@ $$`,
     name: 'sizing-and-linebreak',
     mode: 'block',
     about:
-      'mathsize, which KaTeX sets for a sizing command, and linebreak, which it sets on the mspace a \\\\ becomes: both on the attribute list, so the size and the break reach the browser.',
+      'mathsize, which KaTeX sets for a sizing command, and linebreak, which it sets on the mspace a \\\\ becomes: both on the attribute list, so the size and the break reach the browser — though Chromium ignores linebreak and sets a \\\\ b on one line.',
     input: String.raw`$\Huge x$ and $a \\ b$`,
+  },
+  {
+    name: 'nested-huge',
+    mode: 'block',
+    about:
+      'KaTeX writes \\Huge as mathsize="2.488em" at every depth, meaning 2.488 times the formula, and an em is the parent\'s size: the inner two are rewritten relative to the one around them, 1em each, so x is drawn at 2.488 rather than 15.4 times the text.',
+    input: String.raw`$\Huge{\Huge{\Huge x}}$`,
+  },
+  {
+    name: 'huge-inside-tiny',
+    mode: 'block',
+    about:
+      'A size inside a smaller one is rewritten relative to it: \\Huge inside \\tiny becomes 4.976em of the 0.5em around it, which is 2.488 times the formula, as KaTeX meant.',
+    input: String.raw`$\tiny{\Huge x}$`,
   },
   {
     name: 'math-inside-code',
@@ -360,14 +381,14 @@ $$`,
     name: 'overset',
     mode: 'block',
     about:
-      'KaTeX builds \\overset{!}{=} as an mo around an mover whose base is an mo around the =: both wrappers become mrow, so the ! stays over the = and "a =! b" reads as written.',
+      'KaTeX builds \\overset{!}{=} as an mo around an mover whose base is an mo around the =: the inner one holds one upright character and collapses into <mo>=</mo>, the outer one becomes an mrow, so the ! stays over the = and "a =! b" reads as written.',
     input: String.raw`$a \overset{!}{=} b$`,
   },
   {
     name: 'underset-stackrel-mathop',
     mode: 'block',
     about:
-      'The same wrapping three ways: \\underset is an mi around an munder, \\stackrel an mo around an mover, and the base of each, like \\mathop…\\limits, an mo around an mi. Every wrapper becomes an mrow; the leaves keep their names.',
+      'The same wrapping three ways: \\underset is an mi around an munder, \\stackrel an mo around an mover, and the base of each, like \\mathop…\\limits, an mo around a bare mi. Every wrapper becomes an mrow — a bare mi is italic and an mo is not, so none collapses — and the leaves keep their names.',
     input: String.raw`$\underset{x}{y} + \stackrel{a}{b} + \mathop{x}\limits_{1}^{2}$`,
   },
   {
@@ -388,7 +409,7 @@ $$`,
     name: 'colon-relations',
     mode: 'block',
     about:
-      '\\coloneqq is an mo around an mi holding ≔. \\approxcolon is an mo around three more, one holding nothing but a negative space, which KaTeX writes as a self-closing <mspace/> — an element all the same, so that mo becomes an mrow too — and one holding the colon two mo deep, whose innermost mo holds text and stays.',
+      '\\coloneqq is an mo around an mi mathvariant="normal" holding ≔, one upright character: it collapses into <mo>≔</mo>, the relation KaTeX meant. \\approxcolon is an mo around three more: ≈; one holding nothing but a negative space, which KaTeX writes as a self-closing <mspace/> — an element all the same, so it becomes an mrow; and the colon two mo deep, which collapses, innermost first, into one <mo>:</mo>. Holding three, the outer one becomes an mrow.',
     input: String.raw`$x \coloneqq 1 \approxcolon y$`,
   },
 
