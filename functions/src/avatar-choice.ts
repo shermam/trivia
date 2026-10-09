@@ -1,4 +1,5 @@
 import type { DocumentReference } from 'firebase-admin/firestore';
+import { type CallerToken, callerStanding, isVerifiedPlayer } from './caller-gate';
 
 /**
  * A player's avatar choice (`FEAT-038`), and the decision about who may store
@@ -56,36 +57,10 @@ export interface AvatarChoice {
  */
 export const AVATAR_SEED_PATTERN = /^[a-z]{1,8}-[0-9]{2}$/;
 
-/**
- * The sign-in providers whose accounts may store a choice — the eight the app
- * offers (`AuthService`'s `OAuthProviderId` plus `password`).
- *
- * An allowlist rather than `!== 'anonymous'`, for the reason
- * `recordGameResult` gives: a provider nobody has enabled must fail closed
- * rather than start writing documents the day somebody switches it on in the
- * console. **It names all eight, where `recordGameResult`'s names three**,
- * because the picker is offered to every signed-in account and a client gate
- * may not be broader than the server's (`CLAUDE.md` §4.2): a GitHub player
- * shown the picker and then refused would be exactly that shape.
- */
-export const AVATAR_PROVIDERS: ReadonlySet<string> = new Set([
-  'password',
-  'google.com',
-  'facebook.com',
-  'github.com',
-  'microsoft.com',
-  'apple.com',
-  'twitter.com',
-  'yahoo.com',
-]);
-
 /** The slice of a callable's `request.auth` the decision reads. */
 export interface AvatarCaller {
   uid: string;
-  token: {
-    firebase?: { sign_in_provider?: unknown };
-    email_verified?: unknown;
-  };
+  token: CallerToken;
 }
 
 export type AvatarRefusalCode = 'unauthenticated' | 'permission-denied' | 'invalid-argument';
@@ -139,23 +114,6 @@ export function parseAvatarChoice(payload: unknown): AvatarChoice | null {
 }
 
 /**
- * Whether this caller may store a choice: a non-anonymous account on an
- * allowlisted provider, and — for a password account — a verified address.
- *
- * Read from the verified token, never from the payload, and the same two facts
- * `isRealAuthedUser()` in `firestore.rules` reads for every other write a
- * player makes about themselves. The client mirrors it with
- * `AuthService.isFullyAuthenticated()`.
- */
-function mayChooseAvatar(token: AvatarCaller['token']): boolean {
-  const provider = token.firebase?.sign_in_provider;
-  if (typeof provider !== 'string' || !AVATAR_PROVIDERS.has(provider)) {
-    return false;
-  }
-  return provider !== 'password' || token.email_verified === true;
-}
-
-/**
  * The whole decision `setAvatar` makes before it writes anything.
  *
  * The messages are deliberately general. Which field of a payload was wrong is
@@ -170,7 +128,14 @@ export function decideAvatarChoice(
   if (!caller?.uid) {
     return { ok: false, code: 'unauthenticated', message: 'Sign in before choosing an avatar.' };
   }
-  if (!mayChooseAvatar(caller.token)) {
+  // The whole of the shared caller gate (`caller-gate.ts`): a provider the app
+  // offers, and a verified address for a password account — the same two facts
+  // `isRealAuthedUser()` reads for every other write a player makes about
+  // themselves. Read from the verified token, never from the payload. The
+  // picker mirrors it with `AuthService.isFullyAuthenticated()`, and offers
+  // itself to every signed-in account, which is why the allowlist has to name
+  // every provider the app offers (`CLAUDE.md` §4.2).
+  if (!isVerifiedPlayer(callerStanding(caller.token))) {
     return {
       ok: false,
       code: 'permission-denied',

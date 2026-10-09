@@ -218,8 +218,9 @@ describe('legal pages', () => {
     // For how long, as a number rather than "as long as necessary".
     expect(text).toContain('A game older than');
     expect(text).toContain('twelve months');
-    // For whom: signed-in accounts only. The gate lives in the callable's
-    // provider allowlist, and this is the sentence it keeps honest.
+    // For whom: signed-in accounts only. The gate is the callables' shared
+    // caller gate (`functions/src/caller-gate.ts`), and this is the sentence it
+    // keeps honest.
     expect(text).toContain('Nothing is recorded for anonymous play');
     // And the two account-lifecycle promises `deleteAccount` and
     // `exportAccountData` have to go on keeping.

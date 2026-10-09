@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { avatarLetter } from '../../models/avatar.model';
+import { AccountService } from '../../services/account.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { AvatarService } from '../../services/avatar.service';
@@ -30,6 +31,14 @@ import { IconComponent, IconName } from '../icon/icon.component';
  * to nothing at all.
  */
 type ProfileView = 'loading' | 'signedOut' | 'empty' | 'stats' | 'failed';
+
+/**
+ * Which sentence the card's status line shows: the view, or — over an empty
+ * card or a full one — that the signed-in account's last game in this tab was
+ * refused by the server (`AccountService.unbankedGame`). The tiles and the
+ * action row go by the view alone; only the sentence changes.
+ */
+type StatsLine = ProfileView | 'notBanked';
 
 /** One number on the card. `id` is the `@for` track key, never the label (`CLAUDE.md` §4.4). */
 interface StatTile {
@@ -88,6 +97,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'long' });
 export class ProfileStatsComponent {
   private readonly firebaseService = inject(FirebaseService);
   private readonly authService = inject(AuthService);
+  private readonly accountService = inject(AccountService);
   private readonly authMenuState = inject(AuthMenuStateService);
   protected readonly embedMode = inject(EmbedModeService);
   /** The header's avatar — the same choice, read once, that the chip draws (`FEAT-038`). */
@@ -160,6 +170,28 @@ export class ProfileStatsComponent {
       return 'failed';
     }
     return this.statsSignal() === null ? 'empty' : 'stats';
+  });
+
+  /**
+   * Whether the server refused to bank the last game this account finished in
+   * this tab — so the sentence that would promise totals ("finish a game and
+   * your totals will show up here") is replaced by one saying the game was not
+   * added. Scoped to the account the refused call was made as: another
+   * account signed in since sees nothing of it.
+   *
+   * Nothing is stored, so it lasts as long as the tab. That is enough for what
+   * it is for — a player checking their totals after a game that did not count
+   * — and it is the only thing that can say so: nothing is written for a
+   * refused game, so there is nothing to read back.
+   */
+  private readonly lastGameNotBanked = computed(() => {
+    const unbanked = this.accountService.unbankedGame();
+    return unbanked !== null && unbanked.uid === this.signedInUid();
+  });
+
+  protected readonly line = computed<StatsLine>(() => {
+    const view = this.view();
+    return (view === 'empty' || view === 'stats') && this.lastGameNotBanked() ? 'notBanked' : view;
   });
 
   /**
@@ -250,11 +282,13 @@ export class ProfileStatsComponent {
   private readonly avatarNotice = signal<{ text: string; over: string } | null>(null);
 
   private readonly statsAnnouncement = computed(() => {
-    switch (this.view()) {
+    switch (this.line()) {
       case 'stats':
         return 'Your stats are ready.';
       case 'empty':
         return 'No finished games yet.';
+      case 'notBanked':
+        return 'Your last game could not be added to your stats.';
       case 'signedOut':
         return 'Signed out. Stats are only kept for a signed-in account.';
       case 'failed':
