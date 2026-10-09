@@ -189,7 +189,7 @@ describe('legal pages', () => {
     expect(text).toContain('nothing is kept for anonymous play');
     // ...and the two promises the account lifecycle has to keep honouring.
     expect(text).toContain('deletes your gameplay totals');
-    expect(text).toContain('your gameplay totals, your play history');
+    expect(text).toContain('your gameplay totals and experience points, your play history');
   });
 
   /**
@@ -237,6 +237,17 @@ describe('legal pages', () => {
     expect(text).toContain(
       'Work out the experience points each game you finish signed in earns, and keep their total',
     );
+
+    // Kept for the life of the account, gone with it, and handed back in the
+    // export — the three places a new field on the record has to be named.
+    expect(text).toContain(
+      'gameplay totals and experience points, your avatar choice, the likes and dislikes you give questions, subscription records and donation records are kept for as long as your account exists',
+    );
+    expect(text).toContain(
+      'Your experience points are one running total, not a record of each game, so the twelve-month limit on your play history below does not reduce them',
+    );
+    expect(text).toContain('deletes your gameplay totals, your experience points and your whole');
+    expect(text).toContain('your gameplay totals and experience points, your play history');
   });
 
   /**
@@ -271,11 +282,13 @@ describe('legal pages', () => {
     expect(text).toContain('Nothing is recorded for anonymous play');
     // And the two account-lifecycle promises `deleteAccount` and
     // `exportAccountData` have to go on keeping.
-    expect(text).toContain('deletes your gameplay totals and your whole play history');
+    expect(text).toContain(
+      'deletes your gameplay totals, your experience points and your whole play history',
+    );
     expect(text).toContain('your play history — every game we still hold, question by question');
-    // What outlives the twelve months is the totals and nothing else: no
-    // summary of preferences is derived from the plays, because nothing reads
-    // them yet. Announcing one before it exists is what `CLAUDE.md` §4.0
+    // What outlives the twelve months is the totals record — the totals and
+    // the XP beside them — and nothing else: no summary of preferences is
+    // derived from the plays, because nothing reads them yet. Announcing one before it exists is what `CLAUDE.md` §4.0
     // forbids; the recommender's own PR adds the sentence with the practice.
     expect(text).not.toContain('general picture of your preferences');
   });
@@ -498,7 +511,9 @@ describe('legal pages', () => {
     expect(privacy).toContain('No totals are kept until you finish your first game');
 
     // Retention, deletion and export.
-    expect(privacy).toContain('gameplay totals, your avatar choice, the likes and dislikes');
+    expect(privacy).toContain(
+      'gameplay totals and experience points, your avatar choice, the likes and dislikes',
+    );
     expect(privacy).toContain('deletes your avatar choice');
     expect(privacy).toContain('your avatar choice, and your billing records');
     expect(privacy).toContain('Keep the avatar you chose');

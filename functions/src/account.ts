@@ -58,7 +58,8 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // every question the account was shown, beyond the reach of the only
     // function able to delete it.
     await deletePlayHistory(uid);
-    // Lifetime totals, and the avatar choice stored beside them (`FEAT-038`).
+    // Lifetime totals, and the experience points (`FEAT-041`) and avatar choice
+    // (`FEAT-038`) stored beside them.
     // A delete on a document that was never created is a no-op, which is the
     // normal case for an account that never finished a game nor chose an
     // avatar — the document is created lazily by `recordGameResult` or
