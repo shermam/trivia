@@ -516,7 +516,9 @@ export class FirebaseBackend {
 
   /**
    * Writes one account's lifetime totals, as the `recordGameResult` callable
-   * would have.
+   * would have — and, when a spec names them, the bookkeeping it keeps beside
+   * them: the ring of recent game ids, a pre-ring `lastGameId`, the day's count
+   * against the daily ceiling.
    *
    * Through the Admin SDK because that is the only way they can be written at
    * all — `users` has no client write rule, by design (`docs/data-model.md`).
@@ -646,8 +648,9 @@ export class FirebaseBackend {
       questionCreatedBy: (questionDoc?.data()?.['createdBy'] as string | undefined) ?? null,
       // The whole document, not a boolean. A test that can only ask "does it
       // exist" cannot tell a correct total from a doubled one — and the
-      // double-count on reload is the specific defect `lastGameId` exists to
-      // prevent, so the assertion has to be able to read the number.
+      // double-count on reload is the specific defect the ring of recent game
+      // ids exists to prevent, so the assertion has to be able to read the
+      // number.
       gameplayStats: statsDoc.exists ? (statsDoc.data() as Record<string, unknown>) : null,
     };
   }

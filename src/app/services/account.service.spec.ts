@@ -204,6 +204,21 @@ describe('AccountService.recordGameResult reading the answer', () => {
     expect(String(consoleError.mock.calls[0][0])).toContain('oidc.example');
   });
 
+  /**
+   * The server's daily ceiling (`functions/src/daily-ceiling.ts`) refuses with
+   * a reason `/profile` has words of its own for, so it has to arrive there
+   * exactly as the server gave it.
+   */
+  it('holds a refusal for the daily ceiling with its reason, for /profile to name', async () => {
+    const { service } = setup({ account: { uid: 'player-1', isAnonymous: false } });
+    h.recordAnswer = { recorded: false, reason: 'daily-limit' };
+
+    await service.recordGameResult(result);
+
+    expect(service.unbankedGame()).toEqual({ uid: 'player-1', reason: 'daily-limit' });
+    expect(String(consoleError.mock.calls[0][0])).toContain('daily-limit');
+  });
+
   it('reports every refusal of a signed-in account it was not built to expect', async () => {
     for (const reason of ['invalid', 'rate-limited', 'anonymous', 'a-reason-from-a-newer-server']) {
       const { service } = setup();

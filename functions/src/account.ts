@@ -143,7 +143,8 @@ export const exportAccountData = onCall(async (request) => {
       // file finds the games they remember at the top. Unbounded like every
       // other section here and bounded in practice by two things that are not
       // this function's: the twelve-month retention sweep, and the callable's
-      // own per-hour cap on how many games one account can bank.
+      // own caps on how many games one account can bank — sixty an hour, two
+      // hundred a UTC day.
       firestore.collection('users').doc(uid).collection('plays').orderBy('at', 'desc').get(),
       firestore.collection('custom_questions').where('createdBy', '==', uid).get(),
       // Every like and dislike, by the same id range deletion sweeps
@@ -179,13 +180,13 @@ export const exportAccountData = onCall(async (request) => {
         // is distinguishable from a global one on the same board without the
         // export having to label it separately.
         .map(({ board, snapshot }) => ({ board, ...snapshot.data() })),
-      // The whole document — totals and avatar choice alike — or an explicit
-      // null rather than an absent key when there is none; see
-      // `AccountExport.gameplayStats`.
+      // The whole document — totals, XP, avatar choice, the ring of recent
+      // game ids and the day's count alike — or an explicit null rather than an
+      // absent key when there is none; see `AccountExport.gameplayStats`.
       gameplayStats: stats.exists ? (stats.data() as Record<string, unknown>) : null,
       // The game id rides along as `id`, the way every other collection in this
       // export carries its document id: it is the only thing tying a round here
-      // to the totals' `lastGameId`.
+      // to the totals' `recentGameIds`.
       playHistory: plays.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       questionVotes: votes,

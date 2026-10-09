@@ -22,8 +22,9 @@
  *
  * **Bounded, not attested** — audit decision A1, as for the totals. The records
  * are client-supplied, so a player can lie their way to XP; what bounds it is
- * the payload's own bounds (at most 25 answers, one call per game id, sixty
- * games an hour), which make a game worth at most 800 XP. That is why a level
+ * the payload's own bounds (at most 25 answers, so at most 800 XP a game) and
+ * how many games bank (one per game id among the last twenty, sixty an hour,
+ * two hundred a UTC day — so at most 160,000 XP a day). That is why a level
  * unlocks a cosmetic its owner sees and nothing anybody else does.
  */
 import type { PlayAnswer, PlayDifficulty } from './play-history';

@@ -26,7 +26,8 @@
  * **Bounded, not attested** — audit decision `A1` once more. The outcomes are
  * client-supplied, so somebody can skew a question's difficulty by lying about
  * their own round. What bounds it is one game's worth per call (below), one
- * call per game id, and sixty games an hour per account (`game-stats.ts`).
+ * call per game id among the account's last twenty, and sixty games an hour
+ * and two hundred a UTC day per account (`game-stats.ts`).
  * That is calibration, not a security boundary: the report channel catches a
  * bad question; this catches a badly labelled one.
  */

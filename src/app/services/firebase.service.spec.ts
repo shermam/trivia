@@ -67,6 +67,9 @@ function toWire(value: unknown): unknown {
   if (typeof value === 'boolean') return { booleanValue: value };
   if (typeof value === 'number') return { integerValue: String(value) };
   if (Array.isArray(value)) return { arrayValue: { values: value.map(toWire) } };
+  if (typeof value === 'object' && value !== null) {
+    return { mapValue: { fields: toWireFields(value as Record<string, unknown>) } };
+  }
   return { nullValue: null };
 }
 
@@ -1797,7 +1800,8 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
     statsSince: 1_755_000_000_000,
     xp: 640,
     // Bookkeeping the callable keeps and the profile screen has no use for.
-    lastGameId: 'game-7',
+    recentGameIds: ['game-7', 'game-6', 'game-5', 'game-4'],
+    dailyGames: { day: '2025-08-12', count: 4 },
     updatedAt: 1_755_000_100_000,
     rateWindowStart: 1_755_000_000_000,
     gamesInWindow: 4,
