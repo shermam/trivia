@@ -501,11 +501,14 @@ describe('legal pages', () => {
    * `functions/src/report-anonymisation.ts` enforces, so changing the period
    * there fails this test until both documents state the new one. Pinned on the
    * claims the code has to keep — what a report stores, how long the
-   * identifier stays and why, that a daily job then removes it, what deletion
-   * and export do, that the report itself stays — in both documents, and on
+   * identifier stays and why, that a daily job then removes it, that the copy
+   * keeps the day and not the time (`startOfUtcDay`), what deletion and export
+   * do, that the report itself is kept indefinitely — in both documents, and on
    * every retired sentence in the negative, because the half-finished edit is
    * to fix the retention bullet and leave another section promising the
-   * opposite.
+   * opposite. Two of the retired ones were this feature's own first draft:
+   * nothing clears a report from the queue, and a copy stamped to the
+   * millisecond did not hold "nothing that ties it to you".
    */
   it('says a report names its reporter for the sweep’s thirty days, and what deletion does', async () => {
     const privacy = collapse((await render(PrivacyPolicyComponent)).textContent);
@@ -528,6 +531,10 @@ describe('legal pages', () => {
     expect(privacy).toContain(
       'A job that runs once a day copies each report older than that without your identifier and deletes the original',
     );
+    // What the copy keeps: the day, not the time, and no identifier.
+    expect(privacy).toContain(
+      'The copy keeps the question, the reason, your words and the day you filed the report — the day, not the time — and no account identifier remains',
+    );
     expect(privacy).toContain(
       `keep your account identifier for ${days} from the day you file them`,
     );
@@ -538,12 +545,17 @@ describe('legal pages', () => {
     expect(privacy).toContain(
       'removes your account identifier from every report you have filed — the reports themselves stay, naming nobody',
     );
-    // The report itself, which outlives its identity.
+    // The report itself, which outlives its identity, indefinitely.
     expect(privacy).toContain(
-      'The report itself stays until the question it is about has been decided and we clear it from the review queue',
+      `Reports themselves are kept indefinitely, as the record that something needed looking at, naming nobody once those ${days} are up`,
     );
-    expect(privacy).toContain('nothing in the app deletes a report automatically');
+    expect(privacy).toContain(
+      'The report itself is kept indefinitely — the question, the reason, anything you typed and the day you filed it',
+    );
     // Export, which returns what still names the account.
+    expect(privacy).toContain(
+      'your data export includes only the reports that still carry your identifier',
+    );
     expect(privacy).toContain(
       'every report you have filed that still carries your account identifier',
     );
@@ -555,7 +567,10 @@ describe('legal pages', () => {
     // The Terms, in the section a leaver reads, the reporting paragraph and
     // termination.
     expect(terms).toContain(
-      'Reports you filed outlive your account too, without anything that identifies you',
+      'Reports you filed outlive your account too, without your account identifier',
+    );
+    expect(terms).toContain(
+      'the reports themselves are kept indefinitely, as the record that something needed looking at',
     );
     expect(terms).toContain(
       `A report keeps your identifier for ${days} so that it can be followed up`,
@@ -578,6 +593,13 @@ describe('legal pages', () => {
     expect(terms).not.toContain(
       'everything goes except contributed questions, which stay in the bank with authorship removed.',
     );
+    // …and the first draft's: nothing clears a report, and the copy is not
+    // free of everything that could tie it to its reporter.
+    expect(privacy).not.toContain('we clear it from the review queue');
+    expect(privacy).not.toContain('nothing in the app deletes a report automatically');
+    expect(privacy).not.toContain('holds nothing that ties it to you');
+    expect(privacy).not.toContain('your words and the time stay');
+    expect(terms).not.toContain('without anything that identifies you');
   });
 
   /**
