@@ -48,7 +48,7 @@ export async function expectRadiosAreGrouped(page: Page): Promise<void> {
     await expect(group, `radio "${name}" is inside a [role="radiogroup"]`).toHaveCount(1);
 
     const labelledBy = await group.getAttribute('aria-labelledby');
-    expect(labelledBy, `radiogroup around "${name}" has aria-labelledby`).toBeTruthy();
+    expect(labelledBy?.trim(), `radiogroup around "${name}" has aria-labelledby`).toBeTruthy();
 
     // Every id has to resolve to something with text, or the group is labelled
     // by nothing — which reads exactly like having no label at all. The
