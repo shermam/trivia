@@ -9,6 +9,7 @@ import {
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { DAILY_FREE_GAME_LIMIT } from '../../services/daily-game-limit.service';
 import {
   SubscriptionService,
   subscriptionFailureMessage,
@@ -54,6 +55,13 @@ export class PricingComponent {
   protected readonly authMenuState = inject(AuthMenuStateService);
 
   protected readonly isProUser = this.subscriptionService.isProUser;
+
+  /**
+   * The free tier's daily allowance, as the Starter card states it — the
+   * constant `DailyGameLimitService` applies, so the card cannot promise more
+   * than the setup screen gives. Pro is the tier with unlimited games.
+   */
+  protected readonly dailyFreeGames = DAILY_FREE_GAME_LIMIT;
   protected readonly isSubscribing = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
 

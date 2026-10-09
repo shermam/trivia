@@ -64,10 +64,11 @@ test.describe('lifetime gameplay totals', () => {
   });
 
   /**
-   * **The defect `lastGameId` exists to prevent.** `/game-over` is deliberately
-   * restorable — the completed game stays in the snapshot so a refresh does not
-   * lose the score about to be submitted — which means `ngOnInit` runs again and
-   * calls the callable again with the same game.
+   * **The defect the ring of recent game ids exists to prevent.**
+   * `/game-over` is deliberately restorable — the completed game stays in the
+   * snapshot so a refresh does not lose the score about to be submitted — which
+   * means `ngOnInit` runs again and calls the callable again with the same
+   * game.
    *
    * The assertion has to read the counter, not merely check the document
    * exists: an implementation that banks the game twice produces a document

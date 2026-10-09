@@ -295,6 +295,23 @@ export interface GameplayStatsSeed {
    * before XP existed, which reads as none.
    */
   xp?: number;
+  /**
+   * The ids of the last games banked, newest first — the duplicate check's
+   * ring. Omitted to stand in for an account with none on record.
+   */
+  recentGameIds?: string[];
+  /**
+   * The single id a document written before the ring carries, which
+   * `recordGameResult` reads as a ring of one and deletes on the next banked
+   * game. Seeded only to stand in for such a document.
+   */
+  lastGameId?: string;
+  /**
+   * The count against the daily ceiling: the UTC day it counts, as
+   * `YYYY-MM-DD`, and the games banked in it. Seeded so a spec can stand at
+   * the 200th game without playing 199.
+   */
+  dailyGames?: { day: string; count: number };
 }
 
 /**

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { DocumentReference, Transaction } from 'firebase-admin/firestore';
+import { type DocumentReference, FieldValue, type Transaction } from 'firebase-admin/firestore';
 import { type GameResultRefs, applyGameResult } from './game-result';
 import { MAX_GAMES_PER_WINDOW, type GameResultSubmission, type UserStats } from './game-stats';
 import type { PlayAnswer } from './play-history';
@@ -20,6 +20,8 @@ import type { PlayAnswer } from './play-history';
 
 const NOW = 1_759_900_000_000;
 const HOUR = 60 * 60 * 1000;
+/** The UTC day `NOW` falls in — 8 October 2025, 05:06:40 UTC. */
+const TODAY = '2025-10-08';
 
 /** References are opaque to the code under test, so a path string stands in for each. */
 const refs: GameResultRefs = {
@@ -93,7 +95,8 @@ function storedTotals(overrides: Partial<UserStats> = {}): UserStats {
     questionsAnswered: 15,
     correctAnswers: 9,
     bestStreak: 3,
-    lastGameId: 'game-0',
+    recentGameIds: ['game-0'],
+    dailyGames: { day: TODAY, count: 1 },
     statsSince: NOW - 24 * HOUR,
     updatedAt: NOW - HOUR,
     rateWindowStart: NOW - 10 * 60 * 1000,
@@ -167,7 +170,82 @@ describe('applyGameResult', () => {
       ],
     );
     assert.equal(writes[0].data['gamesPlayed'], 1);
+    assert.deepEqual(writes[0].data['recentGameIds'], ['game-1']);
+    assert.deepEqual(writes[0].data['dailyGames'], { day: TODAY, count: 1 });
     assert.equal((writes[1].data['answers'] as unknown[]).length, 3);
+  });
+
+  /**
+   * **The ring, and the day's count, ride the totals' write.** One merge
+   * carries the new ring — this game first, the one before it after — and the
+   * day's count one higher, so the duplicate check and the ceiling are as
+   * current as the totals they guard.
+   */
+  it('writes the ring and the day count beside the totals', async () => {
+    const { transaction, writes } = fakeTransaction({
+      user: storedTotals({ recentGameIds: ['game-0'], dailyGames: { day: TODAY, count: 41 } }),
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    const totals = writes.find((write) => write.path === 'users/player-1');
+    assert.deepEqual(totals?.data['recentGameIds'], ['game-1', 'game-0']);
+    assert.deepEqual(totals?.data['dailyGames'], { day: TODAY, count: 42 });
+    assert.deepEqual(totals?.options, { merge: true });
+  });
+
+  /**
+   * **The migration's write.** A document from before the ring carries
+   * `lastGameId`; the game that banks next writes the ring — holding the old id
+   * as well as its own — and deletes the old field in the same merge, so the
+   * document stops carrying two answers to one question.
+   */
+  it('retires a pre-ring lastGameId in the write that banks the next game', async () => {
+    const legacy: Record<string, unknown> = { ...storedTotals(), lastGameId: 'game-old' };
+    delete legacy['recentGameIds'];
+    const { transaction, writes } = fakeTransaction({
+      user: legacy,
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.equal(outcome.accepted, true);
+    const totals = writes.find((write) => write.path === 'users/player-1');
+    assert.deepEqual(totals?.data['recentGameIds'], ['game-1', 'game-old']);
+    assert.ok(
+      FieldValue.delete().isEqual(totals?.data['lastGameId'] as FieldValue),
+      'lastGameId is deleted by the same write',
+    );
+    assert.deepEqual(totals?.options, { merge: true });
+  });
+
+  it('names no lastGameId in a write to a document that never carried one', async () => {
+    const { transaction, writes } = fakeTransaction({
+      user: storedTotals(),
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    const totals = writes.find((write) => write.path === 'users/player-1');
+    assert.ok(!('lastGameId' in (totals?.data ?? {})));
+  });
+
+  it('refuses the game a pre-ring lastGameId names, and writes nothing', async () => {
+    const legacy: Record<string, unknown> = { ...storedTotals(), lastGameId: 'game-1' };
+    delete legacy['recentGameIds'];
+    const { transaction, reads, writes } = fakeTransaction({
+      user: legacy,
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.deepEqual(outcome, { accepted: false, reason: 'duplicate' });
+    assert.deepEqual(writes, []);
+    assert.deepEqual(reads, ['users/player-1']);
   });
 
   /**
@@ -236,13 +314,35 @@ describe('applyGameResult', () => {
    */
   it('moves no counter for a refused duplicate, and reads no question', async () => {
     const { transaction, reads, writes } = fakeTransaction({
-      user: storedTotals({ lastGameId: 'game-1' }),
+      user: storedTotals({ recentGameIds: ['game-1'] }),
       questions: { 'bank-1': { answered: 4, correct: 2 }, 'bank-2': {} },
     });
 
     const decision = await applyGameResult(transaction, refs, mixedGame(), NOW);
 
     assert.deepEqual(decision, { accepted: false, reason: 'duplicate' });
+    assert.deepEqual(writes, []);
+    assert.deepEqual(reads, ['users/player-1']);
+  });
+
+  /**
+   * **A call over the daily ceiling touches nothing**: not the totals, not the
+   * XP, not the play history, not a question's counters — and not the ring or
+   * the day's count either, so the call after it is judged on exactly the same
+   * document. It reads the one document the decision needs and no question.
+   */
+  it('writes nothing for a call over the daily ceiling — XP, history, counters, ring and count alike', async () => {
+    const { transaction, reads, writes } = fakeTransaction({
+      user: {
+        ...storedTotals({ recentGameIds: ['game-0'], dailyGames: { day: TODAY, count: 200 } }),
+        xp: 400,
+      },
+      questions: { 'bank-1': { answered: 4, correct: 2 }, 'bank-2': {} },
+    });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.deepEqual(outcome, { accepted: false, reason: 'daily-limit' });
     assert.deepEqual(writes, []);
     assert.deepEqual(reads, ['users/player-1']);
   });
@@ -456,13 +556,13 @@ describe('applyGameResult', () => {
   });
 
   /**
-   * The duplicate is the case `lastGameId` exists for, and a reload of
-   * `/game-over` makes one every time — so it must add no XP, exactly as it
-   * moves no counter. Nothing is written at all, the XP included.
+   * The duplicate is the case the ring of recent game ids exists for, and a
+   * reload of `/game-over` makes one every time — so it must add no XP, exactly
+   * as it moves no counter. Nothing is written at all, the XP included.
    */
   it('adds no XP for a refused duplicate', async () => {
     const { transaction, writes } = fakeTransaction({
-      user: { ...storedTotals({ lastGameId: 'game-1' }), xp: 400 },
+      user: { ...storedTotals({ recentGameIds: ['game-1'] }), xp: 400 },
       questions: { 'bank-1': {}, 'bank-2': {} },
     });
 

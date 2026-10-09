@@ -30,13 +30,14 @@ export interface AccountExport {
   leaderboardEntries: Record<string, unknown>[];
   /**
    * `users/{uid}` whole: the lifetime totals and, beside them, the experience
-   * points (`FEAT-041`) and the avatar choice (`FEAT-038`) — or an explicit
-   * `null` when there is no document,
-   * which is the normal state for an account that has neither finished a game
-   * nor chosen an avatar, since the document is created lazily by whichever
-   * of `recordGameResult` and `setAvatar` writes to it first. A player who
-   * chose an avatar before their first game therefore gets an object holding
-   * only `avatar`.
+   * points (`FEAT-041`), the avatar choice (`FEAT-038`), the ids of the last
+   * twenty games banked (`recentGameIds`) and how many banked on the UTC day
+   * of the latest (`dailyGames`) — or an explicit `null` when there is no
+   * document, which is the normal state for an account that has neither
+   * finished a game nor chosen an avatar, since the document is created lazily
+   * by whichever of `recordGameResult` and `setAvatar` writes to it first. A
+   * player who chose an avatar before their first game therefore gets an
+   * object holding only `avatar`.
    *
    * `null` rather than an absent key, deliberately: an absent key reads as "we
    * are not telling you", an explicit null reads as "there is nothing". The

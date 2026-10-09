@@ -1,5 +1,9 @@
 import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
+import { DAILY_GAME_CEILING } from '../../../../functions/src/daily-ceiling';
+import { MAX_GAMES_PER_WINDOW } from '../../../../functions/src/game-stats';
+import { RECENT_GAMES_KEPT } from '../../../../functions/src/recent-games';
+import { DAILY_FREE_GAME_LIMIT } from '../../services/daily-game-limit.service';
 import {
   LEGAL_AWAITING_PROFESSIONAL_REVIEW,
   LEGAL_CONTACT_EMAIL,
@@ -248,6 +252,90 @@ describe('legal pages', () => {
     );
     expect(text).toContain('deletes your gameplay totals, your experience points and your whole');
     expect(text).toContain('your gameplay totals and experience points, your play history');
+  });
+
+  /**
+   * **The duplicate check and the two caps on `users/{uid}`.** The record holds
+   * the ids of the last games banked and two counts — the hour's and the UTC
+   * day's — so the page has to say what each is, why it is kept, how long, and
+   * that a game past a cap is not added. The numbers are the server's own,
+   * imported across the package boundary rather than restated, because they are
+   * exactly what a later change would move without noticing the page: a ring of
+   * fifty, or a different ceiling, falsifies the sentence the day it ships.
+   */
+  it('discloses the recent game ids and the hourly and daily counts: what, why and how long', async () => {
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+    const spelled: Record<number, string> = { 20: 'twenty', 60: 'sixty', 200: 'two hundred' };
+    const recent = spelled[RECENT_GAMES_KEPT];
+    const hourly = spelled[MAX_GAMES_PER_WINDOW];
+    const daily = spelled[DAILY_GAME_CEILING];
+    expect([recent, hourly, daily], 'every number the page spells out').not.toContain(undefined);
+
+    // What is kept, on the totals record.
+    expect(text).toContain(`the identifiers of the last ${recent} games you banked`);
+    expect(text).toContain(
+      'two counts of how many games you have banked: in the past hour, and on the current day as measured in Coordinated Universal Time (UTC)',
+    );
+    // Why: a game among them never counted twice, and the caps — on the
+    // writes the app pays for, which is all they cap: a refused call is still
+    // a call the app is billed for.
+    expect(text).toContain('so that none of those games is counted twice');
+    expect(text).toContain(`${hourly} an hour and ${daily} a day`);
+    expect(text).toContain(
+      'to keep the totals fair and the writes the app pays for in check; a game past either cap is not added',
+    );
+    expect(text).not.toContain('the cost of running the app in check');
+    // How long: the counts are written over — and nothing removes the last one
+    // sooner — while the identifiers are kept with the account.
+    expect(text).toContain('so the daily count never holds more than one day');
+    expect(text).toContain(
+      'Nothing removes a count sooner: the last one stays on your record until a later game writes over it, or until you delete your account.',
+    );
+    expect(text).toContain(
+      `The ${recent} identifiers are kept for as long as your account exists, each new game taking the place of the oldest.`,
+    );
+    expect(text).toContain(
+      `The identifiers of the last ${recent} games you banked are kept on the same terms`,
+    );
+    expect(text).toContain(
+      'until then the last of them stays on your record, and deleting your account removes it',
+    );
+    // The lawful-basis table names both, each claim as narrow as the code.
+    expect(text).toContain(`Keep the identifiers of the last ${recent} games you banked`);
+    expect(text).toContain(
+      `however often its results are sent while it is among the last ${recent} you banked`,
+    );
+    expect(text).toContain(
+      'Count how many games you banked in the past hour and on the current day (UTC)',
+    );
+    expect(text).toContain(
+      `Fairness and cost control: so one account cannot inflate its own totals, or run up the writes the app pays for, by submitting games over and over. Past ${hourly} an hour or ${daily} a day, a game is not added`,
+    );
+    // The device's own count of games is a different one, and never leaves it.
+    expect(text).toContain('This count never leaves this device');
+    expect(text).not.toContain('no count of your games is sent anywhere');
+    // The sentence this replaced, which named one game id and an hour's count.
+    expect(text).not.toContain('the identifier of the most recent game');
+  });
+
+  /**
+   * **What Pro buys, as the Terms state it.** Pro unlocks unlimited games and
+   * contributing questions; without it a player gets the free tier's daily
+   * allowance, counted on the device (`DailyGameLimitService`). The number is
+   * the service's own constant, so a change to the allowance fails here until
+   * the Terms say the new one — the sentence this replaced said every game was
+   * free, which stopped being true the day the allowance shipped.
+   */
+  it('states in the Terms what Pro unlocks, and the free daily allowance without it', async () => {
+    const text = collapse((await render(TermsOfServiceComponent)).textContent);
+    const spelled: Record<number, string> = { 5: 'five' };
+    const allowance = spelled[DAILY_FREE_GAME_LIMIT];
+    expect(allowance, 'the allowance the page spells out').toBeDefined();
+
+    expect(text).toContain(
+      `Pro is a monthly subscription. It unlocks unlimited games — without it you can play ${allowance} games a day, counted on your device — and contributing questions to the shared bank. Every leaderboard is free and stays free.`,
+    );
+    expect(text).not.toContain('Everything else — unlimited games');
   });
 
   /**
