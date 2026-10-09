@@ -36,6 +36,9 @@ const INLINE_MATH_SOURCE = String.raw`\$(?![\s$])([^$\n]*?[^\s$])\$(?!\d)`;
  * The block form also swallows the newlines after the closing `$$`, which is
  * what makes a display formula a block of its own rather than the first thing
  * in a paragraph that continues after it.
+ *
+ * All three are published, source and flags, in `render-contract.json`;
+ * `render-contract.spec.ts` holds them equal.
  */
 export const DISPLAY_MATH_BLOCK = new RegExp(`^${DISPLAY_MATH_SOURCE}(?:\\n+|$)`);
 export const DISPLAY_MATH_INLINE = new RegExp(`^${DISPLAY_MATH_SOURCE}`);
