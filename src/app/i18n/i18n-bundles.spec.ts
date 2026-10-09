@@ -96,16 +96,16 @@ describe('the message catalogue (en.json)', () => {
   /**
    * `RichTextComponent` splits the tags out before it fills anything in, so
    * each piece has to parse on its own: a tag may sit inside a sentence, but
-   * never across a plural's braces.
+   * never across a plural's braces — and a tag left open or unmatched would be
+   * shown to the reader as markup.
    */
-  it('keeps every rich-text tag whole, outside any plural', () => {
+  it('keeps every rich-text tag closed, whole, and outside any plural', () => {
     const broken = Object.entries(en)
-      .filter(([, text]) => TAG.test(text))
       .filter(([, text]) => {
-        TAG.lastIndex = 0;
         const pieces = text.split(TAG).filter((_, i) => i % 3 !== 1);
         return (
-          pieces.some((piece) => parseMessage(piece) === null) || /<\/?[a-z]/i.test(pieces.join(''))
+          pieces.some((piece) => parseMessage(piece) === null) ||
+          /<\/?[a-z][a-zA-Z0-9]*>/.test(pieces.join(''))
         );
       })
       .map(([key]) => key);

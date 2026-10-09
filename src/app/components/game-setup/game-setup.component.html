@@ -471,6 +471,7 @@
         <button
           type="submit"
           [disabled]="gameController.isLoading()"
+          data-cy="setup-start"
           class="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3.5 shadow-cta transition-all hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-cta"
         >
           @if (gameController.isLoading()) {

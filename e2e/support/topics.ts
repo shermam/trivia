@@ -150,9 +150,11 @@ export async function startTopicGame(
     await expect(page.getByTestId('short-draw-notice')).toContainText(
       `Only ${options.found} of the ${amount} questions`,
     );
-    await page
-      .getByRole('button', { name: `Play ${options.found} Questions`, exact: true })
-      .click();
+    const play = page.getByTestId('setup-start');
+    await expect(play).toHaveText(
+      options.found === 1 ? 'Play 1 Question' : `Play ${options.found} Questions`,
+    );
+    await play.click();
   }
   await waitForPlayRoute(page);
 }
