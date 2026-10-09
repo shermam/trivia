@@ -217,6 +217,21 @@ test('carries the avatar choice stored beside the totals', () => {
   assert.deepEqual(avatarOnly.gameplayStats, { avatar });
 });
 
+/**
+ * The experience points (`FEAT-041`) are stored on `users/{uid}` beside the
+ * totals too, and reach the export the same way — pinned for the same reason:
+ * the Privacy Policy says "Download my data" returns them, and rebuilding
+ * `gameplayStats` from a list of known fields would drop them silently.
+ */
+test('carries the experience points stored beside the totals', () => {
+  const result = buildAccountExport({
+    ...base,
+    gameplayStats: { gamesPlayed: 9, questionsAnswered: 45, correctAnswers: 30, xp: 640 },
+  });
+
+  assert.equal(result.gameplayStats?.['xp'], 640);
+});
+
 test('reports an explicit null, not an absent key, when no game has been finished', () => {
   const result = buildAccountExport({ ...base, gameplayStats: null });
 

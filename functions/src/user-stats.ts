@@ -6,18 +6,17 @@ import { applyGameResult } from './game-result';
 
 /**
  * Banks one completed game into the caller's lifetime totals at
- * `users/{uid}`, the round itself into `users/{uid}/plays/{gameId}`, and each
+ * `users/{uid}`, the round itself into `users/{uid}/plays/{gameId}`, each
  * community question's outcome into that question's difficulty counters
- * (`FEAT-023`).
+ * (`FEAT-023`), and what the game earned into the player's XP (`FEAT-041`).
  *
  * **A callable rather than a client write, and that is the whole design.**
  * `firestore.rules` gives `users/{uid}` no client write path at all, which is
  * what keeps it free of an exact-key `hasOnly()` allowlist — and therefore
- * free of the A10 one-way door, so a future feature can add `xp`, `region` or
- * an avatar map by changing this function and nothing else (`CLAUDE.md` §4.2).
- * Five roadmap specs want fields here and none of their field sets agree yet;
- * freezing a key set now would be the wall on the collection least able to
- * afford it.
+ * free of the A10 one-way door, so a feature adds a field — the avatar map,
+ * `xp` — by changing a function and nothing else (`CLAUDE.md` §4.2). Its
+ * fields still arrive one roadmap spec at a time, and freezing a key set would
+ * put the wall on the collection least able to afford it.
  *
  * The uid comes from the verified token and is never read from the payload —
  * the same authorisation boundary as `deleteAccount` and `exportAccountData`.
@@ -89,7 +88,10 @@ export const recordGameResult = onCall(async (request) => {
       return { recorded: false, reason: outcome.reason };
     }
 
-    return { recorded: true };
+    // The player's own XP after this game, and what the game added, so the
+    // client can tell a level crossed by this game without reading the
+    // document back — the caller's own numbers, and nobody else's.
+    return { recorded: true, xp: outcome.xp.total, xpGained: outcome.xp.gained };
   } catch (error) {
     logger.error(`Failed to record game result for ${uid}`, error);
     throw new HttpsError('internal', 'Could not record this game.');

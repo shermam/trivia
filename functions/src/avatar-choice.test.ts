@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import type { DocumentReference, Transaction } from 'firebase-admin/firestore';
 import {
   type AvatarCaller,
   type AvatarChoice,
   applyAvatarChoice,
   decideAvatarChoice,
+  lockedSetRefusal,
   parseAvatarChoice,
 } from './avatar-choice';
 
@@ -261,27 +263,133 @@ describe('parseAvatarChoice', () => {
   });
 });
 
-describe('applyAvatarChoice', () => {
+/** A built choice from one set — the shape and colour digits do not matter to the unlock. */
+const built = (seed: string): AvatarChoice => ({ kind: 'built', seed, showPublicly: false });
+
+const LOCKED = {
+  ok: false,
+  code: 'permission-denied',
+  message: 'That avatar set is not unlocked yet.',
+};
+
+/**
+ * The unlock (`FEAT-041`), decided against `users/{uid}` as the transaction
+ * read it. Level 3 is 600 XP (`levels.ts`), which is where `bold` opens.
+ */
+describe('lockedSetRefusal', () => {
+  // Accept cases first (`CLAUDE.md` §4.6): a rule that refused every built
+  // avatar would pass every refusal below.
+  it('accepts core from a player with no document and no XP', () => {
+    assert.equal(lockedSetRefusal(built('core-35'), undefined), null);
+    assert.equal(lockedSetRefusal(built('core-00'), { gamesPlayed: 3 }), null);
+  });
+
+  it('accepts bold from a player at level 3', () => {
+    assert.equal(lockedSetRefusal(built('bold-21'), { xp: 600 }), null);
+    assert.equal(lockedSetRefusal(built('bold-55'), { xp: 25_000 }), null);
+  });
+
+  it('refuses bold below level 3, as permission-denied', () => {
+    assert.deepEqual(lockedSetRefusal(built('bold-21'), { xp: 599 }), LOCKED);
+    assert.deepEqual(lockedSetRefusal(built('bold-21'), { gamesPlayed: 40 }), LOCKED);
+    assert.deepEqual(lockedSetRefusal(built('bold-21'), undefined), LOCKED);
+  });
+
+  /** Fail closed: a set the table does not name cannot be chosen at any level. */
+  it('refuses a set nobody has added to the unlock table', () => {
+    assert.deepEqual(lockedSetRefusal(built('gems-11'), { xp: 1_000_000 }), LOCKED);
+  });
+
+  it('reads a stored XP a hand edit has broken as none', () => {
+    for (const xp of ['600', 600.5, -600, null]) {
+      assert.deepEqual(lockedSetRefusal(built('bold-21'), { xp }), LOCKED, String(xp));
+    }
+  });
+
   /**
-   * The option is the whole point of this function. A plain `set` would
-   * replace `users/{uid}` and erase the lifetime totals; `merge: true` merges
-   * maps deeply, so a stored `seed` would survive under a later `initials`.
-   * `mergeFields: ['avatar']` replaces the one field whole. What that does to a
-   * real document is asserted against the emulator in
+   * **Never re-lock what was granted.** A threshold moved above a player who
+   * already wears a bold avatar must not stop them saving it again — with the
+   * switch changed, say — so the seed already stored is accepted whatever the
+   * player's level now is. Another seed from the same set is not.
+   */
+  it('accepts the seed already stored, whatever its set needs now', () => {
+    const stored = { xp: 120, avatar: { kind: 'built', seed: 'bold-21', showPublicly: false } };
+    assert.equal(
+      lockedSetRefusal({ kind: 'built', seed: 'bold-21', showPublicly: true }, stored),
+      null,
+    );
+    assert.deepEqual(lockedSetRefusal(built('bold-22'), stored), LOCKED);
+  });
+
+  it('grants nothing for a seed left beside another kind by a hand edit', () => {
+    const stored = { avatar: { kind: 'initials', seed: 'bold-21', showPublicly: false } };
+    assert.deepEqual(lockedSetRefusal(built('bold-21'), stored), LOCKED);
+  });
+
+  it('has nothing to decide for initials or a photo', () => {
+    assert.equal(lockedSetRefusal({ kind: 'initials', showPublicly: false }, undefined), null);
+    assert.equal(lockedSetRefusal({ kind: 'photo', showPublicly: true }, undefined), null);
+  });
+});
+
+describe('applyAvatarChoice', () => {
+  const user = 'users/player-1' as unknown as DocumentReference;
+
+  /** The slice of a transaction `applyAvatarChoice` uses, over one stored document. */
+  function fakeTransaction(stored?: Record<string, unknown>) {
+    const reads: unknown[] = [];
+    const sets: unknown[][] = [];
+    const transaction = {
+      get: (ref: unknown) => {
+        reads.push(ref);
+        return Promise.resolve({ exists: stored !== undefined, data: () => stored });
+      },
+      set: (...args: unknown[]) => {
+        sets.push(args);
+      },
+    } as unknown as Transaction;
+    return { transaction, reads, sets };
+  }
+
+  /**
+   * The option is the whole point of the write. A plain `set` would replace
+   * `users/{uid}` and erase the lifetime totals and the XP; `merge: true`
+   * merges maps deeply, so a stored `seed` would survive under a later
+   * `initials`. `mergeFields: ['avatar']` replaces the one field whole. What
+   * that does to a real document is asserted against the emulator in
    * `e2e/specs/authenticated/avatar-choice.spec.ts`.
    */
   it('replaces the avatar field whole and names nothing else', async () => {
-    const calls: unknown[][] = [];
-    const ref = {
-      set: (...args: unknown[]) => {
-        calls.push(args);
-        return Promise.resolve();
-      },
-    } as unknown as Parameters<typeof applyAvatarChoice>[0];
+    const { transaction, sets } = fakeTransaction();
     const choice: AvatarChoice = { kind: 'initials', showPublicly: false };
 
-    await applyAvatarChoice(ref, choice);
+    assert.equal(await applyAvatarChoice(transaction, user, choice), null);
 
-    assert.deepEqual(calls, [[{ avatar: choice }, { mergeFields: ['avatar'] }]]);
+    assert.deepEqual(sets, [[user, { avatar: choice }, { mergeFields: ['avatar'] }]]);
+  });
+
+  it('reads nothing for a choice with no set to unlock', async () => {
+    const { transaction, reads } = fakeTransaction();
+
+    await applyAvatarChoice(transaction, user, { kind: 'photo', showPublicly: false });
+
+    assert.deepEqual(reads, []);
+  });
+
+  it('writes an unlocked built avatar, read and decided in the transaction', async () => {
+    const { transaction, reads, sets } = fakeTransaction({ xp: 640 });
+
+    assert.equal(await applyAvatarChoice(transaction, user, built('bold-30')), null);
+
+    assert.deepEqual(reads, [user]);
+    assert.deepEqual(sets, [[user, { avatar: built('bold-30') }, { mergeFields: ['avatar'] }]]);
+  });
+
+  it('writes nothing for a locked one, and hands back the refusal', async () => {
+    const { transaction, sets } = fakeTransaction({ xp: 100 });
+
+    assert.deepEqual(await applyAvatarChoice(transaction, user, built('bold-30')), LOCKED);
+
+    assert.deepEqual(sets, []);
   });
 });

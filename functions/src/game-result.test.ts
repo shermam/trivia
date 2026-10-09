@@ -222,8 +222,10 @@ describe('applyGameResult', () => {
     for (const write of questionWrites(writes)) {
       assert.deepEqual(Object.keys(write.data).sort(), ['answered', 'correct']);
     }
-    // ...and reads only those two off each question.
-    assert.deepEqual(readOptions, [{ fieldMask: ['answered', 'correct'] }]);
+    // ...and reads only those two off each question, beside the wrong answers
+    // whose number the XP's guessing correction needs (`FEAT-041`) — never the
+    // statement or the justification.
+    assert.deepEqual(readOptions, [{ fieldMask: ['answered', 'correct', 'incorrect_answers'] }]);
   });
 
   /**
@@ -379,6 +381,122 @@ describe('applyGameResult', () => {
     assert.deepEqual(questionWrites(writes), [
       { op: 'update', path: 'custom_questions/bank-1', data: { answered: 1, correct: 1 } },
     ]);
+  });
+
+  /**
+   * **XP is merged beside the totals and the avatar, in the same write**
+   * (`FEAT-041`). Three right answers in a row of the mixed game: a medium bank
+   * question with too few answers to price (15), a medium bank question
+   * answered wrong (0), a medium Open Trivia one (15), and a run of one twice —
+   * 30 + 2 = 32, on top of the 400 already stored.
+   */
+  it('merges the XP the game earned into the document, beside the avatar', async () => {
+    const avatar = { kind: 'built', seed: 'bold-21', showPublicly: false };
+    const { transaction, writes } = fakeTransaction({
+      user: { ...storedTotals(), xp: 400, avatar },
+      questions: { 'bank-1': { answered: 4, correct: 2 }, 'bank-2': {} },
+    });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.equal(outcome.accepted, true);
+    assert.deepEqual(outcome.accepted && outcome.xp, { total: 432, gained: 32 });
+    const totals = writes.find((write) => write.path === 'users/player-1');
+    assert.equal(totals?.data['xp'], 432);
+    assert.equal(totals?.data['gamesPlayed'], 4);
+    assert.deepEqual(totals?.options, { merge: true });
+    assert.ok(!('avatar' in (totals?.data ?? {})));
+  });
+
+  it('starts the XP of a first game from nothing', async () => {
+    const { transaction, writes } = fakeTransaction({
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.deepEqual(outcome.accepted && outcome.xp, { total: 32, gained: 32 });
+    assert.equal(writes[0].data['xp'], 32);
+  });
+
+  /**
+   * Priced from the counters as they were before this game: the bank question
+   * had 9 answers, so it is priced on its label, not on the 10 this game takes
+   * it to. With 10 already recorded — none right, four options — it pays the
+   * ceiling: 15 × 1.5 = 22.5, + 15 for the Open Trivia answer + 2 for the
+   * longest run = 39.5, rounded to 40.
+   */
+  it('prices a question from its counters before this game is added to them', async () => {
+    const thin = fakeTransaction({
+      questions: {
+        'bank-1': { answered: 9, correct: 0, incorrect_answers: ['a', 'b', 'c'] },
+        'bank-2': {},
+      },
+    });
+    const priced = fakeTransaction({
+      questions: {
+        'bank-1': { answered: 10, correct: 0, incorrect_answers: ['a', 'b', 'c'] },
+        'bank-2': {},
+      },
+    });
+
+    const thinOutcome = await applyGameResult(thin.transaction, refs, mixedGame(), NOW);
+    const pricedOutcome = await applyGameResult(priced.transaction, refs, mixedGame(), NOW);
+
+    assert.equal(thinOutcome.accepted && thinOutcome.xp.gained, 32);
+    assert.equal(pricedOutcome.accepted && pricedOutcome.xp.gained, 40);
+  });
+
+  it('pays the label for a question that no longer exists', async () => {
+    const { transaction } = fakeTransaction({ questions: {} });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.equal(outcome.accepted && outcome.xp.gained, 32);
+  });
+
+  /**
+   * The duplicate is the case `lastGameId` exists for, and a reload of
+   * `/game-over` makes one every time — so it must add no XP, exactly as it
+   * moves no counter. Nothing is written at all, the XP included.
+   */
+  it('adds no XP for a refused duplicate', async () => {
+    const { transaction, writes } = fakeTransaction({
+      user: { ...storedTotals({ lastGameId: 'game-1' }), xp: 400 },
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.deepEqual(outcome, { accepted: false, reason: 'duplicate' });
+    assert.deepEqual(writes, []);
+  });
+
+  it('banks a game with no history at no XP, keeping the total it had', async () => {
+    const { transaction, writes } = fakeTransaction({
+      user: { ...storedTotals(), xp: 400 },
+    });
+
+    const outcome = await applyGameResult(
+      transaction,
+      refs,
+      mixedGame({ answers: undefined }),
+      NOW,
+    );
+
+    assert.deepEqual(outcome.accepted && outcome.xp, { total: 400, gained: 0 });
+    assert.equal(writes[0].data['xp'], 400);
+  });
+
+  it('starts again from this game when a hand edit has broken the stored XP', async () => {
+    const { transaction, writes } = fakeTransaction({
+      user: { ...storedTotals(), xp: 'lots' },
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.equal(writes[0].data['xp'], 32);
   });
 
   it('replaces a stored pair a hand edit has broken, rather than adding to it', async () => {
