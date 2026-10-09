@@ -15,6 +15,7 @@ import {
 } from '../../support/layout';
 import { CORRECT_ANSWERS, stubOpenTrivia } from '../../support/open-trivia';
 import { holdRequests } from '../../support/requests';
+import { expectShownAlone } from '../../support/states';
 
 const password = 'Str0ngPassw0rd!';
 const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -333,7 +334,12 @@ test.describe('avatar choice', () => {
     await signInViaUi(page, email, password);
     await page.goto('/profile');
 
-    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    await expectShownAlone(
+      page.getByTestId('avatar-status'),
+      'avatar-idle',
+      ['avatar-loading'],
+      'the avatar card, ready',
+    );
     await expectRadiosAreGrouped(page);
     await expect(page.getByRole('radiogroup', { name: 'Show as', exact: true })).toBeVisible();
     await expect(page.getByRole('radiogroup', { name: 'Core Shape', exact: true })).toBeVisible();
@@ -462,7 +468,12 @@ test.describe('avatar choice', () => {
     await page.goto('/');
     await signInViaUi(page, email, password);
     await page.goto('/profile');
-    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    await expectShownAlone(
+      page.getByTestId('avatar-status'),
+      'avatar-idle',
+      ['avatar-loading'],
+      'the avatar card, ready',
+    );
 
     const call = await holdRequests(page, (request) => request.url().endsWith('/setAvatar'));
     await page.getByTestId('avatar-save').click();
@@ -527,7 +538,12 @@ test.describe('avatar choice', () => {
     expect(served.requests, 'requests to Google’s image host on /').toHaveLength(0);
 
     await page.goto('/profile');
-    await expect(page.getByTestId('avatar-idle')).toBeVisible();
+    await expectShownAlone(
+      page.getByTestId('avatar-status'),
+      'avatar-idle',
+      ['avatar-loading'],
+      'the avatar card, ready',
+    );
     const preview = optionLabel(page, page.getByTestId('avatar-kind-photo')).locator('app-avatar');
     await expect(preview).toHaveAttribute('data-avatar', 'photo');
     await expect
@@ -575,7 +591,14 @@ test.describe('avatar choice', () => {
   test('explains itself to an anonymous visitor, and offers sign-in', async ({ page }) => {
     await page.goto('/profile');
 
-    await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    // The sentence shown and its sibling hidden, read at one moment: the
+    // status lines share one grid cell (`docs/ci-cd.md` §4.3).
+    await expectShownAlone(
+      page.getByTestId('avatar-status'),
+      'avatar-signed-out',
+      ['avatar-loading'],
+      'the avatar card, signed out',
+    );
     await expect(page.getByTestId('avatar-picker')).toBeHidden();
     await expect(page.getByTestId('avatar-save')).toBeHidden();
     await expect(page.getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'guest');
@@ -600,7 +623,12 @@ test.describe('avatar choice', () => {
     // can hide a resize (`CLAUDE.md` §4.4).
     await page.setViewportSize({ width: 390, height: 1000 });
     await page.goto('/profile');
-    await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    await expectShownAlone(
+      page.getByTestId('avatar-status'),
+      'avatar-signed-out',
+      ['avatar-loading'],
+      'the avatar card, signed out',
+    );
     const card = page.getByTestId('avatar-card');
     const signedOut = await settledHeight(card, 'the avatar card, signed out');
 
@@ -636,7 +664,12 @@ test.describe('avatar choice', () => {
 
     await page.setViewportSize({ width: 390, height: 1000 });
     await page.goto('/profile');
-    await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    await expectShownAlone(
+      page.getByTestId('avatar-status'),
+      'avatar-signed-out',
+      ['avatar-loading'],
+      'the avatar card, signed out',
+    );
     const card = page.getByTestId('avatar-card');
     const signedOut = await settledHeight(card, 'the avatar card, signed out');
 

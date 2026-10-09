@@ -3,6 +3,7 @@ import { FirebaseBackend } from '../../fixtures/firebase-backend';
 import { expect, test } from '../../fixtures/test';
 import { authMenu, openAuthMenu, signInViaUi } from '../../support/auth';
 import { stubOpenTrivia } from '../../support/open-trivia';
+import { expectShownAlone } from '../../support/states';
 import { addQuestionTopic, configureTopicGame, runTag, startTopicGame } from '../../support/topics';
 
 /**
@@ -257,7 +258,14 @@ test.describe('my questions', () => {
     // rather than answering a question the visitor did not ask.
     await page.goto('/my-questions');
 
-    await expect(page.getByTestId('my-questions-signed-out')).toBeVisible();
+    // The sentence shown and its sibling hidden, read at one moment: the
+    // messages share one grid cell (`docs/ci-cd.md` §4.3).
+    await expectShownAlone(
+      page.getByTestId('my-questions-status'),
+      'my-questions-signed-out',
+      ['my-questions-loading'],
+      'my questions, signed out',
+    );
     await expect(page.getByTestId('my-questions-sign-in')).toBeVisible();
     await expect(page.getByTestId('my-question')).toHaveCount(0);
   });

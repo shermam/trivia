@@ -28,7 +28,10 @@ import { IconComponent } from '../icon/icon.component';
  *    `sr-only` "(opens in a new tab)" so the behaviour is announced rather
  *    than merely happening, and a visible external-link glyph so a sighted
  *    reader gets the same warning. Losing any one of them in a copy-paste is
- *    invisible in review.
+ *    invisible in review. The glyph carries meaning the words do not, so it
+ *    is a graphic WCAG 1.4.11 holds to 3:1: it takes the line's one colour,
+ *    set on the paragraph, rather than a lighter shade of its own — one step
+ *    lighter is 2.6:1 on the light card.
  *
  * 3. **A title can lie about where the link goes, so the reviewer is shown
  *    the host.** The label is the contributor's `sourceTitle` — arbitrary
@@ -40,7 +43,10 @@ import { IconComponent } from '../icon/icon.component';
  *    off by default and on only for `/review`: a player meets the link after
  *    they have already answered and after a reviewer has vouched for the
  *    question, so there the title is the useful thing and the raw host is
- *    noise.
+ *    noise. The host is in the line's own muted grey, set apart from the title
+ *    by its weight and the dash rather than by a lighter shade: one step
+ *    lighter measures 2.6:1 on the light card and 3.7:1 on the dark one,
+ *    under the 4.5:1 its 12px text needs.
  *
  * 4. **A question a machine wrote says so where its source is named.**
  *    `machineGenerated` — on for a question whose `provenance` says the
@@ -69,13 +75,12 @@ import { IconComponent } from '../icon/icon.component';
   imports: [IconComponent],
   template: `
     @if (safeHref(); as href) {
-      <p class="mt-1 flex items-start gap-1.5 text-xs" data-cy="question-source">
-        <app-icon
-          name="external-link"
-          [size]="13"
-          class="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500"
-        />
-        <span class="text-slate-500 dark:text-slate-400">
+      <p
+        class="mt-1 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+        data-cy="question-source"
+      >
+        <app-icon name="external-link" [size]="13" class="mt-0.5 shrink-0" />
+        <span>
           @if (machineGenerated()) {
             <span data-cy="question-source-generated">Machine-generated from </span>
           } @else {
@@ -89,9 +94,7 @@ import { IconComponent } from '../icon/icon.component';
             data-cy="question-source-link"
             >{{ label() }}
             @if (shownHost(); as host) {
-              <span
-                class="font-normal text-slate-400 dark:text-slate-500"
-                data-cy="question-source-host"
+              <span class="font-normal" data-cy="question-source-host"
                 >&nbsp;&mdash; {{ host }}</span
               >
             }

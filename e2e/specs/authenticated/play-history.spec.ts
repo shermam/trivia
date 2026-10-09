@@ -216,13 +216,24 @@ test.describe('per-player play history', () => {
     // already happened. A request listener sees only calls made after it is
     // armed, and the first game's call was made before `waitForPlayHistory`
     // found its document, so the one this catches is the reload's.
-    const reloadCall = page.waitForRequest((request) =>
-      /\/recordGameResult(\?|$)/.test(request.url()),
+    //
+    // **And its answer is asserted, not merely awaited.** `response()` resolves
+    // `null` for a request that failed outright, and a reload whose call never
+    // reached the server leaves "still one document" true for the wrong
+    // reason. The duplicate refusal is the server saying it saw this game and
+    // banked nothing, which is the claim.
+    const reloadCall = page.waitForRequest(
+      (request) => /\/recordGameResult(\?|$)/.test(request.url()) && request.method() === 'POST',
     );
     await page.reload();
     await expect(page).toHaveURL(/\/game-over$/);
     await expect(page.getByRole('heading', { name: 'Game Over!', exact: true })).toBeVisible();
-    await (await reloadCall).response();
+    const reloadResponse = await (await reloadCall).response();
+    expect(reloadResponse, "the reload's recordGameResult call was answered").not.toBeNull();
+    expect(
+      ((await reloadResponse!.json()) as { result?: unknown }).result,
+      "the reload's call is refused as a duplicate",
+    ).toEqual({ recorded: false, reason: 'duplicate' });
 
     const after = await firebase.getPlayHistory(uid);
     expect(after, 'the reload rewrote the same document rather than adding one').toHaveLength(1);
