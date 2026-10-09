@@ -1,7 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
-import { FirestoreRestClient, RestDocument } from './firestore-rest/firestore-rest.client';
+import {
+  FirestoreRestClient,
+  FirestoreRestError,
+  RestDocument,
+} from './firestore-rest/firestore-rest.client';
 import { REPORTS_PAGE_SIZE, ReviewerService } from './reviewer.service';
 
 /**
@@ -16,9 +20,20 @@ import { REPORTS_PAGE_SIZE, ReviewerService } from './reviewer.service';
 
 interface FakeUser {
   uid: string;
+  isAnonymous: boolean;
 }
 
-function setup(document: unknown, options: { throws?: boolean } = {}) {
+/** A signed-in account with a real provider — the only kind that can hold a role. */
+function account(uid: string): FakeUser {
+  return { uid, isAnonymous: false };
+}
+
+/** An anonymous session, which every visitor has once the auth bootstrap has run. */
+function anonymous(uid: string): FakeUser {
+  return { uid, isAnonymous: true };
+}
+
+function setup(document: unknown, options: { rejectWith?: unknown } = {}) {
   const user = signal<FakeUser | null>(null);
   const paths: string[] = [];
   /**
@@ -32,10 +47,10 @@ function setup(document: unknown, options: { throws?: boolean } = {}) {
   const pending = new Map<string, (value: unknown) => void>();
   let deferred = false;
 
-  const getDocument = vi.fn((path: string) => {
+  const batchGetDocument = vi.fn((path: string) => {
     paths.push(path);
-    if (options.throws) {
-      return Promise.reject(new Error('boom'));
+    if (options.rejectWith !== undefined) {
+      return Promise.reject(options.rejectWith);
     }
     if (deferred) {
       return new Promise((resolve) => pending.set(path, resolve));
@@ -46,7 +61,7 @@ function setup(document: unknown, options: { throws?: boolean } = {}) {
   TestBed.configureTestingModule({
     providers: [
       { provide: AuthService, useValue: { user } },
-      { provide: FirestoreRestClient, useValue: { getDocument } },
+      { provide: FirestoreRestClient, useValue: { batchGetDocument } },
     ],
   });
 
@@ -55,7 +70,7 @@ function setup(document: unknown, options: { throws?: boolean } = {}) {
     service,
     user,
     paths,
-    getDocument,
+    batchGetDocument,
     defer: () => {
       deferred = true;
     },
@@ -77,7 +92,7 @@ afterEach(() => {
 describe('ReviewerService', () => {
   it('reports a granted reviewer', async () => {
     const h = setup({ data: { reviewer: true } });
-    h.user.set({ uid: 'rev' });
+    h.user.set(account('rev'));
     await h.flush();
 
     expect(h.service.isReviewer()).toBe(true);
@@ -86,7 +101,7 @@ describe('ReviewerService', () => {
 
   it('reads the caller own document, never a path derived from anything else', async () => {
     const h = setup({ data: { reviewer: true } });
-    h.user.set({ uid: 'rev' });
+    h.user.set(account('rev'));
     await h.flush();
 
     expect(h.paths).toEqual(['user_roles/rev']);
@@ -97,7 +112,7 @@ describe('ReviewerService', () => {
   // exactly the shape of the bug H6 shipped.
   it('reports an account whose document says reviewer: false as not a reviewer', async () => {
     const h = setup({ data: { reviewer: false } });
-    h.user.set({ uid: 'demoted' });
+    h.user.set(account('demoted'));
     await h.flush();
 
     expect(h.service.isReviewer()).toBe(false);
@@ -106,25 +121,29 @@ describe('ReviewerService', () => {
 
   it('reports a non-boolean reviewer value as not a reviewer', async () => {
     const h = setup({ data: { reviewer: 'yes' } });
-    h.user.set({ uid: 'sneaky' });
+    h.user.set(account('sneaky'));
     await h.flush();
 
     expect(h.service.isReviewer()).toBe(false);
   });
 
-  it('reports an account with no role document as not a reviewer', async () => {
+  // Absence is the answer almost every account gets, so it is an answer and
+  // not a failure: nothing may be logged for it.
+  it('reports an account with no role document as not a reviewer, and logs nothing', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const h = setup(null);
-    h.user.set({ uid: 'nobody' });
+    h.user.set(account('nobody'));
     await h.flush();
 
     expect(h.service.isReviewer()).toBe(false);
     expect(h.service.isResolved()).toBe(true);
+    expect(consoleError).not.toHaveBeenCalled();
   });
 
   it('treats a failed read as not a reviewer', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const h = setup(null, { throws: true });
-    h.user.set({ uid: 'rev' });
+    const h = setup(null, { rejectWith: new Error('boom') });
+    h.user.set(account('rev'));
     await h.flush();
 
     // The safe direction: a reviewer who has to reload, never a non-reviewer
@@ -132,18 +151,63 @@ describe('ReviewerService', () => {
     expect(h.service.isReviewer()).toBe(false);
   });
 
+  // A refusal and a dead network are failures, and they keep the failure path:
+  // reported, then "not a reviewer". What they must not become is the quiet
+  // answer an absent document gets, which is the one thing that distinguishes
+  // "this account has no role" from "we could not find out".
+  it.each([
+    ['a refused read', new FirestoreRestError('PERMISSION_DENIED', 403, "false for 'get'")],
+    ['a network failure', new FirestoreRestError('UNAVAILABLE', 0, 'Failed to fetch')],
+  ])('reports %s rather than reading it as no role', async (_label, failure) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const h = setup(null, { rejectWith: failure });
+    h.user.set(account('rev'));
+    await h.flush();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[reviewer] could not read the role register',
+      failure,
+    );
+    expect(h.service.isReviewer()).toBe(false);
+    expect(h.service.isResolved()).toBe(true);
+  });
+
+  // Every visitor has an anonymous session once the bootstrap has run, and no
+  // anonymous uid can name a document a role was granted on — so the answer is
+  // known without asking, and asking would be a billed read per page load.
+  it('answers an anonymous session without reading the register', async () => {
+    const h = setup({ data: { reviewer: true } });
+    h.user.set(anonymous('anon'));
+    await h.flush();
+
+    expect(h.batchGetDocument).not.toHaveBeenCalled();
+    expect(h.service.isReviewer()).toBe(false);
+    expect(h.service.isResolved()).toBe(true);
+  });
+
+  it('reads the register once an anonymous session gives way to a real account', async () => {
+    const h = setup({ data: { reviewer: true } });
+    h.user.set(anonymous('anon'));
+    await h.flush();
+    h.user.set(account('rev'));
+    await h.flush();
+
+    expect(h.paths).toEqual(['user_roles/rev']);
+    expect(h.service.isReviewer()).toBe(true);
+  });
+
   it('does not read anything while signed out', async () => {
     const h = setup({ data: { reviewer: true } });
     await h.flush();
 
-    expect(h.getDocument).not.toHaveBeenCalled();
+    expect(h.batchGetDocument).not.toHaveBeenCalled();
     expect(h.service.isReviewer()).toBe(false);
     expect(h.service.isResolved()).toBe(true);
   });
 
   it('clears the role on sign-out rather than leaving the last answer behind', async () => {
     const h = setup({ data: { reviewer: true } });
-    h.user.set({ uid: 'rev' });
+    h.user.set(account('rev'));
     await h.flush();
     expect(h.service.isReviewer()).toBe(true);
 
@@ -159,13 +223,13 @@ describe('ReviewerService', () => {
   it('does not let a read in flight answer for a different account', async () => {
     const h = setup(null);
     h.defer();
-    h.user.set({ uid: 'rev' });
+    h.user.set(account('rev'));
     await h.flush();
 
     // The reviewer signs out and another account signs in. Only *then* does the
     // first account's read come back saying "yes, a reviewer" — for a user who
     // is no longer signed in.
-    h.user.set({ uid: 'someone-else' });
+    h.user.set(account('someone-else'));
     await h.flush();
     h.release('rev', { data: { reviewer: true } });
     await h.flush();
@@ -182,7 +246,7 @@ describe('ReviewerService', () => {
   it('is unresolved until the register has actually answered', async () => {
     const h = setup(null);
     h.defer();
-    h.user.set({ uid: 'rev' });
+    h.user.set(account('rev'));
     await h.flush();
 
     expect(h.service.isResolved()).toBe(false);
@@ -208,7 +272,7 @@ describe('ReviewerService.getQuestionReports', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: AuthService, useValue: { user: signal(null) } },
-        { provide: FirestoreRestClient, useValue: { getDocument: vi.fn(), runQuery } },
+        { provide: FirestoreRestClient, useValue: { batchGetDocument: vi.fn(), runQuery } },
       ],
     });
 

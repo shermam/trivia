@@ -57,7 +57,9 @@ const REPORT_REASONS: readonly QuestionReportReason[] = [
  * server's gate, so the UI unlocks a form the server is bound to refuse — is
  * that it is not a mirror of the server predicate at all. It reads **the same
  * document and the same field** the rule reads. There is no second expression
- * to keep in step, which is a stronger guarantee than remembering to.
+ * to keep in step, which is a stronger guarantee than remembering to. The one
+ * condition in front of the read — an anonymous session is answered "no"
+ * without asking — can only ever make the answer narrower, never broader.
  *
  * A document rather than a custom claim, so revoking the role takes effect on
  * the next request rather than whenever the user's existing ID token expires
@@ -87,30 +89,52 @@ export class ReviewerService {
     // matters most for the case this whole design exists for: a revoked
     // reviewer, whose next read of their own document returns nothing.
     effect(() => {
-      const uid = this.auth.user()?.uid ?? null;
-      if (!uid) {
+      const user = this.auth.user();
+      if (user === null) {
         this.isReviewerSignal.set(false);
         this.checkedUidSignal.set(null);
         return;
       }
-      void this.refresh(uid);
+      // **An anonymous session is answered without a read.** It is handed a
+      // uid it did not choose, so it can never name a document a role was
+      // granted on (`docs/data-model.md` § `user_roles`), and reading anyway
+      // costs a billed request on every visitor's page load to learn nothing.
+      // Gated on the session being anonymous — a user that is *there* and says
+      // so — rather than on anything that is also true of no user at all
+      // (`CLAUDE.md` §4.4). And not on `isFullyAuthenticated()`: the rules'
+      // `isReviewer()` asks for a signed-in caller, not a verified one, so an
+      // unverified password account can hold a role and use it, and hiding the
+      // queue from it would leave the client narrower than the server for
+      // nothing.
+      if (user.isAnonymous) {
+        this.isReviewerSignal.set(false);
+        this.checkedUidSignal.set(user.uid);
+        return;
+      }
+      void this.refresh(user.uid);
     });
   }
 
   private async refresh(uid: string): Promise<void> {
     let isReviewer = false;
     try {
-      const document = await this.rest.getDocument(`${USER_ROLES_COLLECTION}/${uid}`, {
+      // `batchGetDocument` rather than `getDocument` because of what absence
+      // looks like on the wire. Almost every account has no role, and a `GET`
+      // answers that with a `404`, which Chromium logs to the console as an
+      // error on every page load whatever the app does with it; `batchGet`
+      // answers `200` with a `missing` entry, under the same `get` rule.
+      const document = await this.rest.batchGetDocument(`${USER_ROLES_COLLECTION}/${uid}`, {
         timeoutMs: ROLE_READ_TIMEOUT_MS,
       });
       isReviewer = document?.data?.['reviewer'] === true;
     } catch (error) {
-      // Absence is not an error here — `getDocument` already returns `null` for
-      // a document that does not exist, which is the answer for almost every
-      // account. Reaching this branch means the read genuinely failed, so it is
-      // reported and treated as "not a reviewer". That is the safe direction:
-      // the worst case is a reviewer who has to reload, never a non-reviewer
-      // shown a page the server would refuse them anyway.
+      // Absence is not an error here — `batchGetDocument` returns `null` for a
+      // document that does not exist, which is the answer for almost every
+      // account. Reaching this branch means the read genuinely failed (a
+      // refusal, the network, a malformed answer), so it is reported and
+      // treated as "not a reviewer". That is the safe direction: the worst case
+      // is a reviewer who has to reload, never a non-reviewer shown a page the
+      // server would refuse them anyway.
       console.error('[reviewer] could not read the role register', error);
     }
 

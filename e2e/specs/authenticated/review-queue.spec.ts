@@ -107,12 +107,29 @@ test.describe('the review queue', () => {
     await expect(page.getByText(pendingText)).toBeVisible();
   });
 
+  /**
+   * The answer almost every account gets, so it has to arrive as an answer and
+   * not as an error. A role read that answers "no document" with a `404` puts
+   * Chromium's own `Failed to load resource` line in the console on every page
+   * load, whatever the app does with the result — which only a real browser
+   * shows, and which Lighthouse no longer sees at all, because its anonymous
+   * visitor is not read for (`docs/app.md` §1.4). So the read is pinned here: a
+   * `batchGet` for this account's role that answers `200`, which is what keeps
+   * it out of the console, since Chromium writes that line only for a response
+   * with an error status.
+   */
   test('hides the link from an account with no role document', async ({ page, firebase }) => {
     const email = `plain-${tag}@example.com`;
     await firebase.createVerifiedUser({ email, password, displayName: 'Plain' });
     await page.goto('/');
+    const roleRead = page.waitForResponse(
+      (response) =>
+        response.url().includes('/documents:batchGet') &&
+        (response.request().postData() ?? '').includes('/user_roles/'),
+    );
     await signInViaUi(page, email, password);
 
+    expect((await roleRead).status()).toBe(200);
     await expect(page.getByTestId('review-queue-link')).toHaveCount(0);
   });
 
