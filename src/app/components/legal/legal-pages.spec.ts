@@ -484,6 +484,81 @@ describe('legal pages', () => {
   });
 
   /**
+   * **A report loses its reporter once its question is decided (`FEAT-042`).**
+   * The page said three things this falsified at once: that reports were kept
+   * "indefinitely, including your account identifier", that they were "not
+   * removed when you delete your account", and — in the reporting section —
+   * that the identifier "stays part of the record". The Terms said account
+   * termination removes everything but contributed questions, which was wrong
+   * before this and is now wrong the other way.
+   *
+   * Pinned on the claims `functions/src/report-anonymisation.ts` has to keep —
+   * what a report stores, that the identifier lasts only while the question is
+   * undecided, that a daily job removes it, what deletion and export do — in
+   * both documents, and on every retired sentence in the negative, because the
+   * half-finished edit is to fix the retention bullet and leave the reporting
+   * section promising the opposite.
+   */
+  it('says a report loses its reporter once the question is decided, and what deletion does', async () => {
+    const privacy = collapse((await render(PrivacyPolicyComponent)).textContent);
+    const terms = collapse((await render(TermsOfServiceComponent)).textContent);
+
+    // What a report stores, and who may file one — every player, anonymous
+    // sessions included, which "any signed-in player" did not say.
+    expect(privacy).toContain(
+      'Any player can flag a question and file a report, whether or not they have signed in',
+    );
+    expect(privacy).toContain('when you filed it, and your account identifier');
+    // How long the identifier stays, and what removes it.
+    expect(privacy).toContain(
+      "your account identifier stays on a report only while the question it names is waiting for a reviewer's decision",
+    );
+    expect(privacy).toContain(
+      'Once that question has been approved or rejected, your identifier is removed',
+    );
+    expect(privacy).toContain(
+      'A job that runs once a day copies the report without it and deletes the original',
+    );
+    expect(privacy).toContain(
+      'keep your account identifier only until the question they name has been approved or rejected',
+    );
+    // Deletion and export, the two promises the leaver's pass and the export
+    // section keep.
+    expect(privacy).toContain(
+      'deletes the reports you filed that still carry your identifier — except one about a question still awaiting review, which is kept with the identifier removed',
+    );
+    expect(privacy).toContain(
+      'every report you have filed that still carries your account identifier',
+    );
+    // A guest's report is a record that can point at an anonymous account.
+    expect(privacy).toContain('Two records can point at one: a report it filed');
+
+    // The Terms, in the section a leaver reads and in termination.
+    expect(terms).toContain(
+      'Reports you filed can outlive your account too, without anything that identifies you',
+    );
+    expect(terms).toContain(
+      "and reports about questions still awaiting review, which stay with the account's identifier removed",
+    );
+    expect(terms).toContain(
+      'A report says who filed it only until the question it names has been decided',
+    );
+
+    // Every sentence this retired, in the form it took.
+    expect(privacy).not.toContain('are kept indefinitely, including your account identifier');
+    expect(privacy).not.toContain('are not removed when you delete your account');
+    expect(privacy).not.toContain('your account identifier stays part of the record');
+    expect(privacy).not.toContain('Any signed-in player can flag a question');
+    expect(privacy).not.toContain('no data of any kind is attached to them');
+    expect(terms).not.toContain(
+      'it is the one place where deleting your account does not delete everything',
+    );
+    expect(terms).not.toContain(
+      'everything goes except contributed questions, which stay in the bank with authorship removed.',
+    );
+  });
+
+  /**
    * The pricing page's browser storage, and the one claim in it that is a
    * *retention* promise rather than a description: the checkout link is kept
    * for up to 20 hours on this device.
