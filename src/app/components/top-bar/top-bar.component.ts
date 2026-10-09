@@ -11,14 +11,17 @@ import {
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { avatarLetter } from '../../models/avatar.model';
 import { AudioService } from '../../services/audio.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { AvatarService } from '../../services/avatar.service';
 import { ReviewerService } from '../../services/reviewer.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { ThemeService } from '../../services/theme.service';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
+import { AvatarComponent } from '../avatar/avatar.component';
 import { AuthMenuComponent } from './auth-menu.component';
 import { environment } from '../../../environments/environment';
 
@@ -54,7 +57,7 @@ function canReceiveFocus(element: HTMLElement | null): element is HTMLElement {
 @Component({
   selector: 'app-top-bar',
   standalone: true,
-  imports: [AuthMenuComponent, RouterLink, IconComponent, LogoComponent, NgClass],
+  imports: [AuthMenuComponent, AvatarComponent, RouterLink, IconComponent, LogoComponent, NgClass],
   templateUrl: './top-bar.component.html',
   styleUrl: './top-bar.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -76,6 +79,13 @@ export class TopBarComponent {
    * work or not (`CLAUDE.md` §4.2).
    */
   protected readonly reviewerService = inject(ReviewerService);
+  /**
+   * The stored avatar choice and the photo it may show (`FEAT-038`). Injected
+   * here, by the component on every page, so the one read it makes per
+   * session starts as soon as a real account is known — after first paint,
+   * because auth itself is deferred to then.
+   */
+  protected readonly avatarService = inject(AvatarService);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
 
   /**
@@ -183,11 +193,7 @@ export class TopBarComponent {
     () => this.authService.authReady() && !this.showsRealAccount(),
   );
 
-  protected readonly initials = computed(() => {
-    const user = this.authService.user();
-    const source = user?.displayName || user?.email || '';
-    return source.trim().charAt(0).toUpperCase() || '?';
-  });
+  protected readonly initials = computed(() => avatarLetter(this.authService.user()));
 
   constructor() {
     // Registered on the *capture* phase, so this runs before the click

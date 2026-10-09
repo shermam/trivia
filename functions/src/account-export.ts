@@ -29,9 +29,13 @@ export interface AccountExport {
    */
   leaderboardEntries: Record<string, unknown>[];
   /**
-   * Lifetime totals from `users/{uid}`, or an explicit `null` when the account
-   * has never finished a game — which is a normal state, since the document is
-   * created lazily on the first completed one.
+   * `users/{uid}` whole: the lifetime totals and, beside them, the avatar
+   * choice (`FEAT-038`) — or an explicit `null` when there is no document,
+   * which is the normal state for an account that has neither finished a game
+   * nor chosen an avatar, since the document is created lazily by whichever
+   * of `recordGameResult` and `setAvatar` writes to it first. A player who
+   * chose an avatar before their first game therefore gets an object holding
+   * only `avatar`.
    *
    * `null` rather than an absent key, deliberately: an absent key reads as "we
    * are not telling you", an explicit null reads as "there is nothing". The

@@ -58,9 +58,11 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // every question the account was shown, beyond the reach of the only
     // function able to delete it.
     await deletePlayHistory(uid);
-    // Lifetime totals. A delete on a document that was never created is a
-    // no-op, which is the normal case for an account that never finished a
-    // game — the document is created lazily by `recordGameResult`.
+    // Lifetime totals, and the avatar choice stored beside them (`FEAT-038`).
+    // A delete on a document that was never created is a no-op, which is the
+    // normal case for an account that never finished a game nor chose an
+    // avatar — the document is created lazily by `recordGameResult` or
+    // `setAvatar`, whichever writes first.
     await firestore.collection('users').doc(uid).delete();
     // The private likes and dislikes (`FEAT-027`). Not under `users/{uid}`, so
     // the delete above does not reach them: they are found as the range of
@@ -176,8 +178,9 @@ export const exportAccountData = onCall(async (request) => {
         // is distinguishable from a global one on the same board without the
         // export having to label it separately.
         .map(({ board, snapshot }) => ({ board, ...snapshot.data() })),
-      // Explicit null rather than an absent key when the account has never
-      // finished a game — see `AccountExport.gameplayStats`.
+      // The whole document — totals and avatar choice alike — or an explicit
+      // null rather than an absent key when there is none; see
+      // `AccountExport.gameplayStats`.
       gameplayStats: stats.exists ? (stats.data() as Record<string, unknown>) : null,
       // The game id rides along as `id`, the way every other collection in this
       // export carries its document id: it is the only thing tying a round here

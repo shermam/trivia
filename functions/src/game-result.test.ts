@@ -32,6 +32,8 @@ interface Write {
   op: 'set' | 'update';
   path: string;
   data: Record<string, unknown>;
+  /** The options a `set` was given, when it was given any. */
+  options?: unknown;
 }
 
 /**
@@ -40,7 +42,11 @@ interface Write {
  * every test below also pins the ordering.
  */
 function fakeTransaction(
-  stored: { user?: UserStats; questions?: Record<string, Record<string, unknown>> } = {},
+  stored: {
+    /** A totals document, or one holding something else beside or instead of them. */
+    user?: UserStats | Record<string, unknown>;
+    questions?: Record<string, Record<string, unknown>>;
+  } = {},
 ) {
   const reads: string[] = [];
   const writes: Write[] = [];
@@ -70,8 +76,8 @@ function fakeTransaction(
         paths.map((path) => snapshot(stored.questions?.[path.replace('custom_questions/', '')])),
       );
     },
-    set: (ref: string, data: Record<string, unknown>) => {
-      writes.push({ op: 'set', path: ref, data });
+    set: (ref: string, data: Record<string, unknown>, options?: unknown) => {
+      writes.push({ op: 'set', path: ref, data, ...(options === undefined ? {} : { options }) });
     },
     update: (ref: string, data: Record<string, unknown>) => {
       writes.push({ op: 'update', path: ref, data });
@@ -162,6 +168,46 @@ describe('applyGameResult', () => {
     );
     assert.equal(writes[0].data['gamesPlayed'], 1);
     assert.equal((writes[1].data['answers'] as unknown[]).length, 3);
+  });
+
+  /**
+   * **The totals are merged into `users/{uid}`, never written over it**
+   * (`FEAT-038`). `setAvatar` keeps the player's avatar choice on the same
+   * document, and this write used to be a plain `set` — which replaces the
+   * document whole, so every game banked would have erased the choice. What
+   * the merge does to a real document is the emulator's to show, and
+   * `avatar-choice.spec.ts` plays a game over a stored choice to show it; what
+   * only this file can pin is that the option is passed at all.
+   */
+  it('merges the totals into the document, leaving the avatar choice beside them', async () => {
+    const avatar = { kind: 'built', seed: 'core-35', showPublicly: false };
+    const { transaction, writes } = fakeTransaction({
+      user: { ...storedTotals(), avatar },
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    const totals = writes.find((write) => write.path === 'users/player-1');
+    assert.deepEqual(totals?.options, { merge: true });
+    // The decision writes totals and nothing else, so the merge cannot
+    // overwrite the choice either.
+    assert.ok(!('avatar' in (totals?.data ?? {})));
+  });
+
+  it('banks a first game onto a document that holds only an avatar choice', async () => {
+    const { transaction, writes } = fakeTransaction({
+      user: { avatar: { kind: 'initials', showPublicly: false } },
+      questions: { 'bank-1': {}, 'bank-2': {} },
+    });
+
+    const decision = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+    assert.equal(decision.accepted, true);
+    const totals = writes.find((write) => write.path === 'users/player-1');
+    assert.equal(totals?.data['gamesPlayed'], 1);
+    assert.equal(totals?.data['statsSince'], NOW);
+    assert.equal(totals?.data['gamesInWindow'], 1);
   });
 
   // A counter write that could reach the question's content would be an

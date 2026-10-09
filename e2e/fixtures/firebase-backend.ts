@@ -5,6 +5,7 @@ import { FirebaseTarget } from './firebase-target';
 import {
   AccountState,
   AccountStateQuery,
+  AvatarSeed,
   CheckoutSessionRecord,
   CustomQuestionSeed,
   DonationPriceSeed,
@@ -65,6 +66,7 @@ export class FirebaseBackend {
       email: seed.email,
       password: seed.password,
       displayName: seed.displayName,
+      ...(seed.photoURL === undefined ? {} : { photoURL: seed.photoURL }),
       emailVerified: true,
     });
     this.authUids.add(user.uid);
@@ -506,6 +508,16 @@ export class FirebaseBackend {
    */
   async seedGameplayStats({ uid, ...totals }: GameplayStatsSeed): Promise<void> {
     await this.firestore.doc(`users/${uid}`).set({ ...totals, updatedAt: Date.now() });
+  }
+
+  /**
+   * Writes one account's avatar choice, as the `setAvatar` callable would
+   * have — and the same way: `mergeFields: ['avatar']`, which replaces that
+   * field whole and leaves any totals beside it alone. Through the Admin SDK
+   * because `users` has no client write rule (`docs/data-model.md`).
+   */
+  async seedAvatar({ uid, avatar }: AvatarSeed): Promise<void> {
+    await this.firestore.doc(`users/${uid}`).set({ avatar }, { mergeFields: ['avatar'] });
   }
 
   /**

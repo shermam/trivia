@@ -359,18 +359,75 @@ describe('legal pages', () => {
     // The exhaustive "only needed to…" lists, in both documents — whole, since
     // each entry is a thing that really does need an account: the totals and
     // the play history are banked only for one (`recordGameResult`'s provider
-    // allowlist), and a list without them said they were not.
+    // allowlist), an avatar is stored only for one (`setAvatar`'s, `FEAT-038`),
+    // and a list without them said they were not.
     const signInList =
-      'only needed to save a score to the public leaderboard, to keep your gameplay totals and play history, to like or dislike a question, or to subscribe to Pro';
+      'only needed to save a score to the public leaderboard, to keep your gameplay totals and play history, to choose an avatar, to like or dislike a question, or to subscribe to Pro';
     expect(privacy).toContain(signInList);
     expect(terms).toContain(signInList);
     expect(privacy).toContain(
-      'An email address is only required if you want to save a score, keep your gameplay totals and play history, like or dislike a question, or subscribe',
+      'An email address is only required if you want to save a score, keep your gameplay totals and play history, choose an avatar, like or dislike a question, or subscribe',
     );
     expect(privacy).not.toContain('only needed to save a score to the public leaderboard, or to');
     expect(terms).not.toContain('only needed to save a score to the public leaderboard or to');
     expect(privacy).not.toContain('to save a score to the public leaderboard, to like or dislike');
     expect(terms).not.toContain('to save a score to the public leaderboard, to like or dislike');
+  });
+
+  /**
+   * **The avatar choice (`FEAT-038`)** is a field on `users/{uid}` and, for a
+   * player who picks their Google photo, a fourth host their browser talks to.
+   * Both are things `CLAUDE.md` §4.0 says ship with the policy edit in the same
+   * PR, and the second falsified three sentences at once: the host table read
+   * as exhaustive without it, "nothing is loaded from a third-party CDN" stopped
+   * being true for that player, and so did "your browser only contacts the
+   * provider at the moment you click".
+   *
+   * Pinned on the claims the code has to keep: what is stored (a kind, a seed,
+   * a switch that starts off), what is **not** (the photo's address — read from
+   * the sign-in account at render time), that the host is listed with what it
+   * is for, and the account-lifecycle promises `deleteAccount` and
+   * `exportAccountData` keep by carrying the whole document.
+   */
+  it('discloses the avatar choice and the image host a Google photo is loaded from', async () => {
+    const page = await render(PrivacyPolicyComponent);
+    const privacy = collapse(page.textContent);
+
+    expect(privacy).toContain('Your avatar');
+    expect(privacy).toContain(
+      'which of the three you picked, a short code naming the shape and colour if you built one, and a yes-or-no setting, off unless you turn it on, for whether your avatar may be shown to other players',
+    );
+    expect(privacy).toContain('No screen in the app shows your avatar to anyone but you');
+    expect(privacy).toContain('We do not store your profile picture, or its address.');
+
+    // The host row, read off the table it belongs to: a sentence elsewhere on
+    // the page naming the host would satisfy a page-wide search and leave the
+    // table — the part a reader treats as the list — without it.
+    const hostRows = [...page.querySelectorAll('table')]
+      .filter((table) => collapse(table.querySelector('thead')?.textContent).includes('Service'))
+      .flatMap((table) => [...table.querySelectorAll('tbody tr')])
+      .map((row) => collapse(row.textContent));
+    const imageHost = hostRows.find((row) => row.includes('lh3.googleusercontent.com'));
+    expect(imageHost, 'the host table lists Google’s image server').toBeDefined();
+    expect(imageHost).toContain('Serves your Google profile picture');
+    expect(imageHost).toContain('Only if you chose your Google profile picture as your avatar');
+
+    // The three sentences the photo would otherwise have falsified.
+    expect(privacy).not.toContain(
+      'Nothing is loaded from a third-party CDN, so no font or asset request tells anyone else',
+    );
+    expect(privacy).toContain('with one exception that only you can switch on');
+    expect(privacy).toContain('unless you choose your Google profile picture as your avatar');
+    expect(privacy).toContain('the web address of your profile picture');
+    // The totals record can now exist before a first game, holding only this.
+    expect(privacy).not.toContain('Nothing is kept at all until you finish your first game');
+    expect(privacy).toContain('No totals are kept until you finish your first game');
+
+    // Retention, deletion and export.
+    expect(privacy).toContain('gameplay totals, your avatar choice, the likes and dislikes');
+    expect(privacy).toContain('deletes your avatar choice');
+    expect(privacy).toContain('your avatar choice, and your billing records');
+    expect(privacy).toContain('Keep the avatar you chose');
   });
 
   /**

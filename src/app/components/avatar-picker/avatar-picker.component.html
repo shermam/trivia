@@ -1,0 +1,288 @@
+<section
+  data-cy="avatar-card"
+  aria-labelledby="avatar-heading"
+  class="mt-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-900/8 dark:border-white/10 shadow-card p-6 sm:p-8"
+>
+  <h2 id="avatar-heading" class="text-lg font-bold text-slate-900 dark:text-slate-50 mb-1">
+    Your avatar
+  </h2>
+
+  <!--
+    Every line this card can show, stacked in one grid cell so the space it
+    takes is the tallest of them and no state resizes the card (`CLAUDE.md`
+    §4.4) — the construction the stats card above uses. `invisible` keeps each
+    line laid out while dropping it from the accessibility tree.
+
+    `tabindex="-1"` because `retry()` hands focus here: the button it is called
+    from is about to be hidden.
+  -->
+  <div #statusLine tabindex="-1" data-cy="avatar-status" class="grid mb-5 focus:outline-none">
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'loading'"
+      data-cy="avatar-loading"
+    >
+      Loading your avatar&hellip;
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'signedOut'"
+      data-cy="avatar-signed-out"
+    >
+      Sign in to choose an avatar. A guest session has no account to keep one on.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'unverified'"
+      data-cy="avatar-unverified"
+    >
+      Verify your email address to choose an avatar.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+      [class.invisible]="line() !== 'failed'"
+      data-cy="avatar-failed"
+    >
+      Could not load your avatar just now.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'idle'"
+      data-cy="avatar-idle"
+    >
+      How you appear on your account button and on this page.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'saving'"
+      data-cy="avatar-saving"
+    >
+      Saving&hellip;
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-emerald-700 dark:text-emerald-400"
+      [class.invisible]="line() !== 'saved'"
+      data-cy="avatar-saved"
+    >
+      Saved.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+      [class.invisible]="line() !== 'unavailable'"
+      data-cy="avatar-unavailable"
+    >
+      Avatars cannot be saved on this deployment yet.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+      [class.invisible]="line() !== 'saveFailed'"
+      data-cy="avatar-save-failed"
+    >
+      Could not save your avatar. Please try again.
+    </p>
+  </div>
+
+  <!--
+    The picker is laid out in every state and usable in one. `invisible` keeps
+    its box — that is what holds the card's height — and `inert` makes the
+    hidden controls unreachable by Tab or pointer, the pair the nav drawer uses.
+
+    Three radiogroups of real `<input type="radio">` elements, `sr-only` behind
+    their labels — the setup screen's picker contract (G4): native keys, native
+    checked state, a group name from `aria-labelledby`. The focus ring is on the
+    label, because the radio is a clipped 1px box nobody could see one on.
+  -->
+  <div
+    data-cy="avatar-picker"
+    [class.invisible]="view() !== 'ready'"
+    [attr.inert]="view() === 'ready' ? null : ''"
+  >
+    <span
+      id="avatar-kind-label"
+      class="block mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+      >Show as</span
+    >
+    <div
+      role="radiogroup"
+      aria-labelledby="avatar-kind-label"
+      data-cy="avatar-kind"
+      class="flex flex-wrap gap-2"
+    >
+      @for (option of kindOptions(); track option.kind) {
+        <label
+          class="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+          [class.border-emerald-600]="draftKind() === option.kind"
+          [class.bg-emerald-50]="draftKind() === option.kind"
+          [class.dark:bg-emerald-500/10]="draftKind() === option.kind"
+          [class.text-emerald-800]="draftKind() === option.kind"
+          [class.dark:text-emerald-300]="draftKind() === option.kind"
+          [class.border-slate-900/10]="draftKind() !== option.kind"
+          [class.dark:border-white/10]="draftKind() !== option.kind"
+          [class.text-slate-700]="draftKind() !== option.kind"
+          [class.dark:text-slate-300]="draftKind() !== option.kind"
+        >
+          <input
+            type="radio"
+            name="avatar-kind"
+            class="sr-only"
+            [attr.data-cy]="'avatar-kind-' + option.kind"
+            [attr.value]="option.kind"
+            [checked]="draftKind() === option.kind"
+            [attr.aria-disabled]="saving() ? 'true' : null"
+            (click)="holdWhileSaving($event)"
+            (keydown)="holdKeysWhileSaving($event)"
+            (change)="chooseKind(option.kind)"
+          />
+          <app-avatar
+            size="md"
+            [letter]="letter()"
+            [choice]="option.preview"
+            [photoUrl]="photoUrl()"
+          />
+          {{ option.label }}
+        </label>
+      }
+    </div>
+
+    <span
+      id="avatar-shape-label"
+      class="block mt-5 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+      >Shape</span
+    >
+    <div
+      role="radiogroup"
+      aria-labelledby="avatar-shape-label"
+      data-cy="avatar-shape"
+      class="flex flex-wrap gap-2"
+    >
+      @for (option of shapeOptions(); track option.id) {
+        <label
+          class="flex rounded-full border-2 p-0.5 cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+          [class.border-emerald-600]="builtSelection()?.shapeIndex === option.index"
+          [class.border-transparent]="builtSelection()?.shapeIndex !== option.index"
+        >
+          <input
+            type="radio"
+            name="avatar-shape"
+            class="sr-only"
+            [attr.data-cy]="'avatar-shape-' + option.id"
+            [attr.value]="option.id"
+            [checked]="builtSelection()?.shapeIndex === option.index"
+            [attr.aria-disabled]="saving() ? 'true' : null"
+            (click)="holdWhileSaving($event)"
+            (keydown)="holdKeysWhileSaving($event)"
+            (change)="chooseShape(option.index)"
+          />
+          <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
+          <span class="sr-only">{{ option.label }}</span>
+        </label>
+      }
+    </div>
+
+    <span
+      id="avatar-colour-label"
+      class="block mt-5 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+      >Colour</span
+    >
+    <div
+      role="radiogroup"
+      aria-labelledby="avatar-colour-label"
+      data-cy="avatar-colour"
+      class="flex flex-wrap gap-2"
+    >
+      @for (option of paletteOptions(); track option.id) {
+        <label
+          class="flex rounded-full border-2 p-0.5 cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+          [class.border-emerald-600]="builtSelection()?.paletteIndex === option.index"
+          [class.border-transparent]="builtSelection()?.paletteIndex !== option.index"
+        >
+          <input
+            type="radio"
+            name="avatar-colour"
+            class="sr-only"
+            [attr.data-cy]="'avatar-colour-' + option.id"
+            [attr.value]="option.id"
+            [checked]="builtSelection()?.paletteIndex === option.index"
+            [attr.aria-disabled]="saving() ? 'true' : null"
+            (click)="holdWhileSaving($event)"
+            (keydown)="holdKeysWhileSaving($event)"
+            (change)="choosePalette(option.index)"
+          />
+          <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
+          <span class="sr-only">{{ option.label }}</span>
+        </label>
+      }
+    </div>
+
+    <!--
+      The owner's condition on this feature: a player decides whether their
+      avatar is ever shown to anybody else, and it starts off. Nothing public
+      shows one yet, and the help line says so plainly rather than promising
+      a feature — it is the setting a later public surface has to ask.
+    -->
+    <div class="mt-5 flex items-start gap-3">
+      <input
+        #publicBox
+        id="avatar-public"
+        type="checkbox"
+        data-cy="avatar-public"
+        aria-describedby="avatar-public-help"
+        class="mt-0.5 h-4 w-4 shrink-0 accent-emerald-700"
+        [checked]="draftPublic()"
+        [attr.aria-disabled]="saving() ? 'true' : null"
+        (click)="holdWhileSaving($event)"
+        (change)="choosePublic(publicBox.checked)"
+      />
+      <div>
+        <label
+          for="avatar-public"
+          class="block text-sm font-semibold text-slate-700 dark:text-slate-300 cursor-pointer"
+          >Show my avatar to other players</label
+        >
+        <p id="avatar-public-help" class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+          Nothing in the app shows avatars to other players yet; this decides what happens when
+          something does.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!--
+    The card's one action, and there is always at most one: three controls in
+    a single grid cell, the same box three times, so the row is one height
+    whichever is showing. "Sign in" is not rendered in an embed, which has no
+    top bar for it to open a menu in (the same gate as the stats card's).
+  -->
+  <div class="grid mt-6">
+    <button
+      type="button"
+      data-cy="avatar-save"
+      class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors aria-disabled:opacity-60 aria-disabled:cursor-wait"
+      [class.invisible]="view() !== 'ready'"
+      [attr.aria-disabled]="saving() ? 'true' : null"
+      (click)="save()"
+    >
+      Save avatar
+    </button>
+    @if (!embedMode.isEmbedded()) {
+      <button
+        type="button"
+        data-cy="avatar-sign-in"
+        class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
+        [class.invisible]="view() !== 'signedOut'"
+        (click)="openSignIn()"
+      >
+        Sign in
+      </button>
+    }
+    <button
+      type="button"
+      data-cy="avatar-retry"
+      class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-semibold px-5 py-2.5 transition-colors"
+      [class.invisible]="view() !== 'failed'"
+      (click)="retry()"
+    >
+      Try again
+    </button>
+  </div>
+</section>

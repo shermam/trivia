@@ -231,6 +231,16 @@
             >
           } @else {
             <!--
+              The player's avatar (`FEAT-038`): initials on the first paint, the
+              stored choice — a built avatar or their Google photo — once
+              `AvatarService` has read it, and initials again if a photo fails.
+              `app-avatar` is the reserved box in every one of those states, so
+              the choice arriving changes the picture and never the chip
+              (`CLAUDE.md` §4.4); `avatar-choice.spec.ts` measures the chip
+              across all three kinds. `eager` because the chip is on every page
+              from the first paint — the only surface that loads the photo that
+              way.
+
               The PRO ring. A `ring` is a box-shadow, so it marks a paid account
               without costing a single pixel of layout — which is the whole
               point here, since the badge it replaces was worth 20.6px and
@@ -240,26 +250,31 @@
               rather than a thicker border, and both fit inside the button's
               existing 6px padding.
             -->
-            <span
-              class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-white text-xs font-bold"
+            <app-avatar
+              size="sm"
+              data-cy="auth-menu-avatar"
+              [letter]="initials()"
+              [choice]="avatarService.choice()"
+              [photoUrl]="avatarService.photoUrl()"
+              [eager]="true"
               [class.ring-2]="subscriptionService.isProUser()"
               [class.ring-emerald-400]="subscriptionService.isProUser()"
               [class.ring-offset-2]="subscriptionService.isProUser()"
               [class.ring-offset-white]="subscriptionService.isProUser()"
               [class.dark:ring-offset-slate-900]="subscriptionService.isProUser()"
             >
-              {{ initials() }}
               @if (needsVerification()) {
                 <span
                   class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900"
                 ></span>
               }
-            </span>
+            </app-avatar>
             <!--
               The button's accessible name, and it lives *outside* the animated
-              region below on purpose. The name is never shown now, so this is
-              the only thing standing between a screen reader and a trigger
-              announced as the single letter "S".
+              region below on purpose. The name is never shown now, and the
+              avatar beside it is `aria-hidden` — a picture or a lone initial
+              says nothing a name does not — so this is the only thing standing
+              between a screen reader and a trigger with no name at all.
 
               Chromium does expose text inside the collapsed region too — that
               was measured, not assumed — but a zero-width `overflow: hidden`

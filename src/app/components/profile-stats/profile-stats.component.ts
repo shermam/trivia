@@ -6,13 +6,18 @@ import {
   ElementRef,
   inject,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { avatarLetter } from '../../models/avatar.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { AvatarService } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, GameplayStats } from '../../services/firebase.service';
+import { AvatarPickerComponent } from '../avatar-picker/avatar-picker.component';
+import { AvatarComponent } from '../avatar/avatar.component';
 import { IconComponent, IconName } from '../icon/icon.component';
 
 /**
@@ -76,7 +81,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'long' });
 @Component({
   selector: 'app-profile-stats',
   standalone: true,
-  imports: [RouterLink, IconComponent],
+  imports: [RouterLink, IconComponent, AvatarComponent, AvatarPickerComponent],
   templateUrl: './profile-stats.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -85,6 +90,8 @@ export class ProfileStatsComponent {
   private readonly authService = inject(AuthService);
   private readonly authMenuState = inject(AuthMenuStateService);
   protected readonly embedMode = inject(EmbedModeService);
+  /** The header's avatar — the same choice, read once, that the chip draws (`FEAT-038`). */
+  protected readonly avatarService = inject(AvatarService);
 
   /**
    * The block of stacked messages, focused when a retry starts — see `retry()`.
@@ -128,6 +135,16 @@ export class ProfileStatsComponent {
     const user = this.authService.user();
     return user !== null && !user.isAnonymous ? user.uid : null;
   });
+
+  /**
+   * The header avatar's letter, or `null` for the neutral face — every state
+   * that is not a signed-in account, including "auth has not answered yet",
+   * which defaults to the least specific picture rather than a guessed one
+   * (`CLAUDE.md` §4.4).
+   */
+  protected readonly headerLetter = computed(() =>
+    this.signedInUid() === null ? null : avatarLetter(this.authService.user()),
+  );
 
   protected readonly view = computed<ProfileView>(() => {
     if (!this.authService.authReady()) {
@@ -218,8 +235,21 @@ export class ProfileStatsComponent {
    * twice — once as the announcement and once as the text under the heading.
    * Empty while loading: "loading" is not an outcome, and announcing it on
    * every visit is noise.
+   *
+   * **One region for the page, and the avatar picker speaks through it too**
+   * (`FEAT-038`): a save's outcome replaces the stats line until the stats
+   * have something new to say, so whichever happened last is what is heard.
    */
   protected readonly statusAnnouncement = computed(() => {
+    const stats = this.statsAnnouncement();
+    const notice = this.avatarNotice();
+    return notice !== null && notice.over === stats ? notice.text : stats;
+  });
+
+  /** The picker's last announcement, and the stats line it was made over. */
+  private readonly avatarNotice = signal<{ text: string; over: string } | null>(null);
+
+  private readonly statsAnnouncement = computed(() => {
     switch (this.view()) {
       case 'stats':
         return 'Your stats are ready.';
@@ -283,6 +313,11 @@ export class ProfileStatsComponent {
    */
   protected openSignIn(): void {
     this.authMenuState.open();
+  }
+
+  /** The avatar picker's outcome, said through this page's one live region. */
+  protected onAvatarNotice(text: string): void {
+    this.avatarNotice.set({ text, over: untracked(this.statsAnnouncement) });
   }
 
   private async read(uid: string): Promise<void> {

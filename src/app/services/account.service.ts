@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { environment } from '../../environments/environment';
+import { AvatarChoice, readAvatarChoice } from '../models/avatar.model';
 import { PlayAnswerRecord } from '../utils/play-history.util';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
@@ -33,6 +34,14 @@ const EXPORT_TIMEOUT_MS = 30_000;
  * looking at: a game not banked is a lost total, not a broken screen.
  */
 const RECORD_GAME_TIMEOUT_MS = 10_000;
+
+/**
+ * A player waiting on a button: the same ten seconds the Firestore reads use.
+ * The write is one field on one document, so anything slower than this is a
+ * cold start or a network problem, and the SDK's timeout cancels the request
+ * rather than leaving it to land after the picker has said it failed.
+ */
+const SET_AVATAR_TIMEOUT_MS = 10_000;
 
 type FunctionsModule = typeof import('firebase/functions');
 
@@ -179,6 +188,44 @@ export class AccountService {
       throw new Error(accountErrorMessage(error, 'delete your account'), { cause: error });
     }
     await this.authService.signOut();
+  }
+
+  /**
+   * Stores the signed-in player's avatar choice on `users/{uid}` through the
+   * `setAvatar` callable (`FEAT-038`), and returns the choice as the server
+   * stored it.
+   *
+   * Lives here for the reason `recordGameResult` below does: this file owns
+   * the `firebase/functions` bootstrap, so the callable SDK stays out of the
+   * initial bundle and its cached-rejection fix covers this call too.
+   *
+   * **`seed` is sent only for a built avatar, and omitted otherwise** — the
+   * callable SDK encodes a present-but-`undefined` key as `null`, and the
+   * server refuses a seed on any other kind. It reads `null` as absent too,
+   * so this is the near half of a bound held at both ends.
+   *
+   * Throws an `Error` whose message is fit to show and whose `cause` is the
+   * SDK's error, so a caller can tell `functions/not-found` — the preview
+   * channel case, where the callable does not exist yet — from a failure a
+   * retry might fix.
+   */
+  async setAvatar(choice: AvatarChoice): Promise<AvatarChoice> {
+    const { functions, functionsModule } = await this.getFunctions();
+    const callable = functionsModule.httpsCallable<AvatarChoice, { avatar?: unknown }>(
+      functions,
+      'setAvatar',
+      { timeout: SET_AVATAR_TIMEOUT_MS },
+    );
+    const payload: AvatarChoice =
+      choice.kind === 'built'
+        ? { kind: 'built', seed: choice.seed, showPublicly: choice.showPublicly }
+        : { kind: choice.kind, showPublicly: choice.showPublicly };
+    try {
+      const result = await callable(payload);
+      return readAvatarChoice(result.data?.avatar);
+    } catch (error) {
+      throw new Error(accountErrorMessage(error, 'save your avatar'), { cause: error });
+    }
   }
 
   /**

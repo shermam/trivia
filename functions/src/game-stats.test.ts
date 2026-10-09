@@ -58,6 +58,49 @@ test('creates the document on a first game, starting the lifetime clock', () => 
   assert.equal(stats.rateWindowStart, NOW);
 });
 
+/**
+ * **A document that holds no totals is a first game**, which it was not until
+ * `FEAT-038`: a player who chooses an avatar before finishing a game has a
+ * `users/{uid}` carrying only that choice. Before this was handled the rate
+ * window read `nowMs - undefined` as `NaN`, judged the window still open, and
+ * produced `gamesInWindow: NaN` and `rateWindowStart: undefined` — a write the
+ * Admin SDK refuses — so every game that player finished failed to bank.
+ * Every number is asserted finite, because `NaN` is the shape this takes.
+ */
+test('banks a first game on a document holding only an avatar choice', () => {
+  const avatarOnly = {
+    avatar: { kind: 'built', seed: 'core-35', showPublicly: false },
+  } as unknown as Partial<UserStats>;
+
+  const stats = accept(nextUserStats(avatarOnly, submission(), NOW));
+
+  assert.equal(stats.gamesPlayed, 1);
+  assert.equal(stats.questionsAnswered, 10);
+  assert.equal(stats.correctAnswers, 7);
+  assert.equal(stats.bestStreak, 4);
+  assert.equal(stats.statsSince, NOW);
+  assert.equal(stats.rateWindowStart, NOW);
+  assert.equal(stats.gamesInWindow, 1);
+  for (const [field, value] of Object.entries(stats)) {
+    if (field !== 'lastGameId') {
+      assert.ok(Number.isFinite(value), `${field} is ${String(value)}`);
+    }
+  }
+});
+
+test('treats a window with no recorded start as rolled, whatever the count says', () => {
+  const stats = accept(
+    nextUserStats(
+      stored({ rateWindowStart: undefined, gamesInWindow: MAX_GAMES_PER_WINDOW }),
+      submission(),
+      NOW,
+    ),
+  );
+
+  assert.equal(stats.rateWindowStart, NOW);
+  assert.equal(stats.gamesInWindow, 1);
+});
+
 test('adds one game to existing totals', () => {
   const stats = accept(nextUserStats(stored(), submission(), NOW));
 

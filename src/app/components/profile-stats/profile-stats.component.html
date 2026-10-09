@@ -8,11 +8,27 @@
       Back to game
     </a>
 
-    <h1
-      class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-2"
-    >
-      Your stats
-    </h1>
+    <!--
+      The profile header carries the player's avatar (`FEAT-038`), drawn by the
+      same component as the account chip so the fallback chain exists once. It
+      is the neutral face for anybody who is not a signed-in account, and in
+      every state it is the same box, so nothing beside it moves when the
+      choice — or a photo — arrives.
+    -->
+    <div class="flex items-center gap-4 mb-2">
+      <app-avatar
+        size="lg"
+        data-cy="profile-avatar"
+        [letter]="headerLetter()"
+        [choice]="avatarService.choice()"
+        [photoUrl]="avatarService.photoUrl()"
+      />
+      <h1
+        class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight"
+      >
+        Your stats
+      </h1>
+    </div>
     <p class="text-slate-500 dark:text-slate-400 mb-8">
       Your lifetime totals across every game you have finished while signed in. Only you can see
       them.
@@ -25,7 +41,9 @@
          announced: a live region that arrives in the DOM already carrying its
          message is routinely missed, so a region created when the answer lands
          would announce nothing at all. -->
-    <p role="status" class="sr-only">{{ statusAnnouncement() }}</p>
+    <p role="status" class="sr-only" data-cy="profile-announcement">
+      {{ statusAnnouncement() }}
+    </p>
 
     <div
       data-cy="stats-card"
@@ -169,5 +187,12 @@
         </button>
       </div>
     </div>
+
+    <!--
+      Choosing how you appear (`FEAT-038`). Its own card with its own states,
+      and its outcome is announced through the live region above rather than a
+      second one, so the page has one place a screen reader hears from.
+    -->
+    <app-avatar-picker (announce)="onAvatarNotice($event)" />
   </div>
 </div>

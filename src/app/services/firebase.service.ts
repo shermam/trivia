@@ -1219,6 +1219,12 @@ export class FirebaseService {
    * read (`CLAUDE.md` §4.4 — an error message must not narrate a cause nobody
    * verified).
    *
+   * **A document is not the same thing as totals.** An avatar chosen before
+   * the first finished game creates `users/{uid}` holding that choice and
+   * nothing else (`FEAT-038`), and reading it as totals would show a player
+   * five zeroes where the screen should say nothing is banked yet. Every game
+   * `recordGameResult` banks writes `gamesPlayed`, so its absence is the test.
+   *
    * Every count is coerced rather than asserted. The document is written only
    * by the Admin SDK, so the types are not in doubt today; `asCount` is here
    * because the screen divides one of these by another, and an accuracy of
@@ -1228,7 +1234,7 @@ export class FirebaseService {
     const document = await this.rest.getDocument(`${USERS_COLLECTION}/${uid}`, {
       timeoutMs: FIRESTORE_TIMEOUT_MS,
     });
-    if (!document) {
+    if (!document || typeof document.data['gamesPlayed'] !== 'number') {
       return null;
     }
     const statsSince = document.data['statsSince'];

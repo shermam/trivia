@@ -104,6 +104,12 @@ export interface VerifiedUserSeed {
   email: string;
   password: string;
   displayName?: string;
+  /**
+   * The profile photo a Google sign-in would have left on the account
+   * (`FEAT-038`). The emulator stores it like any other profile field, so an
+   * email/password account can stand in for a Google one in the avatar specs.
+   */
+  photoURL?: string;
 }
 
 /**
@@ -252,6 +258,15 @@ export interface LeaderboardSeed {
  * A spec whose subject is the callable plays the game: see
  * `lifetime-stats.spec.ts`.
  */
+/**
+ * One account's avatar choice (`FEAT-038`), written where `setAvatar` writes
+ * it — the `avatar` field of `users/{uid}`, beside any totals.
+ */
+export interface AvatarSeed {
+  uid: string;
+  avatar: { kind: 'initials' | 'photo' | 'built'; seed?: string; showPublicly: boolean };
+}
+
 export interface GameplayStatsSeed {
   uid: string;
   gamesPlayed: number;

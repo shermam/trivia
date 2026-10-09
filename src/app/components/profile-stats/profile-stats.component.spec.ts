@@ -2,7 +2,9 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
+import { AvatarChoice } from '../../models/avatar.model';
 import { AuthService } from '../../services/auth.service';
+import { AvatarService } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, GameplayStats } from '../../services/firebase.service';
 import { ProfileStatsComponent } from './profile-stats.component';
@@ -35,6 +37,7 @@ interface InternalProfileStats {
 interface FakeUser {
   uid: string;
   isAnonymous: boolean;
+  displayName?: string;
 }
 
 function stats(overrides: Partial<GameplayStats> = {}): GameplayStats {
@@ -54,6 +57,8 @@ interface SetupOptions {
   result?: GameplayStats | null;
   fails?: boolean;
   embedded?: boolean;
+  /** The stored avatar choice the header draws, or `null` while unknown. */
+  avatar?: AvatarChoice | null;
 }
 
 /**
@@ -89,6 +94,25 @@ function configure(options: SetupOptions = {}) {
           user: userSignal,
           authReady: authReadySignal,
           isAnonymous: () => userSignal()?.isAnonymous ?? false,
+          // The avatar picker on the same page asks this — its own spec
+          // covers what it does with the answer.
+          isFullyAuthenticated: () => {
+            const current = userSignal();
+            return current !== null && !current.isAnonymous;
+          },
+        },
+      },
+      // The header and the picker draw from `AvatarService`; a stub keeps the
+      // page from reaching the network to read a choice these tests do not
+      // need. `status` is what the picker's states hang on.
+      {
+        provide: AvatarService,
+        useValue: {
+          choice: signal<AvatarChoice | null>(options.avatar ?? null),
+          photoUrl: signal<string | null>(null),
+          status: () => (userSignal()?.isAnonymous === false ? 'ready' : 'none'),
+          save: vi.fn(() => Promise.resolve('saved')),
+          retry: vi.fn(),
         },
       },
       { provide: AuthMenuStateService, useValue: { open } },
@@ -341,6 +365,47 @@ describe('ProfileStatsComponent (rendered)', () => {
       query: (selector: string) => host.querySelector<HTMLElement>(selector),
     };
   }
+
+  /**
+   * The profile header's avatar (`FEAT-038`): the same component the chip
+   * draws with, and the neutral face for anybody who is not a signed-in
+   * account — including the frames before auth has answered.
+   */
+  it('draws the neutral face in the header for a visitor who is not signed in', async () => {
+    const { query } = await render({ user: { uid: 'anon', isAnonymous: true } });
+
+    expect(query('[data-cy="profile-avatar"]')?.getAttribute('data-avatar')).toBe('guest');
+  });
+
+  it('draws the signed-in account’s stored choice in the header', async () => {
+    const { query } = await render({
+      user: { uid: 'u1', isAnonymous: false, displayName: 'Ada' },
+      avatar: { kind: 'built', seed: 'core-23', showPublicly: false },
+    });
+
+    const avatar = query('[data-cy="profile-avatar"]');
+    expect(avatar?.getAttribute('data-avatar')).toBe('built');
+    expect(avatar?.className).toContain('h-12');
+  });
+
+  /**
+   * One live region for the page: the picker's outcome is said through the
+   * region this page already has, and replaces the stats line until the stats
+   * have something new to say (`CLAUDE.md` §4.5).
+   */
+  it('announces the avatar picker’s outcome through the page’s one live region', async () => {
+    const { query, fixture } = await render();
+    const region = () => query('[role="status"]')?.textContent?.trim();
+    expect(region()).toBe('Your stats are ready.');
+
+    const picker = fixture.debugElement.query((node) => node.name === 'app-avatar-picker')
+      .componentInstance as { announce: { emit(text: string): void } };
+    picker.announce.emit('Avatar saved.');
+    fixture.detectChanges();
+
+    expect(region()).toBe('Avatar saved.');
+    expect(fixture.nativeElement.querySelectorAll('[role="status"]')).toHaveLength(1);
+  });
 
   it('offers the signed-out visitor a sign-in button', async () => {
     const { query } = await render({ user: { uid: 'anon', isAnonymous: true } });

@@ -37,9 +37,9 @@
   <h3>Signing in</h3>
   <p>
     Signing in is optional. It is only needed to save a score to the public leaderboard, to keep
-    your gameplay totals and play history, to like or dislike a question, or to subscribe to Pro. If
-    you sign in from an anonymous session, that same account is upgraded rather than a second one
-    being created, so anything already saved carries over.
+    your gameplay totals and play history, to choose an avatar, to like or dislike a question, or to
+    subscribe to Pro. If you sign in from an anonymous session, that same account is upgraded rather
+    than a second one being created, so anything already saved carries over.
   </p>
   <ul>
     <li>
@@ -50,9 +50,12 @@
     </li>
     <li>
       <strong>Google, Facebook, GitHub, Microsoft, Apple, Twitter/X or Yahoo.</strong> The provider
-      gives us your email address, your display name, and an account identifier. We request nothing
-      beyond that and never receive your password. Your browser only contacts the provider at the
-      moment you click one of these buttons — not on page load.
+      gives us your email address, your display name, an account identifier and, if your account
+      with them has one, the web address of your profile picture. We request nothing beyond that and
+      never receive your password. Your browser only contacts the provider at the moment you click
+      one of these buttons — not on page load — unless you choose your Google profile picture as
+      your avatar, described below, which your browser then loads from Google whenever the app shows
+      it.
     </li>
     <li>
       <strong>Display name.</strong> Optional and set by you. If you save a score, this name is
@@ -147,11 +150,31 @@
   </p>
   <p>
     <strong>Only you can read it.</strong> It is never shown to other players and never appears on a
-    leaderboard. Nothing is kept at all until you finish your first game while signed in, and
+    leaderboard. No totals are kept until you finish your first game while signed in, and
     <strong>nothing is kept for anonymous play</strong>. Deleting your account deletes it, and
     &ldquo;Export my data&rdquo; returns it in full. Apart from the play history described next, a
     record naming a question you were shown exists only where you chose to make one: a report about
     it, described above, or a like or dislike, described after the play history.
+  </p>
+
+  <h3>Your avatar &mdash; also private to you</h3>
+  <p>
+    Signed in, you can choose how you appear on your own account button and on your stats page: your
+    initials, which is the default; the profile picture your Google account carries, offered only if
+    it has one; or an avatar the app draws from a shape and a colour you pick. If you choose one, we
+    keep your choice on the same record as your gameplay totals:
+    <strong
+      >which of the three you picked, a short code naming the shape and colour if you built one, and
+      a yes-or-no setting, off unless you turn it on, for whether your avatar may be shown to other
+      players</strong
+    >. No screen in the app shows your avatar to anyone but you, whichever way that setting is.
+  </p>
+  <p>
+    <strong>We do not store your profile picture, or its address.</strong> If you choose it, your
+    browser reads the address from your sign-in account each time and loads the picture straight
+    from Google &mdash; see &ldquo;Who else your browser contacts&rdquo; below. A drawn avatar is
+    made by your browser and loads nothing from anywhere. Nothing is stored for anonymous play,
+    deleting your account deletes the choice, and &ldquo;Export my data&rdquo; returns it.
   </p>
 
   <h3>Your play history &mdash; also private to you</h3>
@@ -404,6 +427,14 @@
         <td>You asked us to record them, and the buttons show your choice back to you</td>
         <td>Performance of a contract</td>
       </tr>
+      <tr>
+        <td>
+          Keep the avatar you chose, and load your Google profile picture from Google if that is
+          what you chose
+        </td>
+        <td>You asked us to, and the app shows your choice back to you</td>
+        <td>Performance of a contract</td>
+      </tr>
     </tbody>
   </table>
   <p>
@@ -549,11 +580,23 @@
         <td>Authenticates you</td>
         <td>Only at the moment you click that provider</td>
       </tr>
+      <tr>
+        <td>Google's image server (<code>lh3.googleusercontent.com</code>)</td>
+        <td>
+          Serves your Google profile picture. Your browser sends it no referrer, so it is not told
+          which page asked
+        </td>
+        <td>
+          Only if you chose your Google profile picture as your avatar, whenever the app shows it
+        </td>
+      </tr>
     </tbody>
   </table>
   <p>
-    Fonts, scripts, styles and images are all served from Trivimind's own domain. Nothing is loaded
-    from a third-party CDN, so no font or asset request tells anyone else that you visited.
+    Fonts, scripts, styles and images are all served from Trivimind's own domain, with one exception
+    that only you can switch on: your Google profile picture, if you choose it as your avatar.
+    Nothing else is loaded from a third-party CDN, so no font or asset request tells anyone else
+    that you visited.
   </p>
 
   <h2>What we do not do</h2>
@@ -570,7 +613,7 @@
     for you &mdash; is described above, is visible to nobody but you, and goes no further than this
     application. The likes and dislikes you give questions are kept for you alone, and nothing about
     you is inferred from them. The services in the table above are there because the app cannot
-    function without them, not to observe you.
+    function without them, or because you chose one, not to observe you.
   </p>
 
   <h2>Where your information is stored</h2>
@@ -595,8 +638,8 @@
   <ul>
     <li>
       <strong
-        >Your account, leaderboard entries, gameplay totals, the likes and dislikes you give
-        questions, subscription records and donation records</strong
+        >Your account, leaderboard entries, gameplay totals, your avatar choice, the likes and
+        dislikes you give questions, subscription records and donation records</strong
       >
       are kept for as long as your account exists. Delete your account and they go — see below. A
       like or dislike can also be removed on its own, by pressing the same button again wherever
@@ -657,15 +700,15 @@
       leaderboard entries on every board, global and country alike, your gameplay totals, your play
       history — every game we still hold, question by question, newest first — every question you
       have contributed, each one whole, so a reviewer's rejection note comes with it, every like or
-      dislike you have given a question, and your billing records. It also lists what is
-      deliberately not in it and why.
+      dislike you have given a question, your avatar choice, and your billing records. It also lists
+      what is deliberately not in it and why.
     </li>
     <li>
       <strong>Delete account</strong> cancels any live subscription, deletes your Stripe customer
       record and the payment methods stored against it, deletes your leaderboard entries on every
       board, <strong>country boards included</strong>, deletes your gameplay totals and your whole
-      play history, deletes your likes and dislikes, deletes your billing records, and deletes your
-      sign-in account itself.
+      play history, deletes your avatar choice, deletes your likes and dislikes, deletes your
+      billing records, and deletes your sign-in account itself.
       <strong
         >Questions you contributed are kept, with your authorship replaced by a
         <code>[deleted-user]</code> marker.</strong
@@ -684,8 +727,8 @@
   </p>
   <p>
     You do not have to give us anything beyond an account to play. An email address is only required
-    if you want to save a score, keep your gameplay totals and play history, like or dislike a
-    question, or subscribe.
+    if you want to save a score, keep your gameplay totals and play history, choose an avatar, like
+    or dislike a question, or subscribe.
   </p>
 
   <h2>Children</h2>
