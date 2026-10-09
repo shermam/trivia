@@ -15,7 +15,9 @@
   >
     {{ label() }}
     @if (!required()) {
-      <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+      <span class="font-normal text-slate-500 dark:text-slate-400">{{
+        'tags.optional' | t: '(optional)'
+      }}</span>
     }
   </label>
 
@@ -39,14 +41,14 @@
         [attr.data-cy]="id('tag-hint')"
         class="col-start-1 row-start-1 text-xs text-slate-500 dark:text-slate-400"
       >
-        {{ hint() }}
+        {{ hint() | t }}
       </p>
-      @for (variant of hintVariants(); track variant) {
+      @for (variant of hintVariants(); track $index) {
         <span
           aria-hidden="true"
           [attr.data-cy]="id('tag-hint-reserve')"
           class="col-start-1 row-start-1 invisible text-xs"
-          >{{ variant }}</span
+          >{{ variant | t }}</span
         >
       }
     </div>
@@ -71,7 +73,7 @@
     [class.opacity-60]="isDisabled()"
   >
     @if (tags().length > 0) {
-      <ul class="flex flex-wrap gap-1.5" [attr.aria-label]="label() + ' chosen'">
+      <ul class="flex flex-wrap gap-1.5" [attr.aria-label]="chosenLabel()">
         @for (tag of tags(); track tag) {
           <li
             class="flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-500/20 pl-2.5 pr-1 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300"
@@ -82,7 +84,7 @@
               type="button"
               [disabled]="isDisabled()"
               (click)="remove(tag)"
-              [attr.aria-label]="'Remove tag ' + tag"
+              [attr.aria-label]="'tags.remove' | t: 'Remove tag {tag}' : { tag }"
               [attr.data-cy]="'remove-tag-' + tag"
               class="rounded-full p-0.5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-500/30 disabled:cursor-not-allowed transition-colors"
             >
@@ -98,7 +100,7 @@
         6.8:1. One step fainter in either theme falls under it.
       -->
       <p class="text-xs text-slate-500 dark:text-slate-400" [attr.data-cy]="id('no-tags')">
-        No tags yet.
+        {{ 'tags.none' | t: 'No tags yet.' }}
       </p>
     }
   </div>
@@ -117,7 +119,11 @@
       [attr.aria-required]="required() ? 'true' : null"
       [attr.aria-invalid]="errorMessage() ? 'true' : null"
       [attr.aria-describedby]="describedBy()"
-      [attr.placeholder]="canTakeMore() ? 'Type a topic and press Enter' : 'Maximum reached'"
+      [attr.placeholder]="
+        canTakeMore()
+          ? ('tags.placeholder' | t: 'Type a topic and press Enter')
+          : ('tags.placeholderFull' | t: 'Maximum reached')
+      "
       class="min-w-0 flex-1 rounded-xl border-[1.5px] border-slate-900/15 dark:border-white/15 bg-white dark:bg-slate-900 px-3.5 py-2 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-emerald-600 focus:outline-none disabled:cursor-not-allowed transition-colors"
     />
     <button
@@ -128,7 +134,7 @@
       class="flex items-center gap-1 rounded-xl border-[1.5px] border-emerald-700/25 dark:border-emerald-400/25 px-3 py-2 text-sm font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
     >
       <app-icon name="plus-circle" [size]="14" />
-      Add
+      {{ 'tags.add' | t: 'Add' }}
     </button>
   </div>
 
@@ -142,7 +148,7 @@
       [attr.data-cy]="id('tag-error')"
       class="mt-1.5 text-sm text-red-700 dark:text-red-300"
     >
-      {{ errorMessage() }}
+      {{ errorMessage() | t }}
     </p>
   }
 
@@ -168,26 +174,32 @@
     >
       @if (draftRejected()) {
         @if (draftTooLong()) {
-          Too long — a tag is at most {{ maxTagLength }} characters.
+          {{
+            'tags.tooLong'
+              | t: 'Too long — a tag is at most {max} characters.' : { max: maxTagLength }
+          }}
         } @else {
-          A tag needs at least {{ minTagLength }} letters or digits.
+          {{
+            'tags.tooShort'
+              | t: 'A tag needs at least {min} letters or digits.' : { min: minTagLength }
+          }}
         }
       } @else if (draftNotAllowed()) {
-        {{ notAllowedMessage() }}
+        {{ notAllowedMessage() | t }}
       } @else if (draftPreview(); as preview) {
-        Will be saved as #{{ preview }}
+        {{ 'tags.preview' | t: 'Will be saved as #{tag}' : { tag: preview } }}
       } @else if (notice(); as message) {
-        {{ message }}
+        {{ message | t }}
       } @else {
-        {{ tags().length }} of {{ max() }} chosen.
+        {{ 'tags.count' | t: '{count} of {max} chosen.' : { count: tags().length, max: max() } }}
       }
     </p>
-    @for (variant of feedbackVariants(); track variant) {
+    @for (variant of feedbackVariants(); track $index) {
       <span
         aria-hidden="true"
         [attr.data-cy]="id('tag-feedback-reserve')"
         class="col-start-1 row-start-1 invisible text-xs"
-        >{{ variant }}</span
+        >{{ variant | t }}</span
       >
     }
   </div>
@@ -199,7 +211,7 @@
     refused, and what the caller's own changes did; the visible line above says
     the same thing to everybody else.
   -->
-  <p role="status" [attr.data-cy]="id('tag-status')" class="sr-only">{{ announcement() }}</p>
+  <p role="status" [attr.data-cy]="id('tag-status')" class="sr-only">{{ announcement() | t }}</p>
 
   <!--
     Grouped controls carry a role and a label or the group's purpose is never
@@ -226,7 +238,7 @@
     <span
       [id]="id('tag-suggestions-label')"
       class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1"
-      >Suggestions</span
+      >{{ 'tags.suggestions' | t: 'Suggestions' }}</span
     >
     <div
       role="group"

@@ -49,6 +49,9 @@ import { QuestionTagsComponent } from '../question-tags/question-tags.component'
 import { QuestionVoteComponent } from '../question-vote/question-vote.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
 import { SourceLinkComponent } from '../source-link/source-link.component';
+import { messageOf, msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
+import { difficultyLabel } from '../../utils/difficulty-label.util';
 
 /** Derives initials for a leaderboard avatar, e.g. "Jane Doe" -> "JD". */
 function initialsFor(name: string): string {
@@ -126,6 +129,9 @@ type ScoreAction = 'saved' | 'saveFailed' | 'signIn' | 'verify' | 'save' | 'quiz
 /** Which of the two boards the reader is looking at (`FEAT-028`). */
 type BoardScope = 'global' | 'regional';
 
+/** A report that did not go, for a cause nobody verified. */
+const REPORT_FAILED = msg('over.reportFailed', 'Could not send the report. Please try again.');
+
 @Component({
   selector: 'app-game-over',
   standalone: true,
@@ -139,6 +145,7 @@ type BoardScope = 'global' | 'regional';
     QuestionTagsComponent,
     QuestionVoteComponent,
     RenderedTextComponent,
+    TPipe,
   ],
   templateUrl: './game-over.component.html',
   styleUrl: './game-over.component.css',
@@ -170,8 +177,23 @@ export class GameOverComponent implements OnInit {
   );
 
   /** How the board is named in prose — "15-second", "30-second", "no-limit". */
-  protected readonly boardLabel = computed(() =>
-    this.board() === 'unlimited' ? 'no-limit' : `${this.board()}-second`,
+  /**
+   * The board's name is inside every sentence that mentions it — the save
+   * heading, the board's title, the rank — so each is a sentence per board
+   * rather than a frame around a name, and the seconds are the placeholder.
+   */
+  protected readonly saveHeading = computed(() =>
+    this.board() === 'unlimited'
+      ? msg('over.saveToUnlimited', 'Save your score to the no-limit leaderboard')
+      : msg('over.saveToTimed', 'Save your score to the {seconds}-second leaderboard', {
+          seconds: this.board(),
+        }),
+  );
+
+  protected readonly boardHeading = computed(() =>
+    this.board() === 'unlimited'
+      ? msg('over.topUnlimited', 'Top 10 — no-limit games')
+      : msg('over.topTimed', 'Top 10 — {seconds}-second games', { seconds: this.board() }),
   );
 
   /**
@@ -195,10 +217,10 @@ export class GameOverComponent implements OnInit {
   protected playerName = '';
   protected readonly isSaving = signal(false);
   protected readonly hasSaved = signal(false);
-  protected readonly saveError = signal<string | null>(null);
+  protected readonly saveError = signal<Message | null>(null);
   protected readonly leaderboard = signal<LeaderboardEntry[]>([]);
   protected readonly isLoadingLeaderboard = signal(true);
-  protected readonly leaderboardError = signal<string | null>(null);
+  protected readonly leaderboardError = signal<Message | null>(null);
 
   /** Every country the picker offers, named in the reader's own language. */
   protected readonly regionOptions = regionOptions();
@@ -246,9 +268,9 @@ export class GameOverComponent implements OnInit {
    * labels cannot drift into different markup — the property that keeps the
    * pair the same size in both states is that they are one box repeated.
    */
-  protected readonly BOARD_SCOPES: readonly { scope: BoardScope; label: string }[] = [
-    { scope: 'global', label: 'Global' },
-    { scope: 'regional', label: 'Regional' },
+  protected readonly BOARD_SCOPES: readonly { scope: BoardScope; label: Message }[] = [
+    { scope: 'global', label: msg('over.scopeGlobal', 'Global') },
+    { scope: 'regional', label: msg('over.scopeRegional', 'Regional') },
   ];
 
   /**
@@ -261,9 +283,12 @@ export class GameOverComponent implements OnInit {
    */
   protected readonly boardScopeLabel = computed(() => {
     if (this.boardScope() === 'global') {
-      return 'Worldwide';
+      return msg('over.worldwide', 'Worldwide');
     }
-    return this.selectedRegionName() ? `In ${this.selectedRegionName()}` : 'Your country';
+    const country = this.selectedRegionName();
+    return country
+      ? msg('over.inCountry', 'In {country}', { country })
+      : msg('over.yourCountry', 'Your country');
   });
 
   /**
@@ -306,14 +331,20 @@ export class GameOverComponent implements OnInit {
    * It is laid *over* the reserved rows rather than instead of them, so an
    * empty board and a full one are the same height.
    */
-  protected readonly leaderboardMessage = computed(() => {
+  protected readonly leaderboardMessage = computed<Message | null>(() => {
     // The regional tab with no country set. Not an error and not an empty
     // board — there is no board to be empty — so it says how to get one
     // instead of ranking nobody, and never asks for a location (`FEAT-028`).
     if (this.boardScope() === 'regional' && !this.selectedRegion()) {
       return this.showsRealAccount()
-        ? 'Choose your country in the save form above to see how you rank there.'
-        : 'Sign in and choose your country to see how you rank there.';
+        ? msg(
+            'over.chooseCountry',
+            'Choose your country in the save form above to see how you rank there.',
+          )
+        : msg(
+            'over.signInForCountry',
+            'Sign in and choose your country to see how you rank there.',
+          );
     }
     if (this.isLoadingLeaderboard()) {
       return null;
@@ -326,8 +357,10 @@ export class GameOverComponent implements OnInit {
       // yet, and there is deliberately no minimum participant count — an empty
       // national board is an invitation, not a defect.
       return this.boardScope() === 'regional'
-        ? `No scores in ${this.selectedRegionName()} yet. Be the first!`
-        : 'No scores yet. Be the first!';
+        ? msg('over.noScoresIn', 'No scores in {country} yet. Be the first!', {
+            country: this.selectedRegionName(),
+          })
+        : msg('over.noScores', 'No scores yet. Be the first!');
     }
     return null;
   });
@@ -341,9 +374,9 @@ export class GameOverComponent implements OnInit {
    */
   protected readonly leaderboardStatus = computed(() => {
     if (this.isLoadingLeaderboard()) {
-      return 'Loading leaderboard\u2026';
+      return msg('over.loadingBoard', 'Loading leaderboard…');
     }
-    return this.leaderboardMessage() ?? '';
+    return this.leaderboardMessage();
   });
 
   /**
@@ -370,17 +403,20 @@ export class GameOverComponent implements OnInit {
   protected readonly openReportQuestionId = signal<string | null>(null);
   protected readonly reportedQuestionIds = signal<ReadonlySet<string>>(new Set());
   protected readonly isSubmittingReport = signal(false);
-  protected readonly reportError = signal<string | null>(null);
+  protected readonly reportError = signal<Message | null>(null);
   /** Text of the permanent `role="status"` region — set on every report outcome (G3 pattern). */
-  protected readonly reportStatus = signal('');
+  protected readonly reportStatus = signal<Message | null>(null);
   protected reportReason: QuestionReportReason | '' = '';
   protected reportDetail = '';
 
-  protected readonly reportReasonOptions: { value: QuestionReportReason; label: string }[] = [
-    { value: 'incorrect', label: 'The answer is wrong' },
-    { value: 'inappropriate', label: 'Inappropriate or offensive' },
-    { value: 'spam', label: 'Spam or nonsense' },
-    { value: 'other', label: 'Something else' },
+  protected readonly reportReasonOptions: { value: QuestionReportReason; label: Message }[] = [
+    { value: 'incorrect', label: msg('over.reasonIncorrect', 'The answer is wrong') },
+    {
+      value: 'inappropriate',
+      label: msg('over.reasonInappropriate', 'Inappropriate or offensive'),
+    },
+    { value: 'spam', label: msg('over.reasonSpam', 'Spam or nonsense') },
+    { value: 'other', label: msg('over.reasonOther', 'Something else') },
   ];
 
   /**
@@ -540,10 +576,10 @@ export class GameOverComponent implements OnInit {
 
   protected readonly performanceLabel = computed(() => {
     const percentage = this.gameController.percentage();
-    if (percentage >= 90) return 'Outstanding!';
-    if (percentage >= 70) return 'Great job!';
-    if (percentage >= 50) return 'Good effort!';
-    return 'Keep practicing!';
+    if (percentage >= 90) return msg('over.outstanding', 'Outstanding!');
+    if (percentage >= 70) return msg('over.greatJob', 'Great job!');
+    if (percentage >= 50) return msg('over.goodEffort', 'Good effort!');
+    return msg('over.keepPracticing', 'Keep practicing!');
   });
 
   /**
@@ -585,11 +621,36 @@ export class GameOverComponent implements OnInit {
    * to name it: "#3 on the 15-second leaderboard" would be a false claim about
    * the world for a player sitting third in Portugal.
    */
-  protected readonly rankBoardLabel = computed(() =>
-    this.boardScope() === 'regional' && this.selectedRegionName()
-      ? `${this.boardLabel()} leaderboard in ${this.selectedRegionName()}`
-      : `${this.boardLabel()} leaderboard`,
-  );
+  protected readonly rankMessage = computed<Message | null>(() => {
+    const rank = this.playerRank();
+    if (rank === null) {
+      return null;
+    }
+    const country = this.boardScope() === 'regional' ? this.selectedRegionName() : null;
+    const unlimited = this.board() === 'unlimited';
+    const seconds = this.board();
+    if (country) {
+      return unlimited
+        ? msg(
+            'over.rankUnlimitedIn',
+            "You're ranked #{rank} on the no-limit leaderboard in {country}.",
+            { rank, country },
+          )
+        : msg(
+            'over.rankTimedIn',
+            "You're ranked #{rank} on the {seconds}-second leaderboard in {country}.",
+            { rank, seconds, country },
+          );
+    }
+    return unlimited
+      ? msg('over.rankUnlimited', "You're ranked #{rank} on the no-limit leaderboard.", { rank })
+      : msg('over.rankTimed', "You're ranked #{rank} on the {seconds}-second leaderboard.", {
+          rank,
+          seconds,
+        });
+  });
+
+  protected readonly difficultyLabel = difficultyLabel;
 
   /**
    * Whether there is a real, settled account behind this game — as opposed to
@@ -725,7 +786,7 @@ export class GameOverComponent implements OnInit {
    * its own, permanent and outside the recap card, so it exists before it has
    * anything to say (G3).
    */
-  protected readonly voteAnnouncement = signal('');
+  protected readonly voteAnnouncement = signal<Message | null>(null);
 
   /** The recap's community questions — the ones its rows can be voted on. */
   private readonly voteableQuestionIds = computed(() =>
@@ -933,7 +994,9 @@ export class GameOverComponent implements OnInit {
     try {
       await this.authService.resendVerificationEmail();
     } catch {
-      this.saveError.set('Could not send the verification email. Please try again.');
+      this.saveError.set(
+        msg('over.verificationFailed', 'Could not send the verification email. Please try again.'),
+      );
     }
   }
 
@@ -1031,7 +1094,7 @@ export class GameOverComponent implements OnInit {
     if (!uid) {
       // Every visitor gets an anonymous session on load, so this only happens
       // if that bootstrap failed — nothing to do but say so generically.
-      this.setReportFailure('Could not send the report. Please try again.');
+      this.setReportFailure(REPORT_FAILED);
       return;
     }
 
@@ -1044,7 +1107,7 @@ export class GameOverComponent implements OnInit {
     // through '' while the write is in flight guarantees the next outcome
     // is a fresh mutation, the same reason the quiz result region empties
     // between questions (G3).
-    this.reportStatus.set('');
+    this.reportStatus.set(null);
 
     const detail = this.reportDetail.trim();
     const report: NewQuestionReportDoc = {
@@ -1061,7 +1124,12 @@ export class GameOverComponent implements OnInit {
       await this.firebaseService.reportQuestion(report);
       this.reportedQuestionIds.update((ids) => new Set(ids).add(question.id));
       this.closeReportForm();
-      this.reportStatus.set('Report sent. Thank you for helping keep the question bank in shape.');
+      this.reportStatus.set(
+        msg(
+          'over.reportSent',
+          'Report sent. Thank you for helping keep the question bank in shape.',
+        ),
+      );
     } catch (error) {
       // The rejection message deliberately doesn't pick a cause: exhausting
       // every ID slot usually means the volume cap, but an invalid payload is
@@ -1072,8 +1140,8 @@ export class GameOverComponent implements OnInit {
       // only about what to *do*.
       this.setReportFailure(
         error instanceof QuestionReportRejectedError
-          ? error.message
-          : 'Could not send the report. Please try again.',
+          ? messageOf(error, REPORT_FAILED)
+          : REPORT_FAILED,
       );
     } finally {
       this.isSubmittingReport.set(false);
@@ -1081,7 +1149,7 @@ export class GameOverComponent implements OnInit {
   }
 
   /** Failure shows inline *and* announces via the status region (G3). */
-  private setReportFailure(message: string): void {
+  private setReportFailure(message: Message): void {
     this.reportError.set(message);
     this.reportStatus.set(message);
   }
@@ -1114,13 +1182,16 @@ export class GameOverComponent implements OnInit {
       if (existing && existing.score >= attemptedScore) {
         this.hasSaved.set(true);
         this.saveError.set(
-          `Your best score is already higher (${existing.score} points) — ` +
-            'nice consistency! We kept your existing best.',
+          msg(
+            'over.bestHigher',
+            'Your best score is already higher ({score} points) — nice consistency! We kept your existing best.',
+            { score: existing.score },
+          ),
         );
         return;
       }
     }
-    this.saveError.set('Could not save your score. Please try again.');
+    this.saveError.set(msg('over.saveFailed', 'Could not save your score. Please try again.'));
   }
 
   protected playAgain(): void {
@@ -1178,7 +1249,9 @@ export class GameOverComponent implements OnInit {
         return;
       }
       this.leaderboard.set([]);
-      this.leaderboardError.set('Could not load the leaderboard. Please try again later.');
+      this.leaderboardError.set(
+        msg('over.boardFailed', 'Could not load the leaderboard. Please try again later.'),
+      );
     } finally {
       // Only the live call may clear the flag: a superseded one resolving
       // second would otherwise report its successor's read as finished.

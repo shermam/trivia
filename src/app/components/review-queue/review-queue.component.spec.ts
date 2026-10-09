@@ -6,6 +6,8 @@ import { CustomQuestionDoc, QuestionReport, QuestionStatus } from '../../models/
 import { FirebaseService } from '../../services/firebase.service';
 import { ReportCursor, ReviewerService } from '../../services/reviewer.service';
 import { ReportRow, ReviewQueueComponent, ReviewView } from './review-queue.component';
+import type { Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 
 /**
  * The queue's own logic, separate from the rules that authorise it.
@@ -115,9 +117,9 @@ interface InternalReviewQueue {
   reportsView(): 'loading' | 'failed' | 'empty' | 'loaded';
   hasMoreReports(): boolean;
   isLoading(): boolean;
-  loadError(): string | null;
-  actionError(): string | null;
-  actionResult(): string | null;
+  loadError(): Message | null;
+  actionError(): Message | null;
+  actionResult(): Message | null;
   isFull(): boolean;
   reasonFor(question: Q): string;
   setReason(questionId: string, value: string): void;
@@ -192,7 +194,7 @@ describe('ReviewQueueComponent', () => {
 
     await component.decide(question('p1'), 'rejected');
 
-    expect(component.actionResult()).toMatch(/rejected/);
+    expect(english(component.actionResult())).toMatch(/rejected/);
   });
 
   it('keeps the row and reports the failure when a decision is refused', async () => {
@@ -213,7 +215,7 @@ describe('ReviewQueueComponent', () => {
 
     // A refusal, a timeout and a network fault are indistinguishable from here
     // — `CLAUDE.md` §4.4 forbids picking one and telling the user it happened.
-    expect(component.loadError()).toBe('Could not load the queue. Please try again.');
+    expect(english(component.loadError())).toBe('Could not load the queue. Please try again.');
     expect(component.isLoading()).toBe(false);
   });
 
@@ -436,7 +438,7 @@ describe('ReviewQueueComponent reports tab', () => {
     await component.select('reports');
 
     expect(component.reportsView()).toBe('failed');
-    expect(component.loadError()).toBe('Could not load the reports. Please try again.');
+    expect(english(component.loadError())).toBe('Could not load the reports. Please try again.');
     expect(component.reports()).toEqual([]);
   });
 
@@ -496,7 +498,7 @@ describe('ReviewQueueComponent reports tab', () => {
     expect(setQuestionStatus).toHaveBeenCalledWith('p1', 'rejected', '');
     expect(component.reports()).toHaveLength(1);
     expect(component.reports()[0].question?.status).toBe('rejected');
-    expect(component.actionResult()).toMatch(/rejected/);
+    expect(english(component.actionResult())).toMatch(/rejected/);
   });
 
   // Several complaints about one question is the normal case, and one write
@@ -786,7 +788,7 @@ describe('ReviewQueueComponent rejection reasons', () => {
     await component.decide(question('p1'), 'rejected');
 
     expect(setQuestionStatus).not.toHaveBeenCalled();
-    expect(component.actionError()).toMatch(/500 characters or fewer/);
+    expect(english(component.actionError())).toMatch(/500 characters or fewer/);
   });
 
   // Rejecting an already-rejected question — to fix a typo in the note, say —

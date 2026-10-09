@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 import {
   LEGAL_ATTRIBUTION_URL,
@@ -17,7 +18,7 @@ import {
 @Component({
   selector: 'app-legal-page',
   standalone: true,
-  imports: [RouterLink, IconComponent],
+  imports: [RouterLink, IconComponent, TPipe],
   template: `
     <div class="min-h-screen bg-slate-50 px-4 py-10 dark:bg-slate-950">
       <div class="mx-auto w-full max-w-2xl">
@@ -26,9 +27,15 @@ import {
           class="mb-6 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50"
         >
           <app-icon name="arrow-left" [size]="16" />
-          Back to Trivimind
+          {{ 'legal.back' | t: 'Back to Trivimind' }}
         </a>
 
+        <!--
+          The card is the document, and it stays English in every language: a
+          translated policy is a legal act rather than a string swap, so the
+          shell around the projected body is not interface text either.
+        -->
+        <!-- eslint-disable @angular-eslint/template/i18n -- the legal card stays English (docs/app.md §1.16) -->
         <div class="rounded-3xl bg-white px-6 py-8 shadow-card-lg sm:px-8 dark:bg-slate-900">
           <h1 class="mb-1 text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-50">
             {{ title() }}
@@ -84,6 +91,7 @@ import {
             >.
           </p>
         </div>
+        <!-- eslint-enable @angular-eslint/template/i18n -->
       </div>
     </div>
   `,

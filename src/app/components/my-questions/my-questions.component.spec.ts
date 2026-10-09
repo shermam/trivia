@@ -7,6 +7,8 @@ import { AuthService } from '../../services/auth.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, UserQuestionCursor } from '../../services/firebase.service';
 import { MyQuestion, MyQuestionsComponent, MyQuestionsView } from './my-questions.component';
+import type { Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 
 /**
  * `/my-questions` (`FEAT-007`).
@@ -31,11 +33,11 @@ interface InternalMyQuestions {
   view(): MyQuestionsView;
   questions(): MyQuestion[];
   hasMore(): boolean;
-  loadError(): string | null;
-  actionResult(): string;
+  loadError(): Message | null;
+  actionResult(): Message | null;
   dialog(): { kind: 'edit' | 'remove'; question: MyQuestion } | null;
-  dialogError(): string | null;
-  validationSummary(): string | null;
+  dialogError(): Message | null;
+  validationSummary(): Message | null;
   form: ReturnType<typeof import('../question-form/question-form').createQuestionForm>;
   openEdit(question: MyQuestion, event: Event): void;
   openRemove(question: MyQuestion, event: Event): void;
@@ -45,7 +47,7 @@ interface InternalMyQuestions {
   showMore(): Promise<void>;
   retry(): void;
   openSignIn(): void;
-  statusLabel(question: MyQuestion): string;
+  statusLabel(question: MyQuestion): Message;
 }
 
 function myQuestion(id: string, overrides: Partial<CustomQuestionDoc> = {}): MyQuestion {
@@ -240,7 +242,7 @@ describe('MyQuestionsComponent states', () => {
     await settle();
 
     expect(component.view()).toBe('failed');
-    expect(component.loadError()).toMatch(/Could not load/);
+    expect(english(component.loadError())).toMatch(/Could not load/);
   });
 
   it('clears the previous account rows when the account changes', async () => {
@@ -286,12 +288,18 @@ describe('MyQuestionsComponent states', () => {
   it('names each moderation status in words a contributor reads', () => {
     const { component } = setup();
 
-    expect(component.statusLabel(myQuestion('q1', { status: 'pending' }))).toBe('Pending review');
-    expect(component.statusLabel(myQuestion('q1', { status: 'approved' }))).toBe('Approved');
-    expect(component.statusLabel(myQuestion('q1', { status: 'rejected' }))).toBe('Rejected');
+    expect(english(component.statusLabel(myQuestion('q1', { status: 'pending' })))).toBe(
+      'Pending review',
+    );
+    expect(english(component.statusLabel(myQuestion('q1', { status: 'approved' })))).toBe(
+      'Approved',
+    );
+    expect(english(component.statusLabel(myQuestion('q1', { status: 'rejected' })))).toBe(
+      'Rejected',
+    );
     // A document predating the field. Nothing left in the bank has one, and the
     // screen still must not render `undefined` at a person.
-    expect(component.statusLabel(myQuestion('q1', { status: undefined }))).toBe('Unknown');
+    expect(english(component.statusLabel(myQuestion('q1', { status: undefined })))).toBe('Unknown');
   });
 });
 
@@ -346,7 +354,7 @@ describe('MyQuestionsComponent editing', () => {
     expect(component.questions()[0].status).toBe('pending');
     expect(component.questions()[0].rejectionReason).toBeUndefined();
     expect(component.dialog()).toBeNull();
-    expect(component.actionResult()).toMatch(/pending review again/);
+    expect(english(component.actionResult())).toMatch(/pending review again/);
   });
 
   /**
@@ -459,7 +467,7 @@ describe('MyQuestionsComponent editing', () => {
     await settle();
 
     expect(updateUserQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/Topics/);
+    expect(english(component.validationSummary())).toMatch(/Topics/);
   });
 
   /**
@@ -620,7 +628,7 @@ describe('MyQuestionsComponent editing', () => {
     await component.saveEdit();
 
     expect(updateUserQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/Question/);
+    expect(english(component.validationSummary())).toMatch(/Question/);
     expect(component.dialog()?.kind).toBe('edit');
   });
 
@@ -638,7 +646,7 @@ describe('MyQuestionsComponent editing', () => {
     await component.saveEdit();
 
     expect(updateUserQuestion).not.toHaveBeenCalled();
-    expect(component.dialogError()).toMatch(/listed more than once/);
+    expect(english(component.dialogError())).toMatch(/listed more than once/);
   });
 
   it('keeps the dialog open and reports a refused save', async () => {
@@ -650,7 +658,7 @@ describe('MyQuestionsComponent editing', () => {
     await settle();
 
     expect(component.dialog()?.kind).toBe('edit');
-    expect(component.dialogError()).toMatch(/Could not save/);
+    expect(english(component.dialogError())).toMatch(/Could not save/);
     expect(component.questions()).toHaveLength(1);
   });
 });
@@ -685,7 +693,7 @@ describe('MyQuestionsComponent removal', () => {
     expect(deleteUserQuestion).toHaveBeenCalledWith('q1');
     expect(component.questions().map((q) => q.id)).toEqual(['q2']);
     expect(component.dialog()).toBeNull();
-    expect(component.actionResult()).toMatch(/removed from the app/i);
+    expect(english(component.actionResult())).toMatch(/removed from the app/i);
   });
 
   it('keeps the row and reports a refused removal', async () => {
@@ -697,7 +705,7 @@ describe('MyQuestionsComponent removal', () => {
     await settle();
 
     expect(component.dialog()?.kind).toBe('remove');
-    expect(component.dialogError()).toMatch(/Could not remove/);
+    expect(english(component.dialogError())).toMatch(/Could not remove/);
     expect(component.questions()).toHaveLength(1);
   });
 });

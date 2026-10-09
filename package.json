@@ -35,6 +35,8 @@
     "env:verify": "node scripts/verify-environment-isolation.mjs",
     "motion:verify": "node scripts/verify-motion.mjs",
     "ngsw:verify": "node scripts/verify-ngsw-groups.mjs",
+    "i18n:extract": "node scripts/i18n-extract.mjs",
+    "i18n:verify": "node scripts/verify-i18n.mjs",
     "sw:stamp": "node scripts/stamp-service-worker.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

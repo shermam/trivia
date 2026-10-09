@@ -3,6 +3,7 @@ import { signal } from '@angular/core';
 import { DonationDialogStateService } from '../../services/donation-dialog-state.service';
 import { DonationService, type DonationPreset } from '../../services/donation.service';
 import { SubscriptionError } from '../../services/session-handshake.service';
+import { verbatim } from '../../i18n/message';
 import { DonationDialogComponent } from './donation-dialog.component';
 
 /**
@@ -273,7 +274,7 @@ describe('DonationDialogComponent', () => {
   it('shows the service’s own message when the donation cannot be started', async () => {
     const service = donationServiceStub();
     service.startDonation.mockRejectedValue(
-      new SubscriptionError('Your account is already set up to pay in BRL.'),
+      new SubscriptionError(verbatim('Your account is already set up to pay in BRL.')),
     );
     const { host, fixture } = render(service);
 

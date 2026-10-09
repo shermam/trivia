@@ -4,6 +4,9 @@ import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 import { AppTitleStrategy } from './app-title.strategy';
 import { routes } from './app.routes';
+import en from './i18n/en.json';
+import { I18nService } from './i18n/i18n.service';
+import { routeTitleMessage } from './i18n/route-title';
 import { AuthService } from './services/auth.service';
 import { RouteAnnouncerService } from './services/route-announcer.service';
 import { TriviaService } from './services/trivia.service';
@@ -208,6 +211,19 @@ describe('route titles (G5)', () => {
       expect(route.title, `route "${route.path}" has a title`).toBeTruthy();
     }
   });
+
+  /**
+   * A title is a key, so that `AppTitleStrategy` can tell a new screen from
+   * the same screen in another language — and a key with its English beside
+   * it, or the tab would read `route.play`.
+   */
+  it('titles every route with a key that has English registered beside it', () => {
+    for (const route of routes.filter((r) => r.redirectTo === undefined)) {
+      const key = route.title as string;
+      expect(Object.keys(en), `route "${route.path}"`).toContain(key);
+      expect(routeTitleMessage(key).en).toBe(en[key as keyof typeof en]);
+    }
+  });
 });
 
 describe('AppTitleStrategy (G5)', () => {
@@ -225,7 +241,7 @@ describe('AppTitleStrategy (G5)', () => {
 
   it('does not announce the first navigation, which the browser already reads out', () => {
     const { strategy, announcer, titles } = buildStrategy();
-    titles.push('Start a game');
+    titles.push('route.setup');
 
     strategy.updateTitle({} as never);
 
@@ -235,7 +251,7 @@ describe('AppTitleStrategy (G5)', () => {
 
   it('announces every navigation after the first', () => {
     const { strategy, announcer, titles } = buildStrategy();
-    titles.push('Start a game', 'Play');
+    titles.push('route.setup', 'route.play');
 
     strategy.updateTitle({} as never);
     strategy.updateTitle({} as never);
@@ -250,7 +266,7 @@ describe('AppTitleStrategy (G5)', () => {
   // from Stripe to /pricing?checkout=success is the same shape.
   it('says nothing when a navigation does not change the screen', () => {
     const { strategy, announcer, titles } = buildStrategy();
-    titles.push('Start a game', 'Start a game');
+    titles.push('route.setup', 'route.setup');
 
     strategy.updateTitle({} as never); // initial load
     strategy.updateTitle({} as never); // skip link / query change
@@ -260,7 +276,7 @@ describe('AppTitleStrategy (G5)', () => {
 
   it('announces again when the screen really does change back', () => {
     const { strategy, announcer, titles } = buildStrategy();
-    titles.push('Start a game', 'Pricing', 'Start a game');
+    titles.push('route.setup', 'route.pricing', 'route.setup');
 
     strategy.updateTitle({} as never);
     strategy.updateTitle({} as never);
@@ -277,5 +293,42 @@ describe('AppTitleStrategy (G5)', () => {
     strategy.updateTitle({} as never);
 
     expect(document.title).toBe('Trivimind');
+  });
+
+  it('renders the title and the announcement through the translation in use', () => {
+    const { strategy, announcer, titles } = buildStrategy();
+    TestBed.inject(I18nService).useTranslation('pt-BR', { 'route.play': 'Jogar' });
+    titles.push('route.setup', 'route.play');
+
+    strategy.updateTitle({} as never);
+    // A key the translation does not hold is shown in English.
+    expect(document.title).toBe('Start a game — Trivimind');
+
+    strategy.updateTitle({} as never);
+    expect(document.title).toBe('Jogar — Trivimind');
+    expect(announcer.message()).toBe('Jogar');
+  });
+
+  /**
+   * A change of language is not a change of screen: the tab follows it, and
+   * nothing is announced — the strategy compares keys, which the change
+   * leaves alone.
+   */
+  it('re-titles the tab when the translation changes, without announcing it', () => {
+    const { strategy, announcer, titles } = buildStrategy();
+    const i18n = TestBed.inject(I18nService);
+    titles.push('route.play');
+    strategy.updateTitle({} as never);
+    TestBed.tick();
+    const announce = vi.spyOn(announcer, 'announce');
+
+    i18n.useTranslation('pt-BR', { 'route.play': 'Jogar' });
+    TestBed.tick();
+    expect(document.title).toBe('Jogar — Trivimind');
+
+    i18n.useTranslation('en', null);
+    TestBed.tick();
+    expect(document.title).toBe('Play — Trivimind');
+    expect(announce).not.toHaveBeenCalled();
   });
 });

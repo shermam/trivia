@@ -13,6 +13,8 @@ import {
   removeIncorrectAnswer,
 } from '../question-form/question-form';
 import { AddQuestionComponent } from './add-question.component';
+import type { Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 
 /**
  * The report behind this spec: a Pro test account could not add a question,
@@ -91,8 +93,8 @@ function setup(
       };
     };
     onSubmit: () => Promise<void>;
-    validationSummary: () => string | null;
-    submitError: () => string | null;
+    validationSummary: () => Message | null;
+    submitError: () => Message | null;
     hasSubmitted: () => boolean;
   };
 
@@ -124,7 +126,7 @@ describe('AddQuestionComponent validation', () => {
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/Topics/i);
+    expect(english(component.validationSummary())).toMatch(/Topics/i);
   });
 
   it('names every offending field when several are empty', async () => {
@@ -132,9 +134,9 @@ describe('AddQuestionComponent validation', () => {
 
     await component.onSubmit();
 
-    expect(component.validationSummary()).toMatch(/fields need your attention/i);
-    expect(component.validationSummary()).toMatch(/topics/i);
-    expect(component.validationSummary()).toMatch(/question/i);
+    expect(english(component.validationSummary())).toMatch(/fields need your attention/i);
+    expect(english(component.validationSummary())).toMatch(/topics/i);
+    expect(english(component.validationSummary())).toMatch(/question/i);
   });
 
   // `Validators.required` accepts "   ", and the rules check the trimmed
@@ -148,7 +150,7 @@ describe('AddQuestionComponent validation', () => {
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/Question/i);
+    expect(english(component.validationSummary())).toMatch(/Question/i);
   });
 
   it('submits a valid multiple-choice question', async () => {
@@ -158,7 +160,7 @@ describe('AddQuestionComponent validation', () => {
     await component.onSubmit();
 
     expect(addCustomQuestion).toHaveBeenCalledTimes(1);
-    expect(component.validationSummary()).toBeNull();
+    expect(english(component.validationSummary())).toBeNull();
     expect(component.hasSubmitted()).toBe(true);
   });
 
@@ -189,7 +191,7 @@ describe('AddQuestionComponent validation', () => {
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/incorrect answer/i);
+    expect(english(component.validationSummary())).toMatch(/incorrect answer/i);
   });
 });
 
@@ -271,7 +273,7 @@ describe('AddQuestionComponent source attribution', () => {
 
     expect(addCustomQuestion).toHaveBeenCalledTimes(1);
     expect('sourceUrl' in addCustomQuestion.mock.calls[0][0]).toBe(false);
-    expect(component.validationSummary()).toBeNull();
+    expect(english(component.validationSummary())).toBeNull();
   });
 
   it('drops a whitespace-only title rather than writing one the rules refuse', async () => {
@@ -303,7 +305,7 @@ describe('AddQuestionComponent source attribution', () => {
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/source/i);
+    expect(english(component.validationSummary())).toMatch(/source/i);
   });
 
   it('refuses a URL past the length the rules cap', async () => {
@@ -398,7 +400,7 @@ describe('AddQuestionComponent justification', () => {
     await component.onSubmit();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toMatch(/justification/i);
+    expect(english(component.validationSummary())).toMatch(/justification/i);
   });
 });
 
@@ -623,7 +625,7 @@ describe('AddQuestionComponent answer rows (FEAT-051)', () => {
     fixture.detectChanges();
 
     expect(addCustomQuestion).not.toHaveBeenCalled();
-    expect(component.validationSummary()).toBe(
+    expect(english(component.validationSummary())).toBe(
       'Incorrect answer 4 needs your attention before this can be saved.',
     );
     expect(document.activeElement?.id).toBe('incorrect-answer-3');
@@ -776,7 +778,7 @@ describe('AddQuestionComponent submit failures', () => {
 
     await component.onSubmit();
 
-    expect(component.submitError()).toMatch(/does not have Pro access/i);
+    expect(english(component.submitError())).toMatch(/does not have Pro access/i);
     expect(component.hasSubmitted()).toBe(false);
   });
 
@@ -791,7 +793,9 @@ describe('AddQuestionComponent submit failures', () => {
 
     await component.onSubmit();
 
-    expect(component.submitError()).toBe('Could not save your question. Please try again.');
+    expect(english(component.submitError())).toBe(
+      'Could not save your question. Please try again.',
+    );
   });
 
   it('stays generic for a transport failure', async () => {
@@ -803,7 +807,9 @@ describe('AddQuestionComponent submit failures', () => {
 
     await component.onSubmit();
 
-    expect(component.submitError()).toBe('Could not save your question. Please try again.');
+    expect(english(component.submitError())).toBe(
+      'Could not save your question. Please try again.',
+    );
   });
 });
 
@@ -895,7 +901,7 @@ describe('AddQuestionComponent rendered feedback', () => {
     await component.onSubmit();
     fixture.detectChanges();
 
-    expect(component.validationSummary()).toMatch(/source link/i);
+    expect(english(component.validationSummary())).toMatch(/source link/i);
     expect(document.activeElement?.id).toBe('sourceUrl');
 
     const error: HTMLElement | null = fixture.nativeElement.querySelector('#sourceUrl-error');
@@ -924,7 +930,7 @@ describe('AddQuestionComponent rendered feedback', () => {
     await component.onSubmit();
     fixture.detectChanges();
 
-    expect(component.validationSummary()).toMatch(/justification/i);
+    expect(english(component.validationSummary())).toMatch(/justification/i);
     expect(document.activeElement?.id).toBe('explanation');
 
     const error: HTMLElement | null = fixture.nativeElement.querySelector('#explanation-error');

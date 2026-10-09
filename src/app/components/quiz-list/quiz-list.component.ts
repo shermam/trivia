@@ -13,7 +13,13 @@ import { RouterLink } from '@angular/router';
 import { Quiz } from '../../models/quiz.model';
 import { ConnectivityService } from '../../services/connectivity.service';
 import { QuizService } from '../../services/quiz.service';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
+
+/** Shown in the strip and said by the live region, so one message for both. */
+const EMPTY = msg('quizzes.empty', 'No quizzes have been published yet.');
+const FAILED = msg('quizzes.failed', 'The quizzes could not be loaded.');
 
 /**
  * Which of the list's states is showing. `idle` is "not asked yet": the list
@@ -81,7 +87,7 @@ const PLACEHOLDER_CARDS = 3;
 @Component({
   selector: 'app-quiz-list',
   standalone: true,
-  imports: [RouterLink, IconComponent],
+  imports: [RouterLink, IconComponent, TPipe],
   templateUrl: './quiz-list.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -105,18 +111,23 @@ export class QuizListComponent {
   protected readonly placeholders = Array.from({ length: PLACEHOLDER_CARDS }, (_, index) => index);
 
   /** What the live region says once the read lands. Nothing while idle or loading. */
-  protected readonly announcement = computed(() => {
+  protected readonly announcement = computed<Message | null>(() => {
     switch (this.view()) {
       case 'ready':
-        return this.quizzes().length === 1 ? '1 quiz.' : `${this.quizzes().length} quizzes.`;
+        return msg('quizzes.said', '{n, plural, one {# quiz.} other {# quizzes.}}', {
+          n: this.quizzes().length,
+        });
       case 'empty':
-        return 'No quizzes have been published yet.';
+        return EMPTY;
       case 'failed':
-        return 'The quizzes could not be loaded.';
+        return FAILED;
       default:
-        return '';
+        return null;
     }
   });
+
+  protected readonly emptyMessage = EMPTY;
+  protected readonly failedMessage = FAILED;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -147,8 +158,10 @@ export class QuizListComponent {
     });
   }
 
-  protected countLabel(quiz: Quiz): string {
-    return quiz.questionIds.length === 1 ? '1 question' : `${quiz.questionIds.length} questions`;
+  protected countLabel(quiz: Quiz): Message {
+    return msg('quizzes.questions', '{n, plural, one {# question} other {# questions}}', {
+      n: quiz.questionIds.length,
+    });
   }
 
   /**

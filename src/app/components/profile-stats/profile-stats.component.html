@@ -5,7 +5,7 @@
       class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
     >
       <app-icon name="arrow-left" [size]="15" />
-      Back to game
+      {{ 'profile.back' | t: 'Back to game' }}
     </a>
 
     <!--
@@ -26,12 +26,15 @@
       <h1
         class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight"
       >
-        Your stats
+        {{ 'profile.title' | t: 'Your stats' }}
       </h1>
     </div>
     <p class="text-slate-500 dark:text-slate-400 mb-8">
-      Your lifetime totals across every game you have finished while signed in. Only you can see
-      them.
+      {{
+        'profile.intro'
+          | t
+            : 'Your lifetime totals across every game you have finished while signed in. Only you can see them.'
+      }}
     </p>
 
     <!-- Everything on this card arrives after a round trip, and none of it
@@ -42,7 +45,7 @@
          message is routinely missed, so a region created when the answer lands
          would announce nothing at all. -->
     <p role="status" class="sr-only" data-cy="profile-announcement">
-      {{ statusAnnouncement() }}
+      {{ statusAnnouncement() | t }}
     </p>
 
     <div
@@ -70,28 +73,34 @@
           [class.invisible]="line() !== 'loading'"
           data-cy="stats-loading"
         >
-          Loading your lifetime totals&hellip;
+          {{ 'profile.loading' | t: 'Loading your lifetime totals…' }}
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
           [class.invisible]="line() !== 'signedOut'"
           data-cy="stats-signed-out"
         >
-          Sign in and your totals start counting from the next game you finish.
+          {{
+            'profile.signedOut'
+              | t: 'Sign in and your totals start counting from the next game you finish.'
+          }}
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
           [class.invisible]="line() !== 'empty'"
           data-cy="stats-empty"
         >
-          Nothing banked yet — finish a game and your totals will show up here.
+          {{
+            'profile.empty'
+              | t: 'Nothing banked yet — finish a game and your totals will show up here.'
+          }}
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
           [class.invisible]="line() !== 'failed'"
           data-cy="stats-failed"
         >
-          Could not load your stats just now.
+          {{ 'profile.failed' | t: 'Could not load your stats just now.' }}
         </p>
         <!--
           The server refused to bank this account's last game in this tab
@@ -104,7 +113,7 @@
           [class.invisible]="line() !== 'notBanked'"
           data-cy="stats-not-banked"
         >
-          Your last game could not be added to your totals.
+          {{ 'profile.notBanked' | t: 'Your last game could not be added to your totals.' }}
         </p>
         <!--
           The same, refused for the server's daily ceiling (`daily-ceiling.ts`):
@@ -122,7 +131,12 @@
           [class.invisible]="line() !== 'dailyLimit'"
           data-cy="stats-daily-limit"
         >
-          Not added: the daily limit of {{ dailyCeiling }} games resets at midnight UTC.
+          {{
+            'profile.dailyLimit'
+              | t
+                : 'Not added: the daily limit of {limit} games resets at midnight UTC.'
+                : { limit: dailyCeiling }
+          }}
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
@@ -130,9 +144,9 @@
           data-cy="stats-since"
         >
           @if (trackingSince(); as since) {
-            Tracking since {{ since }}.
+            {{ 'profile.since' | t: 'Tracking since {date}.' : { date: since } }}
           } @else {
-            Tracking your lifetime totals.
+            {{ 'profile.tracking' | t: 'Tracking your lifetime totals.' }}
           }
         </p>
       </div>
@@ -161,7 +175,7 @@
                 [size]="16"
                 class="text-emerald-600 dark:text-emerald-400"
               />
-              {{ tile.label }}
+              {{ tile.label | t }}
             </dt>
             <dd
               [attr.data-cy]="'stat-' + tile.id"
@@ -188,7 +202,7 @@
           [class.invisible]="view() === 'signedOut' || view() === 'failed'"
         >
           <app-icon name="zap" [size]="15" />
-          Start a game
+          {{ 'profile.play' | t: 'Start a game' }}
         </a>
         <!-- Gated exactly as game-over's identical opener is: this opens the
              top bar's auth menu, and `?embed=1` removes the top bar, so in an
@@ -204,7 +218,7 @@
             class="col-start-1 row-start-1 justify-self-start inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-5 py-2.5 transition-colors"
             [class.invisible]="view() !== 'signedOut'"
           >
-            Sign in
+            {{ 'profile.signIn' | t: 'Sign in' }}
           </button>
         }
         <button
@@ -215,7 +229,7 @@
           [class.invisible]="view() !== 'failed'"
         >
           <app-icon name="rotate-ccw" [size]="15" />
-          Try again
+          {{ 'profile.retry' | t: 'Try again' }}
         </button>
       </div>
     </div>

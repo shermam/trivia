@@ -1,6 +1,7 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import type { Auth, User } from 'firebase/auth';
 import { environment } from '../../environments/environment';
+import { MessageError, msg, type Message } from '../i18n/message';
 import { isAliasEmail } from '../utils/email-alias.util';
 import { giveUpAfter } from '../utils/give-up-after.util';
 import { nextAnonymousRetryDelayMs } from '../utils/sign-in-retry.util';
@@ -35,6 +36,7 @@ export const SECONDARY_OAUTH_PROVIDERS: readonly OAuthProviderId[] = [
   'yahoo.com',
 ];
 
+// i18n-exempt: provider names are the providers' own, the same in every language
 export const OAUTH_PROVIDER_LABELS: Record<OAuthProviderId, string> = {
   'google.com': 'Google',
   'facebook.com': 'Facebook',
@@ -47,40 +49,49 @@ export const OAUTH_PROVIDER_LABELS: Record<OAuthProviderId, string> = {
 
 type AuthModule = typeof import('firebase/auth');
 
-function friendlyAuthErrorMessage(error: unknown): string {
+function friendlyAuthErrorMessage(error: unknown): Message {
   const code = (error as { code?: string } | null)?.code;
   switch (code) {
     case 'auth/operation-not-allowed':
-      return "This sign-in method isn't enabled yet.";
+      return msg('authErr.notEnabled', "This sign-in method isn't enabled yet.");
     case 'auth/email-already-in-use':
-      return 'An account with this email already exists. Try signing in instead.';
+      return msg(
+        'authErr.emailInUse',
+        'An account with this email already exists. Try signing in instead.',
+      );
     case 'auth/invalid-email':
-      return 'That email address looks invalid.';
+      return msg('authErr.invalidEmail', 'That email address looks invalid.');
     case 'auth/weak-password':
-      return 'Choose a stronger password (at least 6 characters).';
+      return msg('authErr.weakPassword', 'Choose a stronger password (at least 6 characters).');
     case 'auth/wrong-password':
     case 'auth/invalid-credential':
-      return 'Incorrect email or password.';
+      return msg('authErr.wrongPassword', 'Incorrect email or password.');
     case 'auth/user-not-found':
-      return 'No account found with this email.';
+      return msg('authErr.noAccount', 'No account found with this email.');
     case 'auth/credential-already-in-use':
-      return 'This account is already linked to another user.';
+      return msg('authErr.linkedElsewhere', 'This account is already linked to another user.');
     case 'auth/network-request-failed':
-      return 'Network error. Please check your connection and try again.';
+      return msg('authErr.network', 'Network error. Please check your connection and try again.');
     // The OAuth popup's own failure modes. Each of these has a single,
     // checkable meaning, so naming it is not narrating an unverified cause —
     // and each is something the person in front of the screen can act on,
     // which "something went wrong" is not.
     case 'auth/popup-blocked':
-      return 'Your browser blocked the sign-in popup. Allow popups for this site, then try again.';
+      return msg(
+        'authErr.popupBlocked',
+        'Your browser blocked the sign-in popup. Allow popups for this site, then try again.',
+      );
     case 'auth/account-exists-with-different-credential':
-      return 'An account with this email already exists, created with a different sign-in method.';
+      return msg(
+        'authErr.otherMethod',
+        'An account with this email already exists, created with a different sign-in method.',
+      );
     case 'auth/user-disabled':
-      return 'This account has been disabled.';
+      return msg('authErr.disabled', 'This account has been disabled.');
     case 'auth/unauthorized-domain':
-      return "Sign-in isn't allowed from this address yet.";
+      return msg('authErr.domain', "Sign-in isn't allowed from this address yet.");
     case 'auth/operation-not-supported-in-this-environment':
-      return "This browser can't complete that sign-in method.";
+      return msg('authErr.unsupported', "This browser can't complete that sign-in method.");
     default:
       // The message stays deliberately vague, because the codes that reach
       // here are broad ones — `auth/internal-error` covers everything from a
@@ -96,7 +107,7 @@ function friendlyAuthErrorMessage(error: unknown): string {
       // did not list it (`scripts/verify-csp.mjs`). The one line below is
       // what would have named it on day one.
       console.error(`[auth] unhandled ${code ?? 'error without a code'}`, error);
-      return 'Something went wrong. Please try again.';
+      return msg('authErr.unknown', 'Something went wrong. Please try again.');
   }
 }
 
@@ -521,8 +532,11 @@ export class AuthService {
 
   async signUpWithEmail(email: string, password: string): Promise<void> {
     if (isAliasEmail(email)) {
-      throw new Error(
-        'Email aliases (e.g. "name+tag@domain.com") aren\'t allowed. Please use your plain email address.',
+      throw new MessageError(
+        msg(
+          'authErr.alias',
+          'Email aliases (e.g. "name+tag@domain.com") aren\'t allowed. Please use your plain email address.',
+        ),
       );
     }
 
@@ -543,7 +557,7 @@ export class AuthService {
         await authModule.sendEmailVerification(auth.currentUser);
       }
     } catch (error) {
-      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
+      throw new MessageError(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 
@@ -552,7 +566,7 @@ export class AuthService {
     try {
       await authModule.signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
-      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
+      throw new MessageError(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 
@@ -573,7 +587,7 @@ export class AuthService {
       if ((error as { code?: string } | null)?.code === 'auth/user-not-found') {
         return;
       }
-      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
+      throw new MessageError(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 
@@ -635,10 +649,10 @@ export class AuthService {
           if (isUserCancelledPopup(retryError)) {
             return;
           }
-          throw new Error(friendlyAuthErrorMessage(retryError), { cause: retryError });
+          throw new MessageError(friendlyAuthErrorMessage(retryError), { cause: retryError });
         }
       }
-      throw new Error(friendlyAuthErrorMessage(error), { cause: error });
+      throw new MessageError(friendlyAuthErrorMessage(error), { cause: error });
     }
   }
 

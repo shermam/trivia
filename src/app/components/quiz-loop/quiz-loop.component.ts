@@ -29,6 +29,10 @@ import { firstTopicTag } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionVoteComponent } from '../question-vote/question-vote.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
+import { msg, type Message } from '../../i18n/message';
+import { RichTextComponent } from '../../i18n/rich-text.component';
+import { TPipe } from '../../i18n/t.pipe';
+import { difficultyLabel } from '../../utils/difficulty-label.util';
 
 /**
  * Fallback for a game whose config predates the adjustable timer (finding
@@ -88,7 +92,14 @@ const TIMER_RING_CIRCUMFERENCE = 2 * Math.PI * TIMER_RING_RADIUS;
 @Component({
   selector: 'app-quiz-loop',
   standalone: true,
-  imports: [NgClass, IconComponent, QuestionVoteComponent, RenderedTextComponent],
+  imports: [
+    NgClass,
+    IconComponent,
+    QuestionVoteComponent,
+    RenderedTextComponent,
+    RichTextComponent,
+    TPipe,
+  ],
   templateUrl: './quiz-loop.component.html',
   styleUrl: './quiz-loop.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -222,7 +233,17 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * game would set identical text the second time, and a live region only
    * announces on mutation.
    */
-  protected readonly streakAnnouncement = signal('');
+  protected readonly streakAnnouncement = signal<Message | null>(null);
+
+  protected readonly difficultyLabel = difficultyLabel;
+
+  /** "Question 3 / 10", the number set apart by its markup. */
+  protected readonly position = computed(() =>
+    msg('play.position', 'Question <n>{n}</n> / {total}', {
+      n: this.gameController.currentIndex() + 1,
+      total: this.gameController.totalQuestions(),
+    }),
+  );
 
   /**
    * Extra Time is **hidden** on an unlimited game and 50/50 is **disabled** on
@@ -273,7 +294,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * for the same reason `flagAnnouncement` does: a live region only announces
    * on mutation, so identical text set twice says nothing the second time.
    */
-  protected readonly lifelineAnnouncement = signal('');
+  protected readonly lifelineAnnouncement = signal<Message | null>(null);
 
   /**
    * What a screen reader is told the moment a question is answered (G3).
@@ -320,20 +341,21 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * 60% — but that highlight is a purely visual cue, so the announcement keeps
    * the answer in words.
    */
-  protected readonly resultAnnouncement = computed(() => {
+  protected readonly resultAnnouncement = computed<Message | null>(() => {
     const question = this.gameController.currentQuestion();
     if (!question) {
-      return '';
+      return null;
     }
+    const answer = question.correct_answer;
     switch (this.resultKind()) {
       case 'correct':
-        return 'Correct.';
+        return msg('play.saidCorrect', 'Correct.');
       case 'timeout':
-        return `Time's up. The correct answer was ${question.correct_answer}.`;
+        return msg('play.saidTimeout', "Time's up. The correct answer was {answer}.", { answer });
       case 'incorrect':
-        return `Incorrect. The correct answer is ${question.correct_answer}.`;
+        return msg('play.saidIncorrect', 'Incorrect. The correct answer is {answer}.', { answer });
       default:
-        return '';
+        return null;
     }
   });
 
@@ -373,15 +395,19 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * region only announces on mutation — the bug the H4 review found on the
    * game-over screen, in the same shape.
    */
-  protected readonly flagAnnouncement = computed(() => {
+  protected readonly flagAnnouncement = computed<Message | null>(() => {
     const question = this.gameController.currentQuestion();
     if (!question) {
-      return '';
+      return null;
     }
-    const position = this.gameController.currentIndex() + 1;
+    const n = this.gameController.currentIndex() + 1;
     return this.gameController.flaggedQuestionIds().has(question.id)
-      ? `Question ${position} flagged. You'll be asked for details at the end of the game.`
-      : '';
+      ? msg(
+          'play.saidFlagged',
+          "Question {n} flagged. You'll be asked for details at the end of the game.",
+          { n },
+        )
+      : null;
   });
 
   protected toggleFlag(questionId: string): void {
@@ -414,7 +440,7 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
    * had anything to say. This one is permanent, like the result region beside
    * it (G3).
    */
-  protected readonly voteAnnouncement = signal('');
+  protected readonly voteAnnouncement = signal<Message | null>(null);
 
   /** The game's community questions — the only ones a vote can be about. */
   private readonly voteableQuestionIds = computed(() =>
@@ -564,7 +590,13 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     const remaining = this.gameController
       .currentQuestion()
       ?.all_answers.filter((answer) => !this.isEliminated(answer)).length;
-    this.announce(`Fifty-fifty used. ${remaining} options remain.`);
+    this.announce(
+      msg(
+        'play.saidFiftyFifty',
+        '{n, plural, one {Fifty-fifty used. # option remains.} other {Fifty-fifty used. # options remain.}}',
+        { n: remaining ?? 0 },
+      ),
+    );
   }
 
   protected useExtraTime(): void {
@@ -583,7 +615,13 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     // Repaint the countdown now rather than up to a tick later, so the number
     // jumps the instant the button is pressed.
     this.tickTimer();
-    this.announce(`Extra time added. ${EXTRA_TIME_SECONDS} seconds more on this question.`);
+    this.announce(
+      msg(
+        'play.saidExtraTime',
+        '{n, plural, one {Extra time added. # second more on this question.} other {Extra time added. # seconds more on this question.}}',
+        { n: EXTRA_TIME_SECONDS },
+      ),
+    );
   }
 
   protected useSkip(): void {
@@ -623,8 +661,13 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
       : `${base} border-slate-900/8 dark:border-white/10 bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600`;
   }
 
-  private announce(message: string): void {
-    this.lifelineAnnouncement.set(`Question ${this.gameController.currentIndex() + 1}: ${message}`);
+  private announce(message: Message): void {
+    this.lifelineAnnouncement.set(
+      msg('play.saidOnQuestion', 'Question {n}: {message}', {
+        n: this.gameController.currentIndex() + 1,
+        message,
+      }),
+    );
   }
 
   protected answerClass(answer: Answer): string {
@@ -795,10 +838,20 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
     const position = this.gameController.currentIndex() + 1;
     this.streakAnnouncement.set(
       multiplier > multiplierBefore
-        ? `Question ${position}: streak of ${this.gameController.currentStreak()}. ` +
-            `Answers are now worth ${multiplierLabel(multiplier)} times their points.`
-        : `Question ${position}: streak lost. ` +
-            `Answers are back to ${multiplierLabel(multiplier)} times their points.`,
+        ? msg(
+            'play.saidStreakUp',
+            'Question {n}: streak of {streak}. Answers are now worth {multiplier} times their points.',
+            {
+              n: position,
+              streak: this.gameController.currentStreak(),
+              multiplier: multiplierLabel(multiplier),
+            },
+          )
+        : msg(
+            'play.saidStreakLost',
+            'Question {n}: streak lost. Answers are back to {multiplier} times their points.',
+            { n: position, multiplier: multiplierLabel(multiplier) },
+          ),
     );
   }
 
@@ -812,8 +865,8 @@ export class QuizLoopComponent implements OnInit, OnDestroy {
 
     this.isAnswered.set(false);
     this.selectedAnswer.set(null);
-    this.lifelineAnnouncement.set('');
-    this.streakAnnouncement.set('');
+    this.lifelineAnnouncement.set(null);
+    this.streakAnnouncement.set(null);
     this.beginQuestion();
   }
 

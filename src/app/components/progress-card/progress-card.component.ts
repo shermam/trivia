@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { AvatarChoice } from '../../models/avatar.model';
 import {
   AVATAR_SET_UNLOCK_LEVELS,
@@ -9,6 +9,9 @@ import {
 import { AvatarComponent } from '../avatar/avatar.component';
 import { builtSeed } from '../avatar/built-avatar';
 import { IconComponent } from '../icon/icon.component';
+import { I18nService } from '../../i18n/i18n.service';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 
 /**
  * Which state the card is in, as `/profile` decides it from the same read as
@@ -33,8 +36,23 @@ const UNKNOWN = '—';
 /** The reader's own locale, as the totals card formats its counts. */
 const COUNT_FORMAT = new Intl.NumberFormat();
 
-/** `bold` → `Bold`: the set's name is its id, as the picker labels it. */
-const labelFor = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+/**
+ * "Bold avatars" — a sentence per set, because the set's name and the noun it
+ * qualifies agree in a language with gender. A set added without one is named
+ * by its id, capitalised, as the picker names it.
+ */
+function setLabel(set: string): Message {
+  switch (set) {
+    case 'core':
+      return msg('progress.setCore', 'Core avatars');
+    case 'bold':
+      return msg('progress.setBold', 'Bold avatars');
+    default:
+      return msg('progress.setOther', '{name} avatars', {
+        name: set.charAt(0).toUpperCase() + set.slice(1),
+      });
+  }
+}
 
 /** The last set in the table — what the card features once every set is open. */
 const LAST_SET = Object.keys(AVATAR_SET_UNLOCK_LEVELS).at(-1) ?? 'core';
@@ -80,11 +98,13 @@ const LAST_SET = Object.keys(AVATAR_SET_UNLOCK_LEVELS).at(-1) ?? 'core';
 @Component({
   selector: 'app-progress-card',
   standalone: true,
-  imports: [AvatarComponent, IconComponent],
+  imports: [AvatarComponent, IconComponent, TPipe],
   templateUrl: './progress-card.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ProgressCardComponent {
+  private readonly i18n = inject(I18nService);
+
   readonly state = input<ProgressState>('loading');
 
   /** `users/{uid}.xp`, or `null` while there is none to show. Read only in `ready`. */
@@ -121,7 +141,9 @@ export class ProgressCardComponent {
 
   protected readonly xpText = computed(() => {
     const progress = this.progress();
-    return `${progress ? COUNT_FORMAT.format(progress.xp) : UNKNOWN} XP`;
+    return this.i18n.t('progress.xp', '{xp} XP', {
+      xp: progress ? COUNT_FORMAT.format(progress.xp) : UNKNOWN,
+    });
   });
 
   /** How far through this level the bar is filled, 0–100. */
@@ -135,8 +157,10 @@ export class ProgressCardComponent {
     if (!progress) {
       return UNKNOWN;
     }
-    const toGo = COUNT_FORMAT.format(progress.span - progress.into);
-    return `${toGo} XP to level ${COUNT_FORMAT.format(progress.level + 1)}`;
+    return this.i18n.t('progress.toNext', '{xp} XP to level {level}', {
+      xp: COUNT_FORMAT.format(progress.span - progress.into),
+      level: COUNT_FORMAT.format(progress.level + 1),
+    });
   });
 
   protected readonly valueText = computed(() => {
@@ -144,10 +168,11 @@ export class ProgressCardComponent {
     if (!progress) {
       return null;
     }
-    return (
-      `${COUNT_FORMAT.format(progress.into)} of ${COUNT_FORMAT.format(progress.span)} XP ` +
-      `towards level ${COUNT_FORMAT.format(progress.level + 1)}`
-    );
+    return this.i18n.t('progress.valueText', '{into} of {span} XP towards level {level}', {
+      into: COUNT_FORMAT.format(progress.into),
+      span: COUNT_FORMAT.format(progress.span),
+      level: COUNT_FORMAT.format(progress.level + 1),
+    });
   });
 
   /**
@@ -160,7 +185,7 @@ export class ProgressCardComponent {
     return nextUnlock(progress?.xp ?? 0)?.set ?? LAST_SET;
   });
 
-  protected readonly featuredLabel = computed(() => `${labelFor(this.featuredSet())} avatars`);
+  protected readonly featuredLabel = computed(() => setLabel(this.featuredSet()));
 
   protected readonly featuredLevel = computed(() => AVATAR_SET_UNLOCK_LEVELS[this.featuredSet()]);
 

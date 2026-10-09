@@ -1,30 +1,35 @@
 import { Routes } from '@angular/router';
 import { hasActiveGameGuard, hasCompletedGameGuard } from './guards/game-state.guards';
+import { routeTitle } from './i18n/route-title';
 
 /**
  * Every route carries a `title`. It sets the browser tab, and `AppTitleStrategy`
  * also reads it out to assistive tech on navigation — client-side routing is
  * otherwise completely silent (finding G5). A route added without one is a
  * screen that announces nothing, which `app.spec.ts` fails on.
+ *
+ * The title is a message key, written through `routeTitle()` with its English
+ * beside it: the strategy renders it in the reader's language and tells a new
+ * screen from the same one by its key.
  */
 
 export const routes: Routes = [
   {
     path: '',
-    title: 'Start a game',
+    title: routeTitle('route.setup', 'Start a game'),
     loadComponent: () =>
       import('./components/game-setup/game-setup.component').then((m) => m.GameSetupComponent),
   },
   {
     path: 'play',
-    title: 'Play',
+    title: routeTitle('route.play', 'Play'),
     canActivate: [hasActiveGameGuard],
     loadComponent: () =>
       import('./components/quiz-loop/quiz-loop.component').then((m) => m.QuizLoopComponent),
   },
   {
     path: 'game-over',
-    title: 'Game over',
+    title: routeTitle('route.gameOver', 'Game over'),
     canActivate: [hasCompletedGameGuard],
     loadComponent: () =>
       import('./components/game-over/game-over.component').then((m) => m.GameOverComponent),
@@ -35,13 +40,13 @@ export const routes: Routes = [
     // quiz is read from Firestore before it can start, so its screen has
     // nothing to show without a connection (`ngsw-config.json`).
     path: 'quiz/:quizId',
-    title: 'Curated quiz',
+    title: routeTitle('route.quiz', 'Curated quiz'),
     loadComponent: () =>
       import('./components/quiz-detail/quiz-detail.component').then((m) => m.QuizDetailComponent),
   },
   {
     path: 'add-question',
-    title: 'Add a question',
+    title: routeTitle('route.addQuestion', 'Add a question'),
     loadComponent: () =>
       import('./components/add-question/add-question.component').then(
         (m) => m.AddQuestionComponent,
@@ -49,7 +54,7 @@ export const routes: Routes = [
   },
   {
     path: 'my-questions',
-    title: 'Your questions',
+    title: routeTitle('route.myQuestions', 'Your questions'),
     loadComponent: () =>
       import('./components/my-questions/my-questions.component').then(
         (m) => m.MyQuestionsComponent,
@@ -57,7 +62,7 @@ export const routes: Routes = [
   },
   {
     path: 'review',
-    title: 'Review queue',
+    title: routeTitle('route.review', 'Review queue'),
     loadComponent: () =>
       import('./components/review-queue/review-queue.component').then(
         (m) => m.ReviewQueueComponent,
@@ -65,7 +70,7 @@ export const routes: Routes = [
   },
   {
     path: 'profile',
-    title: 'Your stats',
+    title: routeTitle('route.profile', 'Your stats'),
     loadComponent: () =>
       import('./components/profile-stats/profile-stats.component').then(
         (m) => m.ProfileStatsComponent,
@@ -73,19 +78,19 @@ export const routes: Routes = [
   },
   {
     path: 'pricing',
-    title: 'Pricing',
+    title: routeTitle('route.pricing', 'Pricing'),
     loadComponent: () =>
       import('./components/pricing/pricing.component').then((m) => m.PricingComponent),
   },
   {
     path: 'privacy',
-    title: 'Privacy Policy',
+    title: routeTitle('route.privacy', 'Privacy Policy'),
     loadComponent: () =>
       import('./components/legal/privacy-policy.component').then((m) => m.PrivacyPolicyComponent),
   },
   {
     path: 'terms',
-    title: 'Terms of Service',
+    title: routeTitle('route.terms', 'Terms of Service'),
     loadComponent: () =>
       import('./components/legal/terms-of-service.component').then(
         (m) => m.TermsOfServiceComponent,

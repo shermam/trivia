@@ -18,6 +18,8 @@ import { formatUnitAmount } from '../../utils/money.util';
 import { CurrencySwitchComponent } from '../currency-switch/currency-switch.component';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 
 type CheckoutQueryStatus = 'success' | 'cancelled' | null;
 
@@ -42,7 +44,7 @@ const CHECKOUT_PREPARE_DELAY_MS = 1_000;
 @Component({
   selector: 'app-pricing',
   standalone: true,
-  imports: [RouterLink, CurrencySwitchComponent, IconComponent, LogoComponent],
+  imports: [RouterLink, CurrencySwitchComponent, IconComponent, LogoComponent, TPipe],
   templateUrl: './pricing.component.html',
   styleUrl: './pricing.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -63,7 +65,7 @@ export class PricingComponent {
    */
   protected readonly dailyFreeGames = DAILY_FREE_GAME_LIMIT;
   protected readonly isSubscribing = signal(false);
-  protected readonly errorMessage = signal<string | null>(null);
+  protected readonly errorMessage = signal<Message | null>(null);
 
   // Read once at construction — this is only ever meaningful on the initial
   // landing from Stripe's `success_url`/`cancel_url` redirect, not something
@@ -121,7 +123,9 @@ export class PricingComponent {
    */
   protected readonly subscribeLabel = computed(() => {
     const amount = this.priceAmount();
-    return amount ? `Subscribe — ${amount}/mo` : 'Subscribe';
+    return amount
+      ? msg('pricing.subscribeAmount', 'Subscribe — {amount}/mo', { amount })
+      : msg('pricing.subscribe', 'Subscribe');
   });
 
   constructor() {
@@ -209,7 +213,9 @@ export class PricingComponent {
       return;
     }
     if (this.needsVerification()) {
-      this.errorMessage.set('Verify your email first, then come back to subscribe.');
+      this.errorMessage.set(
+        msg('pricing.verifyFirst', 'Verify your email first, then come back to subscribe.'),
+      );
       return;
     }
 
@@ -225,7 +231,10 @@ export class PricingComponent {
       // failure it could not explain gets the generic line (`CLAUDE.md`
       // §4.4: distinguish the cases or stay generic).
       this.errorMessage.set(
-        subscriptionFailureMessage(error, 'Could not start checkout. Please try again.'),
+        subscriptionFailureMessage(
+          error,
+          msg('pricing.checkoutFailed', 'Could not start checkout. Please try again.'),
+        ),
       );
       this.isSubscribing.set(false);
     }

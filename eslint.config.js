@@ -108,7 +108,75 @@ module.exports = defineConfig([
       '@angular-eslint/template/no-duplicate-attributes': 'error',
       '@angular-eslint/template/no-positive-tabindex': 'error',
       '@angular-eslint/template/eqeqeq': 'error',
+
+      /**
+       * Interface text comes from a key (`docs/app.md` §1.16): a letter in a
+       * template's text, or in a static attribute, fails here — inline
+       * templates included, since `processInlineTemplates` hands them to this
+       * block as `.html`. The fix is `{{ 'x.y' | t: 'English' }}` or a bound
+       * attribute through the same pipe, **never the `i18n` attribute the
+       * rule's message suggests**: that is Angular's build-time i18n, which
+       * this app does not use, and `npm run i18n:verify` fails on one.
+       *
+       * `checkId: false` because custom ids are that same build-time scheme.
+       * The attributes listed are the ones whose values are identifiers,
+       * tokens or references rather than copy; an attribute a person reads
+       * (`aria-label`, `title`, `placeholder`, `alt`, a component's `label`)
+       * is deliberately absent. Text that is not copy and reads like it —
+       * the brand, a plan's name — is exempted where it stands with
+       * `<!-- eslint-disable-next-line @angular-eslint/template/i18n -- why -->`,
+       * and `i18n:verify` refuses one with no reason.
+       *
+       * What this rule cannot see — a literal inside a binding, prose in
+       * TypeScript — is `scripts/verify-i18n.mjs`'s; `docs/ci-cd.md` §4.5.
+       */
+      '@angular-eslint/template/i18n': [
+        'error',
+        {
+          checkId: false,
+          checkText: true,
+          checkAttributes: true,
+          ignoreAttributes: [
+            'aria-controls',
+            'aria-describedby',
+            'aria-haspopup',
+            'aria-labelledby',
+            'aria-live',
+            'd',
+            'data-cy',
+            'data-rendered',
+            'decoding',
+            'format',
+            'idPrefix',
+            'inputmode',
+            'labelledBy',
+            'providerId',
+            'referrerpolicy',
+            'rel',
+            'size',
+            'stroke-linecap',
+            'stroke-linejoin',
+            'testId',
+            'testIdPrefix',
+          ],
+        },
+      ],
     },
+  },
+  {
+    /**
+     * Not interface text, by decision (`docs/app.md` §1.16): the two legal
+     * documents stay English and say so, because translating a policy is a
+     * legal act rather than a string swap; and `index.html`'s static text is
+     * what shows before any code runs — the recovery notice, `<noscript>` —
+     * with no code to translate it.
+     */
+    files: [
+      'src/index.html',
+      'src/app/components/legal/privacy-policy.component.html',
+      'src/app/components/legal/terms-of-service.component.html',
+    ],
+    rules: { '@angular-eslint/template/i18n': 'off' },
   },
   {
     /**

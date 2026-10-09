@@ -1,10 +1,15 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, effect, inject, signal } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { RouterStateSnapshot, TitleStrategy } from '@angular/router';
+import { I18nService } from './i18n/i18n.service';
+import { routeTitleMessage } from './i18n/route-title';
 import { RouteAnnouncerService } from './services/route-announcer.service';
 
-/** Appended so the browser tab reads "Play — Trivimind" rather than a bare screen name. */
-const APP_NAME = 'Trivimind';
+/**
+ * Appended so the browser tab reads "Play — Trivimind" rather than a bare
+ * screen name. The brand is a name, the same in every language.
+ */
+const APP_NAME = 'Trivimind'; // i18n-exempt: the brand is never translated
 
 /**
  * Sets the document title on navigation *and* announces the new screen (G5).
@@ -14,14 +19,24 @@ const APP_NAME = 'Trivimind';
  * how a screen reader ends up announcing a screen the tab disagrees with. It
  * also means adding a route means adding one `title`, not remembering two
  * separate registrations.
+ *
+ * **A route's title is a message key** (`routeTitle()` in `app.routes.ts`),
+ * rendered through the active translation. The tab follows a change of
+ * language by itself — the effect below re-renders it — and that is *not* a
+ * change of screen, so it is never announced: the announcement is decided by
+ * comparing keys, which a change of language leaves alone.
  */
 @Injectable({ providedIn: 'root' })
 export class AppTitleStrategy extends TitleStrategy {
   private readonly title = inject(Title);
   private readonly announcer = inject(RouteAnnouncerService);
+  private readonly i18n = inject(I18nService);
+
+  /** The key of the screen on show, or `null` before the first navigation or for an untitled one. */
+  private readonly screen = signal<string | null>(null);
 
   /**
-   * The title of the screen last announced, or `undefined` before the first
+   * The key of the screen last announced, or `undefined` before the first
    * navigation.
    *
    * Two things fall out of comparing against it, and the second was found by
@@ -37,16 +52,28 @@ export class AppTitleStrategy extends TitleStrategy {
    *   Stripe to `/pricing?checkout=success` re-announced "Pricing". Neither is
    *   a page change, and neither should sound like one.
    */
-  private lastAnnouncedTitle: string | undefined;
+  private lastAnnouncedKey: string | undefined;
+
+  constructor() {
+    super();
+    // Re-titles the tab when the translation changes. Silent by construction:
+    // it never touches the announcer.
+    effect(() => this.title.setTitle(this.documentTitle(this.screen())));
+  }
 
   override updateTitle(snapshot: RouterStateSnapshot): void {
-    const screenTitle = this.buildTitle(snapshot);
-    this.title.setTitle(screenTitle ? `${screenTitle} — ${APP_NAME}` : APP_NAME);
+    const key = this.buildTitle(snapshot) || null;
+    this.screen.set(key);
+    this.title.setTitle(this.documentTitle(key));
 
-    const isFirstNavigation = this.lastAnnouncedTitle === undefined;
-    if (!isFirstNavigation && screenTitle && screenTitle !== this.lastAnnouncedTitle) {
-      this.announcer.announce(screenTitle);
+    const isFirstNavigation = this.lastAnnouncedKey === undefined;
+    if (!isFirstNavigation && key && key !== this.lastAnnouncedKey) {
+      this.announcer.announce(this.i18n.t(routeTitleMessage(key)));
     }
-    this.lastAnnouncedTitle = screenTitle ?? '';
+    this.lastAnnouncedKey = key ?? '';
+  }
+
+  private documentTitle(key: string | null): string {
+    return key ? `${this.i18n.t(routeTitleMessage(key))} — ${APP_NAME}` : APP_NAME;
   }
 }

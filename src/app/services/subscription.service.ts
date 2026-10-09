@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { msg, type Message } from '../i18n/message';
 import { pollUntil } from '../utils/poll-until.util';
 import { preferredCurrency } from '../utils/currency-preference.util';
 import { AuthService } from './auth.service';
@@ -107,8 +108,10 @@ const MAX_PRICES_PER_PRODUCT = 20;
  * to sell, and the checkout that finds nothing to buy — and the second must
  * not be phrased as "please try again" for a cause that will not change.
  */
-const NO_PRO_PRICE_MESSAGE =
-  "Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later.";
+const NO_PRO_PRICE_MESSAGE = msg(
+  'sub.noPrice',
+  "Pro isn't available to buy right now — no active monthly Pro price is set up. Please try again later.",
+);
 
 /**
  * A ceiling the `onSnapshot` version never had. The query was filtered by
@@ -814,7 +817,7 @@ export class SubscriptionService {
    * choice exactly as it covers any other price ID a client can send.
    */
   async startProCheckout(): Promise<void> {
-    const uid = this.requireSignedInUid('Sign in before subscribing.');
+    const uid = this.requireSignedInUid(msg('sub.signInFirst', 'Sign in before subscribing.'));
     const priceId = await this.selectedProPriceId();
 
     const ready = this.readyCheckoutFor(uid, priceId);
@@ -948,8 +951,14 @@ export class SubscriptionService {
     const promise = this.handshake.run(uid, {
       collectionName: 'checkout_sessions',
       payload: { price: priceId, origin: window.location.origin },
-      timeoutMessage: 'Timed out waiting for Stripe checkout to start. Please try again.',
-      failureMessage: 'Stripe checkout could not be started. Please try again.',
+      timeoutMessage: msg(
+        'sub.checkoutTimedOut',
+        'Timed out waiting for Stripe checkout to start. Please try again.',
+      ),
+      failureMessage: msg(
+        'sub.checkoutFailed',
+        'Stripe checkout could not be started. Please try again.',
+      ),
     });
     const attempt = { uid, priceId, promise };
     this.pendingCheckout = attempt;
@@ -1039,12 +1048,20 @@ export class SubscriptionService {
    * reading during which to prepare one.
    */
   async openBillingPortal(): Promise<void> {
-    const uid = this.requireSignedInUid('Sign in before managing your subscription.');
+    const uid = this.requireSignedInUid(
+      msg('sub.signInToManage', 'Sign in before managing your subscription.'),
+    );
     const portalUrl = await this.handshake.run(uid, {
       collectionName: 'portal_sessions',
       payload: { origin: window.location.origin },
-      timeoutMessage: 'Timed out waiting for the billing portal to open. Please try again.',
-      failureMessage: 'Billing portal could not be opened. Please try again.',
+      timeoutMessage: msg(
+        'sub.portalTimedOut',
+        'Timed out waiting for the billing portal to open. Please try again.',
+      ),
+      failureMessage: msg(
+        'sub.portalFailed',
+        'Billing portal could not be opened. Please try again.',
+      ),
     });
     window.location.assign(portalUrl);
   }
@@ -1057,7 +1074,7 @@ export class SubscriptionService {
    * caller never even creates a document that would just be rejected — and so
    * neither flow consults the catalog on their behalf.
    */
-  private requireSignedInUid(signedOutMessage: string): string {
+  private requireSignedInUid(signedOutMessage: Message): string {
     const uid = this.signedInUid();
     if (!uid) {
       throw new SubscriptionError(signedOutMessage);

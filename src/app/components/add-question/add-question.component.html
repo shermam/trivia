@@ -9,10 +9,10 @@
       <h1
         class="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mb-1"
       >
-        Add a Question
+        {{ 'add.title' | t: 'Add a Question' }}
       </h1>
       <p class="text-slate-500 dark:text-slate-400">
-        Contribute a question to the shared custom bank
+        {{ 'add.intro' | t: 'Contribute a question to the shared custom bank' }}
       </p>
     </div>
 
@@ -21,14 +21,14 @@
         class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
       >
         <p class="text-slate-700 dark:text-slate-300 mb-3">
-          Sign in to submit a question to the shared bank.
+          {{ 'add.signInPrompt' | t: 'Sign in to submit a question to the shared bank.' }}
         </p>
         <button
           type="button"
           (click)="openSignIn()"
           class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
         >
-          Sign in
+          {{ 'add.signIn' | t: 'Sign in' }}
         </button>
       </div>
     } @else if (!authService.isFullyAuthenticated()) {
@@ -36,14 +36,14 @@
         class="text-center bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-2xl px-4 py-5"
       >
         <p class="text-slate-700 dark:text-slate-300 mb-3">
-          Verify your email to submit a question.
+          {{ 'add.verifyPrompt' | t: 'Verify your email to submit a question.' }}
         </p>
         <button
           type="button"
           (click)="resendVerification()"
           class="rounded-xl border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold px-5 py-2.5 transition-colors"
         >
-          Resend verification email
+          {{ 'add.resend' | t: 'Resend verification email' }}
         </button>
       </div>
     } @else if (!subscriptionService.isProUser()) {
@@ -56,7 +56,7 @@
           <app-icon name="sparkles" [size]="20" class="text-white" />
         </div>
         <h2 class="text-lg font-bold text-slate-900 dark:text-slate-50 mb-1">
-          This one's for Pro members
+          {{ 'add.proOnly' | t: "This one's for Pro members" }}
         </h2>
         <!--
           Deliberately does not quote the price. There is one Stripe Price per
@@ -66,7 +66,11 @@
           shows authoritatively.
         -->
         <p class="text-slate-600 dark:text-slate-400 mb-4">
-          Upgrade to Pro to create and add your own questions to the shared question bank.
+          {{
+            'add.upgradePrompt'
+              | t
+                : 'Upgrade to Pro to create and add your own questions to the shared question bank.'
+          }}
         </p>
         <button
           type="button"
@@ -75,7 +79,7 @@
           (focus)="subscriptionService.primePricing()"
           class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
         >
-          Upgrade to Pro
+          {{ 'add.upgrade' | t: 'Upgrade to Pro' }}
         </button>
       </div>
     } @else if (hasSubmitted()) {
@@ -88,10 +92,13 @@
           class="mx-auto mb-2 text-emerald-700 dark:text-emerald-400"
         />
         <p class="text-emerald-700 dark:text-emerald-300 font-medium mb-1">
-          Thanks! Your question has been submitted for review.
+          {{ 'add.submitted' | t: 'Thanks! Your question has been submitted for review.' }}
         </p>
         <p class="text-emerald-700/80 dark:text-emerald-300/80 text-sm mb-4">
-          It will appear in the shared bank once a reviewer has approved it.
+          {{
+            'add.submittedNote'
+              | t: 'It will appear in the shared bank once a reviewer has approved it.'
+          }}
         </p>
         <div class="flex justify-center gap-3">
           <button
@@ -99,14 +106,14 @@
             (click)="addAnother()"
             class="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-5 py-2.5 transition-colors"
           >
-            Add another
+            {{ 'add.another' | t: 'Add another' }}
           </button>
           <button
             type="button"
             (click)="backToGame()"
             class="rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold px-5 py-2.5 transition-colors"
           >
-            Back to game
+            {{ 'add.back' | t: 'Back to game' }}
           </button>
         </div>
       </div>
@@ -119,7 +126,7 @@
             class="flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
           >
             <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-            {{ submitError() }}
+            {{ submitError() | t }}
           </p>
         }
 
@@ -129,7 +136,7 @@
             (click)="backToGame()"
             class="rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold px-5 py-3 transition-colors"
           >
-            Cancel
+            {{ 'add.cancel' | t: 'Cancel' }}
           </button>
           <button
             type="submit"
@@ -137,9 +144,9 @@
             class="flex-1 rounded-xl bg-emerald-700 hover:bg-emerald-800 hover:shadow-cta-hover disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
           >
             @if (isSubmitting()) {
-              Saving&hellip;
+              {{ 'add.saving' | t: 'Saving…' }}
             } @else {
-              Add Question
+              {{ 'add.submit' | t: 'Add Question' }}
             }
           </button>
         </div>

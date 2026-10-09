@@ -5,17 +5,20 @@
       class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors mb-8"
     >
       <app-icon name="arrow-left" [size]="15" />
-      Back to game
+      {{ 'mine.back' | t: 'Back to game' }}
     </a>
 
     <h1
       class="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight mb-2"
     >
-      Your questions
+      {{ 'mine.title' | t: 'Your questions' }}
     </h1>
     <p class="text-slate-500 dark:text-slate-400 mb-8">
-      Everything you have contributed to the shared bank, and what became of it. Editing a question
-      sends it back for review; removing one takes it out of play.
+      {{
+        'mine.intro'
+          | t
+            : 'Everything you have contributed to the shared bank, and what became of it. Editing a question sends it back for review; removing one takes it out of play.'
+      }}
     </p>
 
     <!--
@@ -46,7 +49,7 @@
         [class.invisible]="view() !== 'loading'"
         data-cy="my-questions-loading"
       >
-        Loading your questions…
+        {{ 'mine.loading' | t: 'Loading your questions…' }}
       </p>
       <div
         class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
@@ -54,8 +57,11 @@
         data-cy="my-questions-signed-out"
       >
         <p class="text-sm text-slate-500 dark:text-slate-400">
-          Sign in to see the questions you have contributed. Guest sessions cannot add questions, so
-          there is nothing here for one.
+          {{
+            'mine.signedOut'
+              | t
+                : 'Sign in to see the questions you have contributed. Guest sessions cannot add questions, so there is nothing here for one.'
+          }}
         </p>
         @if (!embedMode.isEmbedded()) {
           <button
@@ -64,7 +70,7 @@
             (click)="openSignIn()"
             class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
           >
-            Sign in
+            {{ 'mine.signIn' | t: 'Sign in' }}
           </button>
         }
       </div>
@@ -74,14 +80,14 @@
         data-cy="my-questions-empty"
       >
         <p class="text-sm text-slate-500 dark:text-slate-400">
-          You have not contributed a question yet.
+          {{ 'mine.empty' | t: 'You have not contributed a question yet.' }}
         </p>
         <a
           routerLink="/add-question"
           data-cy="my-questions-add-link"
           class="text-sm font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
         >
-          Add a question
+          {{ 'mine.add' | t: 'Add a question' }}
         </a>
       </div>
       <div
@@ -89,14 +95,14 @@
         [class.invisible]="view() !== 'failed'"
         data-cy="my-questions-failed"
       >
-        <p class="text-sm text-red-700 dark:text-red-300">{{ loadError() }}</p>
+        <p class="text-sm text-red-700 dark:text-red-300">{{ loadError() | t }}</p>
         <button
           type="button"
           data-cy="my-questions-retry"
           (click)="retry()"
           class="text-sm font-semibold text-red-700 dark:text-red-300 hover:underline"
         >
-          Try again
+          {{ 'mine.retry' | t: 'Try again' }}
         </button>
       </div>
       <p
@@ -104,13 +110,13 @@
         [class.invisible]="view() !== 'loaded'"
         data-cy="my-questions-summary"
       >
-        Newest first.
+        {{ 'mine.newestFirst' | t: 'Newest first.' }}
       </p>
     </div>
 
     <!-- Every async outcome is announced: an edit and a removal both change the
          list under the reader, which is silent to assistive tech otherwise. -->
-    <p role="status" class="sr-only">{{ actionResult() }}</p>
+    <p role="status" class="sr-only">{{ actionResult() | t }}</p>
 
     @if (questions().length > 0) {
       <ul class="space-y-4">
@@ -148,7 +154,7 @@
                 [class.dark:bg-slate-800]="!question.status"
                 [class.dark:text-slate-300]="!question.status"
               >
-                {{ statusLabel(question) }}
+                {{ statusLabel(question) | t }}
               </span>
             </div>
 
@@ -156,12 +162,12 @@
               class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400"
             >
               <div class="flex gap-1">
-                <dt>Difficulty:</dt>
-                <dd>{{ question.difficulty }}</dd>
+                <dt>{{ 'mine.difficulty' | t: 'Difficulty:' }}</dt>
+                <dd>{{ difficultyLabel(question.difficulty) | t }}</dd>
               </div>
               <div class="flex gap-1">
-                <dt>Submitted:</dt>
-                <dd>{{ submittedAt(question) }}</dd>
+                <dt>{{ 'mine.submitted' | t: 'Submitted:' }}</dt>
+                <dd>{{ submittedAt(question) ?? ('mine.unknownDate' | t: 'Unknown') }}</dd>
               </div>
             </dl>
 
@@ -175,7 +181,7 @@
             -->
             <app-question-tags
               [tags]="topicsOf(question)"
-              label="Topics"
+              [label]="'mine.topics' | t: 'Topics'"
               testId="my-question-tags"
             />
 
@@ -195,7 +201,7 @@
                 class="mt-4 rounded-xl border border-red-200 dark:border-red-500/25 bg-red-50 dark:bg-red-500/10 px-4 py-3"
               >
                 <p class="text-xs font-bold uppercase tracking-wide text-red-800 dark:text-red-300">
-                  Why it was rejected
+                  {{ 'mine.rejectedWhy' | t: 'Why it was rejected' }}
                 </p>
                 @if (question.rejectionReason) {
                   <p class="mt-1 text-sm text-red-700 dark:text-red-300 whitespace-pre-line">
@@ -203,7 +209,7 @@
                   </p>
                 } @else {
                   <p class="mt-1 text-sm text-red-700/80 dark:text-red-300/80">
-                    No reason was given.
+                    {{ 'mine.noReason' | t: 'No reason was given.' }}
                   </p>
                 }
               </div>
@@ -228,7 +234,7 @@
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <app-icon name="pencil" [size]="14" />
-                Edit
+                {{ 'mine.edit' | t: 'Edit' }}
               </button>
               <button
                 type="button"
@@ -239,7 +245,7 @@
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg border border-red-200 dark:border-red-500/25 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
               >
                 <app-icon name="trash" [size]="14" />
-                Remove
+                {{ 'mine.remove' | t: 'Remove' }}
               </button>
             </div>
           </li>
@@ -254,7 +260,7 @@
           [disabled]="isLoading()"
           class="mt-6 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
         >
-          Show more
+          {{ 'mine.showMore' | t: 'Show more' }}
         </button>
       }
     }
@@ -292,11 +298,14 @@
           id="edit-dialog-title"
           class="text-xl font-bold text-slate-900 dark:text-slate-50 mb-1 pr-8"
         >
-          Edit your question
+          {{ 'mine.editTitle' | t: 'Edit your question' }}
         </h2>
         <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
-          Saving sends it back for review, so it will not be served until a reviewer approves it
-          again.
+          {{
+            'mine.editNote'
+              | t
+                : 'Saving sends it back for review, so it will not be served until a reviewer approves it again.'
+          }}
         </p>
 
         <!--
@@ -321,7 +330,7 @@
               class="mt-4 flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
             >
               <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-              {{ dialogError() }}
+              {{ dialogError() | t }}
             </p>
           }
 
@@ -333,7 +342,7 @@
               [disabled]="isSaving()"
               class="rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold px-5 py-3 disabled:opacity-50 transition-colors"
             >
-              Cancel
+              {{ 'mine.cancel' | t: 'Cancel' }}
             </button>
             <button
               type="submit"
@@ -342,9 +351,9 @@
               class="flex-1 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 shadow-cta transition-all"
             >
               @if (isSaving()) {
-                Saving&hellip;
+                {{ 'mine.saving' | t: 'Saving…' }}
               } @else {
-                Save and resubmit
+                {{ 'mine.saveResubmit' | t: 'Save and resubmit' }}
               }
             </button>
           </div>
@@ -354,7 +363,7 @@
           id="remove-dialog-title"
           class="text-xl font-bold text-slate-900 dark:text-slate-50 mb-3 pr-8"
         >
-          Remove this question from the app?
+          {{ 'mine.removeTitle' | t: 'Remove this question from the app?' }}
         </h2>
         <div data-cy="remove-question-text" class="text-sm text-slate-700 dark:text-slate-300 mb-3">
           <app-rendered-text [text]="open.question.question" [format]="open.question.format" />
@@ -366,11 +375,14 @@
           be promising something the app cannot do.
         -->
         <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
-          It stops being served in games straight away. It does not withdraw the licence you granted
-          when you contributed it, and it cannot reach copies already played or saved offline. See
-          <a routerLink="/terms" class="text-emerald-700 dark:text-emerald-400 hover:underline"
-            >the Terms</a
-          >.
+          <app-rich-text [message]="removeNote" [tags]="{ terms: termsLink }" />
+          <ng-template #termsLink let-text
+            ><a
+              routerLink="/terms"
+              class="text-emerald-700 dark:text-emerald-400 hover:underline"
+              >{{ text }}</a
+            ></ng-template
+          >
         </p>
 
         @if (dialogError()) {
@@ -379,7 +391,7 @@
             class="mb-4 flex items-start gap-2 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2"
           >
             <app-icon name="circle-alert" [size]="16" class="shrink-0 mt-0.5" />
-            {{ dialogError() }}
+            {{ dialogError() | t }}
           </p>
         }
 
@@ -391,7 +403,7 @@
             [disabled]="isSaving()"
             class="rounded-xl border border-slate-900/15 dark:border-white/15 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold px-5 py-3 disabled:opacity-50 transition-colors"
           >
-            Cancel
+            {{ 'mine.cancel' | t: 'Cancel' }}
           </button>
           <button
             type="button"
@@ -401,9 +413,9 @@
             class="flex-1 rounded-xl bg-red-700 hover:bg-red-800 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 transition-all"
           >
             @if (isSaving()) {
-              Removing&hellip;
+              {{ 'mine.removing' | t: 'Removing…' }}
             } @else {
-              Remove from the app
+              {{ 'mine.removeConfirm' | t: 'Remove from the app' }}
             }
           </button>
         </div>

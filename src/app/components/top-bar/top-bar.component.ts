@@ -22,6 +22,7 @@ import { ThemeService } from '../../services/theme.service';
 import { IconComponent } from '../icon/icon.component';
 import { LogoComponent } from '../logo/logo.component';
 import { AvatarComponent } from '../avatar/avatar.component';
+import { TPipe } from '../../i18n/t.pipe';
 import { AuthMenuComponent } from './auth-menu.component';
 import { environment } from '../../../environments/environment';
 
@@ -57,7 +58,15 @@ function canReceiveFocus(element: HTMLElement | null): element is HTMLElement {
 @Component({
   selector: 'app-top-bar',
   standalone: true,
-  imports: [AuthMenuComponent, AvatarComponent, RouterLink, IconComponent, LogoComponent, NgClass],
+  imports: [
+    AuthMenuComponent,
+    AvatarComponent,
+    RouterLink,
+    IconComponent,
+    LogoComponent,
+    NgClass,
+    TPipe,
+  ],
   templateUrl: './top-bar.component.html',
   styleUrl: './top-bar.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

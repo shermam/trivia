@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { MessageError, msg, verbatim, type Message } from '../i18n/message';
 import { pollUntil } from '../utils/poll-until.util';
 import {
   FirestoreRestClient,
@@ -60,7 +61,7 @@ export type SessionCollection = 'checkout_sessions' | 'donation_sessions' | 'por
 /** What the Cloud Function eventually writes back onto a session document. */
 interface SessionOutcome {
   url?: string;
-  error?: string;
+  error?: Message;
 }
 
 /**
@@ -84,11 +85,20 @@ interface SessionOutcome {
  * the cause is what makes the difference visible from the screen instead of
  * from the function logs.
  */
-export class SubscriptionError extends Error {
-  constructor(message: string) {
-    super(message);
+export class SubscriptionError extends MessageError {
+  constructor(display: Message) {
+    super(display);
     this.name = 'SubscriptionError';
   }
+}
+
+/**
+ * The function's own sentence (`clientMessageFor`), shown as it was written:
+ * the session document carries English rather than a code, so there is
+ * nothing here to translate it from.
+ */
+function serverMessage(text: string): Message {
+  return verbatim(text);
 }
 
 /**
@@ -102,9 +112,9 @@ export class SubscriptionError extends Error {
  * dropped — once the screen says "please try again", the console is the only
  * place its real cause survives.
  */
-export function subscriptionFailureMessage(error: unknown, fallback: string): string {
+export function subscriptionFailureMessage(error: unknown, fallback: Message): Message {
   if (error instanceof SubscriptionError) {
-    return error.message;
+    return error.display;
   }
   console.error('[subscription] unexplained failure', error);
   return fallback;
@@ -132,8 +142,8 @@ export class SessionHandshakeService {
     options: {
       collectionName: SessionCollection;
       payload: Record<string, string>;
-      timeoutMessage: string;
-      failureMessage: string;
+      timeoutMessage: Message;
+      failureMessage: Message;
     },
   ): Promise<string> {
     const sessionPath = await this.createSessionDoc(uid, options.collectionName, options.payload);
@@ -186,7 +196,7 @@ export class SessionHandshakeService {
    */
   private async readSessionOutcome(
     sessionPath: string,
-    failureMessage: string,
+    failureMessage: Message,
     remainingMs: number,
   ): Promise<SessionOutcome | null> {
     // The budget left, not the whole budget. Giving each read the full
@@ -203,7 +213,7 @@ export class SessionHandshakeService {
     }
     const error = data['error'] as { message?: string } | undefined;
     if (error) {
-      return { error: error.message ?? failureMessage };
+      return { error: error.message ? serverMessage(error.message) : failureMessage };
     }
     return typeof data['url'] === 'string' ? { url: data['url'] } : null;
   }
@@ -245,7 +255,10 @@ export class SessionHandshakeService {
     }
 
     throw new SubscriptionError(
-      'Too many attempts just now. Reload the page and try again in a few minutes.',
+      msg(
+        'session.tooMany',
+        'Too many attempts just now. Reload the page and try again in a few minutes.',
+      ),
     );
   }
 }

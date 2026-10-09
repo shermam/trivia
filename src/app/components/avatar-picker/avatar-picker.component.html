@@ -4,7 +4,7 @@
   class="mt-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-900/8 dark:border-white/10 shadow-card p-6 sm:p-8"
 >
   <h2 id="avatar-heading" class="text-lg font-bold text-slate-900 dark:text-slate-50 mb-1">
-    Your avatar
+    {{ 'avatar.title' | t: 'Your avatar' }}
   </h2>
 
   <!--
@@ -22,63 +22,66 @@
       [class.invisible]="line() !== 'loading'"
       data-cy="avatar-loading"
     >
-      Loading your avatar&hellip;
+      {{ 'avatar.loading' | t: 'Loading your avatar…' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="line() !== 'signedOut'"
       data-cy="avatar-signed-out"
     >
-      Sign in to choose an avatar. A guest session has no account to keep one on.
+      {{
+        'avatar.signedOut'
+          | t: 'Sign in to choose an avatar. A guest session has no account to keep one on.'
+      }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="line() !== 'unverified'"
       data-cy="avatar-unverified"
     >
-      Verify your email address to choose an avatar.
+      {{ 'avatar.unverified' | t: 'Verify your email address to choose an avatar.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
       [class.invisible]="line() !== 'failed'"
       data-cy="avatar-failed"
     >
-      Could not load your avatar just now.
+      {{ 'avatar.failed' | t: 'Could not load your avatar just now.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="line() !== 'idle'"
       data-cy="avatar-idle"
     >
-      How you appear on your account button and on this page.
+      {{ 'avatar.idle' | t: 'How you appear on your account button and on this page.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="line() !== 'saving'"
       data-cy="avatar-saving"
     >
-      Saving&hellip;
+      {{ 'avatar.saving' | t: 'Saving…' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-emerald-700 dark:text-emerald-400"
       [class.invisible]="line() !== 'saved'"
       data-cy="avatar-saved"
     >
-      Saved.
+      {{ 'avatar.saved' | t: 'Saved.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
       [class.invisible]="line() !== 'unavailable'"
       data-cy="avatar-unavailable"
     >
-      Avatars cannot be saved on this deployment yet.
+      {{ 'avatar.unavailable' | t: 'Avatars cannot be saved on this deployment yet.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
       [class.invisible]="line() !== 'saveFailed'"
       data-cy="avatar-save-failed"
     >
-      Could not save your avatar. Please try again.
+      {{ 'avatar.saveFailed' | t: 'Could not save your avatar. Please try again.' }}
     </p>
     <!--
       A save whose answer never came. The callable's timeout stops waiting and
@@ -91,7 +94,10 @@
       [class.invisible]="line() !== 'unconfirmed'"
       data-cy="avatar-unconfirmed"
     >
-      Your avatar could not be confirmed as saved. Reload in a moment to check.
+      {{
+        'avatar.unconfirmed'
+          | t: 'Your avatar could not be confirmed as saved. Reload in a moment to check.'
+      }}
     </p>
   </div>
 
@@ -114,7 +120,7 @@
     <span
       id="avatar-kind-label"
       class="block mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-      >Show as</span
+      >{{ 'avatar.showAs' | t: 'Show as' }}</span
     >
     <!--
       Three columns at every width, whatever this account can choose from. The
@@ -163,7 +169,7 @@
               [choice]="option.preview"
               [photoUrl]="photoUrl()"
             />
-            {{ option.label }}
+            {{ option.label | t }}
           </label>
         } @else {
           <div
@@ -172,7 +178,7 @@
             class="invisible flex flex-col items-center gap-1.5 rounded-xl border border-slate-900/10 px-1.5 py-2.5 text-center text-xs sm:text-sm font-semibold"
           >
             <app-avatar size="md" [letter]="letter()" />
-            {{ option.label }}
+            {{ option.label | t }}
           </div>
         }
       }
@@ -200,7 +206,7 @@
             [id]="'avatar-set-' + block.set + '-label'"
             class="text-sm font-bold text-slate-900 dark:text-slate-50"
           >
-            {{ block.label }}
+            {{ block.label | t }}
           </h3>
           @if (block.status !== 'open') {
             <div
@@ -213,14 +219,14 @@
                 [class.invisible]="block.status !== 'checking'"
                 [attr.data-cy]="'avatar-set-' + block.set + '-checking'"
               >
-                Checking your level&hellip;
+                {{ 'avatar.checkingLevel' | t: 'Checking your level…' }}
               </p>
               <p
                 class="col-start-1 row-start-1"
                 [class.invisible]="block.status !== 'unchecked'"
                 [attr.data-cy]="'avatar-set-' + block.set + '-unchecked'"
               >
-                Could not check your level
+                {{ 'avatar.levelUnchecked' | t: 'Could not check your level' }}
               </p>
               <p
                 class="col-start-1 row-start-1 inline-flex items-center justify-end gap-1"
@@ -228,14 +234,19 @@
                 [attr.data-cy]="'avatar-set-' + block.set + '-locked'"
               >
                 <app-icon name="lock" [size]="12" />
-                Unlocks at level {{ block.unlockLevel }}
+                {{
+                  'avatar.unlocksAt' | t: 'Unlocks at level {level}' : { level: block.unlockLevel }
+                }}
               </p>
               <p
                 class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
                 [class.invisible]="block.status !== 'unlocked'"
                 [attr.data-cy]="'avatar-set-' + block.set + '-unlocked'"
               >
-                Unlocked at level {{ block.unlockLevel }}
+                {{
+                  'avatar.unlockedAt'
+                    | t: 'Unlocked at level {level}' : { level: block.unlockLevel }
+                }}
               </p>
             </div>
           }
@@ -244,7 +255,7 @@
         <span
           [id]="'avatar-set-' + block.set + '-shape-label'"
           class="block mt-2 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-          >Shape</span
+          >{{ 'avatar.shape' | t: 'Shape' }}</span
         >
         <div
           role="radiogroup"
@@ -286,7 +297,7 @@
                 (change)="chooseShape(block.set, option.index)"
               />
               <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
-              <span class="sr-only">{{ option.label }}</span>
+              <span class="sr-only">{{ option.label | t }}</span>
             </label>
           }
         </div>
@@ -294,7 +305,7 @@
         <span
           [id]="'avatar-set-' + block.set + '-colour-label'"
           class="block mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-          >Colour</span
+          >{{ 'avatar.colour' | t: 'Colour' }}</span
         >
         <div
           role="radiogroup"
@@ -338,7 +349,7 @@
                 (change)="choosePalette(block.set, option.index)"
               />
               <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
-              <span class="sr-only">{{ option.label }}</span>
+              <span class="sr-only">{{ option.label | t }}</span>
             </label>
           }
         </div>
@@ -368,11 +379,14 @@
         <label
           for="avatar-public"
           class="block text-sm font-semibold text-slate-700 dark:text-slate-300 cursor-pointer"
-          >Show my avatar to other players</label
+          >{{ 'avatar.public' | t: 'Show my avatar to other players' }}</label
         >
         <p id="avatar-public-help" class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-          Nothing in the app shows avatars to other players yet; this decides what happens when
-          something does.
+          {{
+            'avatar.publicHelp'
+              | t
+                : 'Nothing in the app shows avatars to other players yet; this decides what happens when something does.'
+          }}
         </p>
       </div>
     </div>
@@ -393,7 +407,7 @@
       [attr.aria-disabled]="saving() ? 'true' : null"
       (click)="save()"
     >
-      Save avatar
+      {{ 'avatar.save' | t: 'Save avatar' }}
     </button>
     @if (!embedMode.isEmbedded()) {
       <button
@@ -403,7 +417,7 @@
         [class.invisible]="view() !== 'signedOut'"
         (click)="openSignIn()"
       >
-        Sign in
+        {{ 'avatar.signIn' | t: 'Sign in' }}
       </button>
     }
     <button
@@ -413,7 +427,7 @@
       [class.invisible]="view() !== 'failed'"
       (click)="retry()"
     >
-      Try again
+      {{ 'avatar.retry' | t: 'Try again' }}
     </button>
   </div>
 </section>

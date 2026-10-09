@@ -3,6 +3,8 @@ import { signal } from '@angular/core';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 import { FirestoreRestError } from './firestore-rest/firestore-rest.client';
+import { verbatim } from '../i18n/message';
+import { english } from '../i18n/testing';
 import { GeoService } from './geo.service';
 import { PricingCacheService, READY_CHECKOUT_TTL_MS } from './pricing-cache.service';
 import {
@@ -1483,11 +1485,11 @@ describe('subscriptionFailureMessage', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     const message = subscriptionFailureMessage(
-      new SubscriptionError('Sign in before subscribing.'),
-      'Could not start checkout. Please try again.',
+      new SubscriptionError(verbatim('Sign in before subscribing.')),
+      verbatim('Could not start checkout. Please try again.'),
     );
 
-    expect(message).toBe('Sign in before subscribing.');
+    expect(english(message)).toBe('Sign in before subscribing.');
     expect(consoleError).not.toHaveBeenCalled();
   });
 
@@ -1500,17 +1502,17 @@ describe('subscriptionFailureMessage', () => {
 
     const message = subscriptionFailureMessage(
       error,
-      'Could not start checkout. Please try again.',
+      verbatim('Could not start checkout. Please try again.'),
     );
 
-    expect(message).toBe('Could not start checkout. Please try again.');
+    expect(english(message)).toBe('Could not start checkout. Please try again.');
     expect(consoleError).toHaveBeenCalledWith(expect.any(String), error);
   });
 
   it('stays generic for a rejection that is not an Error at all', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    expect(subscriptionFailureMessage('boom', 'generic')).toBe('generic');
+    expect(english(subscriptionFailureMessage('boom', verbatim('generic')))).toBe('generic');
   });
 });
 

@@ -7,7 +7,7 @@
     class="inline-flex items-center gap-1.5 mb-4 text-sm font-semibold text-slate-600 hover:text-emerald-700 dark:text-slate-300 dark:hover:text-emerald-400 transition-colors disabled:opacity-50"
   >
     <app-icon name="arrow-left" [size]="15" />
-    Back to {{ returnLabel() }}
+    {{ 'author.backTo' | t: 'Back to {label}' : { label: returnLabel() } }}
   </button>
 
   <!-- Focused when the view opens, so it is announced by name: the queue the
@@ -19,7 +19,7 @@
     data-cy="author-view-heading"
     class="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 focus:outline-none"
   >
-    Everything this account contributed
+    {{ 'author.title' | t: 'Everything this account contributed' }}
   </h2>
 
   <!--
@@ -28,7 +28,9 @@
     2,000 characters and this is a label for the set rather than the question
     itself — which is in the list below, whole.
   -->
-  <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">The account that wrote:</p>
+  <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
+    {{ 'author.wrote' | t: 'The account that wrote:' }}
+  </p>
   <div
     data-cy="author-view-anchor"
     class="mt-1 line-clamp-3 border-l-2 border-slate-300 dark:border-slate-700 pl-3 text-sm text-slate-700 dark:text-slate-200"
@@ -36,10 +38,12 @@
     <app-rendered-text [text]="anchor().question" [format]="anchor().format" />
   </div>
   <p class="mt-3 mb-6 text-sm text-slate-500 dark:text-slate-400">
-    Every status, newest first, {{ pageSize }} to a page. Rejecting stops a question being served
-    and shows your reason to its author; nothing is deleted, and any of them can be approved again
-    from the Rejected tab. Suspending or deleting the account itself is not done here — the site
-    owner does that in the Firebase console.
+    {{
+      'author.intro'
+        | t
+          : 'Every status, newest first, {count} to a page. Rejecting stops a question being served and shows your reason to its author; nothing is deleted, and any of them can be approved again from the Rejected tab. Suspending or deleting the account itself is not done here — the site owner does that in the Firebase console.'
+          : { count: pageSize }
+    }}
   </p>
 
   <!--
@@ -67,21 +71,21 @@
       [class.invisible]="statusView() !== 'loading'"
       data-cy="author-loading"
     >
-      Loading this account’s contributions…
+      {{ 'author.loading' | t: 'Loading this account’s contributions…' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="statusView() !== 'empty' || pageIndex() > 0"
       data-cy="author-empty"
     >
-      Nothing this account contributed is in the bank any more.
+      {{ 'author.empty' | t: 'Nothing this account contributed is in the bank any more.' }}
     </p>
     <p
       class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
       [class.invisible]="statusView() !== 'empty' || pageIndex() === 0"
       data-cy="author-empty-older"
     >
-      There is nothing older from this account.
+      {{ 'author.emptyOlder' | t: 'There is nothing older from this account.' }}
     </p>
     <div
       class="col-start-1 row-start-1 flex flex-wrap items-baseline gap-x-3 gap-y-1"
@@ -89,7 +93,7 @@
       data-cy="author-failed"
     >
       <p class="text-sm text-red-700 dark:text-red-300">
-        Could not load this account’s contributions.
+        {{ 'author.failed' | t: 'Could not load this account’s contributions.' }}
       </p>
       <button
         type="button"
@@ -97,7 +101,7 @@
         (click)="retry()"
         class="text-sm font-semibold text-red-700 dark:text-red-300 hover:underline"
       >
-        Try again
+        {{ 'author.retry' | t: 'Try again' }}
       </button>
     </div>
     <p
@@ -105,13 +109,13 @@
       [class.invisible]="statusView() !== 'loaded'"
       data-cy="author-summary"
     >
-      {{ pageLabel() }}
+      {{ pageLabel() | t }}
     </p>
   </div>
 
   <!-- The outcome of a bulk action, announced (`CLAUDE.md` §4.5). Permanent,
        and only its text changes, so the change is what gets read out. -->
-  <p role="status" class="sr-only" data-cy="author-announcement">{{ announcement() }}</p>
+  <p role="status" class="sr-only" data-cy="author-announcement">{{ announcement() | t }}</p>
 
   @if (rows().length > 0) {
     <!--
@@ -137,7 +141,7 @@
           aria-describedby="author-selection-line"
           (change)="toggleAll()"
         />
-        Select all on this page
+        {{ 'author.selectAll' | t: 'Select all on this page' }}
       </label>
 
       <!--
@@ -158,37 +162,47 @@
           [class.invisible]="selectionLine() !== 'count'"
           data-cy="selection-count"
         >
-          {{ selectedCount() }} of {{ selectable().length }} selected
+          {{
+            'author.selectedCount'
+              | t
+                : '{count} of {total} selected'
+                : { count: selectedCount(), total: selectable().length }
+          }}
         </p>
         <p
           class="col-start-1 row-start-1 text-slate-600 dark:text-slate-300"
           [class.invisible]="selectionLine() !== 'nothing-to-reject'"
           data-cy="selection-nothing"
         >
-          Everything on this page is already rejected.
+          {{ 'author.allRejected' | t: 'Everything on this page is already rejected.' }}
         </p>
         <p
           class="col-start-1 row-start-1 text-slate-600 dark:text-slate-300"
           [class.invisible]="selectionLine() !== 'progress'"
           data-cy="selection-progress"
         >
-          Rejecting… {{ progress()?.done ?? 0 }} of {{ progress()?.total ?? 0 }}
+          {{
+            'author.progress'
+              | t
+                : 'Rejecting… {done} of {total}'
+                : { done: progress()?.done ?? 0, total: progress()?.total ?? 0 }
+          }}
         </p>
         <p
           class="col-start-1 row-start-1 text-slate-700 dark:text-slate-200"
           [class.invisible]="selectionLine() !== 'outcome'"
           data-cy="selection-outcome"
         >
-          {{ outcome() }}
+          {{ outcome() | t }}
         </p>
         <p
           class="col-start-1 row-start-1 text-red-700 dark:text-red-300"
           [class.invisible]="selectionLine() !== 'error'"
           data-cy="selection-error"
         >
-          Select at least one question to reject.
+          {{ selectOne | t }}
         </p>
-        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ longestOutcome }}</p>
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ longestOutcome | t }}</p>
       </div>
 
       <!--
@@ -202,7 +216,8 @@
         for="author-bulk-reason"
         class="block mt-4 mb-1 text-xs font-semibold text-slate-500 dark:text-slate-400"
       >
-        Reason for rejecting <span class="font-normal">(required)</span>
+        {{ 'author.reasonLabel' | t: 'Reason for rejecting' }}
+        <span class="font-normal">{{ 'author.required' | t: '(required)' }}</span>
       </label>
       <textarea
         #reasonBox
@@ -222,7 +237,7 @@
         class="w-full rounded-xl border border-slate-900/15 dark:border-white/15 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
       ></textarea>
       <p id="author-bulk-reason-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        Shown to the author on every question this rejects.
+        {{ 'author.reasonHint' | t: 'Shown to the author on every question this rejects.' }}
       </p>
       <!--
         The box's error lands in a line held for it from the first frame — the
@@ -233,15 +248,15 @@
         keystroke, is the jump `CLAUDE.md` §4.4 forbids.
       -->
       <div data-cy="bulk-reason-error-line" class="grid mt-1.5 text-sm">
-        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonMissing }}</p>
-        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonTooLong }}</p>
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonMissing | t }}</p>
+        <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ reasonTooLong | t }}</p>
         @if (reasonError(); as error) {
           <p
             id="author-bulk-reason-error"
             data-cy="bulk-reason-error"
             class="col-start-1 row-start-1 text-red-700 dark:text-red-300"
           >
-            {{ error }}
+            {{ error | t }}
           </p>
         }
       </div>
@@ -259,15 +274,19 @@
         (click)="rejectSelected()"
         class="mt-3 inline-grid rounded-lg border border-red-300 dark:border-red-500/40 px-3 py-1.5 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10 aria-disabled:opacity-60"
       >
-        <span class="col-start-1 row-start-1" [class.invisible]="inFlight()">Reject selected</span>
-        <span class="col-start-1 row-start-1" [class.invisible]="!inFlight()">Rejecting…</span>
+        <span class="col-start-1 row-start-1" [class.invisible]="inFlight()">{{
+          'author.rejectSelected' | t: 'Reject selected'
+        }}</span>
+        <span class="col-start-1 row-start-1" [class.invisible]="!inFlight()">{{
+          'author.rejecting' | t: 'Rejecting…'
+        }}</span>
       </button>
     </div>
 
     <ul
       class="space-y-3"
       data-cy="author-questions"
-      aria-label="This account’s contributions on this page"
+      [attr.aria-label]="'author.listLabel' | t: 'This account’s contributions on this page'"
       [attr.aria-busy]="isLoading() || null"
     >
       <!-- Tracked by the document id, never by the question text: two
@@ -294,7 +313,9 @@
               "
               (change)="toggle(question, $any($event.target).checked)"
             />
-            <span class="sr-only">Select question {{ index + 1 }}</span>
+            <span class="sr-only">{{
+              'author.selectQuestion' | t: 'Select question {n}' : { n: index + 1 }
+            }}</span>
           </label>
 
           <div class="min-w-0 flex-1">
@@ -343,22 +364,22 @@
                 <span
                   class="col-start-1 row-start-1 text-center"
                   [class.invisible]="question.status !== 'pending'"
-                  >Pending review</span
+                  >{{ 'author.statusPending' | t: 'Pending review' }}</span
                 >
                 <span
                   class="col-start-1 row-start-1 text-center"
                   [class.invisible]="question.status !== 'approved'"
-                  >Approved</span
+                  >{{ 'author.statusApproved' | t: 'Approved' }}</span
                 >
                 <span
                   class="col-start-1 row-start-1 text-center"
                   [class.invisible]="question.status !== 'rejected'"
-                  >Rejected</span
+                  >{{ 'author.statusRejected' | t: 'Rejected' }}</span
                 >
                 <span
                   class="col-start-1 row-start-1 text-center"
                   [class.invisible]="!!question.status"
-                  >Unknown</span
+                  >{{ 'author.statusUnknown' | t: 'Unknown' }}</span
                 >
               </span>
             </div>
@@ -367,18 +388,18 @@
               class="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500 dark:text-slate-400"
             >
               <div class="flex gap-1">
-                <dt>Submitted:</dt>
-                <dd>{{ submittedAt(question) }}</dd>
+                <dt>{{ 'author.submitted' | t: 'Submitted:' }}</dt>
+                <dd>{{ submittedAt(question) | t }}</dd>
               </div>
               <div class="flex gap-1">
-                <dt>Difficulty:</dt>
-                <dd>{{ question.difficulty }}</dd>
+                <dt>{{ 'author.difficulty' | t: 'Difficulty:' }}</dt>
+                <dd>{{ difficultyLabel(question.difficulty) | t }}</dd>
               </div>
             </dl>
 
             <app-question-tags
               [tags]="topicsOf(question)"
-              label="Topics"
+              [label]="'author.topics' | t: 'Topics'"
               testId="author-question-tags"
             />
           </div>
@@ -396,7 +417,7 @@
         [disabled]="pageIndex() === 0 || isBusy()"
         class="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
       >
-        Newer contributions
+        {{ 'author.newer' | t: 'Newer contributions' }}
       </button>
       <button
         type="button"
@@ -405,7 +426,7 @@
         [disabled]="next() === null || isBusy()"
         class="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
       >
-        Older contributions
+        {{ 'author.older' | t: 'Older contributions' }}
       </button>
     </div>
   }

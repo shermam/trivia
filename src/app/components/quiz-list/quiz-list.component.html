@@ -11,7 +11,7 @@
       tabindex="-1"
       class="text-2xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight focus:outline-none"
     >
-      Curated quizzes
+      {{ 'quizzes.title' | t: 'Curated quizzes' }}
     </h2>
     <!--
       slate-600 rather than the house slate-500: this sits on slate-50, where
@@ -20,11 +20,11 @@
       slate-950 7.7:1 in the dark theme.
     -->
     <p class="mt-1 text-slate-600 dark:text-slate-400">
-      Questions somebody chose, played in the order they chose them.
+      {{ 'quizzes.intro' | t: 'Questions somebody chose, played in the order they chose them.' }}
     </p>
 
     <!-- Permanent and empty until the read lands (G3); "loading" is not an outcome. -->
-    <p role="status" class="sr-only" data-cy="quiz-list-status">{{ announcement() }}</p>
+    <p role="status" class="sr-only" data-cy="quiz-list-status">{{ announcement() | t }}</p>
 
     <!--
       **One box, one height, every state** (`CLAUDE.md` §4.4). The strip is a
@@ -82,7 +82,7 @@
                   <span
                     class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
                     [class.invisible]="offline()"
-                    >{{ countLabel(quiz) }}</span
+                    >{{ countLabel(quiz) | t }}</span
                   >
                   <span
                     class="col-start-1 row-start-1 flex items-center gap-1.5 text-amber-800 dark:text-amber-300"
@@ -90,7 +90,7 @@
                     data-cy="quiz-link-offline"
                   >
                     <app-icon name="wifi-off" [size]="14" class="shrink-0" />
-                    Needs a connection
+                    {{ 'quizzes.offline' | t: 'Needs a connection' }}
                   </span>
                 </span>
               </a>
@@ -135,7 +135,7 @@
             class="absolute inset-0 flex items-center justify-center px-6 pb-3 text-center text-slate-600 dark:text-slate-400"
             data-cy="quiz-list-empty"
           >
-            No quizzes have been published yet.
+            {{ emptyMessage | t }}
           </p>
         }
         @if (view() === 'failed') {
@@ -145,9 +145,11 @@
           >
             <p class="text-slate-600 dark:text-slate-400">
               @if (connectivity.isOnline()) {
-                The quizzes could not be loaded.
+                {{ failedMessage | t }}
               } @else {
-                You're offline, and the quizzes need a connection.
+                {{
+                  'quizzes.failedOffline' | t: "You're offline, and the quizzes need a connection."
+                }}
               }
             </p>
             <button
@@ -156,7 +158,7 @@
               (click)="retry()"
               class="rounded-xl border border-emerald-300 dark:border-emerald-500/30 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold px-5 py-2 transition-colors"
             >
-              Try again
+              {{ 'quizzes.retry' | t: 'Try again' }}
             </button>
           </div>
         }

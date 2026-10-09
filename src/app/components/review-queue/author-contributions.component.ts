@@ -25,6 +25,9 @@ import { topicTagsOf } from '../../utils/category-tags';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
 import { RenderedTextComponent } from '../rendered-text/rendered-text.component';
+import { msg, verbatim, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
+import { difficultyLabel } from '../../utils/difficulty-label.util';
 
 type ReviewQuestion = CustomQuestionDoc & { id: string };
 
@@ -53,10 +56,7 @@ export type SelectionLineView = 'count' | 'nothing-to-reject' | 'progress' | 'ou
  * sentence is a partial failure, and its length depends on the numbers in it,
  * so the reserved copy is written with the widest numbers a page can produce.
  */
-const LONGEST_OUTCOME = describeOutcome(1, AUTHOR_PAGE_SIZE).replace(
-  /\d+/g,
-  String(AUTHOR_PAGE_SIZE),
-);
+const LONGEST_OUTCOME = partialOutcome(AUTHOR_PAGE_SIZE, AUTHOR_PAGE_SIZE, AUTHOR_PAGE_SIZE);
 
 /**
  * The reason box's two errors. Named here rather than in the template because
@@ -65,8 +65,14 @@ const LONGEST_OUTCOME = describeOutcome(1, AUTHOR_PAGE_SIZE).replace(
  * under them and every row below stay put when one appears or clears
  * (`CLAUDE.md` §4.4).
  */
-const REASON_MISSING = 'Give a reason — it is shown to the author on every question this rejects.';
-const REASON_TOO_LONG = `A reason must be ${MAX_REJECTION_REASON_LENGTH} characters or fewer.`;
+const REASON_MISSING = msg(
+  'author.reasonMissing',
+  'Give a reason — it is shown to the author on every question this rejects.',
+);
+const REASON_TOO_LONG = msg('author.reasonTooLong', 'A reason must be {max} characters or fewer.', {
+  max: MAX_REJECTION_REASON_LENGTH,
+});
+const SELECT_ONE = msg('author.selectOne', 'Select at least one question to reject.');
 
 /**
  * A rejected question is not selectable: the action this view offers is
@@ -88,19 +94,36 @@ function isSelectable(question: ReviewQuestion): boolean {
  * §4.4 forbids. Retrying is safe either way, which is why the unconfirmed ones
  * stay selected.
  */
-export function describeOutcome(succeeded: number, total: number): string {
+export function describeOutcome(succeeded: number, total: number): Message {
   const failed = total - succeeded;
   if (failed === 0) {
-    return `Rejected ${succeeded} ${succeeded === 1 ? 'question' : 'questions'}.`;
+    return msg(
+      'author.outcomeAll',
+      '{n, plural, one {Rejected # question.} other {Rejected # questions.}}',
+      { n: succeeded },
+    );
   }
   if (succeeded === 0) {
     return total === 1
-      ? 'That question could not be confirmed and is still selected — try again.'
-      : `None of the ${total} could be confirmed. They are still selected — try again.`;
+      ? msg(
+          'author.outcomeNoneOne',
+          'That question could not be confirmed and is still selected — try again.',
+        )
+      : msg(
+          'author.outcomeNone',
+          'None of the {total} could be confirmed. They are still selected — try again.',
+          { total },
+        );
   }
-  return (
-    `Rejected ${succeeded} of ${total}. ${failed} could not be confirmed and ` +
-    `${failed === 1 ? 'is' : 'are'} still selected — try again.`
+  return partialOutcome(succeeded, total, failed);
+}
+
+/** Some landed and some did not — the selection line's longest sentence. */
+function partialOutcome(succeeded: number, total: number, failed: number): Message {
+  return msg(
+    'author.outcomePartial',
+    '{failed, plural, one {Rejected {succeeded} of {total}. # could not be confirmed and is still selected — try again.} other {Rejected {succeeded} of {total}. # could not be confirmed and are still selected — try again.}}',
+    { succeeded, total, failed },
   );
 }
 
@@ -133,7 +156,7 @@ export function describeOutcome(succeeded: number, total: number): string {
 @Component({
   selector: 'app-author-contributions',
   standalone: true,
-  imports: [IconComponent, QuestionTagsComponent, RenderedTextComponent],
+  imports: [IconComponent, QuestionTagsComponent, RenderedTextComponent, TPipe],
   templateUrl: './author-contributions.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -148,7 +171,7 @@ export class AuthorContributionsComponent implements OnInit {
   readonly anchor = input.required<ReviewQuestion>();
 
   /** The tab "Back" returns to, in the picker's own words. */
-  readonly returnLabel = input.required<string>();
+  readonly returnLabel = input.required<Message>();
 
   /** "Back" was pressed. */
   readonly closed = output<void>();
@@ -201,11 +224,18 @@ export class AuthorContributionsComponent implements OnInit {
    * page number is in it only once there is more than one page.
    */
   protected readonly pageLabel = computed(() => {
-    const count = this.rows().length;
-    const contributions = `${count} ${count === 1 ? 'contribution' : 'contributions'}`;
+    const n = this.rows().length;
     return this.hasPages()
-      ? `Page ${this.pageIndex() + 1}: ${contributions}, newest first.`
-      : `${contributions}, newest first.`;
+      ? msg(
+          'author.pageOf',
+          '{n, plural, one {Page {page}: # contribution, newest first.} other {Page {page}: # contributions, newest first.}}',
+          { n, page: this.pageIndex() + 1 },
+        )
+      : msg(
+          'author.page',
+          '{n, plural, one {# contribution, newest first.} other {# contributions, newest first.}}',
+          { n },
+        );
   });
 
   /** The selection, by document id. It belongs to the page on screen and is cleared with it. */
@@ -228,14 +258,14 @@ export class AuthorContributionsComponent implements OnInit {
 
   protected readonly inFlight = signal(false);
   protected readonly progress = signal<{ done: number; total: number } | null>(null);
-  protected readonly outcome = signal<string | null>(null);
+  protected readonly outcome = signal<Message | null>(null);
 
   /**
    * Announced through a permanent `role="status"` region (`CLAUDE.md` §4.5):
    * a bulk action changes rows all over the list at once, which is silent to
    * assistive tech otherwise.
    */
-  protected readonly announcement = signal<string | null>(null);
+  protected readonly announcement = signal<Message | null>(null);
 
   protected readonly isBusy = computed(() => this.isLoading() || this.inFlight());
 
@@ -251,10 +281,11 @@ export class AuthorContributionsComponent implements OnInit {
   });
 
   protected readonly selectionError = computed(() =>
-    this.attempted() && this.selectedCount() === 0
-      ? 'Select at least one question to reject.'
-      : null,
+    this.attempted() && this.selectedCount() === 0 ? SELECT_ONE : null,
   );
+
+  protected readonly selectOne = SELECT_ONE;
+  protected readonly difficultyLabel = difficultyLabel;
 
   /** The selection line's face. In flight wins, then an error the reviewer has to act on. */
   protected readonly selectionLine = computed<SelectionLineView>(() => {
@@ -411,7 +442,11 @@ export class AuthorContributionsComponent implements OnInit {
     );
     this.outcome.set(null);
     this.announcement.set(
-      clearing ? 'Selection cleared.' : `${this.selectedCount()} selected on this page.`,
+      clearing
+        ? msg('author.cleared', 'Selection cleared.')
+        : msg('author.selectedAll', '{count} selected on this page.', {
+            count: this.selectedCount(),
+          }),
     );
   }
 
@@ -491,8 +526,10 @@ export class AuthorContributionsComponent implements OnInit {
     return topicTagsOf(question);
   }
 
-  protected submittedAt(question: ReviewQuestion): string {
-    return question.createdAt ? new Date(question.createdAt).toLocaleString() : 'Unknown';
+  protected submittedAt(question: ReviewQuestion): Message {
+    return question.createdAt
+      ? verbatim(new Date(question.createdAt).toLocaleString())
+      : msg('author.unknownDate', 'Unknown');
   }
 
   private focusStatus(): void {

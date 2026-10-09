@@ -79,6 +79,7 @@ export const LEGAL_CONTACT_EMAIL = 'quizloop.trivia@gmail.com';
  * answers to not publishing a home address), and Stripe will require one at
  * go-live regardless — see `docs/known-gaps.md`.
  */
+// i18n-exempt: a registered company name, the same in every language
 export const LEGAL_ENTITY_NAME = 'TRIVIMIND TECNOLOGIA INOVA SIMPLES (I.S.)';
 
 /** Brazilian company registration number, shown alongside {@link LEGAL_ENTITY_NAME}. */

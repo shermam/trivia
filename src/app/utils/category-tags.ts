@@ -60,6 +60,7 @@ export interface SeedCategory {
  * list: a generation run for a former category is a run handed that category's
  * seed tag.
  */
+// i18n-exempt: Open Trivia DB's own category names — data its API is matched against, never shown
 export const OPEN_TRIVIA_CATEGORIES: readonly SeedCategory[] = [
   { id: 9, name: 'General Knowledge', tag: 'general-knowledge' },
   { id: 10, name: 'Entertainment: Books', tag: 'books' },

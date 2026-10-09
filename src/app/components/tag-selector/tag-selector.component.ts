@@ -19,6 +19,8 @@ import {
   normalizeTag,
 } from '../../utils/normalize-tag.util';
 import { QUESTION_TAG_SUGGESTIONS } from '../../utils/tag-suggestions';
+import { msg, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 import { IconComponent } from '../icon/icon.component';
 
 /** Everything a suggestion chip wears in both states — see `suggestionClass()`. */
@@ -131,7 +133,7 @@ const SUGGESTIONS_IDLE_FALLBACK_MS = 500;
 @Component({
   selector: 'app-tag-selector',
   standalone: true,
-  imports: [IconComponent, NgClass],
+  imports: [IconComponent, NgClass, TPipe],
   templateUrl: './tag-selector.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [
@@ -146,8 +148,15 @@ export class TagSelectorComponent implements ControlValueAccessor {
   /** Prefix for every DOM id here, since an id is global (see `QuestionFieldsComponent`). */
   readonly idPrefix = input('');
 
-  /** The visible label above the control. */
-  readonly label = input('Tags');
+  /** The visible label above the control, translated by the caller. */
+  readonly label = input.required<string>();
+
+  /**
+   * The name of the list of chosen tags — "Topics chosen" — for a screen
+   * reader. A whole label of its own rather than `label` plus a word, because
+   * the word agrees with the label in a language with gender.
+   */
+  readonly chosenLabel = input.required<string>();
 
   /**
    * Whether the caller requires at least one tag — the contribute form, since a
@@ -162,10 +171,10 @@ export class TagSelectorComponent implements ControlValueAccessor {
    * named in its `aria-describedby`, the contract every field on the question
    * form keeps — the picker cannot read the form control's validity itself.
    */
-  readonly errorMessage = input<string | null>(null);
+  readonly errorMessage = input<Message | null>(null);
 
   /** One line under the label saying what the control is for. */
-  readonly hint = input('');
+  readonly hint = input<Message | null>(null);
 
   /**
    * Every hint this instance can be given, including the current one.
@@ -178,7 +187,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
    *
    * Left empty by a caller whose hint never changes, which costs it nothing.
    */
-  readonly hintVariants = input<readonly string[]>([]);
+  readonly hintVariants = input<readonly Message[]>([]);
 
   /**
    * How many tags may be selected. Eight on a question, because that is what
@@ -202,7 +211,9 @@ export class TagSelectorComponent implements ControlValueAccessor {
   readonly allowedTags = input<readonly string[] | null>(null);
 
   /** What the feedback line and the live region say about a tag outside {@link allowedTags}. */
-  readonly notAllowedMessage = input('That topic is not on offer here.');
+  readonly notAllowedMessage = input<Message>(
+    msg('tags.notAllowed', 'That topic is not on offer here.'),
+  );
 
   /**
    * Every message beyond the built-in ones that the feedback line may be asked
@@ -210,7 +221,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
    * to {@link replaceSelection} — so the line is reserved at the tallest of
    * them, exactly as {@link hintVariants} reserves the hint.
    */
-  readonly feedbackVariants = input<readonly string[]>([]);
+  readonly feedbackVariants = input<readonly Message[]>([]);
 
   /**
    * Keep the shortcut row empty until the first idle moment or the first focus
@@ -235,14 +246,14 @@ export class TagSelectorComponent implements ControlValueAccessor {
   private readonly formDisabled = signal(false);
 
   /** The last thing that happened, for the live region. */
-  protected readonly announcement = signal('');
+  protected readonly announcement = signal<Message | null>(null);
 
   /**
    * A sentence about a change the reader did not make with their own keys —
    * {@link replaceSelection}'s — shown in the feedback line until the next
    * thing they do here.
    */
-  protected readonly notice = signal<string | null>(null);
+  protected readonly notice = signal<Message | null>(null);
 
   /** Whether a deferred shortcut row has been filled yet. */
   private readonly suggestionsFilled = signal(false);
@@ -367,7 +378,7 @@ export class TagSelectorComponent implements ControlValueAccessor {
    * something here, and speaks `announcement` from the live region every other
    * change here is announced from.
    */
-  replaceSelection(tags: readonly string[], notice: string, announcement: string): void {
+  replaceSelection(tags: readonly string[], notice: Message, announcement: Message): void {
     this.commit([...tags]);
     this.notice.set(notice);
     this.announcement.set(announcement);
@@ -455,15 +466,22 @@ export class TagSelectorComponent implements ControlValueAccessor {
     if (!tag) {
       this.announcement.set(
         this.draftTooLong()
-          ? `"${raw}" is too long — a tag is at most ${MAX_TAG_LENGTH} characters.`
-          : `"${raw}" has no tag in it — a tag needs at least ${MIN_TAG_LENGTH} letters or digits.`,
+          ? msg('tags.saidTooLong', '"{raw}" is too long — a tag is at most {max} characters.', {
+              raw,
+              max: MAX_TAG_LENGTH,
+            })
+          : msg(
+              'tags.saidTooShort',
+              '"{raw}" has no tag in it — a tag needs at least {min} letters or digits.',
+              { raw, min: MIN_TAG_LENGTH },
+            ),
       );
       return;
     }
     if (!this.isAllowed(tag)) {
       // Left in the box, like a malformed draft: the feedback line keeps saying
       // why while the reader decides what to do with it.
-      this.announcement.set(`#${tag} was not added. ${this.notAllowedMessage()}`);
+      this.announcement.set(this.notAddedMessage(tag));
       return;
     }
     this.draft.set('');
@@ -485,25 +503,39 @@ export class TagSelectorComponent implements ControlValueAccessor {
     }
     this.notice.set(null);
     if (!this.isAllowed(tag)) {
-      this.announcement.set(`#${tag} was not added. ${this.notAllowedMessage()}`);
+      this.announcement.set(this.notAddedMessage(tag));
       return;
     }
     if (this.tags().includes(tag)) {
-      this.announcement.set(`${tag} is already added.`);
+      this.announcement.set(msg('tags.saidDuplicate', '{tag} is already added.', { tag }));
       return;
     }
     if (this.replacesOnAdd() && this.tags().length > 0) {
       const replaced = this.tags()[0];
       this.commit([tag]);
-      this.announcement.set(`Replaced ${replaced} with ${tag}.`);
+      this.announcement.set(
+        msg('tags.saidReplaced', 'Replaced {replaced} with {tag}.', { replaced, tag }),
+      );
       return;
     }
     if (this.isFull()) {
-      this.announcement.set(`That is the maximum of ${this.max()} tags.`);
+      this.announcement.set(
+        msg(
+          'tags.saidFull',
+          '{max, plural, one {That is the maximum of # tag.} other {That is the maximum of # tags.}}',
+          { max: this.max() },
+        ),
+      );
       return;
     }
     this.commit([...this.tags(), tag]);
-    this.announcement.set(`Added ${tag}. ${this.tags().length} of ${this.max()}.`);
+    this.announcement.set(
+      msg('tags.saidAdded', 'Added {tag}. {count} of {max}.', {
+        tag,
+        count: this.tags().length,
+        max: this.max(),
+      }),
+    );
   }
 
   protected remove(tag: string): void {
@@ -512,7 +544,21 @@ export class TagSelectorComponent implements ControlValueAccessor {
     }
     this.notice.set(null);
     this.commit(this.tags().filter((existing) => existing !== tag));
-    this.announcement.set(`Removed ${tag}. ${this.tags().length} of ${this.max()}.`);
+    this.announcement.set(
+      msg('tags.saidRemoved', 'Removed {tag}. {count} of {max}.', {
+        tag,
+        count: this.tags().length,
+        max: this.max(),
+      }),
+    );
+  }
+
+  /** "#history was not added." and why — the caller's reason, quoted whole. */
+  private notAddedMessage(tag: string): Message {
+    return msg('tags.saidNotAllowed', '#{tag} was not added. {reason}', {
+      tag,
+      reason: this.notAllowedMessage(),
+    });
   }
 
   private commit(tags: string[]): void {

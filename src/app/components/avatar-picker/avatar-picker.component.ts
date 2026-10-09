@@ -29,6 +29,8 @@ import {
   builtSeed,
 } from '../avatar/built-avatar';
 import { IconComponent } from '../icon/icon.component';
+import { msg, verbatim, type Message } from '../../i18n/message';
+import { TPipe } from '../../i18n/t.pipe';
 
 /**
  * Which of the card's states is showing — decided in one `computed`, for the
@@ -49,7 +51,7 @@ type PickerLine =
 
 interface KindOption {
   kind: AvatarKind;
-  label: string;
+  label: Message;
   /** What the option draws — built once per draft, so the binding is stable. */
   preview: AvatarChoice;
   /**
@@ -63,7 +65,7 @@ interface KindOption {
 interface BuiltOption {
   id: string;
   index: number;
-  label: string;
+  label: Message;
   /** The avatar the tile draws, which is exactly the one choosing it builds. */
   preview: AvatarChoice;
   /** The seed of that avatar — what picking the tile drafts. */
@@ -101,7 +103,7 @@ type SetStatus = 'open' | 'checking' | 'unchecked' | 'locked' | 'unlocked';
 /** One set's two rows, and where the set stands. */
 interface SetBlock {
   set: string;
-  label: string;
+  label: Message;
   unlockLevel: number;
   status: SetStatus;
   /** Whether the set's tiles can be chosen — all but the stored avatar's are held when not. */
@@ -126,11 +128,11 @@ function setStatus(set: string, unlockLevel: number, knowledge: XpKnowledge): Se
 }
 
 /** What the page's live region says when a save ends — shorter than the visible line. */
-const ANNOUNCEMENTS: Record<AvatarSaveOutcome, string> = {
-  saved: 'Avatar saved.',
-  unavailable: 'Avatars cannot be saved on this deployment yet.',
-  failed: 'Could not save your avatar.',
-  unconfirmed: 'Your avatar could not be confirmed as saved.',
+const ANNOUNCEMENTS: Record<AvatarSaveOutcome, Message> = {
+  saved: msg('avatar.saidSaved', 'Avatar saved.'),
+  unavailable: msg('avatar.saidUnavailable', 'Avatars cannot be saved on this deployment yet.'),
+  failed: msg('avatar.saidFailed', 'Could not save your avatar.'),
+  unconfirmed: msg('avatar.saidUnconfirmed', 'Your avatar could not be confirmed as saved.'),
 };
 
 const INITIALS_PREVIEW: AvatarChoice = { kind: 'initials', showPublicly: false };
@@ -142,8 +144,43 @@ const builtChoice = (set: string, shapeIndex: number, paletteIndex: number): Ava
   showPublicly: false,
 });
 
-/** `dot` → `Dot`: the tables' ids are the names, so the labels cannot drift from them. */
-const labelFor = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+/**
+ * What each set, shape and colour is called. The tables' ids are names, and in
+ * English a label is the id with a capital; in any other language it is a word
+ * of its own, so each is a message. An id added to a table without one is
+ * shown capitalised rather than missing.
+ */
+const NAMES: Readonly<Record<string, Message>> = {
+  core: msg('avatar.setCore', 'Core'),
+  bold: msg('avatar.setBold', 'Bold'),
+  dot: msg('avatar.shapeDot', 'Dot'),
+  ring: msg('avatar.shapeRing', 'Ring'),
+  diamond: msg('avatar.shapeDiamond', 'Diamond'),
+  square: msg('avatar.shapeSquare', 'Square'),
+  triangle: msg('avatar.shapeTriangle', 'Triangle'),
+  plus: msg('avatar.shapePlus', 'Plus'),
+  star: msg('avatar.shapeStar', 'Star'),
+  bolt: msg('avatar.shapeBolt', 'Bolt'),
+  heart: msg('avatar.shapeHeart', 'Heart'),
+  crown: msg('avatar.shapeCrown', 'Crown'),
+  moon: msg('avatar.shapeMoon', 'Moon'),
+  shield: msg('avatar.shapeShield', 'Shield'),
+  emerald: msg('avatar.colourEmerald', 'Emerald'),
+  forest: msg('avatar.colourForest', 'Forest'),
+  gold: msg('avatar.colourGold', 'Gold'),
+  night: msg('avatar.colourNight', 'Night'),
+  cocoa: msg('avatar.colourCocoa', 'Cocoa'),
+  mint: msg('avatar.colourMint', 'Mint'),
+  ruby: msg('avatar.colourRuby', 'Ruby'),
+  amber: msg('avatar.colourAmber', 'Amber'),
+  blush: msg('avatar.colourBlush', 'Blush'),
+  honey: msg('avatar.colourHoney', 'Honey'),
+  slate: msg('avatar.colourSlate', 'Slate'),
+  jade: msg('avatar.colourJade', 'Jade'),
+};
+
+const labelFor = (id: string): Message =>
+  NAMES[id] ?? verbatim(id.charAt(0).toUpperCase() + id.slice(1));
 
 /**
  * The avatar picker on `/profile` (`FEAT-038`): initials, the Google photo, or
@@ -191,7 +228,7 @@ const labelFor = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
 @Component({
   selector: 'app-avatar-picker',
   standalone: true,
-  imports: [AvatarComponent, IconComponent],
+  imports: [AvatarComponent, IconComponent, TPipe],
   templateUrl: './avatar-picker.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -214,7 +251,7 @@ export class AvatarPickerComponent {
    * when it ends. Empty first, so a second identical outcome is still a change
    * the region announces.
    */
-  readonly announce = output<string>();
+  readonly announce = output<Message | null>();
 
   /** Focused when a retry starts, because the button pressed is about to be hidden. */
   private readonly statusLine = viewChild<ElementRef<HTMLElement>>('statusLine');
@@ -320,19 +357,24 @@ export class AvatarPickerComponent {
    * object on every check — and fail Angular's dev-mode check for it.
    */
   protected readonly kindOptions = computed<KindOption[]>(() => [
-    { kind: 'initials', label: 'Initials', preview: INITIALS_PREVIEW, available: true },
+    {
+      kind: 'initials',
+      label: msg('avatar.initials', 'Initials'),
+      preview: INITIALS_PREVIEW,
+      available: true,
+    },
     // Offered only to an account that has a photo on the one host the CSP
     // admits: a choice that can only ever resolve to initials is worse than
     // no choice (`FEAT-038` §1). Its cell stays either way — see the template.
     {
       kind: 'photo',
-      label: 'Google photo',
+      label: msg('avatar.photo', 'Google photo'),
       preview: PHOTO_PREVIEW,
       available: this.photoUrl() !== null,
     },
     {
       kind: 'built',
-      label: 'Build your own',
+      label: msg('avatar.built', 'Build your own'),
       preview: { kind: 'built', seed: this.draftSeed(), showPublicly: false },
       available: true,
     },
@@ -482,7 +524,7 @@ export class AvatarPickerComponent {
 
     this.saving.set(true);
     this.outcome.set(null);
-    this.announce.emit('');
+    this.announce.emit(null);
     const outcome = await this.avatars.save(choice);
     this.saving.set(false);
     this.outcome.set(outcome);

@@ -3,6 +3,8 @@ import { signal } from '@angular/core';
 import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
 import { SubscriptionError, SubscriptionService } from '../../services/subscription.service';
+import { verbatim, type Message } from '../../i18n/message';
+import { english } from '../../i18n/testing';
 import { AuthMenuComponent } from './auth-menu.component';
 
 /**
@@ -25,7 +27,7 @@ function setup(openBillingPortal: () => Promise<void>) {
   });
   return TestBed.runInInjectionContext(() => new AuthMenuComponent()) as unknown as {
     manageSubscription(): Promise<void>;
-    errorMessage(): string | null;
+    errorMessage(): Message | null;
     isOpeningPortal(): boolean;
   };
 }
@@ -38,12 +40,16 @@ describe('AuthMenuComponent billing portal failure message', () => {
 
   it('shows the cause the service verified, word for word', async () => {
     const component = setup(() =>
-      Promise.reject(new SubscriptionError('Timed out waiting for the billing portal to open.')),
+      Promise.reject(
+        new SubscriptionError(verbatim('Timed out waiting for the billing portal to open.')),
+      ),
     );
 
     await component.manageSubscription();
 
-    expect(component.errorMessage()).toBe('Timed out waiting for the billing portal to open.');
+    expect(english(component.errorMessage())).toBe(
+      'Timed out waiting for the billing portal to open.',
+    );
     expect(component.isOpeningPortal()).toBe(false);
   });
 
@@ -54,7 +60,9 @@ describe('AuthMenuComponent billing portal failure message', () => {
 
     await component.manageSubscription();
 
-    expect(component.errorMessage()).toBe('Could not open the billing portal. Please try again.');
+    expect(english(component.errorMessage())).toBe(
+      'Could not open the billing portal. Please try again.',
+    );
     expect(component.isOpeningPortal()).toBe(false);
     expect(consoleError).toHaveBeenCalledWith(expect.any(String), error);
   });

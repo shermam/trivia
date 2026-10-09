@@ -113,6 +113,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * stores. Nothing is coerced — a number where a string belongs is a problem,
  * not a value to stringify.
  */
+// i18n-exempt: the curator's messages, printed by scripts/seed-quiz.mjs; the app shows none of them
 export function validateQuizDefinition(input: unknown): QuizDefinitionResult {
   if (!isPlainObject(input)) {
     return { ok: false, problems: ['The definition must be a JSON object.'] };
