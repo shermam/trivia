@@ -27,6 +27,12 @@ export interface CustomQuestionSeed {
    * a pending or rejected question.
    */
   status?: 'approved' | 'pending' | 'rejected';
+  /**
+   * A reviewer's note on a rejected question (`FEAT-007`) — seeded for the
+   * spec that needs a rejection a reviewer already explained, to prove a
+   * later action leaves it alone.
+   */
+  rejectionReason?: string;
   createdAt?: number;
   /**
    * The optional contributor fields (`FEAT-022`): where the answer comes from,

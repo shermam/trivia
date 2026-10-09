@@ -17,6 +17,11 @@ import {
   isVoteValue,
   questionVoteId,
 } from '../models/question-vote';
+import {
+  CONTRIBUTIONS_AUTHOR_FIELD,
+  CONTRIBUTIONS_COLLECTION,
+  CONTRIBUTIONS_ORDER,
+} from '../models/contributions-query';
 import { QUIZZES_COLLECTION, QUIZ_MAX_QUESTIONS } from '../models/quiz.model';
 import { isDocumentReference } from '../utils/quiz-definition.util';
 import {
@@ -150,10 +155,49 @@ export const MY_QUESTIONS_PAGE_SIZE = 25;
  */
 export type UserQuestionCursor = readonly [createdAt: unknown, id: string];
 
-/** One page of an author's own questions, and where the next one begins. */
+/** One page of an author's questions, and where the next one begins. */
 export interface UserQuestionsPage {
   questions: (CustomQuestionDoc & { id: string })[];
   next: UserQuestionCursor | null;
+}
+
+/**
+ * How many of one account's contributions a page of the reviewer's per-author
+ * view holds (`FEAT-006`): the review queue's page size.
+ *
+ * It is also, by construction, the most one bulk decision can touch. A
+ * selection is made on one page and cleared when the page changes, so it can
+ * never span two — and {@link MAX_BULK_DECISIONS} restates the bound at the
+ * write, because a bound does not live at the call site.
+ */
+export const AUTHOR_PAGE_SIZE = REVIEW_PAGE_SIZE;
+
+/** The most questions one bulk decision may name (`FEAT-006`): one page of the per-author view. */
+export const MAX_BULK_DECISIONS = AUTHOR_PAGE_SIZE;
+
+/**
+ * How many of a bulk decision's writes are in flight at once.
+ *
+ * Batched rather than all at once so a page of fifty is not fifty concurrent
+ * requests from one tab, and so the caller can show a count that moves; and
+ * batched rather than one at a time because each write is a round trip plus a
+ * `user_roles` lookup in the rules, and fifty of those in series is a wait the
+ * reviewer would feel.
+ */
+const BULK_WRITE_BATCH_SIZE = 10;
+
+/**
+ * What became of a bulk decision, per document (`FEAT-006`).
+ *
+ * `failed` is every write that was refused, timed out or never answered — and
+ * a timed-out write may still have landed, which is why the screen says these
+ * "could not be confirmed" rather than that they were not saved. Retrying one
+ * is safe either way: rejecting a rejected question with the same reason is a
+ * write the rules accept.
+ */
+export interface BulkDecisionOutcome {
+  succeeded: string[];
+  failed: string[];
 }
 
 /**
@@ -648,24 +692,59 @@ export class FirebaseService {
    * return — without it the query is refused outright rather than narrowed
    * (`docs/data-model.md` §3) — and the limit is `CLAUDE.md` §4.1.
    *
-   * Ordered `createdAt` descending with the document ID as a tiebreaker, which
-   * needs the `(createdBy ASC, createdAt DESC)` composite index declared in
-   * `firestore.indexes.json`. The emulator answers this query whether or not
-   * that index exists, so it is declared rather than discovered (D3).
-   *
    * Questions predating attribution are absent by construction: they carry no
    * `createdBy` to match, and nobody can claim them.
    */
   async getUserQuestions(uid: string, after?: UserQuestionCursor): Promise<UserQuestionsPage> {
+    return this.contributionsPage(uid, MY_QUESTIONS_PAGE_SIZE, after);
+  }
+
+  /**
+   * One page of everything one account has contributed, whatever its status,
+   * newest first, for a reviewer (`FEAT-006`).
+   *
+   * **The same query `/my-questions` sends, at the review page size**, so it
+   * rides the composite index that already exists and nothing about
+   * `firestore.indexes.json` or `firestore.rules` changes. Who may run it is
+   * the read rule's business: a reviewer is admitted by the `isReviewer()`
+   * branch whatever the filter says, and anybody else naming somebody else's
+   * uid is refused outright, because neither the public branch nor the author
+   * branch can be proved for an unapproved question that is not theirs.
+   * Nothing here checks the role — a client check is UX, never authority
+   * (`CLAUDE.md` §4.2) — and the screen that calls this is gated on the same
+   * `user_roles` document the rule reads.
+   *
+   * Bounded by {@link AUTHOR_PAGE_SIZE} and paged on a cursor (`CLAUDE.md`
+   * §4.1). The uid is the one value the caller supplies, taken from a question
+   * the reviewer is already looking at; it is a filter value and never reaches
+   * the screen.
+   */
+  async getQuestionsByAuthor(uid: string, after?: UserQuestionCursor): Promise<UserQuestionsPage> {
+    return this.contributionsPage(uid, AUTHOR_PAGE_SIZE, after);
+  }
+
+  /**
+   * The contributions query both readers above send, built once from
+   * `CONTRIBUTIONS_*` (`models/contributions-query.ts`).
+   *
+   * Ordered `createdAt` descending with the document ID as a tiebreaker, which
+   * needs the `(createdBy ASC, createdAt DESC)` composite index declared in
+   * `firestore.indexes.json`. The emulator answers this query whether or not
+   * that index exists, so it is declared rather than discovered (D3) — and
+   * `firestore-tests/indexes.spec.ts` derives the index it needs from the same
+   * constants this builds the query from, so the two cannot drift.
+   */
+  private async contributionsPage(
+    uid: string,
+    pageSize: number,
+    after?: UserQuestionCursor,
+  ): Promise<UserQuestionsPage> {
     const documents = await this.rest.runQuery(
       {
-        collectionPath: CUSTOM_QUESTIONS_COLLECTION,
-        where: [{ field: 'createdBy', op: 'EQUAL', value: uid }],
-        orderBy: [
-          { field: 'createdAt', direction: 'DESCENDING' },
-          { field: DOCUMENT_ID_FIELD, direction: 'DESCENDING' },
-        ],
-        limit: MY_QUESTIONS_PAGE_SIZE,
+        collectionPath: CONTRIBUTIONS_COLLECTION,
+        where: [{ field: CONTRIBUTIONS_AUTHOR_FIELD, op: 'EQUAL', value: uid }],
+        orderBy: CONTRIBUTIONS_ORDER.map((order) => ({ ...order })),
+        limit: pageSize,
         ...(after === undefined ? {} : { startAfterValues: after }),
       },
       { timeoutMs: FIRESTORE_TIMEOUT_MS },
@@ -680,7 +759,7 @@ export class FirebaseService {
       // A short page is the end. A full one might also be, which costs one
       // empty read to find out — the trade every cursor-paged list makes.
       next:
-        last === undefined || documents.length < MY_QUESTIONS_PAGE_SIZE
+        last === undefined || documents.length < pageSize
           ? null
           : [last.data['createdAt'], last.id],
     };
@@ -796,6 +875,62 @@ export class FirebaseService {
         ...(reason ? {} : { deleteFields: ['rejectionReason'] }),
       },
     );
+  }
+
+  /**
+   * Rejects a reviewer's selection with one reason (`FEAT-006`) — **one write
+   * per document**, each the same `setQuestionStatus` patch a single decision
+   * sends, under the same reviewer rule.
+   *
+   * **Separate writes rather than one batched commit, deliberately.** The rule
+   * is evaluated per document either way, and there is no batch privilege to
+   * add: adding one would mean widening the `affectedKeys()` clause that keeps a
+   * moderator out of the question text. What a commit would change is the
+   * failure — all or nothing — and the failure that actually happens here is
+   * one question its author withdrew a moment ago, which refuses its own write
+   * and should refuse nobody else's. Separate writes report it as what it is,
+   * one failure among successes.
+   *
+   * **Batched in the client**, {@link BULK_WRITE_BATCH_SIZE} in flight at a
+   * time, with `onProgress` called as each batch settles so the screen can
+   * show a count that moves.
+   *
+   * **Bounded here, not at the call site**: more than
+   * {@link MAX_BULK_DECISIONS} ids, or a reason `firestore.rules` would refuse
+   * — empty, which is what makes the reason required, or longer than
+   * {@link MAX_REJECTION_REASON_LENGTH} — throws before anything is sent.
+   * Duplicate ids are written once.
+   */
+  async rejectQuestions(
+    questionIds: readonly string[],
+    reason: string,
+    onProgress?: (settled: number, total: number) => void,
+  ): Promise<BulkDecisionOutcome> {
+    const ids = [...new Set(questionIds)];
+    const note = reason.trim();
+    if (ids.length > MAX_BULK_DECISIONS) {
+      throw new RangeError(
+        `A bulk decision names at most ${MAX_BULK_DECISIONS} questions; got ${ids.length}.`,
+      );
+    }
+    if (note.length === 0 || note.length > MAX_REJECTION_REASON_LENGTH) {
+      throw new RangeError(
+        `A bulk rejection needs a reason of 1–${MAX_REJECTION_REASON_LENGTH} characters.`,
+      );
+    }
+
+    const outcome: BulkDecisionOutcome = { succeeded: [], failed: [] };
+    for (let start = 0; start < ids.length; start += BULK_WRITE_BATCH_SIZE) {
+      const batch = ids.slice(start, start + BULK_WRITE_BATCH_SIZE);
+      const settled = await Promise.allSettled(
+        batch.map((id) => this.setQuestionStatus(id, 'rejected', note)),
+      );
+      settled.forEach((result, index) =>
+        (result.status === 'fulfilled' ? outcome.succeeded : outcome.failed).push(batch[index]),
+      );
+      onProgress?.(outcome.succeeded.length + outcome.failed.length, ids.length);
+    }
+    return outcome;
   }
 
   /**

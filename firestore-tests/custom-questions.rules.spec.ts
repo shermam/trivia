@@ -16,10 +16,14 @@ import {
   orderBy,
   query,
   setDoc,
+  startAfter,
   updateDoc,
   where,
 } from 'firebase/firestore';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { ANONYMISED_AUTHOR } from '../functions/src/account-policy';
+import { DELETED_AUTHOR } from '../src/app/models/question.model';
 import {
   asAnonymous,
   asOAuth,
@@ -2004,6 +2008,172 @@ describe('custom_questions: an author reads their own, whatever the status (FEAT
     });
     await assertSucceeds(
       getDocs(query(questions(asSignedOut(env)), where('status', '==', 'approved'))),
+    );
+  });
+});
+
+/**
+ * `FEAT-006`: a reviewer reads everything one account has contributed, and
+ * rejects the set with one reason.
+ *
+ * **No rule changed for this**, which is what these rows exist to show rather
+ * than assume. The read is admitted by the existing `isReviewer()` branch —
+ * whatever the filter, since a reviewer may read any question in any status —
+ * and the bulk action is the single decision's write issued once per document,
+ * so the existing reviewer `update` clause is the whole of its permission.
+ *
+ * Both directions, with the query the view actually sends
+ * (`FirebaseService.getQuestionsByAuthor`, order, bound and cursor included):
+ * the accept rows are what fail if the reviewer branch goes, and the reject
+ * rows are what fail if the read is widened to anybody signed in. A list
+ * query is what Firestore has to *prove*, so these are queries rather than
+ * gets — a `get` row would pass against a rule that refused every list.
+ */
+describe('custom_questions: a reviewer reads one account’s contributions (FEAT-006)', () => {
+  const AUTHOR = 'author-uid';
+  const REVIEWER = 'reviewer-uid';
+  const PAGE = 50;
+  const T = Date.now() - 3_600_000;
+
+  /** The per-author view's query, from its first page or from a cursor. */
+  const theirs = (ctx: RulesTestContext, after?: [number, string]) =>
+    after
+      ? query(
+          questions(ctx),
+          where('createdBy', '==', AUTHOR),
+          orderBy('createdAt', 'desc'),
+          orderBy(documentId(), 'desc'),
+          startAfter(...after),
+          limit(PAGE),
+        )
+      : query(
+          questions(ctx),
+          where('createdBy', '==', AUTHOR),
+          orderBy('createdAt', 'desc'),
+          orderBy(documentId(), 'desc'),
+          limit(PAGE),
+        );
+
+  beforeEach(async () => {
+    await grantReviewer(env, REVIEWER);
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const seed = (id: string, data: Record<string, unknown>) =>
+        setDoc(doc(ctx.firestore(), 'custom_questions', id), data);
+      await seed('theirs-pending', validQuestion(AUTHOR, { status: 'pending', createdAt: T + 3 }));
+      await seed(
+        'theirs-approved',
+        validQuestion(AUTHOR, { status: 'approved', createdAt: T + 2 }),
+      );
+      await seed(
+        'theirs-rejected',
+        validQuestion(AUTHOR, { status: 'rejected', rejectionReason: 'Vague.', createdAt: T + 1 }),
+      );
+      await seed('elsewhere', validQuestion('somebody-else', { status: 'pending', createdAt: T }));
+    });
+  });
+
+  it('serves a reviewer the query — every status that account has, newest first', async () => {
+    const snapshot = await assertSucceeds(getDocs(theirs(asVerifiedPassword(env, REVIEWER))));
+
+    expect(snapshot.docs.map((document) => document.id)).toEqual([
+      'theirs-pending',
+      'theirs-approved',
+      'theirs-rejected',
+    ]);
+  });
+
+  it('serves a reviewer the next page, from a cursor on both ordering fields', async () => {
+    const snapshot = await assertSucceeds(
+      getDocs(theirs(asVerifiedPassword(env, REVIEWER), [T + 3, 'theirs-pending'])),
+    );
+
+    expect(snapshot.docs.map((document) => document.id)).toEqual([
+      'theirs-approved',
+      'theirs-rejected',
+    ]);
+  });
+
+  // `isReviewer()` asks for a signed-in caller, not a verified one, and the
+  // client gate (`ReviewerService`) reads the role for exactly the same set of
+  // accounts — so an unverified password account holding the role is served
+  // on both sides, and the UI is never narrower than the rule for nothing.
+  it('serves a reviewer whose password account is not yet verified', async () => {
+    await grantReviewer(env, 'unverified-reviewer');
+    await assertSucceeds(getDocs(theirs(asUnverifiedPassword(env, 'unverified-reviewer'))));
+  });
+
+  it('refuses a signed-in account with no role document', async () => {
+    await assertFails(getDocs(theirs(asVerifiedPassword(env, 'stranger'))));
+  });
+
+  it('refuses an account whose role document says reviewer: false', async () => {
+    await grantReviewer(env, 'demoted', false);
+    await assertFails(getDocs(theirs(asVerifiedPassword(env, 'demoted'))));
+  });
+
+  // Paying to contribute is not a licence to read anybody else's unapproved
+  // work.
+  it('refuses a Pro subscriber who is not a reviewer', async () => {
+    await assertFails(getDocs(theirs(asPro(env, 'pro-user'))));
+  });
+
+  it('refuses an anonymous session', async () => {
+    await assertFails(getDocs(theirs(asAnonymous(env, 'anon'))));
+  });
+
+  it('refuses a signed-out visitor', async () => {
+    await assertFails(getDocs(theirs(asSignedOut(env))));
+  });
+
+  it('lets a reviewer reject an approved question with a reason — the bulk write on a live question', async () => {
+    await assertSucceeds(
+      updateDoc(
+        doc(asVerifiedPassword(env, REVIEWER).firestore(), 'custom_questions', 'theirs-approved'),
+        {
+          status: 'rejected',
+          rejectionReason: 'The account is posting spam.',
+        },
+      ),
+    );
+  });
+
+  // A bulk action retried after a write that timed out sends the same write to
+  // a question that may already carry it. Refusing the no-op would turn an
+  // unconfirmed success into a failure the reviewer cannot clear.
+  it('accepts the same rejection twice, so a retried bulk action is not refused', async () => {
+    const target = doc(
+      asVerifiedPassword(env, REVIEWER).firestore(),
+      'custom_questions',
+      'theirs-pending',
+    );
+    const write = { status: 'rejected', rejectionReason: 'The account is posting spam.' };
+    await assertSucceeds(updateDoc(target, write));
+    await assertSucceeds(updateDoc(target, write));
+  });
+
+  it('refuses the bulk write from somebody who is not a reviewer', async () => {
+    await assertFails(
+      updateDoc(
+        doc(asVerifiedPassword(env, 'stranger').firestore(), 'custom_questions', 'theirs-pending'),
+        {
+          status: 'rejected',
+          rejectionReason: 'The account is posting spam.',
+        },
+      ),
+    );
+  });
+
+  /**
+   * The view is offered on no question whose author is the erased-account
+   * sentinel, because every erased author shares it. That decision is made in
+   * the app against its own copy of the string, so the copy has to be the one
+   * `deleteAccount` writes and the rules refuse by name — three copies, and
+   * nothing but this row would notice one drifting.
+   */
+  it('agrees with deleteAccount and the rules on the erased-author sentinel', () => {
+    expect(DELETED_AUTHOR).toBe(ANONYMISED_AUTHOR);
+    expect(readFileSync('firestore.rules', 'utf8')).toContain(
+      `resource.data.createdBy != '${DELETED_AUTHOR}'`,
     );
   });
 });

@@ -4,7 +4,9 @@ import { CustomQuestionDoc, NewQuestionReportDoc } from '../models/question.mode
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
 import {
+  AUTHOR_PAGE_SIZE,
   FirebaseService,
+  MAX_BULK_DECISIONS,
   MAX_TAG_FILTER_VALUES,
   QUIZ_LIST_LIMIT,
   QuestionReportRejectedError,
@@ -94,6 +96,14 @@ interface RecordedQuery {
   orderBy: { field: string; direction: string }[];
   startAt?: string;
   endBefore?: string;
+  /**
+   * The raw values of an **exclusive** start cursor — the SDK's `startAfter`,
+   * which the wire carries as `startAt` with `before: false`. Recorded apart
+   * from `startAt` above, which is the inclusive document-id cursor the random
+   * sampler uses, because these are positional against the query's `orderBy`
+   * and only a test about paging needs them.
+   */
+  startAfter?: unknown[];
   limit?: number;
 }
 
@@ -250,6 +260,7 @@ function fakeServer(
             }
           : undefined;
 
+        const rawStart = query['startAt'] as { values?: unknown[]; before?: boolean } | undefined;
         const recorded: RecordedQuery = {
           collectionPath,
           wheres,
@@ -258,6 +269,7 @@ function fakeServer(
           orderBy: (query['orderBy'] ?? []) as { field: string; direction: string }[],
           startAt: cursorId(query['startAt']),
           endBefore: cursorId(query['endAt']),
+          ...(rawStart?.before === false ? { startAfter: rawStart.values } : {}),
           limit: query['limit'] as number | undefined,
         };
         server.queries.push(recorded);
@@ -1256,6 +1268,255 @@ describe('FirebaseService.getUserQuestions (FEAT-007)', () => {
 
     expect(page.questions).toHaveLength(25);
     expect(page.next).not.toBeNull();
+  });
+});
+
+/**
+ * A reviewer's view of everything one account contributed (`FEAT-006`).
+ *
+ * The read is `/my-questions`' query at the review page size, and that is the
+ * property worth pinning: the same `where`, the same order, and therefore the
+ * composite index that already exists (`firestore-tests/indexes.spec.ts`
+ * derives the index from the same constants). The `where` and the `limit` are
+ * `CLAUDE.md` §4.1, and the fake records the `structuredQuery` that went on
+ * the wire, which is the only place either can be seen.
+ */
+describe('FirebaseService.getQuestionsByAuthor (FEAT-006)', () => {
+  const theirs: SeedDoc[] = Array.from({ length: 3 }, (_, i) => ({
+    id: `theirs-${i}`,
+    data: makeQuestion({
+      question: `Theirs ${i}?`,
+      createdBy: 'author-1',
+      createdAt: 1_760_000_000_000 + i,
+      status: (['pending', 'approved', 'rejected'] as const)[i],
+    }) as unknown as Record<string, unknown>,
+  }));
+  const somebodyElse: SeedDoc = {
+    id: 'somebody-else',
+    data: makeQuestion({
+      createdBy: 'author-2',
+      createdAt: 1_760_000_000_000,
+    }) as unknown as Record<string, unknown>,
+  };
+
+  it('filters on the author and bounds the read at the review page size', async () => {
+    const { service, queries } = setup([...theirs, somebodyElse]);
+
+    await service.getQuestionsByAuthor('author-1');
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0].collectionPath).toBe('custom_questions');
+    expect(queries[0].wheres).toEqual([{ field: 'createdBy', value: 'author-1' }]);
+    expect(queries[0].limit).toBe(AUTHOR_PAGE_SIZE);
+    expect(AUTHOR_PAGE_SIZE).toBe(REVIEW_PAGE_SIZE);
+  });
+
+  it('returns every status the account has, not only what a player may see', async () => {
+    const { service } = setup([...theirs, somebodyElse]);
+
+    const page = await service.getQuestionsByAuthor('author-1');
+
+    expect(page.questions.map((question) => question.status).sort()).toEqual([
+      'approved',
+      'pending',
+      'rejected',
+    ]);
+  });
+
+  /**
+   * One query shape, two page sizes. If the two readers ever differed in
+   * anything but the bound, one of them would be riding an index nobody
+   * declared — green on the emulator, refused in production (D3).
+   */
+  it('sends exactly the query /my-questions sends, but for the page size', async () => {
+    const { service, queries } = setup(theirs);
+
+    await service.getUserQuestions('author-1');
+    await service.getQuestionsByAuthor('author-1');
+
+    const [own, reviewers] = queries;
+    expect({ ...reviewers, limit: own.limit }).toEqual(own);
+    expect(own.limit).toBe(25);
+    expect(reviewers.orderBy).toEqual([
+      { field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' },
+      { field: { fieldPath: '__name__' }, direction: 'DESCENDING' },
+    ]);
+  });
+
+  it('asks for the page after the cursor as an exclusive start, on both ordering fields', async () => {
+    const { service, queries } = setup(theirs);
+
+    await service.getQuestionsByAuthor('author-1', [1_760_000_000_002, 'theirs-2']);
+
+    expect(queries[0].startAfter).toEqual([
+      { integerValue: '1760000000002' },
+      {
+        referenceValue: `${RESOURCE_ROOT}/custom_questions/theirs-2`,
+      },
+    ]);
+  });
+
+  it('hands back a cursor only when the page is full', async () => {
+    const full: SeedDoc[] = Array.from({ length: AUTHOR_PAGE_SIZE }, (_, i) => ({
+      id: `full-${String(i).padStart(2, '0')}`,
+      data: makeQuestion({
+        createdBy: 'author-1',
+        createdAt: 1_760_000_000_000 + i,
+      }) as unknown as Record<string, unknown>,
+    }));
+
+    const short = setup(theirs);
+    expect((await short.service.getQuestionsByAuthor('author-1')).next).toBeNull();
+    vi.unstubAllGlobals();
+    TestBed.resetTestingModule();
+
+    const { service } = setup(full);
+    const page = await service.getQuestionsByAuthor('author-1');
+    expect(page.questions).toHaveLength(AUTHOR_PAGE_SIZE);
+    expect(page.next).not.toBeNull();
+  });
+});
+
+/**
+ * A reviewer's bulk rejection (`FEAT-006`): one write per document, under the
+ * rule a single decision meets, batched in the client and bounded at the write.
+ *
+ * The spec's acceptance row is the partial failure — a set where one write is
+ * refused must come back as one failure among successes, never as the whole
+ * set failing — and that only works because the writes are separate rather
+ * than one all-or-nothing commit.
+ */
+describe('FirebaseService.rejectQuestions (FEAT-006)', () => {
+  const seed: SeedDoc[] = ['q1', 'q2', 'q3'].map((id) => ({
+    id,
+    data: makeQuestion({ status: 'pending' }) as never,
+  }));
+
+  it('sends one patch per document, each the moderation write and nothing else', async () => {
+    const { service, writes } = setup(seed);
+
+    const outcome = await service.rejectQuestions(['q1', 'q2', 'q3'], '  Spam account.  ');
+
+    expect(outcome).toEqual({ succeeded: ['q1', 'q2', 'q3'], failed: [] });
+    expect(writes.map((write) => [write.method, write.path])).toEqual([
+      ['PATCH', 'custom_questions/q1'],
+      ['PATCH', 'custom_questions/q2'],
+      ['PATCH', 'custom_questions/q3'],
+    ]);
+    for (const write of writes) {
+      expect(write.mask).toEqual(['status', 'rejectionReason']);
+      expect(write.fields).toEqual({
+        status: { stringValue: 'rejected' },
+        rejectionReason: { stringValue: 'Spam account.' },
+      });
+    }
+  });
+
+  it('reports a refused write as one failure among successes', async () => {
+    const { service, writes } = setup(seed, (path) =>
+      path === 'custom_questions/q2' ? 'permission-denied' : 'ok',
+    );
+
+    const outcome = await service.rejectQuestions(['q1', 'q2', 'q3'], 'Spam account.');
+
+    expect(outcome).toEqual({ succeeded: ['q1', 'q3'], failed: ['q2'] });
+    expect(writes.map((write) => write.path)).toEqual([
+      'custom_questions/q1',
+      'custom_questions/q3',
+    ]);
+  });
+
+  it('counts a write that never came back as unconfirmed, not as done', async () => {
+    const { service } = setup(seed, (path) =>
+      path === 'custom_questions/q3' ? 'server-error' : 'ok',
+    );
+
+    const outcome = await service.rejectQuestions(['q1', 'q3'], 'Spam account.');
+
+    expect(outcome).toEqual({ succeeded: ['q1'], failed: ['q3'] });
+  });
+
+  it('refuses more than one page of questions, before sending anything', async () => {
+    const { service, attempts } = setup(seed);
+    const ids = Array.from({ length: MAX_BULK_DECISIONS + 1 }, (_, i) => `q${i}`);
+
+    await expect(service.rejectQuestions(ids, 'Spam account.')).rejects.toThrow(RangeError);
+    expect(attempts).toHaveLength(0);
+    expect(MAX_BULK_DECISIONS).toBe(AUTHOR_PAGE_SIZE);
+  });
+
+  it('accepts exactly one page of questions', async () => {
+    const { service, writes } = setup(seed);
+    const ids = Array.from({ length: MAX_BULK_DECISIONS }, (_, i) => `q${i}`);
+
+    const outcome = await service.rejectQuestions(ids, 'Spam account.');
+
+    expect(outcome.succeeded).toHaveLength(MAX_BULK_DECISIONS);
+    expect(writes).toHaveLength(MAX_BULK_DECISIONS);
+  });
+
+  /**
+   * The reason is required: a set of silent rejections is exactly what an
+   * author could not act on. Blank and over-long are both refused here rather
+   * than sent to be refused fifty times by the rules.
+   */
+  it('refuses a blank reason, or one longer than the rules accept, before sending anything', async () => {
+    const { service, attempts } = setup(seed);
+
+    await expect(service.rejectQuestions(['q1'], '   ')).rejects.toThrow(RangeError);
+    await expect(service.rejectQuestions(['q1'], 'x'.repeat(501))).rejects.toThrow(RangeError);
+    expect(attempts).toHaveLength(0);
+  });
+
+  it('writes a question named twice once', async () => {
+    const { service, writes } = setup(seed);
+
+    const outcome = await service.rejectQuestions(['q1', 'q1', 'q2'], 'Spam account.');
+
+    expect(outcome.succeeded).toEqual(['q1', 'q2']);
+    expect(writes).toHaveLength(2);
+  });
+
+  /**
+   * Batched rather than all at once, and batched rather than one at a time:
+   * at most ten writes are out together, and more than one is.
+   */
+  it('keeps at most ten writes in flight, and reports progress as each batch settles', async () => {
+    const { service, writes } = setup([]);
+    const inner = globalThis.fetch;
+    let inFlight = 0;
+    let peak = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: { method: string; body?: string }) => {
+        if (init.method !== 'PATCH') {
+          return inner(url, init);
+        }
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        try {
+          return await inner(url, init);
+        } finally {
+          inFlight--;
+        }
+      }),
+    );
+    const progress: [number, number][] = [];
+
+    await service.rejectQuestions(
+      Array.from({ length: 25 }, (_, i) => `q${i}`),
+      'Spam account.',
+      (done, total) => progress.push([done, total]),
+    );
+
+    expect(writes).toHaveLength(25);
+    expect(peak).toBe(10);
+    expect(progress).toEqual([
+      [10, 25],
+      [20, 25],
+      [25, 25],
+    ]);
   });
 });
 
