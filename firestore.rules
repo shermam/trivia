@@ -728,8 +728,8 @@ service cloud.firestore {
     }
 
     // Whether the caller is the author of the question being written
-    // (`FEAT-007`). Two populations can never satisfy this and both are named
-    // rather than left to fall out of the comparison:
+    // (`FEAT-007`). Three populations can never satisfy this and all three are
+    // named rather than left to fall out of the comparison:
     //
     // - **A document with no `createdBy` at all** predates attribution (A10),
     //   and nobody recorded who wrote it. There is no owner to compare against,
@@ -740,10 +740,21 @@ service cloud.firestore {
     //   survive the person. It is not a uid, and an account that somehow
     //   produced that exact string must not inherit somebody else's
     //   contributions.
+    // - **The `[generated]` sentinel** means no person wrote the question: the
+    //   question-generation pipeline promoted it on the Admin SDK (`FEAT-020`),
+    //   and it belongs to the bank rather than to anybody, so nobody edits or
+    //   withdraws it from `/my-questions` — a reviewer rejects it like any
+    //   other. Every question every run promotes carries it, so an account that
+    //   somehow produced that exact string would otherwise own all of them.
+    //   Nothing here admits a `provenance` key either, so no client can create
+    //   a question in that shape: `create` requires `createdBy` to be the
+    //   caller and the allowlist has no room for the map.
     //
-    // Both are explicit reject cases in `firestore-tests/`, because either
+    // All three are explicit reject cases in `firestore-tests/`, because each
     // would otherwise be caught only by a rule that happens to fail for an
-    // unrelated reason.
+    // unrelated reason. The two sentinels are spelled out here as literals,
+    // and the rules suite pins them equal to the app's and the functions'
+    // copies, since nothing else would notice one drift.
     //
     // The `in` guard is deliberately redundant and is stated anyway. Measured:
     // deleting it fails no test, because reading a field a document does not
@@ -756,6 +767,7 @@ service cloud.firestore {
              && 'createdBy' in resource.data
              && resource.data.createdBy is string
              && resource.data.createdBy != '[deleted-user]'
+             && resource.data.createdBy != '[generated]'
              && resource.data.createdBy == request.auth.uid;
     }
 
@@ -1029,6 +1041,14 @@ service cloud.firestore {
       // asked for), stops `createdBy` being rewritten to steal or disown
       // authorship, and stops new fields being introduced outside the
       // `hasOnly()` allowlist that `create` enforces.
+      //
+      // **What it does not do is validate the shape of what is already
+      // stored**, and that is load-bearing rather than lax. A question the
+      // generation pipeline promoted (`FEAT-020`) carries a `provenance` map
+      // and the `[generated]` author, neither of which a client could have
+      // written, and a reviewer still has to be able to decide it. Adding
+      // `isValidQuestionShape()` here would refuse every such decision, and the
+      // rules tests carry the approval and the rejection to say so.
       //
       // Note the status is *not* required to differ. A no-op write is harmless,
       // and demanding a change would make an idempotent retry fail — the client

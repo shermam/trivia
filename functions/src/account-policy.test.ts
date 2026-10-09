@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
+import { ANONYMISED_AUTHOR, GENERATED_AUTHOR, isCancellableStatus } from './account-policy';
 
 test('cancels every status that still represents live billing', () => {
   for (const status of ['active', 'trialing', 'past_due', 'unpaid', 'paused'] as const) {
@@ -23,4 +23,13 @@ test('the anonymised author sentinel cannot be mistaken for a real uid or a miss
   assert.match(ANONYMISED_AUTHOR, /[^a-zA-Z0-9]/);
   assert.notEqual(ANONYMISED_AUTHOR, '');
   assert.equal(typeof ANONYMISED_AUTHOR, 'string');
+});
+
+test('the generated-author sentinel is neither a uid, a missing field nor an erased author', () => {
+  // The same brackets, for the same reason — and a different word, because a
+  // question no person wrote and a question whose person left are different
+  // facts, and `deleteAccount`'s sweep must never mistake one for the other.
+  assert.match(GENERATED_AUTHOR, /[^a-zA-Z0-9]/);
+  assert.notEqual(GENERATED_AUTHOR, '');
+  assert.notEqual(GENERATED_AUTHOR, ANONYMISED_AUTHOR);
 });

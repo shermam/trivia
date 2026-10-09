@@ -12,10 +12,19 @@ import { DISPLAY_MATH_BLOCK, DISPLAY_MATH_INLINE, INLINE_MATH } from './math-del
  * `markdown-engine.spec.ts` is the suite; every payload in it is a named test,
  * so widening the allowlist fails loudly rather than quietly.
  *
- * Nothing imports this statically except its own spec — the component reaches
- * it through `import()` so that a `plain` question, which is every question in
+ * Nothing imports this statically except the specs — the component reaches it
+ * through `import()` so that a `plain` question, which is every question in
  * the bank today and every question Open Trivia DB will ever serve, pays
  * nothing for a parser it does not use.
+ *
+ * **This configuration is published**, as `render-contract.json` at the
+ * repository root, for the renderer outside this repository that has to agree
+ * with it: the question-generation pipeline renders every candidate the same
+ * way before a reviewer sees it. `render-contract.spec.ts` reads the options
+ * back from the live engines and fails when the file and this code disagree,
+ * so a change here is a change to that file in the same pull request — and,
+ * when it moves any output, to `render-contract.golden.json`, which
+ * `scripts/render-contract-golden.mjs` regenerates.
  *
  * ## The pipeline, and why it is in this order
  *
@@ -230,8 +239,11 @@ export const ALLOWED_ATTR: readonly string[] = [
  */
 export const ALLOWED_URI_REGEXP = /^(?:https:|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/i;
 
-/** The only class any of our own output can carry: `marked`'s fence language. */
-const LANGUAGE_CLASS = /^language-[A-Za-z0-9#+._-]*$/;
+/**
+ * The only class any of our own output can carry: `marked`'s fence language.
+ * Exported for `render-contract.spec.ts`, which holds the published pattern to it.
+ */
+export const LANGUAGE_CLASS = /^language-[A-Za-z0-9#+._-]*$/;
 
 /**
  * The sanitiser configuration, exported so the payload suite asserts against
@@ -530,7 +542,16 @@ const instances = {
   inline: new Map<RenderMath | undefined, Marked>(),
 };
 
-function markedFor(renderMath: RenderMath | undefined, inline: boolean): Marked {
+/**
+ * The instance for this renderer and mode, built on first use.
+ *
+ * Exported so that `render-contract.spec.ts` can read the options an instance
+ * actually holds — `marked`'s defaults merged with everything passed below —
+ * rather than the arguments that built it, which would say nothing about a
+ * default that moved in an upgrade. Being memoized, it returns the very
+ * instance {@link renderMarkdown} parses with.
+ */
+export function markedFor(renderMath: RenderMath | undefined, inline: boolean): Marked {
   const cache = inline ? instances.inline : instances.prose;
   let instance = cache.get(renderMath);
   if (!instance) {

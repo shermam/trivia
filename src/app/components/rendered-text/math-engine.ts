@@ -30,6 +30,11 @@ import katex from 'katex';
  * `strict: 'ignore'` because the alternative is a `console.warn` per formula
  * for things like a Unicode character in text mode, on content this app does
  * not control and cannot fix.
+ *
+ * The options are published in `render-contract.json`, with the KaTeX defaults
+ * the renderer relies on by not passing them — `trust` above all.
+ * `render-contract.spec.ts` captures what this call actually passes and fails
+ * when the two disagree.
  */
 export function renderMath(tex: string, displayMode: boolean): string {
   return katex.renderToString(tex, {

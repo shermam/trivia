@@ -16,6 +16,7 @@ import { firstSeedTag, openTriviaCategoryId, seedTagForCategoryName } from '../u
 import { readCounters } from '../utils/difficulty-score.util';
 import { decodeHtmlEntities } from '../utils/html-entities.util';
 import { readTags } from '../utils/normalize-tag.util';
+import { isMachineGenerated } from '../utils/question-provenance.util';
 import { seenKeyFor } from '../utils/seen-key.util';
 import { shuffleArray } from '../utils/shuffle.util';
 import { FirebaseService } from './firebase.service';
@@ -631,6 +632,16 @@ export class TriviaService {
       // dropped here, whole, so no reader downstream meets it. Only a bank
       // question can carry any; Open Trivia DB has no document to count against.
       ...(counters ? { answered: counters.answered, correct: counters.correct } : {}),
+      // That a machine wrote it (`FEAT-020`), and nothing else from the stored
+      // map: the recap's source line is the one reader, and it needs the one
+      // fact. The model, the run and the rest stay on the document rather than
+      // riding into the saved game and the offline pool. Re-checked for the
+      // reason the tags and the counters are — the console can write any
+      // shape — and absent on every question a person wrote, which is what
+      // absence means.
+      ...('provenance' in raw && isMachineGenerated(raw.provenance)
+        ? { provenance: { source: 'ai' as const } }
+        : {}),
     };
   }
 }
