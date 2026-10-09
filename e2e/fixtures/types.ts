@@ -290,6 +290,21 @@ export interface GameplayStatsSeed {
   bestStreak: number;
   /** Epoch ms. Omitted to stand in for a document written before the field existed. */
   statsSince?: number;
+  /**
+   * Experience points (`FEAT-041`). Omitted to stand in for a document banked
+   * before XP existed, which reads as none.
+   */
+  xp?: number;
+}
+
+/**
+ * One account's XP alone (`FEAT-041`), written beside whatever the document
+ * already holds — for a spec that needs a level without the totals, or needs
+ * to move one under an avatar already stored.
+ */
+export interface XpSeed {
+  uid: string;
+  xp: number;
 }
 
 /**

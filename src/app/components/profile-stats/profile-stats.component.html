@@ -203,10 +203,24 @@
     </div>
 
     <!--
+      The player's level (`FEAT-041`), drawn from the XP on the same document
+      the totals come from — so it shares their read and their states, and
+      their "Try again". A level the last game reached is said in the live
+      region above as well as on the card.
+    -->
+    <app-progress-card
+      [state]="progressState()"
+      [xp]="progressXp()"
+      [levelUp]="levelUp()"
+      [letter]="headerLetter()"
+    />
+
+    <!--
       Choosing how you appear (`FEAT-038`). Its own card with its own states,
       and its outcome is announced through the live region above rather than a
-      second one, so the page has one place a screen reader hears from.
+      second one, so the page has one place a screen reader hears from. Its
+      sets lock on the same XP the progress card draws.
     -->
-    <app-avatar-picker (announce)="onAvatarNotice($event)" />
+    <app-avatar-picker [xp]="xpKnowledge()" (announce)="onAvatarNotice($event)" />
   </div>
 </div>

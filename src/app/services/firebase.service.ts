@@ -22,6 +22,7 @@ import {
   CONTRIBUTIONS_COLLECTION,
   CONTRIBUTIONS_ORDER,
 } from '../models/contributions-query';
+import { readXp } from '../models/xp';
 import { QUIZZES_COLLECTION, QUIZ_MAX_QUESTIONS } from '../models/quiz.model';
 import { isDocumentReference } from '../utils/quiz-definition.util';
 import {
@@ -268,9 +269,10 @@ export class QuestionQuotaExceededError extends Error {
 
 /**
  * One player's lifetime totals, as `recordGameResult` banks them into
- * `users/{uid}` (`docs/data-model.md`).
+ * `users/{uid}` (`docs/data-model.md`), and the XP it banks beside them.
  *
- * Only the five fields `/profile` renders. The document carries four more —
+ * Only the fields `/profile` renders — the five totals, when they started, and
+ * the XP its progress card draws (`FEAT-041`). The document carries four more —
  * `lastGameId`, `updatedAt` and the `rateWindowStart`/`gamesInWindow` pair —
  * which are bookkeeping for the callable rather than anything to show a
  * player, and naming them here would invite a screen to grow around them.
@@ -288,6 +290,12 @@ export interface GameplayStats {
   bestStreak: number;
   /** Epoch ms the first game was banked, or `null` on a document without one. */
   statsSince: number | null;
+  /**
+   * Experience points (`FEAT-041`), 0 on a document banked before XP existed
+   * or one a hand edit has left without a whole, non-negative count — the
+   * reading `setAvatar` gives the same field when it decides an unlock.
+   */
+  xp: number;
 }
 
 /** A count Firestore returned untyped, or 0 when the field is absent or not a number. */
@@ -1244,6 +1252,7 @@ export class FirebaseService {
       correctAnswers: asCount(document.data['correctAnswers']),
       bestStreak: asCount(document.data['bestStreak']),
       statsSince: typeof statsSince === 'number' && Number.isFinite(statsSince) ? statsSince : null,
+      xp: readXp(document.data['xp']),
     };
   }
 

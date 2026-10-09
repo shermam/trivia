@@ -29,8 +29,9 @@ export interface AccountExport {
    */
   leaderboardEntries: Record<string, unknown>[];
   /**
-   * `users/{uid}` whole: the lifetime totals and, beside them, the avatar
-   * choice (`FEAT-038`) — or an explicit `null` when there is no document,
+   * `users/{uid}` whole: the lifetime totals and, beside them, the experience
+   * points (`FEAT-041`) and the avatar choice (`FEAT-038`) — or an explicit
+   * `null` when there is no document,
    * which is the normal state for an account that has neither finished a game
    * nor chosen an avatar, since the document is created lazily by whichever
    * of `recordGameResult` and `setAvatar` writes to it first. A player who

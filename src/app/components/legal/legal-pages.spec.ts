@@ -189,7 +189,65 @@ describe('legal pages', () => {
     expect(text).toContain('nothing is kept for anonymous play');
     // ...and the two promises the account lifecycle has to keep honouring.
     expect(text).toContain('deletes your gameplay totals');
-    expect(text).toContain('your gameplay totals, your play history');
+    expect(text).toContain('your gameplay totals and experience points, your play history');
+  });
+
+  /**
+   * **The experience points (`FEAT-041`).** A new field on the `users/{uid}`
+   * record, and a number worked out from a player's own play — so the page has
+   * to say what it is, where it comes from, that nothing public shows it, and
+   * what a level does, and the three sentences it would otherwise have
+   * falsified have to say so too: the profile paragraph's "nothing else is
+   * used to categorise you", the automated-decisions list, and the
+   * lawful-basis table.
+   *
+   * Each assertion is one claim the code has to keep: `recordGameResult`
+   * computes the points from the game being banked and stores one total;
+   * the level is derived wherever it is shown; and no rule, board or screen
+   * shows either to anybody else.
+   */
+  it('discloses the experience points: what they are, where they come from, and who sees them', async () => {
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+
+    // The field, in the record's inventory.
+    expect(text).toContain(
+      'your longest run of correct answers within one game, your experience points',
+    );
+    expect(text).toContain('Your experience points (XP) are one running total on that record.');
+    // Where they come from: the game being banked, and nothing older.
+    expect(text).toContain('we work out what it earned from that game alone');
+    expect(text).toContain(
+      "which of your answers were right, each question's difficulty, how often players have answered each community question correctly, and your longest run of right answers",
+    );
+    // What is kept, and what is derived.
+    expect(text).toContain(
+      'We keep the total and nothing else: not the points game by game, and not your level',
+    );
+    // What a level does, and who sees it.
+    expect(text).toContain(
+      'A level unlocks more of the avatars you can draw for yourself, and that is all it does.',
+    );
+    expect(text).toContain('never to another player and never on a leaderboard');
+
+    // The three sentences a level would otherwise have falsified.
+    expect(text).toContain('The only other thing worked out from your play is your level');
+    expect(text).toContain('Three things are decided automatically and none is one of those.');
+    expect(text).not.toContain('Two things are decided automatically');
+    expect(text).toContain('an avatar you have already chosen is never taken back');
+    expect(text).toContain(
+      'Work out the experience points each game you finish signed in earns, and keep their total',
+    );
+
+    // Kept for the life of the account, gone with it, and handed back in the
+    // export — the three places a new field on the record has to be named.
+    expect(text).toContain(
+      'gameplay totals and experience points, your avatar choice, the likes and dislikes you give questions, subscription records and donation records are kept for as long as your account exists',
+    );
+    expect(text).toContain(
+      'Your experience points are one running total, not a record of each game, so the twelve-month limit on your play history below does not reduce them',
+    );
+    expect(text).toContain('deletes your gameplay totals, your experience points and your whole');
+    expect(text).toContain('your gameplay totals and experience points, your play history');
   });
 
   /**
@@ -224,11 +282,13 @@ describe('legal pages', () => {
     expect(text).toContain('Nothing is recorded for anonymous play');
     // And the two account-lifecycle promises `deleteAccount` and
     // `exportAccountData` have to go on keeping.
-    expect(text).toContain('deletes your gameplay totals and your whole play history');
+    expect(text).toContain(
+      'deletes your gameplay totals, your experience points and your whole play history',
+    );
     expect(text).toContain('your play history — every game we still hold, question by question');
-    // What outlives the twelve months is the totals and nothing else: no
-    // summary of preferences is derived from the plays, because nothing reads
-    // them yet. Announcing one before it exists is what `CLAUDE.md` §4.0
+    // What outlives the twelve months is the totals record — the totals and
+    // the XP beside them — and nothing else: no summary of preferences is
+    // derived from the plays, because nothing reads them yet. Announcing one before it exists is what `CLAUDE.md` §4.0
     // forbids; the recommender's own PR adds the sentence with the practice.
     expect(text).not.toContain('general picture of your preferences');
   });
@@ -451,7 +511,9 @@ describe('legal pages', () => {
     expect(privacy).toContain('No totals are kept until you finish your first game');
 
     // Retention, deletion and export.
-    expect(privacy).toContain('gameplay totals, your avatar choice, the likes and dislikes');
+    expect(privacy).toContain(
+      'gameplay totals and experience points, your avatar choice, the likes and dislikes',
+    );
     expect(privacy).toContain('deletes your avatar choice');
     expect(privacy).toContain('your avatar choice, and your billing records');
     expect(privacy).toContain('Keep the avatar you chose');

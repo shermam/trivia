@@ -5,6 +5,8 @@ import {
   type UserStats,
   nextUserStats,
 } from './game-stats';
+import { XP_QUESTION_FIELDS, gameXp } from './game-xp';
+import { readXp } from './levels';
 import { nextQuestionCounters } from './question-counters';
 
 /** The documents one banked game touches, named by the caller. */
@@ -18,12 +20,30 @@ export interface GameResultRefs {
 }
 
 /**
- * Only the two counters are read off a question — not its 2,000-character
- * statement, its answers or its justification. A read is billed per document
- * whatever it returns, so this saves bandwidth rather than money, and it is
- * free.
+ * What is read off a question: its two counters, and its wrong answers — for
+ * their number alone, which is the option count the XP's guessing correction
+ * needs (`game-xp.ts`) and which nothing else on the document records. Not its
+ * 2,000-character statement or its justification. A read is billed per
+ * document whatever it returns, so the mask saves bandwidth rather than money,
+ * and widening it cost no read.
  */
-const COUNTER_FIELDS = ['answered', 'correct'];
+const QUESTION_FIELDS = ['answered', 'correct', ...XP_QUESTION_FIELDS];
+
+/** What a banked game added to the player's XP, and the total it came to. */
+export interface XpAward {
+  /** `users/{uid}.xp` after this game. */
+  total: number;
+  /** What this game earned (`gameXp`). */
+  gained: number;
+}
+
+/**
+ * The decision, and for a banked game the XP it earned — which is only known
+ * once the questions it named have been read, after the decision is made.
+ */
+export type GameResultOutcome =
+  | (Extract<StatsDecision, { accepted: true }> & { xp: XpAward })
+  | Extract<StatsDecision, { accepted: false }>;
 
 /**
  * The body of `recordGameResult`'s transaction, taking the transaction rather
@@ -53,17 +73,25 @@ const COUNTER_FIELDS = ['answered', 'correct'];
  * as an increment would be, and computing it here is what lets a pair a hand
  * edit has broken be replaced rather than carried forward
  * (`nextQuestionCounters`).
+ *
+ * **XP rides the same transaction and the same refusals** (`FEAT-041`). It is
+ * priced from the questions' counters as read here, before this game's answers
+ * are added to them, and merged into `users/{uid}` beside the totals — so a
+ * duplicate or a rate-limited call, which returns before anything is read,
+ * adds nothing to it either.
  */
 export async function applyGameResult(
   transaction: Transaction,
   refs: GameResultRefs,
   submission: unknown,
   nowMs: number,
-): Promise<StatsDecision> {
+): Promise<GameResultOutcome> {
   const snapshot = await transaction.get(refs.user);
   // `Partial`, because the document can exist with no totals in it — an
   // avatar chosen before the first finished game creates it (`FEAT-038`).
-  const current = snapshot.exists ? (snapshot.data() as Partial<UserStats>) : null;
+  const current = snapshot.exists
+    ? (snapshot.data() as Partial<UserStats> & { xp?: unknown })
+    : null;
 
   // `submission` is `request.data`, which is anything at all; `nextUserStats`
   // validates it before trusting a field of it.
@@ -79,15 +107,28 @@ export async function applyGameResult(
   // against the emulator.)
   const questions =
     questionRefs.length > 0
-      ? await transaction.getAll(...questionRefs, { fieldMask: COUNTER_FIELDS })
+      ? await transaction.getAll(...questionRefs, { fieldMask: QUESTION_FIELDS })
       : [];
 
-  // **Merged, not replaced.** The totals are this function's fields, not the
-  // whole document: `setAvatar` keeps the player's avatar choice beside them
-  // (`FEAT-038`), and a plain `set` would erase it with every game banked. The
-  // decision always carries every totals field, so merging loses nothing the
-  // replace used to guarantee — it only stops reaching past them.
-  transaction.set(refs.user, decision.stats, { merge: true });
+  // What the game earned (`game-xp.ts`), priced from each question that is
+  // still there as it stood before this game. The records are the decision's
+  // rebuilt copy, so nothing here reads the raw payload.
+  const stored = new Map<string, unknown>();
+  decision.counters.forEach((increment, index) => {
+    if (questions[index].exists) {
+      stored.set(increment.questionId, questions[index].data());
+    }
+  });
+  const gained = gameXp(decision.play?.answers, stored);
+  const xp: XpAward = { total: readXp(current?.xp) + gained, gained };
+
+  // **Merged, not replaced.** The totals and the XP are this function's
+  // fields, not the whole document: `setAvatar` keeps the player's avatar
+  // choice beside them (`FEAT-038`), and a plain `set` would erase it with
+  // every game banked. The decision always carries every totals field, so
+  // merging loses nothing the replace used to guarantee — it only stops
+  // reaching past them.
+  transaction.set(refs.user, { ...decision.stats, xp: xp.total }, { merge: true });
   // The play history, in the same transaction and under the same game id
   // (`FEAT-049`). `lastGameId` *is* that id, so nothing here re-reads the
   // payload — the decision already validated it, and the duplicate check that
@@ -109,5 +150,5 @@ export async function applyGameResult(
     const next = nextQuestionCounters(questions[index].data(), increment);
     transaction.update(questionRefs[index], { answered: next.answered, correct: next.correct });
   });
-  return decision;
+  return { ...decision, xp };
 }

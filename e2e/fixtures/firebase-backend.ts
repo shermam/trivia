@@ -30,6 +30,7 @@ import {
   ReviewerSeed,
   SignedInCaller,
   VerifiedUserSeed,
+  XpSeed,
 } from './types';
 
 /**
@@ -535,6 +536,16 @@ export class FirebaseBackend {
    */
   async seedAvatar({ uid, avatar }: AvatarSeed): Promise<void> {
     await this.firestore.doc(`users/${uid}`).set({ avatar }, { mergeFields: ['avatar'] });
+  }
+
+  /**
+   * Writes one account's XP (`FEAT-041`) and nothing else: `mergeFields:
+   * ['xp']`, so an avatar or totals already on the document stay. Through the
+   * Admin SDK because `users` has no client write rule (`docs/data-model.md`);
+   * in the app only `recordGameResult` writes it.
+   */
+  async seedXp({ uid, xp }: XpSeed): Promise<void> {
+    await this.firestore.doc(`users/${uid}`).set({ xp }, { mergeFields: ['xp'] });
   }
 
   /**

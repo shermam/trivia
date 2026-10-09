@@ -306,7 +306,7 @@ test.describe('avatar choice', () => {
   });
 
   /**
-   * The whole picker, by keyboard alone (`CLAUDE.md` §4.5): three named
+   * The whole picker, by keyboard alone (`CLAUDE.md` §4.5): the named
    * radiogroups walked with Tab and the arrow keys, the switch with Space,
    * Save with Enter — through the real `setAvatar` on the emulator, with the
    * stored document read back through the Admin SDK. Then a second save, of
@@ -336,8 +336,10 @@ test.describe('avatar choice', () => {
     await expect(page.getByTestId('avatar-idle')).toBeVisible();
     await expectRadiosAreGrouped(page);
     await expect(page.getByRole('radiogroup', { name: 'Show as', exact: true })).toBeVisible();
-    await expect(page.getByRole('radiogroup', { name: 'Shape', exact: true })).toBeVisible();
-    await expect(page.getByRole('radiogroup', { name: 'Colour', exact: true })).toBeVisible();
+    await expect(page.getByRole('radiogroup', { name: 'Core Shape', exact: true })).toBeVisible();
+    await expect(page.getByRole('radiogroup', { name: 'Core Colour', exact: true })).toBeVisible();
+    // The set level 3 opens is on the page for this level-0 account too, locked.
+    await expect(page.getByRole('radiogroup', { name: 'Bold Shape', exact: true })).toBeVisible();
     // No photo on this account, so no photo to offer.
     await expect(page.getByTestId('avatar-kind-photo')).toHaveCount(0);
 
@@ -354,6 +356,18 @@ test.describe('avatar choice', () => {
     await expect(page.getByRole('radio', { name: 'Emerald', exact: true })).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('radio', { name: 'Forest', exact: true })).toBeChecked();
+
+    // The locked bold set is passed through, one stop per group: reachable,
+    // which is how a keyboard user learns it exists (`FEAT-041`), and choosing
+    // nothing on the way.
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('radio', { name: 'Star', exact: true })).toBeFocused();
+    await expect(page.getByRole('radio', { name: 'Star', exact: true })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('radio', { name: 'Ruby', exact: true })).toBeFocused();
 
     await page.keyboard.press('Tab');
     const publicSwitch = page.getByRole('checkbox', {

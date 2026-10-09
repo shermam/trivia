@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { AccountService, UnbankedGame } from '../../services/account.service';
+import { AccountService, BankedXp, UnbankedGame } from '../../services/account.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AvatarChoice } from '../../models/avatar.model';
 import { AuthService } from '../../services/auth.service';
@@ -32,6 +32,10 @@ interface InternalProfileStats {
   tiles(): { id: string; label: string; value: string }[];
   trackingSince(): string | null;
   statusAnnouncement(): string;
+  progressXp(): number | null;
+  progressState(): string;
+  levelUp(): number | null;
+  xpKnowledge(): { state: string; xp?: number };
   retry(): void;
   openSignIn(): void;
 }
@@ -49,6 +53,7 @@ function stats(overrides: Partial<GameplayStats> = {}): GameplayStats {
     correctAnswers: 20,
     bestStreak: 7,
     statsSince: Date.UTC(2026, 0, 15),
+    xp: 340,
     ...overrides,
   };
 }
@@ -63,6 +68,8 @@ interface SetupOptions {
   avatar?: AvatarChoice | null;
   /** A game the server declined to bank in this tab (`AccountService.unbankedGame`). */
   unbanked?: UnbankedGame | null;
+  /** The XP the last game banked in this tab came to (`AccountService.bankedXp`). */
+  banked?: BankedXp | null;
 }
 
 /**
@@ -86,6 +93,7 @@ function configure(options: SetupOptions = {}) {
   );
   const open = vi.fn();
   const unbankedGame = signal<UnbankedGame | null>(options.unbanked ?? null);
+  const bankedXp = signal<BankedXp | null>(options.banked ?? null);
 
   TestBed.configureTestingModule({
     providers: [
@@ -121,7 +129,7 @@ function configure(options: SetupOptions = {}) {
         },
       },
       { provide: AuthMenuStateService, useValue: { open } },
-      { provide: AccountService, useValue: { unbankedGame } },
+      { provide: AccountService, useValue: { unbankedGame, bankedXp } },
       // The real service reads `window.location.search` once, at construction,
       // so embed mode is not something a test can turn on afterwards.
       {
@@ -131,7 +139,7 @@ function configure(options: SetupOptions = {}) {
     ],
   });
 
-  return { getGameplayStats, userSignal, authReadySignal, open, unbankedGame };
+  return { getGameplayStats, userSignal, authReadySignal, open, unbankedGame, bankedXp };
 }
 
 function setup(options: SetupOptions = {}) {
@@ -421,6 +429,145 @@ describe('ProfileStatsComponent', () => {
 });
 
 /**
+ * The progress card and the picker's locks (`FEAT-041`) draw one XP, decided
+ * here from the same read as the totals — so which state the card is in, which
+ * number it shows, and when a level-up is said are the page's to get right.
+ */
+describe('ProfileStatsComponent — level and XP', () => {
+  it('hands the card the XP the read returned, in the ready state', async () => {
+    const { component } = setup();
+
+    await settle();
+
+    expect(component.progressState()).toBe('ready');
+    expect(component.progressXp()).toBe(340);
+    expect(component.xpKnowledge()).toEqual({ state: 'known', xp: 340 });
+  });
+
+  /**
+   * Zero is a real total for a signed-in account with nothing banked — the
+   * card shows level 0 and the bar empty, and the picker's locks are decided
+   * on it rather than left guessing.
+   */
+  it('treats an account with nothing banked as a known total of zero', async () => {
+    const { component } = setup({ result: null });
+
+    await settle();
+
+    expect(component.progressState()).toBe('ready');
+    expect(component.progressXp()).toBe(0);
+    expect(component.xpKnowledge()).toEqual({ state: 'known', xp: 0 });
+  });
+
+  /** The least alarming answer while the read is out: no number, and the picker holds its locks. */
+  it('shows no XP while the read is in flight, and tells the picker it is checking', () => {
+    const { component } = setup();
+
+    // Before `settle()`: auth has answered, the read has not.
+    TestBed.tick();
+
+    expect(component.view()).toBe('loading');
+    expect(component.progressState()).toBe('loading');
+    expect(component.progressXp()).toBeNull();
+    expect(component.xpKnowledge()).toEqual({ state: 'checking' });
+  });
+
+  /**
+   * A failed read is told to the picker as one, so its sets can say so rather
+   * than call themselves locked; a visitor who is not signed in cannot use
+   * the picker, and is told the neutral answer the picker starts from.
+   */
+  it('shows no XP to a visitor who is not signed in, or after a failed read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const signedOut = setup({ user: { uid: 'anon', isAnonymous: true } });
+    await settle();
+    expect(signedOut.component.progressState()).toBe('signedOut');
+    expect(signedOut.component.progressXp()).toBeNull();
+    expect(signedOut.component.xpKnowledge()).toEqual({ state: 'checking' });
+    TestBed.resetTestingModule();
+
+    const failed = setup({ fails: true });
+    await settle();
+    expect(failed.component.progressState()).toBe('failed');
+    expect(failed.component.progressXp()).toBeNull();
+    expect(failed.component.xpKnowledge()).toEqual({ state: 'failed' });
+  });
+
+  /**
+   * A game that banked after the read was made: the callable's answer is what
+   * the transaction committed, so the card shows it rather than the older
+   * read — and never goes backwards when the answer is the smaller of the two.
+   */
+  it('raises the read to the XP a game banked in this tab came to', async () => {
+    const { component, bankedXp } = setup({ result: stats({ xp: 590 }) });
+    await settle();
+    expect(component.progressXp()).toBe(590);
+
+    bankedXp.set({ uid: 'u1', xp: 650, gained: 60 });
+    expect(component.progressXp()).toBe(650);
+
+    bankedXp.set({ uid: 'u1', xp: 120, gained: 20 });
+    expect(component.progressXp()).toBe(590);
+  });
+
+  it('says when the last game crossed a level, on the card and in the live region', async () => {
+    const { component } = setup({
+      result: stats({ xp: 650 }),
+      banked: { uid: 'u1', xp: 650, gained: 60 },
+    });
+
+    await settle();
+
+    expect(component.levelUp()).toBe(3);
+    expect(component.statusAnnouncement()).toBe(
+      'Your stats are ready. Your last game took you to level 3.',
+    );
+  });
+
+  it('says nothing of a game that stayed within its level', async () => {
+    const { component } = setup({
+      result: stats({ xp: 640 }),
+      banked: { uid: 'u1', xp: 640, gained: 40 },
+    });
+
+    await settle();
+
+    expect(component.levelUp()).toBeNull();
+    expect(component.statusAnnouncement()).toBe('Your stats are ready.');
+  });
+
+  it('says nothing of another account’s game', async () => {
+    const { component } = setup({
+      result: stats({ xp: 340 }),
+      banked: { uid: 'someone-else', xp: 650, gained: 60 },
+    });
+
+    await settle();
+
+    expect(component.progressXp()).toBe(340);
+    expect(component.levelUp()).toBeNull();
+  });
+
+  /**
+   * Over "nothing banked yet" a level-up would contradict the sentence above
+   * it; over a refused last game there is no level for it to have crossed.
+   */
+  it('says no level-up over an empty card or a refused game', async () => {
+    const empty = setup({ result: null, banked: { uid: 'u1', xp: 170, gained: 170 } });
+    await settle();
+    expect(empty.component.levelUp()).toBeNull();
+    TestBed.resetTestingModule();
+
+    const refused = setup({
+      unbanked: { uid: 'u1', reason: 'rate-limited' },
+      banked: { uid: 'u1', xp: 650, gained: 60 },
+    });
+    await settle();
+    expect(refused.component.levelUp()).toBeNull();
+  });
+});
+
+/**
  * The cases above drive the class; these two need the template, because what
  * they are about is which elements exist and where focus is — neither of which
  * a signal can answer.
@@ -484,6 +631,20 @@ describe('ProfileStatsComponent (rendered)', () => {
 
     expect(region()).toBe('Avatar saved.');
     expect(fixture.nativeElement.querySelectorAll('[role="status"]')).toHaveLength(1);
+  });
+
+  it('renders the progress card between the totals and the picker, fed by the read', async () => {
+    const { query, fixture } = await render({ result: stats({ xp: 650 }) });
+
+    const cards = [...fixture.nativeElement.querySelectorAll('[data-cy$="-card"]')].map(
+      (card) => (card as HTMLElement).dataset['cy'],
+    );
+    expect(cards).toEqual(['stats-card', 'progress-card', 'avatar-card']);
+    expect(query('[data-cy="progress-level"]')?.textContent?.trim()).toBe('3');
+    // The picker is handed the same number, so its locks match the card.
+    expect(query('[data-cy="avatar-set-bold-unlocked"]')?.classList.contains('invisible')).toBe(
+      false,
+    );
   });
 
   it('offers the signed-out visitor a sign-in button', async () => {
