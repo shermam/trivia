@@ -746,7 +746,7 @@ describe('ProfileStatsComponent (rendered)', () => {
       query('[data-cy="stats-status"]'),
     );
     expect(query('[data-cy="stats-daily-limit"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'Your last game was not added: the limit is 200 games a day, reset at midnight UTC.',
+      'Not added: the daily limit of 200 games resets at midnight UTC.',
     );
     expect(query('[role="status"]')?.textContent?.trim()).toBe(
       'Your last game was not added: you reached the daily limit of 200 games.',

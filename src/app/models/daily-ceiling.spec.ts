@@ -3,7 +3,7 @@ import { DAILY_GAME_CEILING } from './daily-ceiling';
 
 /**
  * `/profile` tells a player whose last game was refused with `daily-limit`
- * that the limit is 200 games a day, reset at midnight UTC. Both halves of
+ * that the daily limit of 200 games resets at midnight UTC. Both halves of
  * that sentence are facts about `functions/src/daily-ceiling.ts`, so both are
  * pinned to it here, across the package boundary — the way `levels.spec.ts`
  * pins the level table.

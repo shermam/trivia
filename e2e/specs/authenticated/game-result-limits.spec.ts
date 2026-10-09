@@ -66,24 +66,72 @@ async function callableResult(response: Response): Promise<unknown> {
   return ((await response.json()) as { result?: unknown }).result;
 }
 
+/** The viewports the card is held to one height at, with and without the daily-limit sentence. */
+const CARD_WIDTHS = [320, 390, 1280] as const;
+
+/** The stats card's status cell: every sentence it can show, stacked in one grid cell. */
+function statusCell(page: Page) {
+  return page.getByTestId('stats-status');
+}
+
+/** The status cell's width at a viewport — read once the resize has landed. */
+async function statusCellWidthAt(page: Page, width: number): Promise<number> {
+  await page.setViewportSize({ width, height: 1000 });
+  return statusCell(page).evaluate((cell) => Math.round(cell.getBoundingClientRect().width));
+}
+
+/** One width of the sweep: the daily-limit sentence's text height, and the tallest other's. */
+interface CellReading {
+  width: number;
+  dailyLimit: number;
+  tallestOther: number;
+}
+
 /**
- * How much taller the daily-limit sentence is than the tallest other sentence
- * in the stats card's status cell — `0` or less when it reserves no height of
- * its own. Read through `getBoundingClientRect` because every sentence but one
- * is `visibility: hidden`, which Playwright's `boundingBox` reports as no box.
+ * The daily-limit sentence's text height against the tallest of the cell's
+ * other sentences, at every width from `from` to `to`, a pixel at a time, in
+ * one `evaluate`.
+ *
+ * **Measured with a Range over each sentence's text, not the `<p>`'s own
+ * box.** Every sentence is a grid item in the same cell, so every `<p>`
+ * stretches to the row — the tallest sentence's height — and their boxes all
+ * read the same whatever their text does. A Range around the text measures the
+ * lines the text actually takes, `visibility: hidden` or not.
+ *
+ * **The cell's width is set directly** rather than the viewport resized a
+ * width at a time: the text wraps on the cell's width and nothing else, and
+ * the cell takes every width between its narrowest, at a 320px viewport, and
+ * its widest, from 816px on — the `sm` breakpoint only steps it back within
+ * that range — so sweeping the one covers every viewport from 320px to 1280px.
  */
-function dailyLimitOverhang(page: Page): Promise<number> {
-  return page.getByTestId('stats-status').evaluate((cell) => {
-    const lines = [...cell.querySelectorAll('p')];
-    const own = lines.find((line) => line.dataset['cy'] === 'stats-daily-limit');
-    if (!own) {
-      return Number.NaN;
-    }
-    const tallest = Math.max(
-      ...lines.filter((line) => line !== own).map((line) => line.getBoundingClientRect().height),
-    );
-    return own.getBoundingClientRect().height - tallest;
-  });
+function sweepStatusCell(page: Page, from: number, to: number): Promise<CellReading[]> {
+  return statusCell(page).evaluate(
+    (cell, [narrowest, widest]) => {
+      const lines = [...cell.querySelectorAll('p')];
+      const dailyLimit = lines.find((line) => line.dataset['cy'] === 'stats-daily-limit');
+      const others = lines.filter((line) => line !== dailyLimit);
+      const textHeight = (line: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        return range.getBoundingClientRect().height;
+      };
+      const readings = [];
+      try {
+        for (let width = narrowest; width <= widest; width += 1) {
+          cell.style.width = `${width}px`;
+          readings.push({
+            width,
+            dailyLimit: dailyLimit ? textHeight(dailyLimit) : Number.NaN,
+            tallestOther: Math.max(...others.map(textHeight)),
+          });
+        }
+      } finally {
+        cell.style.width = '';
+      }
+      return readings;
+    },
+    [from, to] as const,
+  );
 }
 
 /**
@@ -279,10 +327,13 @@ test.describe('what recordGameResult will bank', () => {
    * when it resets, on the card and through the live region, with the totals
    * already banked left on the tiles.
    *
-   * The card is measured too (`CLAUDE.md` §4.4): held in its loading state
-   * and then showing the daily-limit sentence it is one height at 390px, and
-   * at three widths the sentence wraps no further than the tallest of the
-   * cell's other sentences, so it reserves no height of its own.
+   * **And it costs nobody any height** (`CLAUDE.md` §4.4). The card is one
+   * height without the sentence — its read held open — and with it, at 320,
+   * 390 and 1280px. That alone cannot catch a sentence that is the tallest in
+   * its cell, because the cell reserves the tallest for every state alike, so
+   * the cell is swept too: at every width it takes between a 320px and a
+   * 1280px viewport, the daily-limit text is never taller than the tallest of
+   * the sentences beside it.
    */
   test('says on /profile that the last game was over the daily limit', async ({
     page,
@@ -346,7 +397,14 @@ test.describe('what recordGameResult will bank', () => {
     await expect(page.getByTestId('stats-loading')).toBeVisible();
     await expect(page.getByTestId('stats-daily-limit')).toBeHidden();
     const card = page.getByTestId('stats-card');
-    const loadingHeight = await settledHeight(card, 'the stats card while the read is held');
+    const withoutTheSentence = new Map<number, number>();
+    for (const width of CARD_WIDTHS) {
+      await page.setViewportSize({ width, height: 1000 });
+      withoutTheSentence.set(
+        width,
+        await settledHeight(card, `the stats card at ${width}px while the read is held`),
+      );
+    }
 
     release();
     await expect(page.getByTestId('stats-daily-limit')).toBeVisible();
@@ -354,22 +412,32 @@ test.describe('what recordGameResult will bank', () => {
     await expect(page.getByTestId('stats-not-banked')).toBeHidden();
     await expect(page.getByTestId('stats-since')).toBeHidden();
     await expect(page.getByTestId('stats-daily-limit')).toHaveText(
-      'Your last game was not added: the limit is 200 games a day, reset at midnight UTC.',
+      'Not added: the daily limit of 200 games resets at midnight UTC.',
     );
     await expect(page.getByTestId('profile-announcement')).toHaveText(
       'Your last game was not added: you reached the daily limit of 200 games.',
     );
     await expect(page.getByTestId('stat-games-played')).toHaveText('200');
-    await expectSameHeight(card, loadingHeight, 'the stats card showing the daily limit');
-
-    for (const width of [320, 390, 1280]) {
+    for (const width of CARD_WIDTHS) {
       await page.setViewportSize({ width, height: 1000 });
-      await expect
-        .poll(() => dailyLimitOverhang(page), {
-          message: `the daily-limit sentence at ${width}px is no taller than the cell's others`,
-        })
-        .toBeLessThanOrEqual(0.5);
+      await expectSameHeight(
+        card,
+        withoutTheSentence.get(width)!,
+        `the stats card at ${width}px showing the daily limit`,
+      );
     }
+
+    const narrowest = await statusCellWidthAt(page, 320);
+    const widest = await statusCellWidthAt(page, 1280);
+    const readings = await sweepStatusCell(page, narrowest, widest);
+    // The sweep swept, and saw the cell's other sentences wrap differently
+    // across it — or a measurement that read one height everywhere would pass.
+    expect(readings).toHaveLength(widest - narrowest + 1);
+    expect(new Set(readings.map((reading) => reading.tallestOther)).size).toBeGreaterThan(1);
+    expect(
+      readings.filter((reading) => !(reading.dailyLimit <= reading.tallestOther + 0.5)),
+      'widths at which the daily-limit sentence is the tallest in its cell',
+    ).toEqual([]);
 
     expect(
       (await firebase.inspectAccountState({ uid })).gameplayStats,

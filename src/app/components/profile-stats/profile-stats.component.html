@@ -108,19 +108,21 @@
         </p>
         <!--
           The same, refused for the server's daily ceiling (`daily-ceiling.ts`):
-          what the limit is and when the count starts again. The day is UTC
-          because the server's is, and the sentence is fixed rather than a
-          local time so its length never changes the height this cell reserves
-          — measured, it wraps no further than the longest sentence above at
-          320, 360, 390, 414 and 1280px.
+          what the limit is and when the count starts again — the live region
+          says it in full. The day is UTC because the server's is, and the
+          sentence is fixed rather than a local time, and short, because it
+          sits in this cell for everybody: at every width the cell takes
+          between a 320px and a 1280px viewport its text is never taller than
+          the tallest sentence beside it, so it reserves no height of its own.
+          Lengthen it and `game-result-limits.spec.ts` measures whether that
+          still holds.
         -->
         <p
           class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
           [class.invisible]="line() !== 'dailyLimit'"
           data-cy="stats-daily-limit"
         >
-          Your last game was not added: the limit is {{ dailyCeiling }} games a day, reset at
-          midnight UTC.
+          Not added: the daily limit of {{ dailyCeiling }} games resets at midnight UTC.
         </p>
         <p
           class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
