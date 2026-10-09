@@ -42,10 +42,11 @@ import { configureTopicGame, runTag } from '../../support/topics';
  * green emulator run says nothing about `firestore.indexes.json` — see
  * `docs/ci-cd.md` §4.3 and `AUDIT_REMEDIATION.md` `D3`. The preview slice runs
  * the same filtered draws against `trivimind-dev`'s real query engine, which
- * refuses a missing index outright, and that is the only place in the repo
- * where the declaration is checked against a Firestore rather than against
- * itself; `firestore-tests/indexes.spec.ts` pins what is declared, and the
- * deploy builds it.
+ * refuses a missing index outright, and that — with `quiz-list.spec.ts`'s
+ * newest-first query — is the only place in the repo where a declaration is
+ * checked against a Firestore rather than against itself;
+ * `firestore-tests/indexes.spec.ts` pins what is declared, and the deploy
+ * builds it.
  */
 
 const GAME_SIZE = 5;

@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { Quiz } from '../../models/quiz.model';
 import { ConnectivityService } from '../../services/connectivity.service';
 import { QuizService } from '../../services/quiz.service';
@@ -73,16 +73,18 @@ function setup(
     vi.stubGlobal('IntersectionObserver', FakeObserver);
   }
   const listPublished = vi.fn(options.listPublished ?? (() => Promise.resolve([quiz('a')])));
+  // Writable, so a test can take the connection away and give it back.
+  const online = signal(options.online ?? true);
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
       { provide: QuizService, useValue: { listPublished } },
-      { provide: ConnectivityService, useValue: { isOnline: signal(options.online ?? true) } },
+      { provide: ConnectivityService, useValue: { isOnline: online } },
     ],
   });
   const fixture = TestBed.createComponent(QuizListComponent);
   fixture.detectChanges();
-  return { fixture, host: fixture.nativeElement as HTMLElement, listPublished };
+  return { fixture, host: fixture.nativeElement as HTMLElement, listPublished, online };
 }
 
 async function settle(fixture: { whenStable: () => Promise<unknown>; detectChanges: () => void }) {
@@ -242,5 +244,107 @@ describe('QuizListComponent — its states share one box', () => {
     expect(host.querySelector('[data-cy="quiz-list-status"]')?.textContent?.trim()).toBe(
       '2 quizzes.',
     );
+  });
+});
+
+describe('QuizListComponent — offline, a card says it needs a connection', () => {
+  /**
+   * A quiz's page is a lazy chunk outside the precache and the quiz itself is
+   * a Firestore read, so a card cannot open offline — a tap used to start a
+   * navigation whose chunk failed to load, with nothing on screen to say so.
+   * jsdom has no network to lose; `offline-play.spec.ts` cuts a real one.
+   */
+  async function listed(options: Parameters<typeof setup>[0]) {
+    const rendered = setup({
+      listPublished: () => Promise.resolve([quiz('a'), quiz('b', { questionIds: ['q-1'] })]),
+      ...options,
+    });
+    await settle(rendered.fixture);
+    FakeObserver.instances[0].report(1);
+    await settle(rendered.fixture);
+    const links = () => [...rendered.host.querySelectorAll<HTMLElement>('[data-cy="quiz-link"]')];
+    return { ...rendered, links };
+  }
+
+  /** The two cells stacked in a card's foot: the question count, and the offline reason. */
+  function foot(link: HTMLElement) {
+    const reason = link.querySelector('[data-cy="quiz-link-offline"]') as HTMLElement;
+    const count = [...(reason.parentElement as HTMLElement).children].find(
+      (cell) => cell !== reason,
+    ) as HTMLElement;
+    return { count, reason };
+  }
+
+  it('makes every card a disabled link with the reason in place of the count', async () => {
+    const { links } = await listed({ online: false });
+
+    expect(links()).toHaveLength(2);
+    for (const link of links()) {
+      // No href: a tap has nowhere to go. role + aria-disabled: still the
+      // link it is, announced as unavailable.
+      expect(link.hasAttribute('href')).toBe(false);
+      expect(link.getAttribute('role')).toBe('link');
+      expect(link.getAttribute('aria-disabled')).toBe('true');
+      const { count, reason } = foot(link);
+      expect(reason.textContent?.trim()).toBe('Needs a connection');
+      expect(reason.classList.contains('invisible')).toBe(false);
+      expect(count.classList.contains('invisible')).toBe(true);
+    }
+  });
+
+  it('goes nowhere when a card is tapped', async () => {
+    const { links } = await listed({ online: false });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+
+    links()[0].click();
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('re-enables the cards when the connection returns, with nothing re-read', async () => {
+    const { fixture, links, listPublished, online } = await listed({ online: false });
+
+    online.set(true);
+    fixture.detectChanges();
+
+    expect(links().map((link) => link.getAttribute('href'))).toEqual(['/quiz/a', '/quiz/b']);
+    for (const link of links()) {
+      expect(link.hasAttribute('role')).toBe(false);
+      expect(link.hasAttribute('aria-disabled')).toBe(false);
+      const { count, reason } = foot(link);
+      expect(count.classList.contains('invisible')).toBe(false);
+      expect(reason.classList.contains('invisible')).toBe(true);
+    }
+    expect(links()[1].textContent).toContain('1 question');
+    expect(listPublished).toHaveBeenCalledTimes(1);
+
+    // Stubbed, because the test router has no `/quiz` route to arrive at.
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    links()[0].click();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(String(navigate.mock.calls[0][0])).toBe('/quiz/a');
+  });
+
+  // The foot holds both cells in every state, one of them invisible, so its
+  // height is the taller of the two whichever is showing (`CLAUDE.md` §4.4).
+  it('keeps both of the foot’s cells rendered online and offline', async () => {
+    const { fixture, links, online } = await listed({ online: true });
+
+    const visible = () =>
+      links().map((link) => {
+        const { count, reason } = foot(link);
+        return [count, reason].map((cell) => !cell.classList.contains('invisible'));
+      });
+    expect(visible()).toEqual([
+      [true, false],
+      [true, false],
+    ]);
+
+    online.set(false);
+    fixture.detectChanges();
+    expect(visible()).toEqual([
+      [false, true],
+      [false, true],
+    ]);
   });
 });

@@ -44,7 +44,7 @@ export default defineConfig<object, E2EWorkerOptions>({
 
   /**
    * The slice that is safe against a real, persistent, publicly-readable
-   * project: all of `unauthenticated/` bar the seven below, plus the two
+   * project: all of `unauthenticated/` bar the five below, plus the two
    * authenticated specs whose entire footprint is accounts and rows the sweep
    * can delete.
    *
@@ -161,23 +161,12 @@ export default defineConfig<object, E2EWorkerOptions>({
      * on `!navigator.webdriver`), which makes it pass for a reason no future
      * spec in this directory is obliged to preserve. `ci-cd.md` §4.3 records
      * the split; the precache half of the question is
-     * `service-worker-precache.spec.ts`, which belongs here and only here.
+     * `service-worker-precache.spec.ts`, which belongs here and only here. Its
+     * second test — the curated-quiz cards on `/` with the network cut — goes
+     * with it: it asserts only what the page itself does offline, which the
+     * emulator settles without spending anything on the real project.
      */
     '**/unauthenticated/offline-play.spec.ts',
-    /*
-     * Not yet runnable here, and for a reason about the project rather than the
-     * specs: rules are per project and a channel is Hosting only, so a preview
-     * runs whatever `firestore.rules` `main` last deployed to `trivimind-dev`
-     * (`docs/ci-cd.md` §4.2a) — and until `FEAT-024` has merged and
-     * `deploy-dev` has shipped its rules, that is a rule set with no `quizzes`
-     * block, under which every quiz read is refused. Their footprint is
-     * otherwise safe here: every quiz and question they seed is tracked by id
-     * and swept. They belong back in the slice once the rules are deployed —
-     * the list's `(isPublished, createdAt)` query is the only place its
-     * composite index meets a real query engine (`D3`).
-     */
-    '**/unauthenticated/curated-quiz.spec.ts',
-    '**/unauthenticated/quiz-list.spec.ts',
   ],
 
   use: {
