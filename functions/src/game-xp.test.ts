@@ -168,6 +168,44 @@ describe('gameXp — observed hardness', () => {
   });
 });
 
+describe('gameXp — one question, paid once', () => {
+  /**
+   * **The forged game the review found.** Twenty-five entries naming one
+   * question that nobody knew (×1.5): the first wrong, the next twenty-four
+   * right. The difficulty counters count it once — one answer, wrong — so
+   * paying every entry would have earned 24 × 30 + 2 × 24 = 768 XP for one
+   * wrong answer, at a price the forged entries' own counts never move. The
+   * first entry decides, as it does for the counters: nothing is earned.
+   */
+  it('pays nothing for a question whose first entry is wrong, however often it repeats', () => {
+    const counters = new Map([['q', question(40, 10)]]);
+    const forged = [
+      answer({ questionId: 'q', difficulty: 'hard', correct: false }),
+      ...Array.from({ length: 24 }, () => answer({ questionId: 'q', difficulty: 'hard' })),
+    ];
+
+    assert.equal(gameXp(forged, counters), 0);
+  });
+
+  it('pays a repeated question once, by its first entry, and runs past the repeats', () => {
+    const counters = new Map([['q', question(40, 10)]]);
+    const game = [
+      answer({ questionId: 'q', difficulty: 'hard' }),
+      answer({ questionId: 'q', difficulty: 'hard', correct: false }),
+      answer({ questionId: 'q', difficulty: 'hard' }),
+      answer({ difficulty: 'easy' }),
+    ];
+    // 30 for the question once, 10 for the Open Trivia answer, and the run of
+    // two they make with the repeats passed over.
+    assert.equal(gameXp(game, counters), 30 + 10 + 2 * 2);
+  });
+
+  it('pays every Open Trivia entry, which has no id to repeat', () => {
+    const game = Array.from({ length: 3 }, () => answer({ difficulty: 'easy' }));
+    assert.equal(gameXp(game, NO_QUESTIONS), 30 + 2 * 3);
+  });
+});
+
 describe('hardnessMultiplier', () => {
   it('is 1.5 − knew across the scale', () => {
     assert.equal(hardnessMultiplier(0), 1.5);
@@ -200,11 +238,12 @@ describe('gameXp — rounding', () => {
    * where rounding each answer first would have made 13 + 13 + 4 = 30.
    */
   it('rounds the total once, to the nearest whole number', () => {
-    const counters = new Map([['q1', question(16, 10, 1)]]);
-    const easy = answer({ questionId: 'q1', difficulty: 'easy' });
-    assert.equal(gameXp([easy], counters), 15);
-    assert.equal(gameXp([easy, easy], counters), 29);
-    assert.ok(Number.isInteger(gameXp([easy, easy, easy], counters)));
+    const ids = ['q1', 'q2', 'q3'];
+    const counters = new Map(ids.map((id) => [id, question(16, 10, 1)]));
+    const [first, second, third] = ids.map((id) => answer({ questionId: id, difficulty: 'easy' }));
+    assert.equal(gameXp([first], counters), 15);
+    assert.equal(gameXp([first, second], counters), 29);
+    assert.ok(Number.isInteger(gameXp([first, second, third], counters)));
   });
 });
 
@@ -227,16 +266,16 @@ describe('gameXp — rounding', () => {
  * Bo 216 XP (level 1).
  */
 describe('two players with identical correct answers', () => {
-  const hard = new Map([['hard', question(40, 10)]]);
-  const easy = new Map([['easy', question(40, 40)]]);
-  const ana = [
-    ...Array.from({ length: 5 }, () => answer({ questionId: 'hard', difficulty: 'hard' })),
-    ...Array.from({ length: 5 }, () =>
-      answer({ questionId: 'hard', difficulty: 'hard', correct: false }),
-    ),
-  ];
-  const bo = Array.from({ length: 10 }, (_, index) =>
-    answer({ questionId: 'easy', difficulty: 'easy', correct: index % 2 === 0 }),
+  // Ten different questions each, as a real game deals them — every one with
+  // the counters its player's description gives it.
+  const ids = (prefix: string) => Array.from({ length: 10 }, (_, index) => `${prefix}-${index}`);
+  const hard = new Map(ids('hard').map((id) => [id, question(40, 10)]));
+  const easy = new Map(ids('easy').map((id) => [id, question(40, 40)]));
+  const ana = ids('hard').map((id, index) =>
+    answer({ questionId: id, difficulty: 'hard', correct: index < 5 }),
+  );
+  const bo = ids('easy').map((id, index) =>
+    answer({ questionId: id, difficulty: 'easy', correct: index % 2 === 0 }),
   );
 
   it('reach different XP totals, and different levels', () => {

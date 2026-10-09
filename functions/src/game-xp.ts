@@ -108,6 +108,13 @@ export function observedHardness(question: unknown): number {
  *   out smaller than the streak the game showed, never larger.
  * - Rounded once, at the end, so the result does not depend on the order the
  *   fractions were added in.
+ * - **A community question is paid once per game, its first entry deciding** —
+ *   the rule the difficulty counters already follow (`counterIncrementsFrom`).
+ *   A real game never holds one bank question twice; a forged one naming it
+ *   in every entry would otherwise be paid twenty-four times over, at whatever
+ *   price the counters set, while counting into those counters only once.
+ *   Later entries for it are passed over entirely — paid nothing and no part
+ *   of a run. An Open Trivia entry has no id to repeat, and each is paid.
  *
  * `questions` maps a community question's id to its stored fields. A game with
  * no per-answer records — a client from before them, or a save whose history
@@ -125,7 +132,14 @@ export function gameXp(
   let earned = 0;
   let run = 0;
   let longestRun = 0;
+  const seen = new Set<string>();
   for (const answer of answers) {
+    if (answer.questionId !== undefined) {
+      if (seen.has(answer.questionId)) {
+        continue;
+      }
+      seen.add(answer.questionId);
+    }
     if (!answer.correct) {
       run = 0;
       continue;
