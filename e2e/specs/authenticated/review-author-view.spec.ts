@@ -186,7 +186,11 @@ test.describe('everything one account contributed, as a reviewer', () => {
     await seen;
     const heading = page.getByTestId('author-view-heading');
     await expect(heading).toBeFocused();
+    // The loading sentence shown **and** a sibling hidden: the view is created
+    // by this click, and before its first binding pass every sentence in the
+    // status block's one grid cell reads as visible (`docs/ci-cd.md` §4.3).
     await expect(page.getByTestId('author-loading')).toBeVisible();
+    await expect(page.getByTestId('author-empty')).toBeHidden();
     await expect(page.getByTestId('review-queue-body')).toBeHidden();
     const status = page.getByTestId('author-status');
     const statusWhileLoading = await settledBox(status, 'the status block while loading');

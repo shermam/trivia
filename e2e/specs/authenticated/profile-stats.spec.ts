@@ -148,18 +148,23 @@ test.describe('profile — lifetime stats', () => {
     await page.goto('/profile');
 
     // Measured in the loading state, which lasts exactly as long as this test
-    // needs it to.
+    // needs it to — once the read is out and held, because the card also says
+    // "loading" before auth has answered, which is not the state under test.
+    // The intercept is load-bearing: one that silently stopped matching would
+    // leave this measuring the loaded state twice and passing by luck
+    // (`CLAUDE.md` §4.6). The state is asserted by its sentence shown **and** a
+    // sibling hidden, because before the card's first binding pass every
+    // sentence in its one grid cell reads as visible (`docs/ci-cd.md` §4.3).
     const card = page.getByTestId('stats-card');
+    await expect
+      .poll(() => stats.held.reads, { message: 'stats reads held open by the intercept' })
+      .toBeGreaterThan(0);
     await expect(page.getByTestId('stats-loading')).toBeVisible();
+    await expect(page.getByTestId('stats-signed-out')).toBeHidden();
     const whileLoading = await settledHeight(card, 'the stats card while the read is in flight');
 
     stats.release();
     await expect(page.getByTestId('stat-games-played')).toHaveText('12');
-
-    // The intercept is load-bearing: one that silently stopped matching would
-    // leave this measuring the loaded state twice and passing by luck
-    // (`CLAUDE.md` §4.6).
-    expect(stats.held.reads, 'stats reads held open by the intercept').toBeGreaterThan(0);
     await expectSameHeight(card, whileLoading, 'the stats card when the totals arrive');
   });
 

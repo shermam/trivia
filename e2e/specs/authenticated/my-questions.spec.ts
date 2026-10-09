@@ -257,7 +257,11 @@ test.describe('my questions', () => {
     // rather than answering a question the visitor did not ask.
     await page.goto('/my-questions');
 
+    // The sentence shown **and** its sibling hidden: the messages share one
+    // grid cell, and before the page's first binding pass every one of them
+    // reads as visible (`docs/ci-cd.md` §4.3).
     await expect(page.getByTestId('my-questions-signed-out')).toBeVisible();
+    await expect(page.getByTestId('my-questions-loading')).toBeHidden();
     await expect(page.getByTestId('my-questions-sign-in')).toBeVisible();
     await expect(page.getByTestId('my-question')).toHaveCount(0);
   });

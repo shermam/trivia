@@ -575,7 +575,11 @@ test.describe('avatar choice', () => {
   test('explains itself to an anonymous visitor, and offers sign-in', async ({ page }) => {
     await page.goto('/profile');
 
+    // The sentence shown **and** its sibling hidden: the status lines share
+    // one grid cell, and before the card's first binding pass every one of
+    // them reads as visible (`docs/ci-cd.md` §4.3).
     await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    await expect(page.getByTestId('avatar-loading')).toBeHidden();
     await expect(page.getByTestId('avatar-picker')).toBeHidden();
     await expect(page.getByTestId('avatar-save')).toBeHidden();
     await expect(page.getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'guest');
@@ -601,6 +605,7 @@ test.describe('avatar choice', () => {
     await page.setViewportSize({ width: 390, height: 1000 });
     await page.goto('/profile');
     await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    await expect(page.getByTestId('avatar-loading')).toBeHidden();
     const card = page.getByTestId('avatar-card');
     const signedOut = await settledHeight(card, 'the avatar card, signed out');
 
@@ -637,6 +642,7 @@ test.describe('avatar choice', () => {
     await page.setViewportSize({ width: 390, height: 1000 });
     await page.goto('/profile');
     await expect(page.getByTestId('avatar-signed-out')).toBeVisible();
+    await expect(page.getByTestId('avatar-loading')).toBeHidden();
     const card = page.getByTestId('avatar-card');
     const signedOut = await settledHeight(card, 'the avatar card, signed out');
 
