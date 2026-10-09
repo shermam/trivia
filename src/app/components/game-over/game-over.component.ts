@@ -751,9 +751,13 @@ export class GameOverComponent implements OnInit {
    * inflate the totals on each one, which is precisely what the id exists to
    * prevent.
    *
-   * Anonymous and unverified sessions are refused server-side rather than
-   * here, so this deliberately does not duplicate that predicate — a client
-   * mirror of a server gate is a thing that drifts (H6).
+   * Anonymous sessions, and any sign-in provider the app does not offer, are
+   * refused server-side by the shared caller gate
+   * (`functions/src/caller-gate.ts`) rather than here, so this deliberately
+   * does not duplicate that predicate — a client mirror of a server gate is a
+   * thing that drifts (H6). A password account whose address is not verified
+   * yet is banked like any other: the gate's email clause is for writes such
+   * as the leaderboard save, which this screen's "verify" face is about.
    *
    * **Both numbers come from the game's own counters, and neither is the
    * score.** `correctAnswers` used to be `score()`, correct only while the two
@@ -785,10 +789,11 @@ export class GameOverComponent implements OnInit {
     // half of a bound held at both ends, not the only thing holding it.
     //
     // Sent for every account, including an anonymous one. The gate is the
-    // callable's provider allowlist and nothing here duplicates it, for the
-    // reason the doc comment gives: a client mirror of a server gate is a thing
-    // that drifts (H6). An anonymous submission is refused before any write, so
-    // nothing is stored for a guest.
+    // callable's — the shared caller gate — and nothing here duplicates it, for
+    // the reason the doc comment gives: a client mirror of a server gate is a
+    // thing that drifts (H6). An anonymous submission is refused before any
+    // write, so nothing is stored for a guest; what a refusal of a signed-in
+    // account means is `AccountService.recordGameResult`'s to report.
     const answers = buildPlayAnswers(
       this.gameController.questions(),
       this.gameController.answerHistory(),

@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { AccountService, UnbankedGame } from '../../services/account.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AvatarChoice } from '../../models/avatar.model';
 import { AuthService } from '../../services/auth.service';
@@ -27,6 +28,7 @@ type ProfileView = 'loading' | 'signedOut' | 'empty' | 'stats' | 'failed';
 /** The template-facing members are `protected`; the spec drives them directly. */
 interface InternalProfileStats {
   view(): ProfileView;
+  line(): ProfileView | 'notBanked';
   tiles(): { id: string; label: string; value: string }[];
   trackingSince(): string | null;
   statusAnnouncement(): string;
@@ -59,6 +61,8 @@ interface SetupOptions {
   embedded?: boolean;
   /** The stored avatar choice the header draws, or `null` while unknown. */
   avatar?: AvatarChoice | null;
+  /** A game the server declined to bank in this tab (`AccountService.unbankedGame`). */
+  unbanked?: UnbankedGame | null;
 }
 
 /**
@@ -81,6 +85,7 @@ function configure(options: SetupOptions = {}) {
     options.fails ? Promise.reject(new Error('refused')) : Promise.resolve(result),
   );
   const open = vi.fn();
+  const unbankedGame = signal<UnbankedGame | null>(options.unbanked ?? null);
 
   TestBed.configureTestingModule({
     providers: [
@@ -116,6 +121,7 @@ function configure(options: SetupOptions = {}) {
         },
       },
       { provide: AuthMenuStateService, useValue: { open } },
+      { provide: AccountService, useValue: { unbankedGame } },
       // The real service reads `window.location.search` once, at construction,
       // so embed mode is not something a test can turn on afterwards.
       {
@@ -125,7 +131,7 @@ function configure(options: SetupOptions = {}) {
     ],
   });
 
-  return { getGameplayStats, userSignal, authReadySignal, open };
+  return { getGameplayStats, userSignal, authReadySignal, open, unbankedGame };
 }
 
 function setup(options: SetupOptions = {}) {
@@ -339,6 +345,79 @@ describe('ProfileStatsComponent', () => {
 
     expect(open).toHaveBeenCalledOnce();
   });
+
+  /**
+   * A game the server refused to bank (`AccountService.unbankedGame`). "Nothing
+   * banked yet — finish a game and your totals will show up here" is the
+   * sentence every GitHub, Microsoft, Apple, Twitter/X and Yahoo player read
+   * while every game they finished was refused, so it must not be the sentence
+   * shown once the app knows a game was refused — and neither may "Tracking
+   * since", which promises the same thing to a player with older totals.
+   */
+  it('says the last game was not added, over an empty card', async () => {
+    const { component } = setup({
+      result: null,
+      unbanked: { uid: 'u1', reason: 'unsupported-provider' },
+    });
+
+    await settle();
+
+    expect(component.view()).toBe('empty');
+    expect(component.line()).toBe('notBanked');
+    expect(component.statusAnnouncement()).toBe('Your last game could not be added to your stats.');
+  });
+
+  it('says it over a full card too, and keeps the totals already banked', async () => {
+    const { component } = setup({ unbanked: { uid: 'u1', reason: 'rate-limited' } });
+
+    await settle();
+
+    expect(component.line()).toBe('notBanked');
+    expect(component.tiles().find((tile) => tile.id === 'games-played')?.value).toBe('3');
+  });
+
+  it('says it the moment the refusal lands, with the page already open', async () => {
+    const { component, unbankedGame } = setup();
+    await settle();
+    expect(component.line()).toBe('stats');
+
+    unbankedGame.set({ uid: 'u1', reason: 'unsupported-provider' });
+
+    expect(component.line()).toBe('notBanked');
+  });
+
+  it('shows nothing of a refused game that belongs to another account', async () => {
+    const { component } = setup({ unbanked: { uid: 'someone-else', reason: 'invalid' } });
+
+    await settle();
+
+    expect(component.line()).toBe('stats');
+    expect(component.statusAnnouncement()).toBe('Your stats are ready.');
+  });
+
+  /**
+   * It refines what the card says about totals, so it only ever replaces a
+   * sentence about totals: a read in flight, a failed read and a signed-out
+   * visitor keep their own, and the failed read keeps its retry.
+   */
+  it('leaves the loading, failed and signed-out sentences alone', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const unbanked = { uid: 'u1', reason: 'unsupported-provider' };
+
+    const failed = setup({ fails: true, unbanked });
+    await settle();
+    expect(failed.component.line()).toBe('failed');
+    TestBed.resetTestingModule();
+
+    const loading = setup({ authReady: false, unbanked });
+    await settle();
+    expect(loading.component.line()).toBe('loading');
+    TestBed.resetTestingModule();
+
+    const signedOut = setup({ user: null, unbanked });
+    await settle();
+    expect(signedOut.component.line()).toBe('signedOut');
+  });
 });
 
 /**
@@ -412,6 +491,29 @@ describe('ProfileStatsComponent (rendered)', () => {
 
     expect(query('[data-cy="stats-signed-out"]')).not.toBeNull();
     expect(query('[data-cy="stats-sign-in"]')).not.toBeNull();
+  });
+
+  /**
+   * The refused-game sentence takes the place of the one it contradicts, in the
+   * same grid cell, so the card says one thing and keeps its height — and the
+   * live region says it too, because it arrives after a round trip.
+   */
+  it('shows the refused-game sentence in place of the one that promised totals', async () => {
+    const { query } = await render({
+      result: null,
+      unbanked: { uid: 'u1', reason: 'unsupported-provider' },
+    });
+
+    const shown = (cy: string) => !query(`[data-cy="${cy}"]`)!.classList.contains('invisible');
+    expect(shown('stats-not-banked')).toBe(true);
+    expect(shown('stats-empty')).toBe(false);
+    expect(shown('stats-since')).toBe(false);
+    expect(query('[data-cy="stats-not-banked"]')?.parentElement).toBe(
+      query('[data-cy="stats-status"]'),
+    );
+    expect(query('[role="status"]')?.textContent?.trim()).toBe(
+      'Your last game could not be added to your stats.',
+    );
   });
 
   /**
