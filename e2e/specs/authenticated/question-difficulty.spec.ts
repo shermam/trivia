@@ -214,9 +214,10 @@ test.describe('per-question difficulty (FEAT-023)', () => {
 
   /**
    * Anonymous play adds nothing, which is the Privacy Policy's sentence: the
-   * callable's provider allowlist refuses a guest before anything is written,
-   * counters included. Read after the callable has answered, so "unchanged"
-   * cannot mean "not yet".
+   * shared caller gate (`functions/src/caller-gate.ts`) refuses a guest before
+   * anything is written, counters included — and says why, `anonymous`, which
+   * is the refusal the client keeps quiet about. Read after the callable has
+   * answered, so "unchanged" cannot mean "not yet".
    */
   test('counts nothing for an anonymous player', async ({ page, firebase }) => {
     const topic = runTag('difficulty');
@@ -231,7 +232,8 @@ test.describe('per-question difficulty (FEAT-023)', () => {
     await expect(page.getByText('Sign in to save this score to the leaderboard.')).toBeVisible();
     expect(await callableResult(await recorded)).toEqual({
       recorded: false,
-      reason: 'unsupported-provider',
+      reason: 'anonymous',
+      provider: 'anonymous',
     });
 
     expect(await firebase.getQuestionCounters([id])).toEqual({
