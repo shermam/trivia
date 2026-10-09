@@ -125,8 +125,9 @@ test.describe('a machine-generated question', () => {
     // Readable whole at the narrowest phones (`CLAUDE.md` §4.4): neither line
     // cut off at 320 or 390. The author line is also the height of the uid's
     // line beside it at every width. The run line is one line from 390 up; at
-    // 320 — a 305px page once this runner's scrollbar takes its share — its 32
-    // characters wrap, by `break-all`, rather than lose the end of the id.
+    // 320 its 32 characters can need more room than the line has — measured,
+    // 233px of text beside 217px of line — so `break-all` wraps them rather
+    // than lose the end of the id.
     for (const viewport of [
       { width: 320, height: 640 },
       { width: 390, height: 844 },
