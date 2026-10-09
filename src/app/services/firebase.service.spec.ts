@@ -139,6 +139,19 @@ const PERMISSION_DENIED_RESPONSE = {
   json: () => Promise.resolve({ error: { status: 'PERMISSION_DENIED', message: 'refused' } }),
 };
 
+/**
+ * A refusal, answered on a later turn of the event loop.
+ *
+ * Everything else this fake answers resolves at once, and against that a
+ * client that re-sent a refused read for ever would be a pure microtask loop —
+ * one the test timeout, a timer, never gets to interrupt, so the run would hang
+ * rather than fail. The tick is what turns that mutation of the quiz fallback
+ * into a timed-out test (`FEAT-024`).
+ */
+function refusedLater(): Promise<typeof PERMISSION_DENIED_RESPONSE> {
+  return new Promise((resolve) => setTimeout(() => resolve(PERMISSION_DENIED_RESPONSE), 0));
+}
+
 interface FakeServer {
   queries: RecordedQuery[];
   writes: RecordedWrite[];
@@ -255,7 +268,7 @@ function fakeServer(
             (id) => !canRead(collectionPath, id, seed.find((row) => row.id === id)?.data),
           )
         ) {
-          return Promise.resolve(PERMISSION_DENIED_RESPONSE);
+          return refusedLater();
         }
 
         let rows = [...seed].sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -317,7 +330,7 @@ function fakeServer(
         const id = path.slice(path.lastIndexOf('/') + 1);
         const match = seed.find((row) => row.id === id);
         if (canRead && !canRead(path.slice(0, path.lastIndexOf('/')), id, match?.data)) {
-          return Promise.resolve(PERMISSION_DENIED_RESPONSE);
+          return refusedLater();
         }
         return Promise.resolve(
           match
@@ -1926,6 +1939,26 @@ describe('FirebaseService: curated quizzes (FEAT-024)', () => {
   });
 
   /**
+   * The fallback is bounded exactly as the query it replaces (`CLAUDE.md`
+   * §4.1): one get per id the query named — malformed ids and repeats already
+   * dropped, never more than twenty-five — and the refused query is not sent
+   * again. A fallback that walked the caller's raw list instead would read a
+   * thirty-id quiz thirty-three times here, one of them a path the REST client
+   * refuses outright; one that re-sent the query fails on the count, and one
+   * that re-sent it for ever times out (see `refusedLater`).
+   */
+  it('falls back to at most twenty-five gets, one per usable id, and never re-sends the query', async () => {
+    const { service, queries } = setup([], undefined, () => false);
+    const ids = Array.from({ length: 30 }, (_, index) => `q-${index}`);
+
+    const questions = await service.getApprovedQuestionsByIds([...ids, 'q-0', 'a/b', '__x__']);
+
+    expect(questions).toEqual([]);
+    expect(queries).toHaveLength(1);
+    expect(documentGets()).toEqual(ids.slice(0, 25).map((id) => `custom_questions/${id}`));
+  });
+
+  /**
    * A reviewer, or the author of a pending question, may read it — so the
    * per-id reads can hand back a question the quiz must not play. The status
    * is checked on what came back, so a quiz plays the same questions to
@@ -1957,24 +1990,24 @@ describe('FirebaseService: curated quizzes (FEAT-024)', () => {
         'fetch',
         vi.fn((url: string) => {
           const failure = answer(url);
-          return Promise.resolve(
-            failure
-              ? {
-                  ok: false,
-                  status: failure.status,
-                  json: () =>
-                    Promise.resolve({ error: { status: failure.code, message: failure.code } }),
-                }
-              : {
-                  ok: true,
-                  status: 200,
-                  json: () =>
-                    Promise.resolve({
-                      name: `${RESOURCE_ROOT}/custom_questions/q-1`,
-                      fields: toWireFields(makeQuestion() as never),
-                    }),
-                },
-          );
+          const response = failure
+            ? {
+                ok: false,
+                status: failure.status,
+                json: () =>
+                  Promise.resolve({ error: { status: failure.code, message: failure.code } }),
+              }
+            : {
+                ok: true,
+                status: 200,
+                json: () =>
+                  Promise.resolve({
+                    name: `${RESOURCE_ROOT}/custom_questions/q-1`,
+                    fields: toWireFields(makeQuestion() as never),
+                  }),
+              };
+          // On a later tick, for the reason `refusedLater` gives.
+          return new Promise((resolve) => setTimeout(() => resolve(response), 0));
         }),
       );
 
