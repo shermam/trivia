@@ -192,6 +192,53 @@ describe('legal pages', () => {
   });
 
   /**
+   * **The experience points (`FEAT-041`).** A new field on the `users/{uid}`
+   * record, and a number worked out from a player's own play — so the page has
+   * to say what it is, where it comes from, that nothing public shows it, and
+   * what a level does, and the three sentences it would otherwise have
+   * falsified have to say so too: the profile paragraph's "nothing else is
+   * used to categorise you", the automated-decisions list, and the
+   * lawful-basis table.
+   *
+   * Each assertion is one claim the code has to keep: `recordGameResult`
+   * computes the points from the game being banked and stores one total;
+   * the level is derived wherever it is shown; and no rule, board or screen
+   * shows either to anybody else.
+   */
+  it('discloses the experience points: what they are, where they come from, and who sees them', async () => {
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+
+    // The field, in the record's inventory.
+    expect(text).toContain(
+      'your longest run of correct answers within one game, your experience points',
+    );
+    expect(text).toContain('Your experience points (XP) are one running total on that record.');
+    // Where they come from: the game being banked, and nothing older.
+    expect(text).toContain('we work out what it earned from that game alone');
+    expect(text).toContain(
+      "which of your answers were right, each question's difficulty, how often players have answered each community question correctly, and your longest run of right answers",
+    );
+    // What is kept, and what is derived.
+    expect(text).toContain(
+      'We keep the total and nothing else: not the points game by game, and not your level',
+    );
+    // What a level does, and who sees it.
+    expect(text).toContain(
+      'A level unlocks more of the avatars you can draw for yourself, and that is all it does.',
+    );
+    expect(text).toContain('never to another player and never on a leaderboard');
+
+    // The three sentences a level would otherwise have falsified.
+    expect(text).toContain('The only other thing worked out from your play is your level');
+    expect(text).toContain('Three things are decided automatically and none is one of those.');
+    expect(text).not.toContain('Two things are decided automatically');
+    expect(text).toContain('an avatar you have already chosen is never taken back');
+    expect(text).toContain(
+      'Work out the experience points each game you finish signed in earns, and keep their total',
+    );
+  });
+
+  /**
    * **The play-history disclosure (`FEAT-049`).** `users/{uid}/plays` is the
    * first thing the app stores that is a *profile* in the ordinary sense — a
    * record of which questions a player was shown, how they did and how long
