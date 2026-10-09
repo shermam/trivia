@@ -319,16 +319,20 @@ test.describe('what recordGameResult will bank', () => {
     });
 
     // The `users/{uid}` read `/profile` makes, held open until released so the
-    // loading state can be measured rather than raced.
+    // loading state can be measured rather than raced. Only the first is held.
+    // `held` moves in the same tick that `release` is assigned, after the
+    // fetch, so a test that has seen it at 1 can never call the placeholder.
     let release: () => void = () => undefined;
+    let claimed = false;
     let held = 0;
     await page.route(/\/documents\/users\//, async (route) => {
-      if (route.request().method() !== 'GET' || held > 0) {
+      if (route.request().method() !== 'GET' || claimed) {
         await route.fallback();
         return;
       }
-      held += 1;
+      claimed = true;
       const response = await route.fetch();
+      held += 1;
       await new Promise<void>((resolve) => {
         release = resolve;
       });
