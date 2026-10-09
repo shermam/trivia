@@ -392,4 +392,22 @@ describe('applyAvatarChoice', () => {
 
     assert.deepEqual(sets, []);
   });
+
+  /**
+   * A player who has not finished a game has no `users/{uid}` document, and
+   * the transaction reads nothing — which is no XP, never no rule. Core is
+   * open to them as to anyone; bold is refused, and nothing is written.
+   */
+  it('decides a player with no document yet as one with no XP', async () => {
+    const open = fakeTransaction();
+    assert.equal(await applyAvatarChoice(open.transaction, user, built('core-12')), null);
+    assert.deepEqual(open.sets, [
+      [user, { avatar: built('core-12') }, { mergeFields: ['avatar'] }],
+    ]);
+
+    const locked = fakeTransaction();
+    assert.deepEqual(await applyAvatarChoice(locked.transaction, user, built('bold-30')), LOCKED);
+    assert.deepEqual(locked.reads, [user]);
+    assert.deepEqual(locked.sets, []);
+  });
 });

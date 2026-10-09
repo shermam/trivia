@@ -499,6 +499,26 @@ describe('applyGameResult', () => {
     assert.equal(writes[0].data['xp'], 32);
   });
 
+  /**
+   * A number is not an XP total because it is a number. Only this function
+   * writes the field and it only ever writes a whole, non-negative one, so a
+   * negative or fractional value can only be a hand edit — read as none, the
+   * way `readXp` reads it everywhere else, rather than carried into the total.
+   */
+  it('reads a stored number that is not a whole, non-negative XP as none', async () => {
+    for (const xp of [-50, 12.5]) {
+      const { transaction, writes } = fakeTransaction({
+        user: { ...storedTotals(), xp },
+        questions: { 'bank-1': {}, 'bank-2': {} },
+      });
+
+      const outcome = await applyGameResult(transaction, refs, mixedGame(), NOW);
+
+      assert.deepEqual(outcome.accepted && outcome.xp, { total: 32, gained: 32 }, String(xp));
+      assert.equal(writes[0].data['xp'], 32, String(xp));
+    }
+  });
+
   it('replaces a stored pair a hand edit has broken, rather than adding to it', async () => {
     const { transaction, writes } = fakeTransaction({
       questions: { 'bank-1': { answered: 2, correct: 7 }, 'bank-2': { answered: 'many' } },
