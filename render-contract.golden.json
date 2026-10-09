@@ -4,7 +4,7 @@
     "src/app/components/rendered-text/render-contract.spec.ts re-renders every input, directly and through RenderedTextComponent, and fails on any difference, and on a generatedWith that no longer names the installed packages — so a change to the renderer, or to marked, KaTeX, DOMPurify, jsdom or the parse5 jsdom serialises with, is a change to this file in the same pull request.",
     "A renderer configured from render-contract.json reproduces every output here byte for byte, or it is not the app's renderer. block renders a question and its explanation; inline renders an answer option. katex says whether render-contract.json's math.selection pattern matched the input, so it rendered through the instance with the KaTeX renderer, as the app would; false means the instance without one, which is where most questions go.",
     "output is the string the renderer returns — DOMPurify's serialisation, which the app writes into an element as it is — and it is jsdom's serialisation: parse5, at the version under generatedWith. A browser builds the same DOM but need not write it the same way: Chromium 141 escapes < and > inside an attribute value (title=\"a&lt;b&gt;c\") where parse5 writes them as they are (title=\"a<b>c\"), as link-title-with-angle-brackets shows. Byte equality is defined under jsdom; compare there.",
-    "A case whose about starts 'Known defect' records the renderer as it behaves today, not as it should: a fix changes that output, and the change shows here."
+    "A case whose about starts 'Known defect' records the renderer as it behaves, not as it should: its fix changes that output, and the change shows here."
   ],
   "version": 1,
   "generatedWith": {
@@ -78,6 +78,14 @@
       "input": "- one\n- two\n  - nested\n\n1. first\n2. second",
       "katex": false,
       "output": "<ul>\n<li>one</li>\n<li>two<ul>\n<li>nested</li>\n</ul>\n</li>\n</ul>\n<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n"
+    },
+    {
+      "name": "ordered-list-start",
+      "mode": "block",
+      "about": "A numbered list written from 3: marked writes start=\"3\", which is on the attribute list, so the list is numbered from 3. A list written from 1 carries no start, as lists shows.",
+      "input": "3. three\n4. four",
+      "katex": false,
+      "output": "<ol start=\"3\">\n<li>three</li>\n<li>four</li>\n</ol>\n"
     },
     {
       "name": "https-links",
@@ -232,6 +240,14 @@
       "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mphantom><mi>x</mi></mphantom><mpadded height=\"0px\" depth=\"0px\"><mi>y</mi></mpadded><mo>+</mo><mo largeop=\"false\">∫</mo><mi>f</mi></mrow><annotation encoding=\"application/x-tex\">\\phantom{x}\\smash{y} + \\smallint f</annotation></semantics></math></p>\n"
     },
     {
+      "name": "sizing-and-linebreak",
+      "mode": "block",
+      "about": "mathsize, which KaTeX sets for a sizing command, and linebreak, which it sets on the mspace a \\\\ becomes: both on the attribute list, so the size and the break reach the browser.",
+      "input": "$\\Huge x$ and $a \\\\ b$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle mathsize=\"2.488em\"><mi>x</mi></mstyle></mrow><annotation encoding=\"application/x-tex\">\\Huge x</annotation></semantics></math> and <math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mspace linebreak=\"newline\"></mspace><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\\\ b</annotation></semantics></math></p>\n"
+    },
+    {
       "name": "math-inside-code",
       "mode": "block",
       "about": "A delimiter inside a code span or a fence is code: the fence tokenizer claims it first. The source still takes the KaTeX instance — the selection pattern reads the raw text — and nothing is compiled.",
@@ -258,10 +274,10 @@
     {
       "name": "table",
       "mode": "block",
-      "about": "Known defect, recorded as the app renders it today: table elements are not on the list and their text is kept — except the header row, which DOMPurify drops whole, because thead is in its FORBID_CONTENTS.",
+      "about": "A GFM table is not on the list: every table element goes and its text stays, header row included — thead is left out of FORBID_CONTENTS, so it is stripped as tbody is rather than dropped whole. The cells read in order, header first.",
       "input": "| a | b |\n|---|---|\n| 1 | 2 |",
       "katex": false,
-      "output": "\n\n\n1\n2\n\n\n"
+      "output": "\n\n\na\nb\n\n\n\n1\n2\n\n\n"
     },
     {
       "name": "horizontal-rule",
@@ -336,36 +352,44 @@
       "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle><mtext>\\href</mtext></mstyle></mrow><annotation encoding=\"application/x-tex\">\\href{https://evil.example}{x}</annotation></semantics></math></p>\n"
     },
     {
-      "name": "known-overset-emptied",
+      "name": "overset",
       "mode": "block",
-      "about": "Known defect, recorded as the app renders it today: KaTeX nests the over-script inside an <mo>, a MathML token element whose children the HTML parser puts in the HTML namespace; DOMPurify refuses a MathML name there and drops it with its content, so \"a =! b\" reads \"ab\".",
+      "about": "KaTeX builds \\overset{!}{=} as an mo around an mover whose base is an mo around the =: both wrappers become mrow, so the ! stays over the = and \"a =! b\" reads as written.",
       "input": "$a \\overset{!}{=} b$",
       "katex": true,
-      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mo></mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\overset{!}{=} b</annotation></semantics></math></p>\n"
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mrow><mover><mrow><mo>=</mo></mrow><mo stretchy=\"false\" lspace=\"0em\" rspace=\"0em\">!</mo></mover></mrow><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\overset{!}{=} b</annotation></semantics></math></p>\n"
     },
     {
-      "name": "known-nested-token-constructs",
+      "name": "underset-stackrel-mathop",
       "mode": "block",
-      "about": "Known defect, recorded as the app renders it today: the same nesting empties \\underset, \\stackrel and \\mathop…\\limits: each leaves an empty token element behind.",
+      "about": "The same wrapping three ways: \\underset is an mi around an munder, \\stackrel an mo around an mover, and the base of each, like \\mathop…\\limits, an mo around an mi. Every wrapper becomes an mrow; the leaves keep their names.",
       "input": "$\\underset{x}{y} + \\stackrel{a}{b} + \\mathop{x}\\limits_{1}^{2}$",
       "katex": true,
-      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi></mi><mo>+</mo><mo></mo><mo>+</mo><msubsup><mo></mo><mn>1</mn><mn>2</mn></msubsup></mrow><annotation encoding=\"application/x-tex\">\\underset{x}{y} + \\stackrel{a}{b} + \\mathop{x}\\limits_{1}^{2}</annotation></semantics></math></p>\n"
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mrow><munder><mrow><mi>y</mi></mrow><mi>x</mi></munder></mrow><mo>+</mo><mrow><mover><mrow><mi>b</mi></mrow><mi>a</mi></mover></mrow><mo>+</mo><msubsup><mrow><mi>x</mi></mrow><mn>1</mn><mn>2</mn></msubsup></mrow><annotation encoding=\"application/x-tex\">\\underset{x}{y} + \\stackrel{a}{b} + \\mathop{x}\\limits_{1}^{2}</annotation></semantics></math></p>\n"
     },
     {
-      "name": "known-sizing-and-linebreak",
+      "name": "bmod",
       "mode": "block",
-      "about": "Known defect, recorded as the app renders it today: KaTeX emits mathsize for a sizing command and linebreak for \\\\, and neither is on the attribute list, so the size and the break are both lost.",
-      "input": "$\\Huge x$ and $a \\\\ b$",
+      "about": "\\bmod is \\mathbin around an upright \"mod\": its mo wrapper becomes an mrow and keeps the lspace and rspace KaTeX put on it, which do nothing on an mrow.",
+      "input": "$a \\bmod b$",
       "katex": true,
-      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle><mi>x</mi></mstyle></mrow><annotation encoding=\"application/x-tex\">\\Huge x</annotation></semantics></math> and <math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mspace></mspace><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\\\ b</annotation></semantics></math></p>\n"
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>a</mi><mtext> </mtext><mrow lspace=\"0.22em\" rspace=\"0.22em\"><mrow><mi mathvariant=\"normal\">m</mi><mi mathvariant=\"normal\">o</mi><mi mathvariant=\"normal\">d</mi></mrow></mrow><mtext> </mtext><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">a \\bmod b</annotation></semantics></math></p>\n"
     },
     {
-      "name": "known-ordered-list-start",
+      "name": "varliminf",
       "mode": "block",
-      "about": "Known defect, recorded as the app renders it today: marked writes start=\"3\", which is not on the attribute list, so the list is numbered from 1.",
-      "input": "3. three\n4. four",
-      "katex": false,
-      "output": "<ol>\n<li>three</li>\n<li>four</li>\n</ol>\n"
+      "about": "\\varliminf is an operator name that is not plain text — lim underlined — so KaTeX puts an munder inside an mi: it becomes an mrow and keeps its mathvariant.",
+      "input": "$\\varliminf_{n} x_n$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msub><mrow><mrow mathvariant=\"normal\"><munder accentunder=\"true\"><mrow><mi mathvariant=\"normal\">l</mi><mi mathvariant=\"normal\">i</mi><mi mathvariant=\"normal\">m</mi></mrow><mo stretchy=\"true\">‾</mo></munder></mrow><mo>⁡</mo></mrow><mi>n</mi></msub><msub><mi>x</mi><mi>n</mi></msub></mrow><annotation encoding=\"application/x-tex\">\\varliminf_{n} x_n</annotation></semantics></math></p>\n"
+    },
+    {
+      "name": "colon-relations",
+      "mode": "block",
+      "about": "\\coloneqq is an mo around an mi holding ≔. \\approxcolon is an mo around three more, one holding nothing but a negative space, which KaTeX writes as a self-closing <mspace/> — an element all the same, so that mo becomes an mrow too — and one holding the colon two mo deep, whose innermost mo holds text and stays.",
+      "input": "$x \\coloneqq 1 \\approxcolon y$",
+      "katex": true,
+      "output": "<p><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>x</mi><mrow><mi mathvariant=\"normal\">≔</mi></mrow><mn>1</mn><mrow><mo>≈</mo><mrow><mspace width=\"-0.0667em\"></mspace></mrow><mrow><mrow><mo>:</mo></mrow></mrow></mrow><mi>y</mi></mrow><annotation encoding=\"application/x-tex\">x \\coloneqq 1 \\approxcolon y</annotation></semantics></math></p>\n"
     },
     {
       "name": "inline-link-as-label",

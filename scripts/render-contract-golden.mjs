@@ -38,11 +38,13 @@ import { format, resolveConfig } from 'prettier';
  * **The corpus is chosen for what each input exercises**, not for realism:
  * every construct the allowlist carries and every allowlisted element and
  * attribute any input can reach, each construct it refuses, the places the
- * sanitiser is the one doing the work, the Markdown a rendering check has to
- * rule on, inline mode's narrower rules — and the renderer's known defects,
- * rendered as the app renders them today and labelled as such, so that a fix
- * shows up as a diff here. Add a case here, never in the JSON — the file is
- * written whole, so a case added by hand is gone at the next run.
+ * sanitiser is the one doing the work, the KaTeX output the renderer rewrites
+ * before sanitising, the Markdown a rendering check has to rule on, and
+ * inline mode's narrower rules. A defect found in the renderer is recorded the
+ * same way — rendered as the app renders it, its `about` starting
+ * "Known defect" — so that its fix shows up as a diff here. Add a case here,
+ * never in the JSON — the file is written whole, so a case added by hand is
+ * gone at the next run.
  *
  * Needs a Node that strips TypeScript types (22.18 or later; this repository
  * runs 24), because it imports the renderer's own `.ts` modules rather than a
@@ -53,9 +55,6 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const OUTPUT = `${root}render-contract.golden.json`;
 const ENGINE = new URL('../src/app/components/rendered-text/', import.meta.url);
 const require = createRequire(import.meta.url);
-
-/** Prefixes the `about` of a case that records a defect rather than a decision. */
-const KNOWN = 'Known defect, recorded as the app renders it today:';
 
 /** One input, the mode it renders in, and why it is in the corpus. */
 const CORPUS = [
@@ -112,6 +111,13 @@ const CORPUS = [
     mode: 'block',
     about: 'A bulleted list with a nested one, then a numbered list.',
     input: '- one\n- two\n  - nested\n\n1. first\n2. second',
+  },
+  {
+    name: 'ordered-list-start',
+    mode: 'block',
+    about:
+      'A numbered list written from 3: marked writes start="3", which is on the attribute list, so the list is numbered from 3. A list written from 1 carries no start, as lists shows.',
+    input: '3. three\n4. four',
   },
   {
     name: 'https-links',
@@ -246,6 +252,13 @@ $$`,
     input: String.raw`$\phantom{x}\smash{y} + \smallint f$`,
   },
   {
+    name: 'sizing-and-linebreak',
+    mode: 'block',
+    about:
+      'mathsize, which KaTeX sets for a sizing command, and linebreak, which it sets on the mspace a \\\\ becomes: both on the attribute list, so the size and the break reach the browser.',
+    input: String.raw`$\Huge x$ and $a \\ b$`,
+  },
+  {
     name: 'math-inside-code',
     mode: 'block',
     about:
@@ -270,7 +283,8 @@ $$`,
   {
     name: 'table',
     mode: 'block',
-    about: `${KNOWN} table elements are not on the list and their text is kept — except the header row, which DOMPurify drops whole, because thead is in its FORBID_CONTENTS.`,
+    about:
+      'A GFM table is not on the list: every table element goes and its text stays, header row included — thead is left out of FORBID_CONTENTS, so it is stripped as tbody is rather than dropped whole. The cells read in order, header first.',
     input: '| a | b |\n|---|---|\n| 1 | 2 |',
   },
   {
@@ -339,30 +353,43 @@ $$`,
     input: String.raw`$\href{https://evil.example}{x}$`,
   },
 
-  // The renderer's known defects, as it renders them today.
+  // KaTeX output the renderer rewrites before sanitising: a token element
+  // holding elements is renamed mrow, or the HTML parser would put what it
+  // holds in the HTML namespace and DOMPurify would drop it with its content.
   {
-    name: 'known-overset-emptied',
+    name: 'overset',
     mode: 'block',
-    about: `${KNOWN} KaTeX nests the over-script inside an <mo>, a MathML token element whose children the HTML parser puts in the HTML namespace; DOMPurify refuses a MathML name there and drops it with its content, so "a =! b" reads "ab".`,
+    about:
+      'KaTeX builds \\overset{!}{=} as an mo around an mover whose base is an mo around the =: both wrappers become mrow, so the ! stays over the = and "a =! b" reads as written.',
     input: String.raw`$a \overset{!}{=} b$`,
   },
   {
-    name: 'known-nested-token-constructs',
+    name: 'underset-stackrel-mathop',
     mode: 'block',
-    about: `${KNOWN} the same nesting empties \\underset, \\stackrel and \\mathop…\\limits: each leaves an empty token element behind.`,
+    about:
+      'The same wrapping three ways: \\underset is an mi around an munder, \\stackrel an mo around an mover, and the base of each, like \\mathop…\\limits, an mo around an mi. Every wrapper becomes an mrow; the leaves keep their names.',
     input: String.raw`$\underset{x}{y} + \stackrel{a}{b} + \mathop{x}\limits_{1}^{2}$`,
   },
   {
-    name: 'known-sizing-and-linebreak',
+    name: 'bmod',
     mode: 'block',
-    about: `${KNOWN} KaTeX emits mathsize for a sizing command and linebreak for \\\\, and neither is on the attribute list, so the size and the break are both lost.`,
-    input: String.raw`$\Huge x$ and $a \\ b$`,
+    about:
+      '\\bmod is \\mathbin around an upright "mod": its mo wrapper becomes an mrow and keeps the lspace and rspace KaTeX put on it, which do nothing on an mrow.',
+    input: String.raw`$a \bmod b$`,
   },
   {
-    name: 'known-ordered-list-start',
+    name: 'varliminf',
     mode: 'block',
-    about: `${KNOWN} marked writes start="3", which is not on the attribute list, so the list is numbered from 1.`,
-    input: '3. three\n4. four',
+    about:
+      '\\varliminf is an operator name that is not plain text — lim underlined — so KaTeX puts an munder inside an mi: it becomes an mrow and keeps its mathvariant.',
+    input: String.raw`$\varliminf_{n} x_n$`,
+  },
+  {
+    name: 'colon-relations',
+    mode: 'block',
+    about:
+      '\\coloneqq is an mo around an mi holding ≔. \\approxcolon is an mo around three more, one holding nothing but a negative space, which KaTeX writes as a self-closing <mspace/> — an element all the same, so that mo becomes an mrow too — and one holding the colon two mo deep, whose innermost mo holds text and stays.',
+    input: String.raw`$x \coloneqq 1 \approxcolon y$`,
   },
 
   // Inline mode: an answer option, which is a button.
@@ -487,7 +514,7 @@ const golden = {
     'src/app/components/rendered-text/render-contract.spec.ts re-renders every input, directly and through RenderedTextComponent, and fails on any difference, and on a generatedWith that no longer names the installed packages — so a change to the renderer, or to marked, KaTeX, DOMPurify, jsdom or the parse5 jsdom serialises with, is a change to this file in the same pull request.',
     "A renderer configured from render-contract.json reproduces every output here byte for byte, or it is not the app's renderer. block renders a question and its explanation; inline renders an answer option. katex says whether render-contract.json's math.selection pattern matched the input, so it rendered through the instance with the KaTeX renderer, as the app would; false means the instance without one, which is where most questions go.",
     'output is the string the renderer returns — DOMPurify\'s serialisation, which the app writes into an element as it is — and it is jsdom\'s serialisation: parse5, at the version under generatedWith. A browser builds the same DOM but need not write it the same way: Chromium 141 escapes < and > inside an attribute value (title="a&lt;b&gt;c") where parse5 writes them as they are (title="a<b>c"), as link-title-with-angle-brackets shows. Byte equality is defined under jsdom; compare there.',
-    "A case whose about starts 'Known defect' records the renderer as it behaves today, not as it should: a fix changes that output, and the change shows here.",
+    "A case whose about starts 'Known defect' records the renderer as it behaves, not as it should: its fix changes that output, and the change shows here.",
   ],
   version: 1,
   generatedWith: {

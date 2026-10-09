@@ -31,7 +31,7 @@ import {
   INLINE_MATH,
   containsMath,
 } from './math-delimiters';
-import { renderMath } from './math-engine';
+import { TOKEN_ELEMENTS, renameTokensHoldingElements, renderMath } from './math-engine';
 import { RenderedTextComponent } from './rendered-text.component';
 
 /**
@@ -215,7 +215,10 @@ describe('render-contract.json: the file itself', () => {
     expect(Object.keys(contract.math).sort()).toEqual(
       ['$comment', 'delimiters', 'extensions', 'selection'].sort(),
     );
-    expect(Object.keys(contract.katex).sort()).toEqual(['$comment', 'defaults', 'options'].sort());
+    expect(Object.keys(contract.katex).sort()).toEqual(
+      ['$comment', 'defaults', 'options', 'postprocess'].sort(),
+    );
+    expect(Object.keys(contract.katex.postprocess)).toEqual(['renameTokensHoldingElements']);
     expect(Object.keys(contract.dompurify).sort()).toEqual(
       ['$comment', 'block', 'hooks', 'inline'].sort(),
     );
@@ -465,6 +468,69 @@ describe('render-contract.json: KaTeX', () => {
       const setting = schema[option];
       expect(setting, `${option} is a KaTeX option`).toBeDefined();
       expect(katexDefault(setting!), option).toEqual(value);
+    }
+  });
+});
+
+describe("render-contract.json: what is done to KaTeX's markup", () => {
+  const step = contract.katex.postprocess.renameTokensHoldingElements;
+
+  it('names the token elements the rewrite reads', () => {
+    expect(TOKEN_ELEMENTS).toEqual(step.tokens);
+  });
+
+  /**
+   * A behaviour, so derived rather than compared: every element the published
+   * allowlist names, and every published token, goes through the rewrite
+   * holding an element — a self-closing one among them — and holding only
+   * text, and must come out renamed exactly when the file says so, to the
+   * name it gives, with its attributes and children as they were.
+   */
+  it('renames exactly the published tokens, and only when they hold an element', () => {
+    const holding = (tag: string) =>
+      `<math><${tag} lspace="0em"><mi>x</mi>y<mspace width="1em"/></${tag}></math>`;
+    const holdingSelfClosing = (tag: string) =>
+      `<math><${tag} lspace="0em"><mspace width="1em"/></${tag}></math>`;
+    const text = (tag: string) => `<math><${tag} lspace="0em">x &lt; y</${tag}></math>`;
+    for (const name of new Set([...contract.dompurify.block.ALLOWED_TAGS, ...step.tokens])) {
+      const renamed = step.tokens.includes(name) ? step.to : name;
+      expect(renameTokensHoldingElements(holding(name)), name).toBe(holding(renamed));
+      expect(renameTokensHoldingElements(holdingSelfClosing(name)), name).toBe(
+        holdingSelfClosing(renamed),
+      );
+      expect(renameTokensHoldingElements(text(name)), name).toBe(text(name));
+    }
+  });
+
+  /**
+   * Applied to exactly what `renderToString` returned, captured on the call,
+   * in both display modes — over formulas KaTeX wraps in a token and one it
+   * does not, so the check cannot pass by the rewrite never firing.
+   */
+  it('is applied to the string renderToString returns, and to nothing else', () => {
+    const renderToString = vi.spyOn(katex, 'renderToString');
+    try {
+      const rewritten: string[] = [];
+      for (const tex of [
+        String.raw`a \overset{!}{=} b`,
+        String.raw`\varliminf_{n} x_n`,
+        String.raw`\frac{a}{b}`,
+      ]) {
+        for (const displayMode of [true, false]) {
+          renderToString.mockClear();
+          const out = renderMath(tex, displayMode);
+          const returned = renderToString.mock.results[0].value as string;
+          expect(out, tex).toBe(renameTokensHoldingElements(returned));
+          if (out !== returned) {
+            rewritten.push(tex);
+          }
+        }
+      }
+      expect(new Set(rewritten)).toEqual(
+        new Set([String.raw`a \overset{!}{=} b`, String.raw`\varliminf_{n} x_n`]),
+      );
+    } finally {
+      renderToString.mockRestore();
     }
   });
 });

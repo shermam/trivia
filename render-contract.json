@@ -1,10 +1,10 @@
 {
   "$comment": [
     "What the app does with a question's text when the document's format is 'markdown' (FEAT-019, src/app/components/rendered-text/), published for the renderer this repository does not run: the question-generation pipeline (shermam/trivia-pipeline) renders every candidate the same way before a reviewer sees it. Vendor this file and render-contract.golden.json; configure a renderer from them, do not transcribe them.",
-    "The code is the authority and this file is its published statement. Nothing reads it at runtime. src/app/components/rendered-text/render-contract.spec.ts reads it and asserts that the live engines are configured exactly so — every option all four marked instances hold, the math tokenizers and their delimiters, the pattern that decides which instance a source takes, the options KaTeX receives and the defaults it is left with, the objects DOMPurify receives and the one hook it runs — and that the installed packages are the series named under dependencies. A value changed in either place fails that suite.",
+    "The code is the authority and this file is its published statement. Nothing reads it at runtime. src/app/components/rendered-text/render-contract.spec.ts reads it and asserts that the live engines are configured exactly so — every option all four marked instances hold, the math tokenizers and their delimiters, the pattern that decides which instance a source takes, the options KaTeX receives, the defaults it is left with and the rewrite of what it returns, the objects DOMPurify receives and the one hook it runs — and that the installed packages are the series named under dependencies. A value changed in either place fails that suite.",
     "render-contract.golden.json is this configuration's output for a corpus of inputs, written from the live renderer under jsdom by scripts/render-contract-golden.mjs, each input through the instance math.selection picks for it, and held equal to it by the same spec. It is the test of a second renderer: one configured from this file reproduces every output there byte for byte, or it is not the same renderer.",
     "Two modes. block renders a question and its explanation, the explanation trimmed first and not rendered at all when that leaves it empty. inline renders each answer option, which is a button: parsed with parseInline, so nothing block-level; a link renders as its label; a $$…$$ formula compiles undisplayed; DOMPurify's tag list loses a. Each mode has two marked instances, configured alike: a source that math.selection matches renders through the one given the KaTeX renderer, and any other source — most questions — through the one without. A document whose format is anything but exactly 'markdown', absent included, is shown as its text and never parsed. A render that throws is shown as its source text; KaTeX's parse errors do not throw (throwOnError: false) and come out as the formula's own source.",
-    "A RegExp is written as { source, flags }. An option not named here is left at the installed package's default — DOMPurify's KEEP_CONTENT and FORBID_CONTENTS among them: an element off the list is removed and its text kept, except the elements DOMPurify drops whole (annotation-xml, script, style, thead and the rest of FORBID_CONTENTS), which is why a table loses its header row.",
+    "A RegExp is written as { source, flags }. An option not named here is left at the installed package's default — DOMPurify's KEEP_CONTENT among them: an element off the list is removed and its text kept, except the elements FORBID_CONTENTS names, which go whole.",
     "dependencies names each package's release series as a caret range fixes it: the major, or for a 0.x package the minor.",
     "version is the version of this file's format — its keys and what they mean — not of the configuration: a tag added to the allowlist leaves it at 1."
   ],
@@ -61,12 +61,15 @@
     }
   },
   "katex": {
-    "$comment": "options is exactly what renderToString receives besides displayMode. defaults are options it is not given whose installed default the renderer's safety rests on: trust (false, so \\href, \\url, \\includegraphics and the \\html* commands compile as unsupported) and maxExpand (the macro-expansion bound a \\def bomb runs into). maxSize is not set, so sizes are not capped; no macros object is passed, so a \\gdef in one formula never reaches the next.",
+    "$comment": "options is exactly what renderToString receives besides displayMode. defaults are options it is not given whose installed default the renderer's safety rests on: trust (false, so \\href, \\url, \\includegraphics and the \\html* commands compile as unsupported) and maxExpand (the macro-expansion bound a \\def bomb runs into). maxSize is not set, so sizes are not capped; no macros object is passed, so a \\gdef in one formula never reaches the next. postprocess is applied to the string renderToString returns, before it is inserted into marked's output and so before anything parses it, and renameTokensHoldingElements is its one step: an element named in tokens — the MathML token elements, which the HTML parser treats as text integration points — that has an element among its children, a self-closing <mspace/> included, is renamed to the element named by to: its start and end tags change, its attributes and children stay as they are. KaTeX puts an expression inside an mi or an mo for a math class whose body is more than one character (\\mathrel{…}, \\mathbin{…} and the like, which is how \\overset, \\underset, \\stackrel, \\bmod and \\coloneqq are built), for \\mathop{…}, and for an operator name that is not plain text (\\varliminf); parsed as written, everything inside lands in the HTML namespace and DOMPurify removes it with its content. The step reads tags as KaTeX writes them: KaTeX escapes <, >, &, \" and ' in every text and attribute value, so a < always starts a tag.",
     "options": { "output": "mathml", "throwOnError": false, "strict": "ignore" },
-    "defaults": { "trust": false, "maxExpand": 1000 }
+    "defaults": { "trust": false, "maxExpand": 1000 },
+    "postprocess": {
+      "renameTokensHoldingElements": { "tokens": ["mi", "mn", "mo", "ms", "mtext"], "to": "mrow" }
+    }
   },
   "dompurify": {
-    "$comment": "block is the configuration DOMPurify.sanitize receives in block mode; inline is what replaces in it for inline mode. The lists are per document, not per element, and are the allowlist exactly as configured: ALLOWED_TAGS the twelve prose tags and then the MathML elements, ALLOWED_ATTR the three prose attributes and then the MathML ones. They are not a record of what KaTeX emits, which differs in both directions — render-contract.golden.json shows what the sanitiser drops from KaTeX's output today. hooks is the only hook installed, run after DOMPurify has finished an element's attributes: class is split on whitespace and only the names matching classKeep survive, the attribute going when none does; an element that is not an HTML a loses every attribute in anchorOnly; an a whose href parses as an absolute URL with protocol linkProtocol is given linkAttributes, and any other a loses its href and every attribute in linkAttributes.",
+    "$comment": "block is the configuration DOMPurify.sanitize receives in block mode; inline is what replaces in it for inline mode. The lists are per document, not per element, and are the allowlist exactly as configured: ALLOWED_TAGS the twelve prose tags and then the MathML elements, ALLOWED_ATTR the four prose attributes and then the MathML ones. Per document means start, which is there so a numbered list written from 3 is numbered from 3, is kept on every allowed element, though only an ol gives it a meaning and MathML none. The lists are not a record of what KaTeX emits, which differs in both directions — render-contract.golden.json shows what the sanitiser drops from KaTeX's output. FORBID_CONTENTS replaces DOMPurify's own list of the elements it removes with their content rather than keeping their text: DOMPurify's default, restated whole, without thead, so a table's header row keeps its text like its body. hooks is the only hook installed, run after DOMPurify has finished an element's attributes: class is split on whitespace and only the names matching classKeep survive, the attribute going when none does; an element that is not an HTML a loses every attribute in anchorOnly; an a whose href parses as an absolute URL with protocol linkProtocol is given linkAttributes, and any other a loses its href and every attribute in linkAttributes.",
     "block": {
       "ALLOWED_TAGS": [
         "p",
@@ -116,10 +119,12 @@
         "href",
         "title",
         "class",
+        "start",
         "xmlns",
         "display",
         "encoding",
         "mathvariant",
+        "mathsize",
         "displaystyle",
         "scriptlevel",
         "stretchy",
@@ -135,6 +140,7 @@
         "width",
         "height",
         "depth",
+        "linebreak",
         "voffset",
         "linethickness",
         "accent",
@@ -153,7 +159,34 @@
       },
       "ALLOW_DATA_ATTR": false,
       "ALLOW_ARIA_ATTR": false,
-      "FORBID_ATTR": ["style"]
+      "FORBID_ATTR": ["style"],
+      "FORBID_CONTENTS": [
+        "annotation-xml",
+        "audio",
+        "colgroup",
+        "desc",
+        "foreignobject",
+        "head",
+        "iframe",
+        "math",
+        "mi",
+        "mn",
+        "mo",
+        "ms",
+        "mtext",
+        "noembed",
+        "noframes",
+        "noscript",
+        "plaintext",
+        "script",
+        "selectedcontent",
+        "style",
+        "svg",
+        "template",
+        "title",
+        "video",
+        "xmp"
+      ]
     },
     "inline": {
       "ALLOWED_TAGS": [
