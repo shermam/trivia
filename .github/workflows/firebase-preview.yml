@@ -181,8 +181,8 @@ jobs:
     # `deploy-preview` has just published, and therefore against the real
     # `trivimind-dev` project — which is what makes it worth running next to the
     # emulator suite in e2e.yml: real headers, a real service worker, real rules
-    # and real Cloud Functions. One runner, no shard; the slice is 79 tests and
-    # takes under two minutes.
+    # and real Cloud Functions. One runner, no shard; the slice is 123 tests and
+    # runs in a little under three minutes.
     #
     # Stated rather than inherited from `deploy-preview`'s own guard: this job
     # reads the service account too (the sweep deletes the accounts and

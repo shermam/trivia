@@ -20,10 +20,11 @@ import { runTag } from '../../support/topics';
  * question carries a run tag of its own (`e2e/support/topics.ts`) so nothing a
  * test seeds can turn up in another worker's topic-filtered draw.
  *
- * Emulator-only for now, and not for a reason about the spec: a preview channel
- * runs whatever `firestore.rules` `main` last deployed, and until this feature
- * merges that is a rule set with no `quizzes` block — so every quiz read there
- * is refused (`playwright.preview.config.ts` says the rest).
+ * **It runs in the preview slice too**, against `trivimind-dev`'s deployed
+ * rules and its real query engine, with every quiz and question it seeds
+ * tracked by id for the sweep. That is where the questions read meets
+ * production Firestore's evaluation of a `documentId() in` query, which need
+ * not be the emulator's — see the first test.
  */
 
 const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -175,14 +176,31 @@ test.describe('a curated quiz, played from /quiz/:quizId (FEAT-024)', () => {
     await expect(page.getByTestId('quiz-status')).toHaveText('Quiz ready: 4 questions.');
 
     // Bounded reads, all on arrival (`CLAUDE.md` §4.1): the quiz by its id,
-    // then one query for every question it names — which the rules refuse
-    // whole, because it names a question this reader may not read — and so
-    // one get per id, of which the pending one is refused and skipped.
-    // Counted once the page shows what the reads returned, so none can still
-    // be in flight.
+    // then one query for every question it names, and — only if the rules
+    // refuse that query — one get per id, the pending one refused and skipped.
+    // Whether they refuse it is the backend's evaluation, not the page's
+    // behaviour: the emulator authorises a `documentId() in` query against
+    // every document it names, so the pending one refuses it whole, and this
+    // spec also runs against production Firestore, which is free to prove the
+    // query from its `status == 'approved'` clause and serve the four instead.
+    // The subject is the page — the four readable questions, above and in the
+    // round below — so either outcome passes, but only those two: the count is
+    // held to the shapes `getApprovedQuestionsByIds` has, so a second query or
+    // a stray get still fails. Counted once the page shows what the reads
+    // returned, so none can still be in flight.
     expect(reads.quiz, 'reads of the quiz document').toBe(1);
     expect(reads.questionQueries, 'queries for the quiz’s questions').toBe(1);
-    expect(reads.questionGets, 'per-question reads after the query was refused').toBe(5);
+    expect(
+      [0, 5],
+      'per-question reads: none when the query was served, one per id when it was refused',
+    ).toContain(reads.questionGets);
+    test.info().annotations.push({
+      type: 'measured',
+      description:
+        reads.questionGets === 0
+          ? 'the questions query was served (no per-id reads)'
+          : 'the questions query was refused whole; read again one id at a time',
+    });
 
     // The suggestion pre-selects the picker and says it is a suggestion…
     await expect(page.getByTestId('quiz-time-limit-30')).toBeChecked();

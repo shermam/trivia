@@ -13,6 +13,7 @@ import { RouterLink } from '@angular/router';
 import { Quiz } from '../../models/quiz.model';
 import { ConnectivityService } from '../../services/connectivity.service';
 import { QuizService } from '../../services/quiz.service';
+import { IconComponent } from '../icon/icon.component';
 
 /**
  * Which of the list's states is showing. `idle` is "not asked yet": the list
@@ -60,11 +61,27 @@ const PLACEHOLDER_CARDS = 3;
  * quizzes, one quiz, the loading placeholders and the empty and failed messages
  * all occupy the same box — the messages laid over invisible placeholders, the
  * way the game-over board lays its message over reserved rows.
+ *
+ * **Offline, a card says it needs a connection and does nothing.** Opening a
+ * quiz takes the network twice over: its page is a lazy chunk outside the
+ * precache, and the quiz itself is a Firestore read. A plain link would fail
+ * there without saying so — its navigation waits on a chunk that cannot load,
+ * so nothing appears, the address stays put and the only trace is `Failed to
+ * fetch dynamically imported module` in the console — and would go on failing
+ * once the connection is back, because Chromium keeps a failed dynamic import
+ * in its module map until the page is reloaded. So while
+ * `ConnectivityService` says offline, every card is a disabled link instead:
+ * no `href`, so a tap goes nowhere and fetches nothing, `role="link"` with
+ * `aria-disabled` so it is still announced as the link it is, and the reason
+ * in place of the question count. The connection coming back re-enables
+ * them, with nothing to re-read — the list already holds them. The reason and
+ * the count share one cell, so neither state moves anything inside a card
+ * that is a fixed size anyway (`CLAUDE.md` §4.4).
  */
 @Component({
   selector: 'app-quiz-list',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, IconComponent],
   templateUrl: './quiz-list.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -82,6 +99,9 @@ export class QuizListComponent {
 
   protected readonly view = this.viewSignal.asReadonly();
   protected readonly quizzes = this.quizzesSignal.asReadonly();
+
+  /** Whether the cards are disabled: a quiz cannot be opened without a connection. */
+  protected readonly offline = computed(() => !this.connectivity.isOnline());
   protected readonly placeholders = Array.from({ length: PLACEHOLDER_CARDS }, (_, index) => index);
 
   /** What the live region says once the read lands. Nothing while idle or loading. */
