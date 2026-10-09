@@ -81,8 +81,16 @@ export const authDomainOrigin = (projectId) => `https://${projectId}.firebaseapp
 export const callableOrigin = (projectId) => `https://us-central1-${projectId}.cloudfunctions.net`;
 
 /**
- * Origins this app requests at runtime, and what requests them. Every one of
- * these is a `fetch`/`XHR` and therefore governed by `connect-src`.
+ * Origins this app requests at runtime, what requests them, and — for one the
+ * page loads as a subresource rather than fetching — the directive it loads
+ * under: `[origin, why]` or `[origin, why, directive]`.
+ *
+ * Every one of these is governed by `connect-src`, which is checked: a fetch
+ * directly, and a subresource because the service worker re-issues it as a
+ * fetch from inside the worker (see `SUBRESOURCE_DIRECTIVES`). The page's own
+ * directive is checked as well when one is named, and the two checks together
+ * are what make an origin half-added fail in either direction — in the policy
+ * but not here, or here but missing from the directive that loads it.
  *
  * Hand-maintained, and it has to be: nothing can derive it, because the URLs
  * are built inside third-party SDKs and grepping `src/` for `https://` never
@@ -99,13 +107,19 @@ export const RUNTIME_ORIGINS = [
   [
     'https://apis.google.com',
     'gapi loader for the OAuth popup resolver — browserPopupRedirectResolver',
+    'script-src',
+  ],
+  [
+    'https://lh3.googleusercontent.com',
+    'the Google profile photo a player may choose as their avatar — AvatarComponent, as an <img>',
+    'img-src',
   ],
   // Per-deployment, and derived rather than written out: `httpsCallable`
   // targets the project the app was loaded from, so each deployment needs its
   // own. Hardcoding one project's is what made the policy production-only.
   ...DEPLOY_TARGETS.map(([projectId, why]) => [
     callableOrigin(projectId),
-    `httpsCallable: deleteAccount, exportAccountData and recordGameResult — AccountService (${why})`,
+    `httpsCallable: deleteAccount, exportAccountData, recordGameResult and setAvatar — AccountService (${why})`,
   ]),
 ];
 
@@ -190,12 +204,23 @@ export function findCspProblems(csp) {
   /** @type {CspProblem[]} */
   const problems = [];
 
-  for (const [origin, reason] of RUNTIME_ORIGINS) {
+  for (const [origin, reason, loadedUnder] of RUNTIME_ORIGINS) {
     if (!connectSrc.has(origin)) {
       problems.push({
         origin,
         detail: `requested at runtime by ${reason}`,
         why: 'A fetch to it will be refused outright, on a real deployment only.',
+      });
+    }
+    // The page's half. `connect-src` is what the service worker needs; the
+    // directive the page loads it under is what the page needs, and it is
+    // checked first — a resource that directive refuses is never requested at
+    // all, so no worker gets the chance to re-fetch it.
+    if (loadedUnder && !(directives.get(loadedUnder) ?? []).includes(origin)) {
+      problems.push({
+        origin,
+        detail: `loaded by the page under ${loadedUnder} (${reason}), missing from it`,
+        why: 'The page refuses it before any service worker sees it, so it never loads — on a real deployment only.',
       });
     }
   }
@@ -207,6 +232,25 @@ export function findCspProblems(csp) {
           origin: value,
           detail: `allowed by ${directive}, missing from connect-src`,
           why: 'It will load until a service worker controls the page, then 504.',
+        });
+      }
+      // The reverse direction: a subresource grant nothing here explains.
+      // Matched on the directive as well as the origin, so an image host
+      // cannot also turn up in `script-src` — a grant to *execute* from it —
+      // on the strength of an entry that only ever loads pictures.
+      if (
+        isOrigin(value) &&
+        !RUNTIME_ORIGINS.some(
+          ([origin, , loadedUnder]) => origin === value && loadedUnder === directive,
+        )
+      ) {
+        problems.push({
+          origin: value,
+          detail: `allowed by ${directive}, but no RUNTIME_ORIGINS entry loads it under ${directive}`,
+          why:
+            'A grant nothing explains is either dead weight or a host nobody wrote down — and ' +
+            'the Privacy Policy lists every host the browser contacts, so an unlisted one is a ' +
+            'policy claim gone stale.',
         });
       }
     }
@@ -277,7 +321,7 @@ export function findDeploymentOriginProblems(csp, { projectId, authDomain }) {
       detail: `the Cloud Functions origin for ${projectId}, missing from connect-src`,
       why:
         'httpsCallable targets the project the app was loaded from, so deleteAccount, ' +
-        'exportAccountData and recordGameResult are refused on this deployment only.',
+        'exportAccountData, recordGameResult and setAvatar are refused on this deployment only.',
     });
   }
 

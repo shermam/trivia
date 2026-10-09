@@ -1863,6 +1863,33 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
     });
   });
 
+  /**
+   * `FEAT-038`: choosing an avatar before finishing a game creates the
+   * document with the choice on it and no totals. That is still "nothing
+   * banked yet" — `/profile`'s empty state — and not a row of zeroes.
+   */
+  it('returns null for a document that holds an avatar choice and no totals', async () => {
+    const { service } = setup([
+      { id: 'user-1', data: { avatar: { kind: 'built', seed: 'core-35', showPublicly: false } } },
+    ]);
+
+    expect(await service.getGameplayStats('user-1')).toBeNull();
+  });
+
+  it('reads the totals of a document that also holds an avatar choice', async () => {
+    const { service } = setup([
+      { id: 'user-1', data: { ...TOTALS, avatar: { kind: 'initials', showPublicly: false } } },
+    ]);
+
+    expect(await service.getGameplayStats('user-1')).toEqual({
+      gamesPlayed: 4,
+      questionsAnswered: 40,
+      correctAnswers: 31,
+      bestStreak: 9,
+      statsSince: 1_755_000_000_000,
+    });
+  });
+
   it('propagates a refused read rather than reporting an empty profile', async () => {
     const { service } = setup([]);
     // The 404 the fake answers an unseeded path with is the *absence* case.

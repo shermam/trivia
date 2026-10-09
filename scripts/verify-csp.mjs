@@ -23,6 +23,12 @@
  * derive it, since the origins live inside third-party SDKs. Adding a call to
  * a new host means adding it here.
  *
+ * An entry the page loads as a subresource rather than fetches names the
+ * directive it loads under — `apis.google.com` under `script-src`, Google's
+ * image host under `img-src` — and is checked there too, because that
+ * directive is consulted first: an `<img>` the page's `img-src` refuses is
+ * never requested, so no worker ever re-fetches it.
+ *
  * ## Check 2: every origin allowed for a *subresource* is also in `connect-src`
  *
  * This one is about the service worker. `ngsw-worker.js` responds to every
@@ -42,6 +48,14 @@
  * remote host's fault, and a hard reload — which bypasses the service worker —
  * makes it disappear. It cost weeks of intermittent Google sign-in failures on
  * `https://apis.google.com/js/api.js`.
+ *
+ * **And the reverse: every subresource origin is explained by `RUNTIME_ORIGINS`
+ * under the same directive.** Without it, an origin added to `firebase.json`
+ * and nowhere else passed every check here — the policy agreed with itself —
+ * while the list that says what the app talks to, and that the Privacy
+ * Policy's host table is kept in step with, had never heard of it. Matching on
+ * the directive is what stops an image host turning up in `script-src` on the
+ * strength of an entry that only loads pictures.
  *
  * **`frame-src` is deliberately not in this list, and used to be.** A
  * cross-origin `<iframe>` is a navigation, and a navigation is matched to a
@@ -107,15 +121,21 @@ if (problems.length > 0) {
     console.error(`      ${why}\n`);
   }
   console.error(
-    `  Add each to the named directive in ${CONFIG}. For an origin already allowed by another\n` +
-      `  directive, adding it to connect-src grants strictly less than it already has \u2014 fetching\n` +
-      `  bytes from a host you may already execute scripts from is not a widening.\n`,
+    `  "missing from …" / "requested at runtime …": add the origin to the named directive in\n` +
+      `  ${CONFIG}. For an origin another directive already allows, adding it to connect-src grants\n` +
+      `  strictly less than it already has \u2014 fetching bytes from a host you may already execute\n` +
+      `  scripts from is not a widening.\n` +
+      `  "no RUNTIME_ORIGINS entry loads it": the policy grants something nothing explains. If the\n` +
+      `  app really loads it under that directive, add an [origin, why, directive] entry to\n` +
+      `  RUNTIME_ORIGINS in scripts/csp-rules.mjs (and the host to the Privacy Policy's table);\n` +
+      `  if not, remove it from ${CONFIG}.\n`,
   );
   process.exit(1);
 }
 
 console.log(
-  `\u2713 CSP: ${RUNTIME_ORIGINS.length} runtime origin(s) reachable, every subresource origin ` +
-    `across ${SUBRESOURCE_DIRECTIVES.length} directives is re-fetchable by the service worker, ` +
-    `and all ${DEPLOY_TARGETS.length} deploy target(s) can frame their own authDomain.`,
+  `\u2713 CSP: ${RUNTIME_ORIGINS.length} runtime origin(s) reachable and allowed where the page ` +
+    `loads them, every subresource origin across ${SUBRESOURCE_DIRECTIVES.length} directives is ` +
+    `re-fetchable by the service worker and explained by RUNTIME_ORIGINS, and all ` +
+    `${DEPLOY_TARGETS.length} deploy target(s) can frame their own authDomain.`,
 );

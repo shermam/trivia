@@ -61,7 +61,9 @@ export async function applyGameResult(
   nowMs: number,
 ): Promise<StatsDecision> {
   const snapshot = await transaction.get(refs.user);
-  const current = snapshot.exists ? (snapshot.data() as UserStats) : null;
+  // `Partial`, because the document can exist with no totals in it — an
+  // avatar chosen before the first finished game creates it (`FEAT-038`).
+  const current = snapshot.exists ? (snapshot.data() as Partial<UserStats>) : null;
 
   // `submission` is `request.data`, which is anything at all; `nextUserStats`
   // validates it before trusting a field of it.
@@ -80,7 +82,12 @@ export async function applyGameResult(
       ? await transaction.getAll(...questionRefs, { fieldMask: COUNTER_FIELDS })
       : [];
 
-  transaction.set(refs.user, decision.stats);
+  // **Merged, not replaced.** The totals are this function's fields, not the
+  // whole document: `setAvatar` keeps the player's avatar choice beside them
+  // (`FEAT-038`), and a plain `set` would erase it with every game banked. The
+  // decision always carries every totals field, so merging loses nothing the
+  // replace used to guarantee — it only stops reaching past them.
+  transaction.set(refs.user, decision.stats, { merge: true });
   // The play history, in the same transaction and under the same game id
   // (`FEAT-049`). `lastGameId` *is* that id, so nothing here re-reads the
   // payload — the decision already validated it, and the duplicate check that

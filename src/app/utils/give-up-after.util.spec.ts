@@ -1,11 +1,11 @@
 import { giveUpAfter } from './give-up-after.util';
 
 /**
- * Part of finding B6. This helper only still exists for the Firestore and Auth
- * calls that expose no cancellation of their own; everywhere an API offers one
- * — `AbortSignal.timeout` for `fetch`, `HttpsCallableOptions.timeout` for
- * callables, a bounded poll for what `onSnapshot` used to do — the call site
- * uses it instead.
+ * Part of finding B6. This helper only still exists for the calls that expose
+ * no cancellation of their own; everywhere an API offers one —
+ * `AbortSignal.timeout` for `fetch`, a bounded poll for what `onSnapshot` used
+ * to do — the call site uses it instead. (A callable's `timeout` option is not
+ * one of those: the SDK races it against a `fetch` it never aborts.)
  *
  * What is pinned here is the timer teardown. `Promise.race` settles on the
  * first promise and ignores the other, so the losing `setTimeout` used to stay

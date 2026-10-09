@@ -10,11 +10,15 @@
  * usually one:
  *
  * - `fetch` → `AbortSignal.timeout(ms)` (see `FirebaseAppService`)
- * - Firebase callables → `httpsCallable(fns, name, { timeout: ms })` (see
- *   `AccountService`)
  * - a poll → bound it on the wall clock and stop (see `pollUntil`, which
  *   replaced this app's `onSnapshot` listeners)
  * - Angular `HttpClient` → RxJS `timeout()`, since unsubscribing aborts
+ *
+ * Firebase callables are **not** on that list. `httpsCallable`'s `timeout`
+ * option is this same `Promise.race` inside the SDK — `@firebase/functions`
+ * races a timer against a `fetch` it gives no abort signal — so it bounds the
+ * wait and the request runs on; `AccountService` uses it for the bound and
+ * treats a timed-out write as one that may have landed.
  *
  * What is left of it is shrinking on purpose. `signInAnonymously` takes no
  * options argument at all — `AbortSignal` appears nowhere in the Auth SDK's

@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { environment } from '../../environments/environment';
+import { AvatarChoice, readAvatarChoice } from '../models/avatar.model';
 import { PlayAnswerRecord } from '../utils/play-history.util';
 import { AuthService } from './auth.service';
 import { FirebaseAppService } from './firebase-app.service';
@@ -16,7 +17,9 @@ const FUNCTIONS_EMULATOR_PORT = 5001;
  *
  * Deliberately generous: 60s, rather than the 10s the Firestore reads use. The
  * function makes several Stripe round-trips and batched Firestore writes, and
- * a client-side timeout does not cancel it — so timing out early would leave
+ * a client-side timeout stops neither it nor the request carrying it — the
+ * SDK's `timeout` only stops *waiting* (`@firebase/functions` races a timer
+ * against a `fetch` it gives no abort signal) — so timing out early would leave
  * the user staring at an error while their account is deleted anyway, which is
  * the worst possible outcome to report.
  */
@@ -26,13 +29,28 @@ const DELETE_ACCOUNT_TIMEOUT_MS = 60_000;
 const EXPORT_TIMEOUT_MS = 30_000;
 
 /**
- * The stats call is fire-and-forget, so nothing is waiting for it — which
- * makes a timeout *more* necessary rather than less. Without one an abandoned
- * request holds a connection open indefinitely for a result nobody will read.
- * Short, because this is a background write on a screen the player is already
- * looking at: a game not banked is a lost total, not a broken screen.
+ * The stats call is fire-and-forget, so nothing is waiting for it — and the
+ * timeout bounds only how long *this* code waits. It does not end the request:
+ * the SDK races a timer against a `fetch` it gives no abort signal, so the
+ * call runs on until the function answers, and a game "timed out" here may
+ * still bank. Short, because this is a background write on a screen the player
+ * is already looking at: a game not banked is a lost total, not a broken
+ * screen.
  */
 const RECORD_GAME_TIMEOUT_MS = 10_000;
+
+/**
+ * A player waiting on a button: the same ten seconds the Firestore reads use.
+ * The write is one field on one document, so anything slower than this is a
+ * cold start or a network problem.
+ *
+ * **The timeout stops waiting; it does not cancel.** `@firebase/functions`
+ * races a timer against a `fetch` it gives no abort signal, so a save that
+ * times out runs on and may land after this has given up. That is why
+ * `AvatarService.save` reads the stored choice back on `deadline-exceeded`
+ * and says "could not be confirmed" rather than "not saved".
+ */
+const SET_AVATAR_TIMEOUT_MS = 10_000;
 
 type FunctionsModule = typeof import('firebase/functions');
 
@@ -58,9 +76,9 @@ function accountErrorMessage(error: unknown, action: string): string {
   if (code === 'functions/unauthenticated') {
     return 'Your session expired. Sign in again and retry.';
   }
-  // Raised by the callable's own `timeout` option once it gives up and cancels
-  // the request. The work may still have completed server-side, so the message
-  // deliberately doesn't claim it failed.
+  // Raised by the callable's own `timeout` option once it stops waiting — it
+  // does not cancel the request, which runs on and may still succeed — so the
+  // message deliberately doesn't claim it failed.
   if (code === 'functions/deadline-exceeded') {
     return `This is taking longer than expected. Check back in a moment before trying to ${action} again.`;
   }
@@ -129,8 +147,8 @@ export class AccountService {
    */
   async downloadMyData(): Promise<void> {
     const { functions, functionsModule } = await this.getFunctions();
-    // The SDK's own timeout, which cancels the request rather than merely
-    // abandoning it — see HttpsCallableOptions.timeout.
+    // The SDK's own timeout, which bounds the wait and nothing more: the
+    // request is not aborted, so a slow export still completes server-side.
     const callable = functionsModule.httpsCallable<unknown, unknown>(
       functions,
       'exportAccountData',
@@ -179,6 +197,44 @@ export class AccountService {
       throw new Error(accountErrorMessage(error, 'delete your account'), { cause: error });
     }
     await this.authService.signOut();
+  }
+
+  /**
+   * Stores the signed-in player's avatar choice on `users/{uid}` through the
+   * `setAvatar` callable (`FEAT-038`), and returns the choice as the server
+   * stored it.
+   *
+   * Lives here for the reason `recordGameResult` below does: this file owns
+   * the `firebase/functions` bootstrap, so the callable SDK stays out of the
+   * initial bundle and its cached-rejection fix covers this call too.
+   *
+   * **`seed` is sent only for a built avatar, and omitted otherwise** — the
+   * callable SDK encodes a present-but-`undefined` key as `null`, and the
+   * server refuses a seed on any other kind. It reads `null` as absent too,
+   * so this is the near half of a bound held at both ends.
+   *
+   * Throws an `Error` whose message is fit to show and whose `cause` is the
+   * SDK's error, so a caller can tell `functions/not-found` — the preview
+   * channel case, where the callable does not exist yet — from a failure a
+   * retry might fix.
+   */
+  async setAvatar(choice: AvatarChoice): Promise<AvatarChoice> {
+    const { functions, functionsModule } = await this.getFunctions();
+    const callable = functionsModule.httpsCallable<AvatarChoice, { avatar?: unknown }>(
+      functions,
+      'setAvatar',
+      { timeout: SET_AVATAR_TIMEOUT_MS },
+    );
+    const payload: AvatarChoice =
+      choice.kind === 'built'
+        ? { kind: 'built', seed: choice.seed, showPublicly: choice.showPublicly }
+        : { kind: choice.kind, showPublicly: choice.showPublicly };
+    try {
+      const result = await callable(payload);
+      return readAvatarChoice(result.data?.avatar);
+    } catch (error) {
+      throw new Error(accountErrorMessage(error, 'save your avatar'), { cause: error });
+    }
   }
 
   /**

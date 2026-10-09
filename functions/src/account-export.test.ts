@@ -194,6 +194,29 @@ test('includes lifetime gameplay totals when the account has them', () => {
   });
 });
 
+/**
+ * The avatar choice (`FEAT-038`) is stored on `users/{uid}` beside the totals,
+ * and the export carries that document whole — so the choice reaches the
+ * person who asked for their data without a section of its own. Pinned
+ * because the obvious tidy-up, rebuilding `gameplayStats` from the five
+ * totals, would drop it silently: the Privacy Policy says "Download my data"
+ * returns it, and nothing else would notice that it had stopped.
+ */
+test('carries the avatar choice stored beside the totals', () => {
+  const avatar = { kind: 'built', seed: 'core-35', showPublicly: false };
+
+  const withTotals = buildAccountExport({
+    ...base,
+    gameplayStats: { gamesPlayed: 3, questionsAnswered: 15, avatar },
+  });
+  assert.deepEqual(withTotals.gameplayStats?.['avatar'], avatar);
+
+  // A player can choose an avatar before finishing a game, which creates the
+  // document with nothing else on it — and that still has to be exported.
+  const avatarOnly = buildAccountExport({ ...base, gameplayStats: { avatar } });
+  assert.deepEqual(avatarOnly.gameplayStats, { avatar });
+});
+
 test('reports an explicit null, not an absent key, when no game has been finished', () => {
   const result = buildAccountExport({ ...base, gameplayStats: null });
 

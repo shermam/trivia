@@ -1,8 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { AvatarChoice } from '../../models/avatar.model';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
+import { AvatarService } from '../../services/avatar.service';
 import { ReviewerService } from '../../services/reviewer.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { ThemeService } from '../../services/theme.service';
@@ -59,7 +61,14 @@ interface AuthState {
   isFullyAuthenticated?: boolean;
 }
 
-function setup(options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolean } = {}) {
+interface AvatarState {
+  choice?: AvatarChoice | null;
+  photoUrl?: string | null;
+}
+
+function setup(
+  options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolean; avatar?: AvatarState } = {},
+) {
   const media = stubMatchMedia();
   const auth = options.auth ?? {};
   const authStub = {
@@ -89,6 +98,16 @@ function setup(options: { isReviewer?: boolean; auth?: AuthState; isPro?: boolea
         useValue: authStub,
       },
       { provide: SubscriptionService, useValue: { isProUser: signal(options.isPro ?? false) } },
+      // The stored choice is `AvatarService`'s business and has its own spec;
+      // here it is two signals the chip draws from, so no test reaches the
+      // network to find out what the stub user chose.
+      {
+        provide: AvatarService,
+        useValue: {
+          choice: signal<AvatarChoice | null>(options.avatar?.choice ?? null),
+          photoUrl: signal<string | null>(options.avatar?.photoUrl ?? null),
+        },
+      },
       { provide: ThemeService, useValue: { currentTheme: signal('light'), toggle: vi.fn() } },
       {
         provide: ReviewerService,
@@ -715,8 +734,9 @@ describe('TopBarComponent: the chip label region', () => {
 
   /**
    * The accessible name must not live inside the region that collapses to zero
-   * width, because with the name no longer rendered it is the only thing
-   * stopping the trigger announcing as the single letter "A".
+   * width, because with the name no longer rendered — and the avatar beside it
+   * `aria-hidden` — it is the only thing stopping the trigger announcing as
+   * nothing at all.
    *
    * Chromium exposes clipped text either way — that was measured against the
    * built app, not assumed — but a zero-width `overflow: hidden` box is
@@ -782,6 +802,85 @@ describe('TopBarComponent: the chip label region', () => {
  * refusal itself (`focus()` on a hidden element works here). Both are why the
  * end-to-end version of this lives in `sign-in-save-score.spec.ts`.
  */
+/**
+ * The chip's avatar (`FEAT-038`). What each kind looks like is
+ * `AvatarComponent`'s spec; what is pinned here is that the chip hands it the
+ * stored choice, keeps the box the layout tests measure (`.h-7.w-7`), and
+ * loads a photo the one way the brief allows only here — eagerly, with no
+ * referrer.
+ */
+describe('TopBarComponent: the account avatar', () => {
+  const signedIn: AuthState = {
+    authReady: true,
+    user: { displayName: 'Ada Lovelace' },
+    isAnonymous: false,
+    isFullyAuthenticated: true,
+  };
+
+  const avatarOf = (h: ReturnType<typeof setup>) =>
+    h.chip().querySelector('[data-cy="auth-menu-avatar"]') as HTMLElement;
+
+  it('draws initials until the stored choice is known', () => {
+    const h = setup({ auth: signedIn, avatar: { choice: null } });
+
+    expect(avatarOf(h).getAttribute('data-avatar')).toBe('initials');
+    expect(avatarOf(h).textContent).toContain('A');
+    expect(avatarOf(h).className).toContain('h-7');
+    expect(avatarOf(h).className).toContain('w-7');
+  });
+
+  it('draws the built avatar the account chose, in the same box', () => {
+    const h = setup({
+      auth: signedIn,
+      avatar: { choice: { kind: 'built', seed: 'core-35', showPublicly: false } },
+    });
+
+    expect(avatarOf(h).getAttribute('data-avatar')).toBe('built');
+    expect(avatarOf(h).querySelector('svg')).not.toBeNull();
+    expect(avatarOf(h).className).toContain('h-7');
+    expect(avatarOf(h).className).toContain('w-7');
+  });
+
+  it('loads the chosen photo eagerly and without a referrer', () => {
+    const url = 'https://lh3.googleusercontent.com/a/ada=s96-c';
+    const h = setup({
+      auth: signedIn,
+      avatar: { choice: { kind: 'photo', showPublicly: false }, photoUrl: url },
+    });
+
+    const image = avatarOf(h).querySelector('img') as HTMLImageElement;
+    expect(image.getAttribute('src')).toBe(url);
+    expect(image.getAttribute('loading')).toBe('eager');
+    expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(image.getAttribute('alt')).toBe('');
+  });
+
+  it('keeps the unverified-email dot inside the avatar, drawn after it', () => {
+    const h = setup({
+      auth: { ...signedIn, isFullyAuthenticated: false },
+      avatar: { choice: { kind: 'built', seed: 'core-00', showPublicly: false } },
+    });
+
+    const dot = avatarOf(h).querySelector('.bg-amber-400');
+    expect(dot).not.toBeNull();
+    // Later in the box than the drawing, so it paints on top of it.
+    const svg = avatarOf(h).querySelector('svg') as SVGElement;
+    expect(
+      svg.compareDocumentPosition(dot as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('carries the Pro ring on the avatar box whatever it draws', () => {
+    const h = setup({
+      auth: signedIn,
+      isPro: true,
+      avatar: { choice: { kind: 'built', seed: 'core-12', showPublicly: false } },
+    });
+
+    expect(avatarOf(h).className).toContain('ring-2');
+  });
+});
+
 describe('TopBarComponent: focus returning to the opener', () => {
   function openFromExternalTrigger(hide: 'hidden' | 'detached' | 'none') {
     const h = setup();

@@ -36,7 +36,11 @@ vi.mock('firebase/functions', () => ({
       if (h.callableError) {
         return Promise.reject(h.callableError);
       }
-      return Promise.resolve({ data: { recorded: true } });
+      // `setAvatar` answers with the choice it stored; everything else here
+      // only needs to resolve.
+      return Promise.resolve({
+        data: name === 'setAvatar' ? { avatar: payload } : { recorded: true },
+      });
     };
   },
 }));
@@ -191,5 +195,50 @@ describe('AccountService functions bootstrap', () => {
 
     expect(h.calls).toHaveLength(2);
     expect(h.importCount).toBe(1);
+  });
+});
+
+/**
+ * `setAvatar` (`FEAT-038`). The payload is the part worth pinning: the server
+ * refuses a `seed` on any kind but `built`, and the callable SDK encodes a
+ * present-but-`undefined` key as `null` — so the key has to be absent, not
+ * merely empty, for everything that is not a built avatar.
+ */
+describe('AccountService.setAvatar', () => {
+  it('sends a built avatar with its seed, and returns what the server stored', async () => {
+    const { service } = setup();
+
+    const stored = await service.setAvatar({ kind: 'built', seed: 'core-35', showPublicly: true });
+
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].name).toBe('setAvatar');
+    expect(h.calls[0].payload).toEqual({ kind: 'built', seed: 'core-35', showPublicly: true });
+    expect(h.calls[0].options).toEqual({ timeout: 10_000 });
+    expect(stored).toEqual({ kind: 'built', seed: 'core-35', showPublicly: true });
+  });
+
+  it('omits the seed key entirely for any other kind', async () => {
+    const { service } = setup();
+
+    // A stale seed on the object passed in must not travel.
+    await service.setAvatar({ kind: 'photo', seed: 'core-35', showPublicly: false });
+
+    expect(h.calls[0].payload).toEqual({ kind: 'photo', showPublicly: false });
+    expect(Object.keys(h.calls[0].payload as object)).not.toContain('seed');
+  });
+
+  it('throws a message fit to show, keeping the SDK error as the cause', async () => {
+    const { service } = setup();
+    const refusal = Object.assign(new Error('gone'), { code: 'functions/not-found' });
+    h.callableError = refusal;
+
+    const error = (await service.setAvatar({ kind: 'initials', showPublicly: false }).then(
+      () => null,
+      (caught: unknown) => caught,
+    )) as Error;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain("isn't available on this deployment yet");
+    expect(error.cause).toBe(refusal);
   });
 });

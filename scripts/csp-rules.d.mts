@@ -12,8 +12,14 @@ export declare function authDomainOrigin(projectId: string): string;
 /** `https://us-central1-{projectId}.cloudfunctions.net` — what `httpsCallable` targets. */
 export declare function callableOrigin(projectId: string): string;
 
-/** `[origin, why the app requests it]`. */
-export declare const RUNTIME_ORIGINS: readonly (readonly [string, string])[];
+/**
+ * `[origin, why the app requests it]`, or `[origin, why, the directive the
+ * page loads it under]` for a subresource rather than a fetch.
+ */
+export declare const RUNTIME_ORIGINS: readonly (
+  | readonly [origin: string, why: string]
+  | readonly [origin: string, why: string, loadedUnder: string]
+)[];
 
 export declare const SUBRESOURCE_DIRECTIVES: readonly string[];
 

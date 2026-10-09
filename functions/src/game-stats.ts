@@ -46,7 +46,12 @@ export const MAX_GAMES_PER_WINDOW = 60;
 
 const WINDOW_MS = 60 * 60 * 1000;
 
-/** The totals as stored. Every field is written by this module and nothing else. */
+/**
+ * The totals as stored. Every field here is written by this module and
+ * nothing else — but they are not the only fields on the document: `setAvatar`
+ * keeps the player's avatar choice beside them (`FEAT-038`), which is why the
+ * write merges rather than replaces (`game-result.ts`).
+ */
 export interface UserStats {
   gamesPlayed: number;
   questionsAnswered: number;
@@ -179,9 +184,18 @@ export function isValidSubmission(submission: unknown): submission is GameResult
  * charging it a slot would let a player with a flaky connection exhaust an
  * hour's budget on one game. Pinned by a test that submits a repeat id at a
  * full window and expects `duplicate`, not `rate-limited`.
+ *
+ * **`current` may be a document that holds no totals at all.** A player who
+ * chooses an avatar before finishing a game has a `users/{uid}` carrying only
+ * that choice (`FEAT-038`), so "the document exists" no longer means "the
+ * totals exist" — and every field here is read as possibly absent. The one
+ * that mattered was the rate window: `nowMs - undefined` is `NaN`, which
+ * compares false against the window length, so the window read as still open,
+ * `gamesInWindow` became `undefined + 1`, and the write was refused for an
+ * `undefined` field — every game that player finished, forever.
  */
 export function nextUserStats(
-  current: UserStats | null,
+  current: Partial<UserStats> | null,
   submission: GameResultSubmission,
   nowMs: number,
 ): StatsDecision {
@@ -197,9 +211,16 @@ export function nextUserStats(
   // against the stored start rather than bucketing on a computed slot id, so
   // there is no `string(math.floor(...))` equivalent to get wrong — that trap
   // belongs to the rules language, and this is TypeScript, but the shape of
-  // the mistake travels.
-  const windowRolled = current === null || nowMs - current.rateWindowStart >= WINDOW_MS;
-  const gamesInWindow = windowRolled ? 0 : current.gamesInWindow;
+  // the mistake travels. A window with no recorded start has rolled: there is
+  // nothing in it to count.
+  const windowStart = current?.rateWindowStart;
+  const openWindowStart =
+    typeof windowStart === 'number' &&
+    Number.isFinite(windowStart) &&
+    nowMs - windowStart < WINDOW_MS
+      ? windowStart
+      : null;
+  const gamesInWindow = openWindowStart === null ? 0 : (current?.gamesInWindow ?? 0);
 
   if (gamesInWindow >= MAX_GAMES_PER_WINDOW) {
     return { accepted: false, reason: 'rate-limited' };
@@ -218,7 +239,7 @@ export function nextUserStats(
       // than `Math.min`.
       statsSince: current?.statsSince ?? nowMs,
       updatedAt: nowMs,
-      rateWindowStart: windowRolled ? nowMs : current.rateWindowStart,
+      rateWindowStart: openWindowStart ?? nowMs,
       gamesInWindow: gamesInWindow + 1,
     },
     // Written in the same transaction as the totals and keyed by the same game
