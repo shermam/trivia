@@ -172,9 +172,20 @@ export const INLINE_ALLOWED_TAGS: readonly string[] = ALLOWED_TAGS.filter((tag) 
  * MathML element carrying one into a link — so `<mi href>` would be a live
  * link that never passed the `https:` parse or collected a `rel`.
  *
+ * `start` is here so a numbered list written from 3 is numbered from 3:
+ * `marked` writes `<ol start="3">`, and without it the list renumbers itself
+ * from 1 and the reader sees numbers the contributor never wrote. The hook
+ * below keeps it only up to four digits ({@link START_KEEP}). Being on a
+ * per-document list, it is legal on every other allowed element too, where it
+ * does nothing — HTML gives `start` a meaning on `<ol>` alone, and MathML none
+ * at all.
+ *
  * The rest are MathML presentation attributes. None of them carries a URL or a
  * script; they carry lengths, alignments and the `display="block"` that tells
  * the stylesheet a formula is a display formula rather than an inline one.
+ * `mathsize` is the size KaTeX's sizing commands set (`\large`, `\Huge`), a
+ * length like `width` and `height`; `linebreak` is what a `\\` or a
+ * `\newline` inside a formula becomes, `<mspace linebreak="newline">`.
  * Deliberately **not** among them: `mathcolor` and `mathbackground`, which are
  * a `style` attribute wearing MathML's clothes — a contributed question could
  * pin a colour that ignores the reader's theme, and on any element a
@@ -189,11 +200,13 @@ export const ALLOWED_ATTR: readonly string[] = [
   'href',
   'title',
   'class',
+  'start',
   // MathML.
   'xmlns',
   'display',
   'encoding',
   'mathvariant',
+  'mathsize',
   'displaystyle',
   'scriptlevel',
   'stretchy',
@@ -209,6 +222,7 @@ export const ALLOWED_ATTR: readonly string[] = [
   'width',
   'height',
   'depth',
+  'linebreak',
   'voffset',
   'linethickness',
   'accent',
@@ -246,6 +260,72 @@ export const ALLOWED_URI_REGEXP = /^(?:https:|[^a-z]|[a-z+.-]+(?:[^a-z+.:-]|$))/
 export const LANGUAGE_CLASS = /^language-[A-Za-z0-9#+._-]*$/;
 
 /**
+ * The `start` a numbered list may keep: one to four digits. Past that the
+ * marker is wider than the list's gutter and the card's padding together — a
+ * list written from `999999999.` puts its number over the card's left edge —
+ * so a longer value is dropped and the list is numbered from 1. Exported for
+ * `render-contract.spec.ts`, which holds the published pattern to it.
+ */
+export const START_KEEP = /^[0-9]{1,4}$/;
+
+/**
+ * Elements inside which nothing is a link: an `<a>` with one of these as an
+ * ancestor is treated like any element that is not a link — it loses `href`
+ * and `title`, and is given no `target` or `rel`. Exported for
+ * `render-contract.spec.ts`.
+ */
+export const NO_LINK_WITHIN: readonly string[] = ['math'];
+
+/**
+ * The elements DOMPurify removes *together with* their content when they are
+ * off the list: its own default, restated whole, without `thead`.
+ *
+ * Anything else off the list is removed while its text is kept — the
+ * degradation `FEAT-019` §1 asks for — and DOMPurify's default makes an
+ * exception of `thead` that this renderer does not want. A GFM table is not
+ * supported, so its elements go; with `thead` dropped whole, the body's cells
+ * would stay as text and the header row would vanish — the numbers without the
+ * words saying what they are. Without `thead` here the header is stripped the
+ * way `tbody` is, its text kept, so a table reads as its cells in order,
+ * header first. Not a table, but nothing lost.
+ *
+ * **A replacement, not an addition.** DOMPurify takes `FORBID_CONTENTS` as the
+ * whole list — there is no option that removes one entry from its default — so
+ * every other entry is restated, and only ever dropped on purpose.
+ * `markdown-engine.spec.ts` reads the default out of the DOMPurify the app
+ * bundles and holds this list to it, `thead` aside: an upgrade that adds an
+ * entry fails there until the entry is added here as well, rather than leaving
+ * the renderer quietly keeping text DOMPurify has decided to drop.
+ */
+export const FORBID_CONTENTS: readonly string[] = [
+  'annotation-xml',
+  'audio',
+  'colgroup',
+  'desc',
+  'foreignobject',
+  'head',
+  'iframe',
+  'math',
+  'mi',
+  'mn',
+  'mo',
+  'ms',
+  'mtext',
+  'noembed',
+  'noframes',
+  'noscript',
+  'plaintext',
+  'script',
+  'selectedcontent',
+  'style',
+  'svg',
+  'template',
+  'title',
+  'video',
+  'xmp',
+];
+
+/**
  * The sanitiser configuration, exported so the payload suite asserts against
  * the same object the renderer uses rather than a copy of it.
  *
@@ -273,6 +353,9 @@ export const LANGUAGE_CLASS = /^language-[A-Za-z0-9#+._-]*$/;
  * still refuses an inline style on the day somebody widens `ALLOWED_ATTR` — the
  * failure mode `CLAUDE.md` §4.4 exists about, where a refused `style` attribute
  * stays in the DOM with its declarations silently dropped.
+ *
+ * `FORBID_CONTENTS` is {@link FORBID_CONTENTS}: DOMPurify's default without
+ * `thead`, so a table's header row keeps its text like the rest of the table.
  */
 export const SANITIZE_CONFIG: Config = {
   ALLOWED_TAGS: [...ALLOWED_TAGS],
@@ -281,6 +364,7 @@ export const SANITIZE_CONFIG: Config = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
   FORBID_ATTR: ['style'],
+  FORBID_CONTENTS: [...FORBID_CONTENTS],
 };
 
 /**
@@ -314,7 +398,7 @@ function isHttpsUrl(value: string): boolean {
 let hooksInstalled = false;
 
 /**
- * The three things the allowlist alone cannot express, all applied after
+ * The five things the allowlist alone cannot express, all applied after
  * DOMPurify has finished with an element's attributes.
  *
  * **Classes are narrowed to the fence language.** `class` has to be allowed for
@@ -335,6 +419,18 @@ let hooksInstalled = false;
  * raw HTML and KaTeX runs untrusted, so `\href` compiles to an error — but
  * this file is the boundary, and a boundary that holds only because of what is
  * upstream of it is not one.
+ *
+ * **Nothing inside a formula is a link**, not even an HTML `<a>`
+ * ({@link NO_LINK_WITHIN}). A MathML token element is a text integration
+ * point, so `<math><mtext><a href="https://evil.example">` parses as an HTML
+ * anchor inside the formula; DOMPurify's namespace check admits HTML there,
+ * and the allowlist admits `<a>` and `href`, so without this the sanitiser
+ * would keep a live link in a formula. `marked` escapes raw HTML and KaTeX
+ * escapes its text, so nothing upstream writes one today; this is what keeps
+ * the sanitiser a second line here too.
+ *
+ * **`start` is kept to four digits** ({@link START_KEEP}): a longer one puts
+ * the list's number past the card's left edge.
  *
  * **`target="_blank"` is added here, with its `rel`, and never trusted from the
  * source.** A contributed link leaves the app, so it opens in a new tab; a new
@@ -363,12 +459,23 @@ function installHooks(): void {
       }
     }
 
-    // An HTML `<a>`, and only that: DOMPurify refuses an `a` in the MathML
-    // namespace outright, so anything reaching the branch below is a real
-    // anchor rather than a MathML element wearing the name.
-    if (node.tagName.toLowerCase() !== 'a') {
+    const start = node.getAttribute('start');
+    if (start !== null && !START_KEEP.test(start)) {
+      node.removeAttribute('start');
+    }
+
+    // An HTML `<a>` outside a formula, and only that: DOMPurify refuses an `a`
+    // in the MathML namespace outright, so anything reaching the branch below
+    // is a real anchor rather than a MathML element wearing the name — and an
+    // anchor inside a formula is no link either.
+    if (
+      node.tagName.toLowerCase() !== 'a' ||
+      NO_LINK_WITHIN.some((name) => node.closest(name) !== null)
+    ) {
       node.removeAttribute('href');
       node.removeAttribute('title');
+      node.removeAttribute('target');
+      node.removeAttribute('rel');
       return;
     }
     const href = node.getAttribute('href');
