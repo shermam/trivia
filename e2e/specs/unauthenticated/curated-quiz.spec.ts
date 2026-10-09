@@ -2,6 +2,7 @@ import { Page, Request, Route } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
 import { expectRadiosAreGrouped } from '../../support/a11y';
+import { waitForAnonymousSession } from '../../support/auth';
 import { answerQuestion, optionLabel, waitForPlayRoute } from '../../support/game';
 import { expectBoxUnmoved, expectUnmoved, settledBox } from '../../support/layout';
 import { runTag } from '../../support/topics';
@@ -126,6 +127,42 @@ async function holdRequests(
   });
 
   return { seen, release: () => open() };
+}
+
+/**
+ * Records `count` free games as played today, straight into IndexedDB — the
+ * write `daily-game-limit.spec.ts` makes, for its reason: so a test does not
+ * have to play them. It attaches to the database the app has already opened,
+ * so call it once the allowance has rendered a count.
+ */
+async function seedFreeGamesPlayed(page: Page, count: number): Promise<void> {
+  const now = new Date();
+  const date = [
+    now.getFullYear(),
+    `${now.getMonth() + 1}`.padStart(2, '0'),
+    `${now.getDate()}`.padStart(2, '0'),
+  ].join('-');
+  await page.evaluate(
+    (record) =>
+      new Promise<void>((resolve, reject) => {
+        const open = window.indexedDB.open('trivia-offline');
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction('daily-limit', 'readwrite');
+          tx.objectStore('daily-limit').put({ id: 'today', ...record });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            reject(tx.error as Error);
+          };
+        };
+        open.onerror = () => reject(open.error as Error);
+      }),
+    { date, count },
+  );
 }
 
 const START = 'start-quiz';
@@ -348,6 +385,58 @@ test.describe('a curated quiz, played from /quiz/:quizId (FEAT-024)', () => {
     await expect(page.getByTestId('quiz-title')).toHaveText(title);
     await expect(page.getByTestId('quiz-title')).toBeFocused();
     await expect(page.getByTestId(START)).toBeVisible();
+  });
+
+  /**
+   * The day's last free game. Start spends it before `/play`'s chunk has
+   * loaded, so the allowance reads zero while Start still says "Starting…" —
+   * and the Pro offer, a far taller box, took Start's place under the pointer
+   * for as long as the chunk took (`CLAUDE.md` §4.4). Held open here the way
+   * the size test below holds it, so the window is measured, not caught.
+   */
+  test('Start keeps its box while it spends the day’s last free game', async ({
+    page,
+    firebase,
+  }) => {
+    const runId = unique();
+    const tag = runTag('quiz-last-game');
+    const questions = ['a', 'b'].map((label) => questionFor(runId, tag, label));
+    await firebase.seedCustomQuestions(questions);
+    const quizId = `e2e-last-game-${runId}`;
+    await firebase.seedQuiz({
+      id: quizId,
+      title: `The last free game ${runId}`,
+      questionIds: questions.map((question) => question.id),
+    });
+
+    await page.goto(`/quiz/${quizId}`);
+    // A count on screen means the app has opened the database the seed writes to.
+    await expect(page.getByTestId('quiz-daily-allowance')).toHaveText(
+      '5 of 5 free games left today.',
+    );
+    await seedFreeGamesPlayed(page, 4);
+    await page.reload();
+    await expect(page.getByTestId('quiz-daily-allowance')).toHaveText(
+      '1 of 5 free games left today.',
+    );
+    // The offer is optimistic until the entitlement is known, so wait for it:
+    // the zero below is then the free tier's answer, not the window before it.
+    await waitForAnonymousSession(page);
+
+    const start = page.getByTestId(START);
+    const startBox = await settledBox(start, 'Start, with one free game left');
+
+    const playChunk = await holdRequests(page, (request) => request.resourceType() === 'script');
+    await start.click();
+    await playChunk.seen;
+    // Spent, and saying so — the moment the offer used to arrive.
+    await expect(page.getByTestId('quiz-daily-allowance')).toHaveText('No free games left today.');
+    await expect(page.getByTestId('quiz-daily-limit-reached')).toHaveCount(0);
+    await expect(start).toHaveText('Starting…');
+    await expectBoxUnmoved(start, startBox, 'Start while it spends the last free game');
+
+    playChunk.release();
+    await waitForPlayRoute(page);
   });
 });
 

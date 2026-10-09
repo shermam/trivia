@@ -228,7 +228,18 @@
             }
           </p>
 
-          @if (gameController.limitReached() || !dailyLimit.hasGamesLeft()) {
+          <!--
+            Not while a start is in flight. Start spends the day's last free
+            game before `/play`'s chunk has loaded, so the allowance reads zero
+            while Start still says "Starting…" — and the offer, a far taller
+            box, took Start's place under the pointer for as long as that chunk
+            took (`CLAUDE.md` §4.4). A start the allowance refuses clears
+            `isLoading` with `limitReached` set, so the offer still arrives.
+          -->
+          @if (
+            !gameController.isLoading() &&
+            (gameController.limitReached() || !dailyLimit.hasGamesLeft())
+          ) {
             <div
               role="status"
               data-cy="quiz-daily-limit-reached"

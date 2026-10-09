@@ -76,6 +76,8 @@ interface Options {
 async function render(url: string, options: Options = {}) {
   const load = vi.fn(options.load ?? (() => Promise.resolve(ready())));
   const limitReached = signal(false);
+  const isLoading = signal(false);
+  const hasGamesLeft = signal(options.hasGamesLeft ?? true);
   const hasResumableGame = signal(options.resumable ?? false);
   const startQuiz = vi.fn(options.startQuiz ?? (() => Promise.resolve(true)));
   TestBed.configureTestingModule({
@@ -86,7 +88,7 @@ async function render(url: string, options: Options = {}) {
         provide: GameControllerService,
         useValue: {
           startQuiz,
-          isLoading: signal(false),
+          isLoading,
           limitReached,
           hasResumableGame,
         },
@@ -95,7 +97,7 @@ async function render(url: string, options: Options = {}) {
         provide: DailyGameLimitService,
         useValue: {
           isUnlimited: signal(false),
-          hasGamesLeft: signal(options.hasGamesLeft ?? true),
+          hasGamesLeft,
           remaining: signal(4),
           refresh: vi.fn(() => Promise.resolve()),
         },
@@ -115,6 +117,8 @@ async function render(url: string, options: Options = {}) {
     load,
     startQuiz,
     limitReached,
+    isLoading,
+    hasGamesLeft,
     hasResumableGame,
   };
 }
@@ -212,6 +216,32 @@ describe('QuizDetailComponent — a quiz ready to start', () => {
 
   it('offers Pro instead of Start when the day’s free games are spent', async () => {
     const { host } = await render('/quiz/world-cup-1998', { hasGamesLeft: false });
+
+    expect(host.querySelector('[data-cy="start-quiz"]')).toBeNull();
+    expect(host.querySelector('[data-cy="quiz-daily-limit-reached"]')).not.toBeNull();
+  });
+
+  /**
+   * Start spends the day's last free game before the play screen has loaded,
+   * so the allowance reads zero while Start still says "Starting…" — and the
+   * offer, a far taller box, replaced the button under the pointer for as long
+   * as `/play`'s chunk took (`CLAUDE.md` §4.4; `curated-quiz.spec.ts` measures
+   * it). A start the allowance refused still ends on the offer.
+   */
+  it('keeps Start while its own start spends the last free game, and offers Pro after a refusal', async () => {
+    const { harness, host, isLoading, hasGamesLeft, limitReached } =
+      await render('/quiz/world-cup-1998');
+
+    isLoading.set(true);
+    hasGamesLeft.set(false);
+    harness.detectChanges();
+
+    expect(text(host, 'start-quiz')).toBe('Starting…');
+    expect(host.querySelector('[data-cy="quiz-daily-limit-reached"]')).toBeNull();
+
+    limitReached.set(true);
+    isLoading.set(false);
+    harness.detectChanges();
 
     expect(host.querySelector('[data-cy="start-quiz"]')).toBeNull();
     expect(host.querySelector('[data-cy="quiz-daily-limit-reached"]')).not.toBeNull();
