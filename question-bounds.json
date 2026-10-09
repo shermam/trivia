@@ -1,0 +1,31 @@
+{
+  "$comment": [
+    "The bounds firestore.rules holds on the content of a newly created custom_questions document, published for the writers the rules never see: the question-generation pipeline (shermam/trivia-pipeline) writes through the Admin SDK, which bypasses them. Vendor this file; do not transcribe it.",
+    "firestore.rules is the authority and this file is its published statement. Nothing reads it at runtime. firestore-tests/question-bounds.rules.spec.ts reads it and, for every bound, writes a question at the bound and one past it against the rules in the Firestore emulator, so the suite fails when the two disagree in either direction — a bound that moves in the rules moves here in the same pull request.",
+    "Lengths are UTF-16 code units: JavaScript's String length, and what the rules language's size() counts — probed against the emulator with characters that are one unit but two UTF-8 bytes, and two units but one code point.",
+    "version is the version of this file's format — its keys and what they mean — not of the numbers in it: a bound that moves leaves it at 1, and a key added or a meaning changed moves it.",
+    "Not stated here, because they are relations rather than bounds, and refused by the rules all the same: an option repeated, the correct answer among the wrong ones, a tag repeated."
+  ],
+  "version": 1,
+  "source": {
+    "repository": "shermam/trivia",
+    "file": "firestore.rules",
+    "functions": ["isValidQuestionShape", "isValidCustomQuestion"]
+  },
+  "question": { "minLength": 1, "maxLength": 2000 },
+  "correct_answer": { "minLength": 1, "maxLength": 200 },
+  "incorrect_answers": { "minCount": 1, "maxCount": 5, "minLength": 1, "maxLength": 200 },
+  "explanation": { "minLength": 1, "maxLength": 1000 },
+  "tags": {
+    "minCount": 1,
+    "maxCount": 8,
+    "minLength": 2,
+    "maxLength": 32,
+    "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+  },
+  "format": { "values": ["plain", "markdown"] },
+  "difficulty": { "values": ["easy", "medium", "hard"] },
+  "type": { "values": ["multiple", "boolean"], "booleanIncorrectAnswers": 1 },
+  "sourceUrl": { "prefix": "https://", "minLength": 9, "maxLength": 500 },
+  "sourceTitle": { "minLength": 1, "maxLength": 200 }
+}
