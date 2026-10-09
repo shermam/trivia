@@ -13,7 +13,13 @@
     >
       Curated quizzes
     </h2>
-    <p class="mt-1 text-slate-500 dark:text-slate-400">
+    <!--
+      slate-600 rather than the house slate-500: this sits on slate-50, where
+      slate-500 measures 4.55:1 — clearing 4.5:1 by a hair, on the one page
+      Lighthouse audits for contrast. slate-600 is 7.2:1, and slate-400 on
+      slate-950 7.7:1 in the dark theme.
+    -->
+    <p class="mt-1 text-slate-600 dark:text-slate-400">
       Questions somebody chose, played in the order they chose them.
     </p>
 
@@ -93,7 +99,7 @@
         </ul>
         @if (view() === 'empty') {
           <p
-            class="absolute inset-0 flex items-center justify-center px-6 pb-3 text-center text-slate-500 dark:text-slate-400"
+            class="absolute inset-0 flex items-center justify-center px-6 pb-3 text-center text-slate-600 dark:text-slate-400"
             data-cy="quiz-list-empty"
           >
             No quizzes have been published yet.

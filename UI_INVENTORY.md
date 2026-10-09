@@ -557,6 +557,39 @@ Modal headed "Remove this question from the app?", showing the question text, th
 
 ---
 
+## 10. Route: `/quiz/:quizId` — Curated quiz (`QuizDetailComponent`)
+
+One curated quiz (`FEAT-024`), reached from a card in the list on `/` or by its address. A single card on the standard page ground, top-aligned rather than centred, so it grows downwards and nothing above it moves. **No route guard** — an address naming no published quiz renders a not-found state inside the app rather than redirecting.
+
+### Hierarchy
+
+- **Back link**: "← Back to game" → `/`
+- **Card**
+  - A small emerald eyebrow: "Curated quiz"
+  - **Title** (`h1`, focusable for the retry): the quiz's title — or "Loading quiz…", "Quiz not found", "This quiz could not be loaded" while there is none
+  - **Description**, when the quiz has one
+  - **Question count**: "{n} questions, in the order they were chosen" (or "1 question, …")
+  - **Shortfall line** (amber), only when some of the quiz's questions cannot be played: "{n} of its {total} questions cannot be played right now, so it plays the other {m}."
+  - **In-progress warning**, only when a game was already in progress when the quiz was read: "Starting this quiz replaces the game you have in progress."
+  - **Field: "Time per Question"** — the setup screen's segmented control: "15 seconds", "30 seconds", "No limit", real radios hidden with `sr-only` in a `role="radiogroup"` labelled by the caption. When the quiz suggests a limit, a line under the caption says "Suggested for this quiz: {limit}." and that option starts selected; every option stays selectable
+  - **Pace note** under the picker, one line reserved at the tallest of its three variants: "15 seconds a question. Quizzes are not ranked, so pick the pace that suits you." / "30 seconds a question. …" / "No countdown. Quizzes are not ranked, so take all the time you need."
+  - **Daily allowance row** — the setup screen's: "Unlimited games with Pro." / "{n} of 5 free games left today." / "No free games left today."
+  - **Start quiz** button (full width, emerald, sparkles icon) — "Starting…" and disabled while the game starts; or, when the day's free games are spent, the setup screen's amber Pro offer ("That's your 5 free games for today." · "They reset at midnight. Pro removes the limit entirely." · **See Pro**)
+  - A red status line under Start, empty unless Start failed: "The quiz could not start. Please try again."
+- An `sr-only` `role="status"` region announcing the outcome of the read: "Quiz ready: {n} questions." / "None of this quiz's questions can be played right now." / "Quiz not found." / "The quiz could not be loaded."
+
+### States
+
+| State                | Content                                                                                                                                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Loading**          | Eyebrow and "Loading quiz…" only — nothing pressable exists until the quiz does                                                                                                                                                                      |
+| **Ready**            | Everything above                                                                                                                                                                                                                                     |
+| **Nothing playable** | Title and description, then an amber notice: "None of this quiz's questions can be played right now, so it cannot start. Try another quiz, or a random game." and a **Play a random game** button → `/`                                              |
+| **Not found**        | "Quiz not found", "There is no published quiz at this address. It may have been taken down, or the link may be incomplete." and **Play a random game** → `/` — a draft and a missing quiz look the same                                              |
+| **Load failed**      | "This quiz could not be loaded", "Something went wrong while reading it. Please try again." — offline: "You're offline, and a quiz needs a connection to load its questions." — and **Try again**, which moves focus to the title before it re-reads |
+
+---
+
 ## 11. Cross-cutting elements & patterns
 
 ### 11.1 PRO badge

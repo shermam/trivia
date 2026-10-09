@@ -114,13 +114,14 @@ test.describe('anonymous game flow (open_trivia source)', () => {
    * Every face of the score card is the same height, which is what stops the
    * page moving when auth resolves.
    *
-   * The card has five states — sign in, verify, save, saved, save failed — and
-   * which one shows is decided by auth arriving. Measured before the fix at
-   * 390x1000: sign-in 146px, verify 148px, save form 192px. So a returning
-   * player who could actually save watched the leaderboard drop **46px** the
-   * moment auth resolved, and a signed-out one was shown the verify prompt
-   * first and then the sign-in prompt, for a 2px twitch on top of being told
-   * about a problem they did not have.
+   * The card has six faces — sign in, verify, save, saved, save failed, and a
+   * curated quiz's (`FEAT-024`) — and which of the first five shows is decided
+   * by auth arriving. Measured before the fix at 390x1000: sign-in 146px,
+   * verify 148px, save form 192px. So a returning player who could actually
+   * save watched the leaderboard drop **46px** the moment auth resolved, and a
+   * signed-out one was shown the verify prompt first and then the sign-in
+   * prompt, for a 2px twitch on top of being told about a problem they did
+   * not have.
    *
    * **390 wide is the whole test.** At 1024 the same three measured 122 / 124 /
    * 120 — a 4px spread — because the save form only stacks its input above its
@@ -128,7 +129,7 @@ test.describe('anonymous game flow (open_trivia source)', () => {
    * near enough while a phone was moving half a card.
    *
    * Asserted face-by-face against the cell rather than by driving the app
-   * through all five states: they share one grid cell, so equal face heights
+   * through all six states: they share one grid cell, so equal face heights
    * *is* the property. It also means an anonymous game — the cheapest thing
    * this suite can set up — can prove something about the signed-in states.
    */
@@ -153,7 +154,7 @@ test.describe('anonymous game flow (open_trivia source)', () => {
       .poll(() => measureScoreCardFaces(card), {
         message: 'every face of the score card fills the one reserved cell',
       })
-      .toEqual({ faces: 5, collapsed: false, mismatched: [] });
+      .toEqual({ faces: 6, collapsed: false, mismatched: [] });
   });
 
   /**

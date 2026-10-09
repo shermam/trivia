@@ -349,8 +349,8 @@ quizzes/{quizId}         (the id is the /quiz/<id> address; the seed script writ
   createdBy: string      (who curated it — a uid or a name; written by the console or the script)
   createdAt: int         (epoch ms, stamped by the writer; the list on / is ordered by it)
   isPublished: boolean   (the whole of the read rule)
-  tags?: string[]        (FEAT-021; at most 8 normalised tags — written, not yet read)
-  language?: string      (FEAT-030; a BCP-47 tag — written, not yet read)
+  tags?: string[]        (FEAT-021; at most 8 normalised tags — carried, not yet used)
+  language?: string      (FEAT-030; a BCP-47 tag — carried, not yet used)
   sponsorId?: string | null  (FEAT-035, parked)
   suggestedTimeLimit?: 15 | 30 | 'unlimited' | null  (FEAT-018; pre-selects the picker, never locks it)
 ```
@@ -635,7 +635,7 @@ Deliberately **no `random` field on the documents**, which is the textbook appro
 
 ### Rules test suite
 
-`firestore.rules` is the app's real security boundary, so it has a dedicated unit suite (`npm run rules:test`, `firestore-tests/`, 640 tests across eight spec files) built on `@firebase/rules-unit-testing` and run against the Firestore emulator. Deliberately outside `src/` and driven by its own `vitest.rules.config.ts`, so the Angular build, `ng test` and the ESLint globs never pick it up.
+`firestore.rules` is the app's real security boundary, so it has a dedicated unit suite (`npm run rules:test`, `firestore-tests/`, 683 tests across nine spec files) built on `@firebase/rules-unit-testing` and run against the Firestore emulator. Deliberately outside `src/` and driven by its own `vitest.rules.config.ts`, so the Angular build, `ng test` and the ESLint globs never pick it up.
 
 - **Every branch is covered by its reject case, not just its happy path** — signed-out, anonymous, unverified-password, verified-but-not-Pro, a `stripeRole` that is set but isn't `pro`, cross-uid writes, every schema bound, and default-deny on an undeclared collection.
 - **Auth contexts always set `firebase.sign_in_provider` explicitly** (`firestore-tests/helpers.ts`). Omitting it yields a provider that satisfies `!= 'anonymous'`, so a test leaning on the default would pass for the wrong reason and would keep passing if the anonymous check were deleted outright.

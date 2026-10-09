@@ -596,7 +596,7 @@ export class GameOverComponent implements OnInit {
   );
 
   /**
-   * Which of the card's five faces to show, as one pure decision rather than a
+   * Which of the card's six faces to show, as one pure decision rather than a
    * template `@if`/`@else if` chain.
    *
    * Written this way for two reasons. It is unit-testable in isolation, which
