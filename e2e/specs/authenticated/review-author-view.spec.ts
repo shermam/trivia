@@ -144,6 +144,18 @@ test.describe('everything one account contributed, as a reviewer', () => {
       seedQuestion(`other-pending-${tag}`, `someone-else-${tag}`, otherText, { createdAt: now }),
     ]);
 
+    await signInAsReviewer(page, firebase, tag);
+    // Through the link rather than a reload: the role read the sign-in just
+    // started is what renders the link, and reloading under it aborts that
+    // read, which `ReviewerService` reports as a console error — on the setup
+    // screen, before anything this test is about.
+    await page.getByTestId('review-queue-link').click();
+    await expect(page).toHaveURL(/\/review$/);
+    const opener = queueCard(page, pendingText).getByTestId('open-author-view');
+    await expect(opener).toBeVisible();
+
+    // From here to the end — the view, its read, a refused submit, the
+    // action and the way back — nothing may log an error.
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
     page.on('console', (message) => {
@@ -151,12 +163,7 @@ test.describe('everything one account contributed, as a reviewer', () => {
         errors.push(`console: ${message.text()} @ ${message.location().url}`);
       }
     });
-
-    await signInAsReviewer(page, firebase, tag);
-    await page.goto('/review');
     const writes = countQuestionWrites(page);
-    const opener = queueCard(page, pendingText).getByTestId('open-author-view');
-    await expect(opener).toBeVisible();
 
     // The read is held open, so the loading face can be measured rather than
     // raced: against the emulator it lasts a few milliseconds.
