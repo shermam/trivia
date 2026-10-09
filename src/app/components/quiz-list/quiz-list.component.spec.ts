@@ -192,7 +192,7 @@ describe('QuizListComponent — its states share one box', () => {
 
   // A failed read is not an empty collection (`CLAUDE.md` §4.4).
   it('offers a retry when the read fails, moving focus off the button first', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     let calls = 0;
     const { fixture, host, listPublished } = await inView({
       listPublished: () =>
@@ -211,7 +211,7 @@ describe('QuizListComponent — its states share one box', () => {
   });
 
   it('says the quizzes need a connection when the read fails offline', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { host } = await inView({
       listPublished: () => Promise.reject(new Error('offline')),
       online: false,
@@ -220,6 +220,20 @@ describe('QuizListComponent — its states share one box', () => {
     expect(host.querySelector('[data-cy="quiz-list-failed"]')?.textContent).toContain(
       "You're offline, and the quizzes need a connection.",
     );
+  });
+
+  // `/` keeps its console free of errors (Lighthouse's `errors-in-console`),
+  // and an optional list that failed is not one: it says so on screen.
+  it('logs a failed read as a warning, never as an error', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await inView({ listPublished: () => Promise.reject(new Error('refused')) });
+
+    expect(warn).toHaveBeenCalledWith(
+      '[quizzes] could not read the published quizzes',
+      expect.any(Error),
+    );
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('announces how many quizzes there are once they land', async () => {

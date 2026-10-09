@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { ConsoleMessage, Page } from '@playwright/test';
 import { expect, test } from '../../fixtures/test';
 import { CustomQuestionSeed } from '../../fixtures/types';
 import { waitForAnonymousSession } from '../../support/auth';
@@ -192,6 +192,77 @@ for (const { width, height, embed } of VIEWPORTS) {
 }
 
 test.describe('the quizzes the list shows (FEAT-024)', () => {
+  /**
+   * A list that could not load says so, offers a retry, and puts **no error**
+   * in the console of `/` — which Lighthouse asserts `errors-in-console` on,
+   * and where `sound-effects.spec.ts` fails a round on any script error. It
+   * matters more than it looks: on a short window the click on Start Game
+   * scrolls the list into view, so the list reads during an ordinary round.
+   *
+   * The refusal is a 403 fulfilled at the network, the answer every project
+   * gives while its deployed rules have no `quizzes` block. One handler with a
+   * flag rather than an unroute, for the reason `profile-stats.spec.ts` gives.
+   */
+  test('a refused read shows the failed state and a retry, and logs no error', async ({
+    page,
+    firebase,
+  }) => {
+    await firebase.seedQuiz({
+      id: `e2e-refused-${unique()}`,
+      title: 'Read on the second try',
+      questionIds: ['e2e-list-question'],
+    });
+
+    const errors: string[] = [];
+    page.on('console', (message: ConsoleMessage) => {
+      if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) {
+        errors.push(message.text());
+      }
+    });
+    let refusing = true;
+    let refused = 0;
+    await page.route(/:runQuery(\?|$)/, async (route) => {
+      const request = route.request();
+      if (
+        refusing &&
+        request.method() === 'POST' &&
+        (request.postData() ?? '').includes('"collectionId":"quizzes"')
+      ) {
+        refused += 1;
+        await route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            { error: { code: 403, status: 'PERMISSION_DENIED', message: 'Missing permissions.' } },
+          ]),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await stubOpenTrivia(page);
+    await page.goto('/');
+    await page.getByTestId('quiz-list').scrollIntoViewIfNeeded();
+
+    await expect(page.getByTestId('quiz-list-failed')).toContainText(
+      'The quizzes could not be loaded.',
+    );
+    await expect(page.getByTestId('quiz-list-status')).toHaveText(
+      'The quizzes could not be loaded.',
+    );
+    expect(refused, 'the refusal is what produced the failed state').toBe(1);
+
+    refusing = false;
+    await page.getByTestId('quiz-list-retry').click();
+    // The button goes away with the state it belongs to; focus went to the
+    // heading first rather than dropping to <body> (`CLAUDE.md` §4.4).
+    await expect(page.locator('#quiz-list-heading')).toBeFocused();
+    await expect(page.getByTestId('quiz-list-strip')).toBeVisible();
+
+    expect(errors, errors.join('\n')).toEqual([]);
+  });
+
   test('lists published quizzes newest first, leaves drafts out, and links each to its page', async ({
     page,
     firebase,

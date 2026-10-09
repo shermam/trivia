@@ -150,7 +150,14 @@ export class QuizListComponent {
     } catch (error) {
       // "No quizzes yet" is a claim about the collection, and a read that
       // never answered has established nothing about it (`CLAUDE.md` §4.4).
-      console.error('[quizzes] could not read the published quizzes', error);
+      //
+      // A warning, not an error, and deliberately so. The list is optional and
+      // already says it failed, with a retry; and this is `/`, whose console
+      // is kept free of errors — Lighthouse asserts `errors-in-console` there,
+      // and `sound-effects.spec.ts` fails a round on any script error. A short
+      // window scrolls the list into view on the way to Start Game, so a list
+      // that could not load would otherwise put an error in front of both.
+      console.warn('[quizzes] could not read the published quizzes', error);
       this.viewSignal.set('failed');
     }
   }
