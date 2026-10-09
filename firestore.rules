@@ -1389,6 +1389,43 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // The question-generation pipeline's staging record (`FEAT-020` §B, design
+    // §2 S8): everything a run produced — every candidate, accepted and
+    // rejected alike, each stage's verdict and score, the prompt and rubric
+    // versions it was judged under, the verbatim supporting quote from its
+    // source passage, and the siblings rejected beside it. Its writer is the
+    // pipeline (`shermam/trivia-pipeline`), on the Admin SDK, which these rules
+    // never see. In its design a separate promote step copies the accepted
+    // subset into `custom_questions` as `pending`, and that copy — not this
+    // record — is what a reviewer approves.
+    //
+    // **No client path at all, reads included.** `user_roles`, `users/{uid}`
+    // and `quizzes` already keep every write on the Admin SDK; this goes one
+    // step further, because nothing in the app has a reason to read a
+    // candidate either. The record is the pipeline's working state and its
+    // provenance, large and of no use to anybody playing a game. So there is
+    // no `hasOnly()` allowlist, no field bounds, no ownership check and no
+    // volume cap here: `CLAUDE.md` §4.1 asks for those on a client-writable
+    // collection, and with every verb denied there is nothing for any of them
+    // to guard — which is also what leaves the record's shape free to grow as
+    // the pipeline's stages do, without a rules deploy. The bounds the
+    // promoted copy must keep are published in `question-bounds.json`, beside
+    // this file.
+    //
+    // **No personal data, by construction**: a candidate is machine-written
+    // from a public source, so it carries no uid and no text a user typed —
+    // which is why `deleteAccount` and `exportAccountData` do not touch it.
+    //
+    // `if false` is what the language already does for any path no `match`
+    // names, so this block changes no outcome — the mutation sweep recorded
+    // deleting it as invisible to every test. It is written out so that the
+    // collection's policy is a statement here rather than an absence, and so
+    // that granting anything on it is an edit to these lines, made beside this
+    // reasoning.
+    match /generated_questions/{candidateId} {
+      allow read, write: if false;
+    }
+
     // Product/price catalog `stripeWebhook` mirrors from the Stripe
     // Dashboard — public so the pricing page and checkout-session creation
     // can read the current Pro price without any secrets.
