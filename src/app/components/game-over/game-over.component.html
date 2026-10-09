@@ -997,10 +997,16 @@
                       field existed — so the component renders nothing at all
                       rather than a placeholder or an "unverified" badge, which
                       would turn a missing optional field into an accusation.
+
+                      A question the generation pipeline wrote reads
+                      "Machine-generated from <source>" here (FEAT-020) — the
+                      one place a player is told, and the place the Privacy
+                      Policy says they will be. Nothing in the loop changes.
                     -->
                     <app-source-link
                       [url]="row.question.sourceUrl"
                       [title]="row.question.sourceTitle"
+                      [machineGenerated]="row.machineGenerated"
                     />
 
                     <!--

@@ -1473,6 +1473,44 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
     expect(rows[1].querySelector('[data-cy="question-source"]')).toBeNull();
   });
 
+  /**
+   * `FEAT-020`. The wiring of the label: a question the generation pipeline
+   * wrote carries the one fact `TriviaService` keeps of its provenance, and
+   * the row's source line says so — "Machine-generated from" its source — while
+   * a person's citation beside it is left exactly as it was.
+   */
+  it('reads a machine-generated question’s source as machine-generated, and only that row', () => {
+    const generated = recapQuestion('q0', {
+      source: 'custom',
+      sourceUrl: 'https://en.wikipedia.org/wiki/Water',
+      sourceTitle: 'Water',
+      provenance: { source: 'ai' },
+    });
+    const cited = recapQuestion('q1', {
+      source: 'custom',
+      sourceUrl: 'https://example.org/h2o',
+      sourceTitle: 'Example Journal',
+    });
+    const { open, queryAll } = render({
+      questions: [generated, cited],
+      answerHistory: [answeredWith('q0:right'), answeredWith('q1:wrong')],
+    });
+    open();
+
+    const rows = queryAll('[data-cy="recap-row"]');
+    expect(
+      rows[0].querySelector('[data-cy="question-source-generated"]')?.textContent?.trim(),
+    ).toBe('Machine-generated from');
+    const link = rows[0].querySelector<HTMLAnchorElement>('[data-cy="question-source-link"]');
+    expect(link?.getAttribute('href')).toBe('https://en.wikipedia.org/wiki/Water');
+    expect(link?.textContent).not.toContain('Machine-generated');
+
+    expect(rows[1].querySelector('[data-cy="question-source-generated"]')).toBeNull();
+    expect(rows[1].querySelector('[data-cy="question-source-link"]')?.textContent).toContain(
+      'Example Journal',
+    );
+  });
+
   it("offers the contributor's justification on the row that carries one", () => {
     const explained = recapQuestion('q0', {
       explanation: 'CO2 and O2 are both real molecules, which is what makes this one tricky.',

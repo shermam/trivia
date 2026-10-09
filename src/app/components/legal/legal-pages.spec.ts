@@ -7,6 +7,7 @@ import {
   LEGAL_ENTITY_NAME,
   LEGAL_LAST_UPDATED,
 } from './legal';
+import { SourceLinkComponent } from '../source-link/source-link.component';
 import { PrivacyPolicyComponent } from './privacy-policy.component';
 import { TermsOfServiceComponent } from './terms-of-service.component';
 
@@ -471,6 +472,43 @@ describe('legal pages', () => {
 
     expect(text).toContain('the source link, the source name and the justification');
     expect(text).toContain('your browser sends no referrer');
+  });
+
+  /**
+   * `FEAT-020`. The question-generation pipeline promotes questions into the
+   * bank with no person as their author, and the policy says three things
+   * about them that a later change could falsify without touching this page:
+   * that they may exist, that a player is told which they are, and that they
+   * carry nothing about anybody. Pinned in the words the page uses, and the
+   * second one against the words the app renders — the recap's source line
+   * reads "Machine-generated from …" (`SourceLinkComponent`), and a policy
+   * promising a label the app had renamed would be a quiet misstatement.
+   *
+   * True before the first question is promoted as well as after it, which is
+   * what "may" is doing: the page does not pre-announce a practice, and it
+   * does not need editing on the day the first wave lands.
+   */
+  it('says some questions may be machine-generated, are labelled, and carry no personal data', async () => {
+    const text = collapse((await render(PrivacyPolicyComponent)).textContent);
+
+    expect(text).toContain(
+      'Some questions in the bank may be machine-generated from public sources rather than written by a player',
+    );
+    expect(text).toContain('the end-of-game review of your answers labels it as machine-generated');
+    expect(text).toContain(
+      'it carries no personal data, since no account is recorded as its author',
+    );
+
+    // ...and the recap's source line still says it in those words.
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({ imports: [SourceLinkComponent] }).compileComponents();
+    const label = TestBed.createComponent(SourceLinkComponent);
+    label.componentRef.setInput('title', 'Water');
+    label.componentRef.setInput('machineGenerated', true);
+    label.detectChanges();
+    expect(collapse((label.nativeElement as HTMLElement).textContent).trim()).toBe(
+      'Machine-generated from Water',
+    );
   });
 
   /**

@@ -42,6 +42,7 @@ import { topicTagsOf } from '../../utils/category-tags';
 import { difficultyBand, difficultyScore } from '../../utils/difficulty-score.util';
 import { keepTabInside } from '../../utils/focus-trap.util';
 import { buildPlayAnswers } from '../../utils/play-history.util';
+import { isMachineGenerated } from '../../utils/question-provenance.util';
 import { IconComponent } from '../icon/icon.component';
 import { QuestionJustificationComponent } from '../question-justification/question-justification.component';
 import { QuestionTagsComponent } from '../question-tags/question-tags.component';
@@ -100,6 +101,13 @@ interface RecapRow {
    * since moved.
    */
   difficulty: Difficulty;
+  /**
+   * Whether the generation pipeline wrote the question (`FEAT-020`), which
+   * makes the row's source line read "Machine-generated from …". Read off the
+   * one fact `TriviaService` carries from the stored `provenance`, so it is
+   * the same answer after a reload of this screen as before it.
+   */
+  machineGenerated: boolean;
 }
 
 /**
@@ -680,6 +688,7 @@ export class GameOverComponent implements OnInit {
           question.source === 'custom'
             ? difficultyBand(difficultyScore(question))
             : question.difficulty,
+        machineGenerated: isMachineGenerated(question.provenance),
       });
     }
     return rows;

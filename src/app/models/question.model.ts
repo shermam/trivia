@@ -179,6 +179,15 @@ export interface TriviaQuestion {
    */
   answered?: number;
   correct?: number;
+  /**
+   * Present only on a community question the generation pipeline wrote
+   * (`FEAT-020`), and then only the one fact a reader needs from the stored
+   * map: that a machine wrote it, which the recap's source line says
+   * ("Machine-generated from …"). The model, the run and the rest of the
+   * stored `provenance` stay on the document — carried here they would be
+   * copied into the saved game and the offline pool for nothing to read.
+   */
+  provenance?: Pick<QuestionProvenance, 'source'>;
 }
 
 /**
@@ -391,7 +400,9 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
   /**
    * Why a reviewer rejected the question, in their own words (`FEAT-007`).
    *
-   * **Reviewer-authored and shown to the author**, on `/my-questions`. Optional
+   * **Reviewer-authored and shown to the author**, on `/my-questions` — except
+   * on a question the generation pipeline wrote, which has no author to show
+   * it to, so there it stays on the record for the reviewers. Optional
    * in every direction: a reviewer may reject without giving one, every
    * question rejected before this field existed has none, and
    * `firestore.rules` refuses it on any document that is not `rejected` — so
@@ -416,6 +427,41 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
    */
   answered?: number;
   correct?: number;
+  /**
+   * Where a machine-generated question came from (`FEAT-020`): the map the
+   * question-generation pipeline writes on every question it promotes into the
+   * bank. **Absent means a person wrote it**, so no question already in the
+   * bank changed meaning when the field arrived.
+   *
+   * **Written on the Admin SDK and never through a rule.** No client may write
+   * it — the create allowlist has no such key — nothing in `firestore.rules`
+   * reads it, and the reviewer's status write leaves it exactly as it was.
+   * That makes the pipeline the only thing that ever validated it, and the
+   * console can write any shape here, so every reader goes through
+   * `question-provenance.util.ts` rather than trusting this type
+   * (`CLAUDE.md` §4.4).
+   */
+  provenance?: QuestionProvenance;
+}
+
+/**
+ * The `provenance` map, as the pipeline writes it on a question it promotes
+ * (design §3 in `shermam/trivia-project`): `FEAT-020` §0's block, plus the
+ * provider, minus a requester. The pipeline's `promoted-document.ts` is the
+ * writer and the validator; this is the shape it promises, not one anybody
+ * here checks on the way in.
+ */
+export interface QuestionProvenance {
+  source: 'ai';
+  provider: string;
+  /** The model the run asked for. */
+  model: string;
+  /** The model that answered, as its response named it — a dated snapshot, where there is one. */
+  modelVersion: string;
+  /** Epoch ms: when the generation call returned with this question. */
+  generatedAt: number;
+  /** The run that produced it — what makes a bad batch one query rather than an archaeology exercise. */
+  runId: string;
 }
 
 /**
@@ -431,6 +477,23 @@ export interface CustomQuestionDoc extends CustomQuestionContent {
  * copies equal, since nothing else would notice them drift.
  */
 export const DELETED_AUTHOR = '[deleted-user]';
+
+/**
+ * What the question-generation pipeline writes into `createdBy` on a question
+ * it promotes into the bank (`FEAT-020`; `GENERATED_AUTHOR` in
+ * `shermam/trivia-pipeline`, after the `[deleted-user]` precedent) — beside
+ * `GENERATED_AUTHOR` in `functions/src/account-policy.ts`, and the value
+ * `firestore.rules`' `isQuestionAuthor()` refuses by name.
+ *
+ * **Not a uid, and not a person.** A generated question belongs to the bank,
+ * so nobody may edit or withdraw it from `/my-questions`; and every question
+ * every run promotes shares it, so "everything this account contributed"
+ * (`FEAT-006`) asked of it would be the pipeline's whole output presented as
+ * one account's. Nor is there anything of anybody's for `deleteAccount` to
+ * anonymise or `exportAccountData` to return. `firestore-tests` pins the three
+ * copies equal, as it does `DELETED_AUTHOR`'s.
+ */
+export const GENERATED_AUTHOR = '[generated]';
 
 /**
  * What the client writes. `firestore.rules` requires `createdBy` to equal the

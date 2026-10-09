@@ -326,9 +326,17 @@
       <dt>Status:</dt>
       <dd data-cy="question-status">{{ question.status ?? 'unknown' }}</dd>
     </div>
-    <div class="flex gap-1">
-      <dt>Author:</dt>
-      <dd>{{ question.createdBy ?? 'Unattributed (predates attribution)' }}</dd>
+    <!--
+      One line whatever it names (`CLAUDE.md` §4.4): a uid, "Unattributed", or
+      — for a question the generation pipeline wrote (`FEAT-020`) — the
+      pipeline and its run, which is twice a uid's length and would wrap at a
+      phone's width. `min-w-0` lets the pair shrink to the row and `truncate`
+      ends the text in an ellipsis instead of a second line; the whole of it
+      stays in the DOM for a screen reader.
+    -->
+    <div class="flex gap-1 min-w-0 max-w-full">
+      <dt class="shrink-0">Author:</dt>
+      <dd class="truncate" data-cy="question-author">{{ authorLine(question) }}</dd>
     </div>
   </dl>
 
@@ -336,8 +344,9 @@
     The way into everything this question's author has contributed
     (`FEAT-006`) — the abuse tooling, entered from a question the reviewer is
     already looking at, whether in a status tab or under a report. Absent where
-    there is no account to look up: a question that predates attribution, or
-    one whose author erased their account (`canOpenAuthorView`).
+    there is no account to look up: a question that predates attribution, one
+    whose author erased their account, or one the generation pipeline wrote
+    (`canOpenAuthorView`).
   -->
   @if (canOpenAuthorView(question)) {
     <button
@@ -377,8 +386,17 @@
     and where every other contributor-written value is shown raw. The reviewer
     sees the destination; the player, who meets the link only after a reviewer
     has vouched for the question, does not need it.
+
+    A question the generation pipeline wrote says so here in the words the
+    recap uses ("Machine-generated from …", `FEAT-020`), so the reviewer sees
+    the line a player will.
   -->
-  <app-source-link [url]="question.sourceUrl" [title]="question.sourceTitle" [showHost]="true" />
+  <app-source-link
+    [url]="question.sourceUrl"
+    [title]="question.sourceTitle"
+    [showHost]="true"
+    [machineGenerated]="machineGenerated(question)"
+  />
 
   <!--
     The contributor's justification, when they gave one. This is the card's
@@ -402,16 +420,25 @@
 
     The label carries the question's id because this template renders once per
     row: a fixed `for` would point every box at the first one.
+
+    Once the question is rejected the label says who reads the note, and a
+    question the generation pipeline wrote has nobody to show it to
+    (`FEAT-020`): there the note stays on the record for the reviewers. Every
+    label fits one line at a phone's width, so a decision made from a report —
+    which updates the row's status in place — changes the words and not the
+    card's height (`CLAUDE.md` §4.4).
   -->
   <div class="mt-4">
     <label
       [attr.for]="'rejection-reason-' + question.id"
       class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1"
     >
-      @if (status === 'rejected') {
-        Reason shown to the author
-      } @else {
+      @if (status !== 'rejected') {
         Reason for rejecting
+      } @else if (isGenerated(question)) {
+        Reason kept on the record
+      } @else {
+        Reason shown to the author
       }
       <span class="font-normal">(optional)</span>
     </label>

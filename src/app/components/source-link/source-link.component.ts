@@ -42,6 +42,17 @@ import { IconComponent } from '../icon/icon.component';
  *    question, so there the title is the useful thing and the raw host is
  *    noise.
  *
+ * 4. **A question a machine wrote says so where its source is named.**
+ *    `machineGenerated` — on for a question whose `provenance` says the
+ *    generation pipeline wrote it (`FEAT-020`) — reads the line as
+ *    "Machine-generated from <source>": honest and short, and the only change
+ *    such a question makes anywhere in the game. The words sit **outside** the
+ *    anchor, so the link is still named by the page it opens rather than
+ *    claiming to lead to something machine-generated. With no usable source
+ *    at all it still renders "Machine-generated": the Privacy Policy says such
+ *    a question is labelled in the end-of-game review, and the reader cannot
+ *    rely on the writer to have cited anything.
+ *
  * Label precedence is the title, else the URL's hostname: a contributor who
  * supplies only a link should not leave the reader staring at a 300-character
  * URL, and the hostname is the part that tells them whether it is worth
@@ -65,7 +76,11 @@ import { IconComponent } from '../icon/icon.component';
           class="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500"
         />
         <span class="text-slate-500 dark:text-slate-400">
-          <span class="sr-only">Source:</span>
+          @if (machineGenerated()) {
+            <span data-cy="question-source-generated">Machine-generated from </span>
+          } @else {
+            <span class="sr-only">Source:</span>
+          }
           <a
             [href]="href"
             target="_blank"
@@ -86,8 +101,16 @@ import { IconComponent } from '../icon/icon.component';
       </p>
     } @else if (label(); as text) {
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" data-cy="question-source">
-        <span class="sr-only">Source:</span>
+        @if (machineGenerated()) {
+          <span data-cy="question-source-generated">Machine-generated from</span>
+        } @else {
+          <span class="sr-only">Source:</span>
+        }
         {{ text }}
+      </p>
+    } @else if (machineGenerated()) {
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" data-cy="question-source">
+        <span data-cy="question-source-generated">Machine-generated</span>
       </p>
     }
   `,
@@ -95,6 +118,14 @@ import { IconComponent } from '../icon/icon.component';
 export class SourceLinkComponent {
   readonly url = input<string | undefined>(undefined);
   readonly title = input<string | undefined>(undefined);
+
+  /**
+   * Whether the question was machine-generated (`FEAT-020`), which turns the
+   * line into "Machine-generated from <source>" — see point 4 above. The
+   * caller decides it from the question's `provenance`
+   * (`question-provenance.util.ts`); this component only words it.
+   */
+  readonly machineGenerated = input(false);
 
   /**
    * Whether to disclose the link's hostname next to its title. On for the
