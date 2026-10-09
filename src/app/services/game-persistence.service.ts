@@ -11,7 +11,9 @@ import {
   TriviaQuestion,
   isTimeLimitOption,
 } from '../models/question.model';
+import { QuizContext } from '../models/quiz.model';
 import { displayScore, maxScoreFor } from '../models/scoring';
+import { isQuizDocumentId } from '../utils/quiz-definition.util';
 import { MAX_ANSWER_MS } from '../utils/play-history.util';
 import { CURRENT_GAME_KEY, GAME_STATE_STORE, OfflineDbService } from './offline-db.service';
 
@@ -159,6 +161,25 @@ export interface PersistedGame {
    * on every refresh and inflate the totals on each one.
    */
   gameId: string | null;
+  /**
+   * The curated quiz this game is playing, or `null` for a drawn game
+   * (`FEAT-024`) — what `/game-over` keys on to offer no leaderboard entry.
+   *
+   * **Additive, and no `SCHEMA_VERSION` bump** — the call the flags, the
+   * answer history, the lifelines and the game id each made, for the reason
+   * they did: a version mismatch discards the save rather than migrating it,
+   * so bumping would throw away every game in flight at deploy time to protect
+   * a field whose absence already has the right meaning. A save written before quizzes existed is a drawn game, which
+   * is exactly what `null` says. `FEAT-024` §3 asks for a bump "if the shape
+   * changes"; an optional field an older save reads correctly without is the
+   * case this file has always kept the version for.
+   *
+   * An unusable value restores as `null` rather than discarding the game: the
+   * questions and the score are worth more than knowing the game was a quiz,
+   * and the worst a hand-edited record can do with it is put a quiz score in
+   * front of a save form whose writes `firestore.rules` bounds like any other.
+   */
+  quiz: QuizContext | null;
 }
 
 /** As written to the object store: the same record plus the keyPath field. */
@@ -245,6 +266,25 @@ function isConfig(value: unknown): value is GameConfig {
 }
 
 /**
+ * The quiz a save says it belongs to, or `null` — for a drawn game, a save
+ * written before quizzes existed, and anything that does not read as one.
+ *
+ * Rebuilt from the two fields rather than passed through, so a record carrying
+ * more cannot smuggle it back into the signal.
+ */
+function restoredQuiz(value: unknown): QuizContext | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { id, title } = value;
+  if (!isQuizDocumentId(id) || typeof title !== 'string') {
+    return null;
+  }
+  const trimmed = title.trim();
+  return trimmed.length > 0 ? { id, title: trimmed } : null;
+}
+
+/**
  * The config as the app holds it now, built field by field from a validated
  * save: the limit a pre-G7 save was necessarily played under filled in, and a
  * pre-`FEAT-052` save's `category` left behind.
@@ -302,6 +342,7 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     lifelines,
     eliminatedAnswerIds,
     gameId,
+    quiz,
   } = parsed;
 
   if (typeof savedAt !== 'number' || !Number.isFinite(savedAt)) {
@@ -420,6 +461,7 @@ function parseSavedGame(parsed: unknown, now: number): PersistedGame | null {
     // record cannot mint itself extra lifetime totals that way, and an honest
     // pre-feature save takes the same path.
     gameId: typeof gameId === 'string' && gameId.length > 0 && gameId.length <= 128 ? gameId : null,
+    quiz: restoredQuiz(quiz),
   };
 }
 

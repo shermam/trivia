@@ -452,3 +452,14 @@
     </a>
   </div>
 </div>
+
+<!--
+  The curated quizzes (`FEAT-024`), **after** the block above rather than inside
+  it. That block is `min-h-screen` and centres the card vertically, so anything
+  added inside it would lift the card by half its height, and a list arriving
+  inside it would move the card under the reader (`CLAUDE.md` §4.4). Out here
+  the card is laid out exactly as it was before quizzes existed, at every
+  viewport, and the list starts below the first screen — where it reads
+  nothing until it is scrolled to.
+-->
+<app-quiz-list />

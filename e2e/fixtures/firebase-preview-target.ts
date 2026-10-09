@@ -290,6 +290,11 @@ export const previewTarget: FirebaseTarget = {
       ...[...created.customQuestionIds].map((id) =>
         attempt(`custom_questions/${id}`, firestore.doc(`custom_questions/${id}`).delete()),
       ),
+      // Curated quizzes (`FEAT-024`), which no client can write, so every one
+      // on the real project that a run did not seed is the owner's.
+      ...[...created.quizIds].map((id) =>
+        attempt(`quizzes/${id}`, firestore.doc(`quizzes/${id}`).delete()),
+      ),
     ]);
 
     // The app holds gRPC channels and a metadata-server lookup that keeps

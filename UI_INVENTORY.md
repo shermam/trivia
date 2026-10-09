@@ -164,6 +164,7 @@ Full-screen centered card on an indigo/purple gradient background.
     - After a short filtered draw: "Play {found} Questions"
     - While loading questions: "Loading Questions…" (disabled)
 - **Footer link**: "+ Create custom question" → `/add-question`, with a **PRO badge** next to it (indigo/filled if the current user is Pro, grey/muted otherwise)
+- **Curated quizzes** (`QuizListComponent`, `FEAT-024`) — a section **below the card, one screen down**, on the page's light background rather than the gradient: heading "Curated quizzes", the line "Questions somebody chose, played in the order they chose them.", then a fixed-height strip of up to ten fixed-size cards, newest first, that scrolls sideways rather than wrapping. Each card links to `/quiz/:quizId` and shows the quiz's title (clamped to two lines), its description (clamped to three) and "{n} questions" ("1 question") at the foot. Nothing is read until the section is scrolled into view
 
 ### States — donation return banner (from `?donation=success|cancelled` query param)
 
@@ -176,14 +177,25 @@ Read from the route snapshot at construction, so the banner is part of the first
 
 ### States
 
-| State                                                | Effect                                                                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Initial load                                         | Form usable immediately; no request is made before Start, and the suggestion chips land on the first idle moment    |
-| Form submitted while invalid                         | Validation errors marked (all fields touched); no navigation                                                        |
-| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"                                                                |
-| Game start failed — no questions matched the filters | Red inline error: "No questions were found for the selected options. Try a different topic, difficulty, or source." |
-| Game start failed — network/fetch error              | Red inline error: "Failed to load questions. Please check your connection and try again."                           |
-| Success                                              | Navigates to `/play`                                                                                                |
+| State                                                | Effect                                                                                                                                                               |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial load                                         | Form usable immediately; no request is made before Start or before the curated quizzes below are scrolled to, and the suggestion chips land on the first idle moment |
+| Form submitted while invalid                         | Validation errors marked (all fields touched); no navigation                                                                                                         |
+| Submitting (`gameController.isLoading()`)            | Submit button disabled, label → "Loading Questions…"                                                                                                                 |
+| Game start failed — no questions matched the filters | Red inline error: "No questions were found for the selected options. Try a different topic, difficulty, or source."                                                  |
+| Game start failed — network/fetch error              | Red inline error: "Failed to load questions. Please check your connection and try again."                                                                            |
+| Success                                              | Navigates to `/play`                                                                                                                                                 |
+
+### States — curated quiz list
+
+One strip height in every state: the messages are laid **over** invisible placeholder cards rather than replacing them.
+
+| State                                | Content                                                                                                                                                                                                          |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Not scrolled to yet, and loading** | Three pulsing placeholder cards (`aria-hidden`); the two look the same, so nothing changes when the read starts                                                                                                  |
+| **Loaded**                           | Up to ten quiz cards; the `sr-only` status reads "{n} quizzes." or "1 quiz."                                                                                                                                     |
+| **Empty**                            | Grey "No quizzes have been published yet." centred over the reserved strip                                                                                                                                       |
+| **Load error**                       | "The quizzes could not be loaded." — or "You're offline, and the quizzes need a connection." — and an outlined "Try again", which moves focus to the heading before it re-reads; centred over the reserved strip |
 
 ---
 
@@ -263,10 +275,11 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
   - "**{{ percentage }}%**" — label "Accuracy", plus a derived performance label/color: "Outstanding!" (green, ≥90%) / "Great job!" (indigo, ≥70%) / "Good effort!" (amber, ≥50%) / "Keep practicing!" (red, <50%). Never multiplied, so never above 100%
   - "**{{ correctAnswers }}** / **{{ totalQuestions }}**" — label "Correct", caption "correct answers"
   - flame icon + "**{{ maxStreak }}**" — label "Best streak", caption "in a row"
-- **Save-score area** — content depends on auth state (see States below)
+- **Save-score area** — content depends on auth state, or on the game being a curated quiz (see States below)
 - **Section heading**: "Top 10 — {{ boardLabel }} games" (with a medal icon), and under it a second, always-present line naming the population being ranked: "Worldwide", "In {{ country }}", or "Your country" when the Regional tab is selected with none set. Two lines by construction, so the header keeps one height across the toggle — the combined form wraps at 390px and not at 1024px
 - **Global / Regional toggle** — a segmented pair in its own row above the board, built the same way as the pricing page's currency switch: real `<input type="radio">` elements hidden with `sr-only` inside `<label>`s, wrapped in a `role="radiogroup"` whose `sr-only` label reads "Which leaderboard to show". Labels are fixed ("Global", "Regional") in every state, and both are selectable whether or not a country is set
 - **Leaderboard list** — content depends on load state (see States below); each row: rank (🥇/🥈/🥉 for top 3, "#N" otherwise), gradient avatar circle with the player's initials, name, "{{ score }} pts · {{ percentage }}%" (`tabular-nums`, `shrink-0`, so a three-digit score narrows the name rather than reshaping the row — old unmultiplied entries and new multiplied ones share the board indefinitely). The current player's own row (matched by `uid`) is highlighted (indigo tint + left border) and tagged with a "YOU" badge, if present in the fetched top 10.
+- **For a curated quiz** (`FEAT-024`) the heading, the toggle and the list are not rendered at all, and nothing is read for them: a quiz is not ranked.
 - **"Review answers" card** (collapsible, collapsed by default) — header button reading "Review answers (X/N correct)" with a rotate icon and a chevron that flips on open. Expanded, it lists one row per question of the round: a numbered pill (emerald if the answer was right, red if not), the question text, topic (`#tag`, the question's first) and difficulty badges — on a community question the difficulty badge shows the band its players have **measured** (`FEAT-023`): the word alone, "easy", "medium" or "hard", in the same pill and casing as a label, and an unplayed one shows its label; an Open Trivia DB row keeps the label it arrived with — the player's pick with a check/cross/clock icon, and — only when the pick was wrong or the clock ran out — the correct answer on a second line with a check icon. A timed-out question also carries an amber "Time expired" badge, and a skipped one (`FEAT-002`) a grey "Skipped" badge with "You skipped this" in place of a pick. Where a question carries more than one topic, the row ends with all of them as **Topics** (a row of `#tag` chips, `FEAT-021`) — one is already the badge; where a contributed question carries them, its **source** — an external-link glyph and a link opening in a new tab (`FEAT-022`) — and its **Justification**, a tinted block headed "Justification" holding the contributor's prose; neither renders on a question with none, which is every Open Trivia DB question and most contributed ones. A community question's row then ends with the same **vote row** the quiz shows after a reveal ("Rate this question", thumbs-up, thumbs-down — `FEAT-027`), here with no clock; none on an Open Trivia DB row or in embed mode. A guest's tap opens the account menu, and outcomes are announced through a permanent `sr-only` `role="status"` region outside the card. The whole card is absent unless the recorded answers cover the whole round.
 - **Button**: "Play Again" (full width, dark slate, reset icon) — resets all in-memory game state, navigates to `/`
 
@@ -280,6 +293,7 @@ Full-screen centered card on a light slate background. **Guard**: if there's no 
 | **Signed in but not fully authenticated** (unverified email)                              | Indigo info box: "Verify your email to save this score to the leaderboard." + **"Resend verification email" button**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **Fully authenticated, not yet saved**                                                    | A labelled **"Country to rank in"** dropdown listing every country by name in the reader's own locale, with "Prefer not to say" first, and a hint reading "Published beside your name and score on that country's public board, as well as the global one. Leave it unset and only the global board gets your score." It opens on the country the app inferred, or on the one the reader last chose. Then the form: text input (placeholder "Enter your name", prefilled from profile display name, max 30 chars, required) + **"Save Score" button** (disabled while saving or while name is blank; label → "Saving…" while in flight). The dropdown comes first in the DOM, and therefore in the tab order: it is part of what Save publishes |
 | **Save failed** (generic)                                                                 | Red inline error: "Could not save your score. Please try again."                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Curated quiz** (any auth state)                                                         | Slate box: "Quizzes aren't ranked on a leaderboard." and "Everyone plays a quiz's questions in the same order, so its score stays off the board." It wins over every state above, in the same reserved cell, so the card is the size a drawn game's is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ### States — Review answers card
 
@@ -505,7 +519,7 @@ A single card on a light slate background. **No route guard** — access is deci
 
 **Every state is the same height**, and the construction is what makes that true rather than a measurement: each number is rendered from first paint as an em-dash, the five distinct status sentences are stacked in one grid cell so the space reserved is the tallest of them, and the three actions are one grid cell holding the same button box three times. Accuracy shows "—" rather than "0%" when no questions have been answered — `0 / 0` is `NaN`.
 
-Two details a test has to know about. **"Sign in" is not rendered under `?embed=1`** (§10.7) — it opens the top bar's auth menu, and an embed has no top bar; the signed-out state is then the sentence alone, at the same height. And **"Try again" hands focus to the status line before it re-reads**, because the retry puts the card back into its loading state and hides the button that was focused; the status line is where the answer to the retry appears, and "Try again" is one Tab away from it if the second read fails too.
+Two details a test has to know about. **"Sign in" is not rendered under `?embed=1`** (§11.7) — it opens the top bar's auth menu, and an embed has no top bar; the signed-out state is then the sentence alone, at the same height. And **"Try again" hands focus to the status line before it re-reads**, because the retry puts the card back into its loading state and hides the button that was focused; the status line is where the answer to the retry appears, and "Try again" is one Tab away from it if the second read fails too.
 
 ---
 
@@ -543,16 +557,16 @@ Modal headed "Remove this question from the app?", showing the question text, th
 
 ---
 
-## 10. Cross-cutting elements & patterns
+## 11. Cross-cutting elements & patterns
 
-### 10.1 PRO badge
+### 11.1 PRO badge
 
 A small rounded pill, bold uppercase "PRO" text. Two visual variants used consistently everywhere it appears (game-setup footer link, Auth Menu "Add a question" link, top-bar account trigger):
 
 - **Locked** (non-Pro user): grey background, muted grey text
 - **Unlocked** (Pro user): indigo-100 background, indigo-600 text (indigo-600/white on the "Add a question" button itself, which is solid indigo)
 
-### 10.2 Buttons
+### 11.2 Buttons
 
 Consistent visual vocabulary across the whole app:
 
@@ -563,7 +577,7 @@ Consistent visual vocabulary across the whole app:
 - **Danger-adjacent text buttons**: none — errors are always shown as banners, not button color changes
 - **Destructive-looking dark button**: "Play Again" uses a dark slate fill (distinct from primary indigo), signaling a full reset action
 
-### 10.3 Inline banners (consistent 3-color system across every screen)
+### 11.3 Inline banners (consistent 3-color system across every screen)
 
 - **Red** (`bg-red-50`/`border-red-200`/`text-red-700`): hard errors (failed save, failed load, failed submit)
 - **Amber** (`bg-amber-50`/`border-amber-200`/`text-amber-700`): soft warnings / non-fatal notices (a topic-filtered draw that came back short; checkout cancelled; existing best score was already higher)
@@ -571,22 +585,22 @@ Consistent visual vocabulary across the whole app:
 - **Indigo** (`bg-indigo-50`/`bg-indigo-100`): neutral call-to-action prompts, not errors (sign-in prompts, verify-email prompts, Pro upsell box, save-score prompt)
 - Most banners now carry a small leading icon reinforcing their color (triangle-alert/circle-alert for amber/red, circle-check-big for green, mail for the verify-email prompt)
 
-### 10.4 Loading / busy conventions
+### 11.4 Loading / busy conventions
 
 - Buttons that trigger an async action disable themselves and swap their label to a present-participle phrase ending in an ellipsis: "Loading Questions…", "Saving…", "Please wait…", "Redirecting…", "Opening billing portal…"
 - The top bar and Pricing's Subscribe button both guard on `authReady()` specifically (distinct from "anonymous") to avoid a one-frame flash of the wrong state before Firebase's first auth callback resolves — shown as "Loading…" in both places.
 
-### 10.5 Form field conventions
+### 11.5 Form field conventions
 
 - All labels are `<label>` elements, small, semibold, slate-500/600, positioned directly above their control with a small gap
 - All text/select inputs share the same shape: `rounded-xl` corners, thin slate border, indigo focus ring; `<select>`s use a custom chevron-down icon (native arrow hidden via `appearance-none`)
 - Segmented "pill" radio groups (Question Source, Question Type, True/False, Multiple/True-False question type) are used instead of native radio buttons or dropdowns wherever the option set is small (2–3 choices) — the underlying `<input type="radio">` is visually hidden (`sr-only`) and its wrapping `<label>` is styled as the visible control, with the selected option getting an indigo-100 fill + indigo-600 bold text; unselected labels use slate-600 (not a lighter grey) to keep body text at a readable contrast ratio against the segmented control's slate-100 track
 
-### 10.6 Elevation & shape tokens
+### 11.6 Elevation & shape tokens
 
 Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s shadow scale so every surface pulls from the same set: `shadow-card` (subtle card shadow), `shadow-card-lg` (quiz/game-over/leaderboard cards), `shadow-hero-card` (game-setup's large gradient-backed card), `shadow-dropdown` (auth menu), `shadow-cta`/`shadow-cta-hover` (primary gradient buttons), `shadow-pro-card` (pricing's Pro card). Corner radii follow Tailwind's default scale: `rounded-3xl` (24px, cards), `rounded-2xl` (16px, dropdowns/sub-cards), `rounded-xl` (12px, buttons/inputs/segmented controls).
 
-### 10.7 Embed mode (`?embed=1`)
+### 11.7 Embed mode (`?embed=1`)
 
 - Top bar (and therefore the entire Auth Menu, sign-in affordances) is not rendered at all.
 - Every other button that opens the auth menu is hidden with it, since there is nowhere for it to open a menu into: Game Over's "Sign in" in the anonymous-player prompt (§3), and `/profile`'s "Sign in" in the signed-out state (§8). Both leave the explanatory text, at the same height.
@@ -596,13 +610,14 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 ---
 
-## 11. Full route table
+## 12. Full route table
 
 | Path            | Component                 | Guard                                             | Purpose                                                   |
 | --------------- | ------------------------- | ------------------------------------------------- | --------------------------------------------------------- |
 | `/`             | `GameSetupComponent`      | none                                              | Configure & start a game; `?donation=` return             |
 | `/play`         | `QuizLoopComponent`       | redirects to `/` if no active question in memory  | Answer questions against a timer                          |
 | `/game-over`    | `GameOverComponent`       | redirects to `/` if no completed game in memory   | Final score, save to leaderboard, view top 10             |
+| `/quiz/:quizId` | `QuizDetailComponent`     | none (an unknown id renders "Quiz not found")     | One curated quiz: what it is, its time limit, and Start   |
 | `/add-question` | `AddQuestionComponent`    | none (in-page gating by auth/Pro state instead)   | Submit a question to the custom bank (Pro only)           |
 | `/profile`      | `ProfileStatsComponent`   | none (in-page gating on a signed-in real account) | A player's own lifetime gameplay totals                   |
 | `/pricing`      | `PricingComponent`        | none                                              | Compare Starter vs. Pro, subscribe via Stripe             |
@@ -614,7 +629,7 @@ Named Tailwind utilities (`src/styles.css`) codify `BRAND_DESIGN_SYSTEM.md`'s sh
 
 ---
 
-## 12. Full copy inventory (verbatim strings)
+## 13. Full copy inventory (verbatim strings)
 
 Grouped by screen, for quick reference when building Figma text styles / content models.
 
@@ -624,7 +639,11 @@ Grouped by screen, for quick reference when building Figma text styles / content
 
 **Quiz Loop**: Question {{n}} / {{total}} · Score: {{n}} · #{{topic}} (topic badge) · (difficulty badge) · (streak badge: {{streak}} ×{{multiplier}}) · Question {{n}}: streak of {{n}}. Answers are now worth {{multiplier}} times their points. · Question {{n}}: streak lost. Answers are back to 1.0 times their points. · Correct! Well done. · Time's up! The answer was {{correct_answer}}. · Incorrect. The correct answer is {{correct_answer}}. · Lifelines · 50/50 · +15s · Skip · Fifty-fifty: remove every wrong answer but one. One use per game. · Fifty-fifty is unavailable on a question with two options. · Fifty-fifty already used. · Question {{n}}: Fifty-fifty used. {{n}} options remain. · Extra time: add 15 seconds to this question. One use per game. · Extra time already used. · Skip: move to the next question. It still counts toward your total. One use per game. · Skip already used. · Rate this question · Like this question · Dislike this question · Question {{n}}: you liked this question. · Question {{n}}: you disliked this question. · Question {{n}}: your vote was removed. · Question {{n}}: your vote could not be saved. Please try again. · Question {{n}}: your vote could not be removed. Please try again. · Question {{n}}: sign in to like or dislike questions. · Question {{n}}: verify your email to like or dislike questions.
 
-**Game Over**: Game Over! · Here's how you did · Score · points · Accuracy · Correct · correct answers · Best streak · in a row · Outstanding! · Great job! · Good effort! · Keep practicing! · Score saved to the leaderboard! · You're ranked #{{n}} on the {{boardLabel}} leaderboard[ in {{country}}]. · Your best score is already higher ({{n}} points) — nice consistency! We kept your existing best. · Sign in to save this score to the leaderboard. · Verify your email to save this score to the leaderboard. · Enter your name · Save Score · Saving… · Country to rank in · Prefer not to say · Published beside your name and score on that country's public board, as well as the global one. Leave it unset and only the global board gets your score. · Could not save your score. Please try again. · Top 10 — {{boardLabel}} games · Which leaderboard to show · Global · Regional · Worldwide · In {{country}} · Your country · Loading leaderboard… · Could not load the leaderboard. Please try again later. · No scores yet. Be the first! · No scores in {{country}} yet. Be the first! · Choose your country in the save form above to see how you rank there. · Sign in and choose your country to see how you rank there. · Play Again · YOU (leaderboard badge for the current player's own row) · Review answers ({{n}}/{{total}} correct) · Your answers · Correct answer: · Source: · (opens in a new tab) · Justification · No answer · Time expired · You skipped this · Rate this question · Like this question · Dislike this question (and the quiz's vote announcements, numbered by the row) · Questions you flagged · Found something wrong in this game? Report it here.
+**Game Over**: Game Over! · Here's how you did · Score · points · Accuracy · Correct · correct answers · Best streak · in a row · Outstanding! · Great job! · Good effort! · Keep practicing! · Score saved to the leaderboard! · You're ranked #{{n}} on the {{boardLabel}} leaderboard[ in {{country}}]. · Your best score is already higher ({{n}} points) — nice consistency! We kept your existing best. · Sign in to save this score to the leaderboard. · Verify your email to save this score to the leaderboard. · Enter your name · Save Score · Saving… · Country to rank in · Prefer not to say · Published beside your name and score on that country's public board, as well as the global one. Leave it unset and only the global board gets your score. · Could not save your score. Please try again. · Top 10 — {{boardLabel}} games · Which leaderboard to show · Global · Regional · Worldwide · In {{country}} · Your country · Loading leaderboard… · Could not load the leaderboard. Please try again later. · No scores yet. Be the first! · No scores in {{country}} yet. Be the first! · Choose your country in the save form above to see how you rank there. · Sign in and choose your country to see how you rank there. · Play Again · YOU (leaderboard badge for the current player's own row) · Review answers ({{n}}/{{total}} correct) · Your answers · Correct answer: · Source: · (opens in a new tab) · Justification · No answer · Time expired · You skipped this · Rate this question · Like this question · Dislike this question (and the quiz's vote announcements, numbered by the row) · Questions you flagged · Found something wrong in this game? Report it here. · Quizzes aren't ranked on a leaderboard. · Everyone plays a quiz's questions in the same order, so its score stays off the board.
+
+**Curated quizzes (on `/`)**: Curated quizzes · Questions somebody chose, played in the order they chose them. · {{n}} questions · 1 question · {{n}} quizzes. · 1 quiz. · No quizzes have been published yet. · The quizzes could not be loaded. · You're offline, and the quizzes need a connection. · Try again
+
+**Curated quiz (`/quiz/:quizId`)**: Back to game · Curated quiz · Loading quiz… · Quiz not found · There is no published quiz at this address. It may have been taken down, or the link may be incomplete. · Play a random game · This quiz could not be loaded · Something went wrong while reading it. Please try again. · You're offline, and a quiz needs a connection to load its questions. · Try again · None of this quiz's questions can be played right now, so it cannot start. Try another quiz, or a random game. · {{n}} questions, in the order they were chosen · {{n}} of its {{total}} questions cannot be played right now, so it plays the other {{m}}. · Starting this quiz replaces the game you have in progress. · Time per Question · Suggested for this quiz: {{limit}}. · 15 seconds · 30 seconds · No limit · 15 seconds a question. Quizzes are not ranked, so pick the pace that suits you. · 30 seconds a question. Quizzes are not ranked, so pick the pace that suits you. · No countdown. Quizzes are not ranked, so take all the time you need. · Unlimited games with Pro. · {{n}} of {{max}} free games left today. · No free games left today. · That's your {{max}} free games for today. · They reset at midnight. Pro removes the limit entirely. · See Pro · Start quiz · Starting… · The quiz could not start. Please try again. · Quiz ready: {{n}} questions. · None of this quiz's questions can be played right now. · Quiz not found. · The quiz could not be loaded.
 
 **Add a Question**: Add a Question · Contribute a question to the shared custom bank · Sign in to submit a question to the shared bank. · Verify your email to submit a question. · This one's for Pro members · Upgrade to Pro to create and add your own questions to the shared question bank. · Upgrade to Pro · Thanks! Your question has been submitted for review. · Add another · Back to game · Topics · Add at least one topic. · Difficulty · Question Type · Multiple Choice · True / False · Question · What is the question? · Formatting · Plain text · Markdown & math · Bold, italics, strikethrough, lists, quotes, links, inline code and fenced code blocks, plus LaTeX between $…$ and $$…$$. Anything else is removed rather than shown. · Preview · {{n}} of 2000 characters · Question must be 2000 characters or fewer. · Correct Answer · True · False · Incorrect Answers · Incorrect answer {{n}} · Remove incorrect answer {{n}} · Add an answer · Two to six answers in all, counting the correct one. · Incorrect answer {{n}} added. The question now has {{n}} answers. · Incorrect answer {{n}} removed. The question now has {{n}} answers. · That is the most a question can have. · That is the fewest a question can have. · Source link · (optional) · Where the answer comes from. Reviewers see it, and so do players after they answer. · Source name · Justification · Why is the right answer right, and why are the others wrong? · Only needed for a tricky question — where knowing the subject still isn't enough to see why the right answer is right. Reviewers see it, and so do players after they answer. · A few words for what this question is about, so players can ask for exactly this subject. Reviewers see them too. · Could not save your question. Please try again. · Cancel · Add Question
 

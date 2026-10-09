@@ -146,6 +146,28 @@ describe('firestore.indexes.json', () => {
   });
 
   /**
+   * The quiz list's index (`FEAT-024`). `QuizService.listPublished` sends
+   * `where('isPublished','==',true)` — which the read rule needs before it will
+   * serve the query at all — ordered by `createdAt` descending, newest first,
+   * and an equality on one field ordered by another is exactly what the
+   * automatic single-field indexes cannot serve.
+   *
+   * Asserted by shape and by direction rather than left to the deploy: the
+   * emulator answers the query without it, so a missing or ascending index is
+   * green in every local suite and fails in production as a list that never
+   * loads — on the home screen, under the card, where nobody is looking.
+   */
+  it('declares the index the published-quiz list queries', () => {
+    const quizzes = spec.indexes.filter((index) => index.collectionGroup === 'quizzes');
+
+    expect(quizzes).toHaveLength(1);
+    expect(quizzes[0].fields).toEqual([
+      { fieldPath: 'isPublished', order: 'ASCENDING' },
+      { fieldPath: 'createdAt', order: 'DESCENDING' },
+    ]);
+  });
+
+  /**
    * The retention sweep's index (`FEAT-049`). `sweepPlayHistory` runs
    * `collectionGroup('plays').where('at','<',cutoff)`, and **Firestore's
    * automatic single-field indexes are collection-scoped only** — a

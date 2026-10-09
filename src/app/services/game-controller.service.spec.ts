@@ -1399,3 +1399,172 @@ describe('GameControllerService — a short tag-filtered draw (FEAT-021)', () =>
     expect(navigateByUrl).toHaveBeenCalledWith('/play');
   });
 });
+
+/**
+ * `FEAT-024`. A curated quiz is the second way into the loop: its questions
+ * arrive already resolved, in the quiz's own order, and everything after the
+ * start is the drawn game's — which is what these pin, along with the one
+ * thing that is different, the quiz context `/game-over` keys on.
+ */
+describe('GameControllerService — curated quizzes (FEAT-024)', () => {
+  beforeEach(async () => {
+    await clearSavedGame();
+  });
+  afterEach(async () => {
+    TestBed.resetTestingModule();
+    await clearSavedGame();
+  });
+
+  const QUIZ = { id: 'world-cup-1998', title: 'The 1998 World Cup' };
+
+  function setupQuiz(consumeGame: () => Promise<boolean> = () => Promise.resolve(true)) {
+    const navigateByUrl = vi.fn(() => Promise.resolve(true));
+    const getQuestions = vi.fn(() => Promise.resolve(['d-1', 'd-2'].map((id) => makeQuestion(id))));
+    const consume = vi.fn(consumeGame);
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: TriviaService, useValue: { getQuestions } },
+        { provide: Router, useValue: { navigateByUrl } },
+        {
+          provide: DailyGameLimitService,
+          useValue: { ...noDailyLimit().useValue, consumeGame: consume },
+        },
+      ],
+    });
+    return {
+      service: TestBed.inject(GameControllerService),
+      navigateByUrl,
+      getQuestions,
+      consume,
+    };
+  }
+
+  const quizQuestions = () => ['q-3', 'q-1', 'q-2'].map((id) => makeQuestion(id));
+
+  it('starts with the quiz’s questions in its order, and reads nothing to do it', async () => {
+    const { service, navigateByUrl, getQuestions } = setupQuiz();
+
+    const started = await service.startQuiz(QUIZ, quizQuestions(), 'unlimited');
+
+    expect(started).toBe(true);
+    expect(service.questions().map((question) => question.id)).toEqual(['q-3', 'q-1', 'q-2']);
+    expect(service.quiz()).toEqual(QUIZ);
+    expect(getQuestions).not.toHaveBeenCalled();
+    expect(navigateByUrl).toHaveBeenCalledWith('/play');
+  });
+
+  // The limit is the one the quiz page's picker ended on — the suggestion only
+  // pre-selects it (WCAG 2.2.1) — and the config says what the game is.
+  it('records the limit the player chose, and a config describing a quiz', async () => {
+    const { service } = setupQuiz();
+
+    await service.startQuiz(QUIZ, quizQuestions(), 'unlimited');
+
+    expect(service.config()).toEqual({
+      amount: 3,
+      difficulty: '',
+      source: 'custom',
+      timeLimit: 'unlimited',
+    });
+  });
+
+  it('spends a game from the daily allowance, like any other game', async () => {
+    const { service, consume } = setupQuiz();
+
+    await service.startQuiz(QUIZ, quizQuestions(), 15);
+
+    expect(consume).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start when the day’s allowance is spent, and says so', async () => {
+    const { service, navigateByUrl } = setupQuiz(() => Promise.resolve(false));
+
+    const started = await service.startQuiz(QUIZ, quizQuestions(), 15);
+
+    expect(started).toBe(false);
+    expect(service.limitReached()).toBe(true);
+    expect(service.questions()).toEqual([]);
+    expect(service.quiz()).toBeNull();
+    expect(navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('starts nothing, and spends nothing, for a quiz with no questions', async () => {
+    const { service, consume, navigateByUrl } = setupQuiz();
+
+    expect(await service.startQuiz(QUIZ, [], 15)).toBe(false);
+    expect(consume).not.toHaveBeenCalled();
+    expect(navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  // The same reset every way into a game owes the next one (see `beginGame`):
+  // a quiz started from a link must not inherit the abandoned game's streak,
+  // flags, history or spent lifelines.
+  it('starts from nothing, whatever the previous game left behind', async () => {
+    const { service } = setupQuiz();
+    service.questions.set([makeQuestion('old')]);
+    service.currentStreak.set(8);
+    service.maxStreak.set(8);
+    service.points.set(12);
+    service.correctAnswers.set(5);
+    service.flaggedQuestionIds.set(new Set(['old']));
+    service.answerHistory.set([TIMED_OUT]);
+    service.answerDurations.set([1000]);
+    service.lifelines.set({ fiftyFifty: false, extraTime: false, skip: false });
+    service.isComplete.set(true);
+
+    await service.startQuiz(QUIZ, quizQuestions(), 15);
+
+    expect(service.currentIndex()).toBe(0);
+    expect(service.currentStreak()).toBe(0);
+    expect(service.maxStreak()).toBe(0);
+    expect(service.points()).toBe(0);
+    expect(service.correctAnswers()).toBe(0);
+    expect([...service.flaggedQuestionIds()]).toEqual([]);
+    expect(service.answerHistory()).toEqual([]);
+    expect(service.answerDurations()).toEqual([]);
+    expect(service.lifelines()).toEqual(ALL_LIFELINES_AVAILABLE);
+    expect(service.isComplete()).toBe(false);
+    expect(service.gameId()).not.toBeNull();
+  });
+
+  // The other direction of the same reset: a drawn game started after a quiz
+  // is not a quiz, or its results screen would refuse to rank it.
+  it('leaves no quiz behind for a drawn game started after it', async () => {
+    const { service } = setupQuiz();
+    await service.startQuiz(QUIZ, quizQuestions(), 15);
+
+    await service.startGame({ amount: 5, difficulty: '', source: 'open_trivia', timeLimit: 15 });
+
+    expect(service.quiz()).toBeNull();
+    expect(service.questions().map((question) => question.id)).toEqual(['d-1', 'd-2']);
+  });
+
+  it('clears the quiz with the rest of the game', async () => {
+    const { service } = setupQuiz();
+    await service.startQuiz(QUIZ, quizQuestions(), 15);
+
+    service.discardSavedGame();
+
+    expect(service.quiz()).toBeNull();
+  });
+
+  // A quiz reloaded mid-round — or on `/game-over` — is still a quiz, or its
+  // results screen would offer a save the quiz must not have.
+  it('carries the quiz through a reload mid-quiz', async () => {
+    const { service } = setupQuiz();
+    await service.startQuiz(QUIZ, quizQuestions(), 30);
+    service.registerAnswer(service.questions()[0].all_answers[0]);
+    service.currentIndex.set(1);
+    TestBed.tick();
+    await service.flushPendingWrites();
+
+    TestBed.resetTestingModule();
+    const reloaded = setupWithoutQuestions();
+    await reloaded.restoreSavedGame();
+
+    expect(reloaded.quiz()).toEqual(QUIZ);
+    expect(reloaded.questions().map((question) => question.id)).toEqual(['q-3', 'q-1', 'q-2']);
+    expect(reloaded.currentIndex()).toBe(1);
+    expect(reloaded.config()?.timeLimit).toBe(30);
+  });
+});

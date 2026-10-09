@@ -17,9 +17,12 @@ import {
   isVoteValue,
   questionVoteId,
 } from '../models/question-vote';
+import { QUIZZES_COLLECTION, QUIZ_MAX_QUESTIONS } from '../models/quiz.model';
+import { isDocumentReference } from '../utils/quiz-definition.util';
 import {
   DOCUMENT_ID_FIELD,
   FirestoreRestClient,
+  RestDocument,
   RestFieldFilter,
   RestQuery,
   isDocumentId,
@@ -169,6 +172,26 @@ const QUESTION_ID_BATCH_SIZE = 30;
  * stay under it — a caller is not the place a bound lives.
  */
 export const MAX_VOTE_READ_IDS = 25;
+
+/**
+ * How many published quizzes the list on `/` reads (`FEAT-024`): the newest
+ * ten, by `createdAt`.
+ *
+ * A bound with an order behind it, so it means "the ten newest" rather than
+ * "ten arbitrary" (`CLAUDE.md` §4.1). The pair needs the
+ * `(isPublished ASC, createdAt DESC)` composite index declared in
+ * `firestore.indexes.json` — the emulator answers the query without it, so it
+ * is declared rather than discovered (D3), and `firestore-tests/indexes.spec.ts`
+ * pins it. An older quiz is still playable from its address; a list that pages
+ * is for when there are more than ten.
+ */
+export const QUIZ_LIST_LIMIT = 10;
+
+/** A document as read back, before anything has been decided about its shape. */
+export interface RawDocument {
+  id: string;
+  data: Record<string, unknown>;
+}
 
 /**
  * Every `{window}-{slot}` document ID was refused. Usually that means the
@@ -528,6 +551,91 @@ export class FirebaseService {
         .flat()
         .map((doc) => ({ id: doc.id, ...asDocumentData<CustomQuestionDoc>(doc.data) }));
     });
+  }
+
+  /**
+   * The approved questions among these ids, for a curated quiz (`FEAT-024`).
+   *
+   * **One query when every question can be read, one `get` per id when one
+   * cannot** — bounded either way (`CLAUDE.md` §4.1):
+   *
+   * 1. `where('status','==','approved')` plus a `__name__` `IN` over at most
+   *    {@link QUIZ_MAX_QUESTIONS} ids, limited to the same number.
+   * 2. **That query is refused outright, not narrowed, when any id it names is
+   *    a question the caller may not read** — deleted, withdrawn, sent back to
+   *    `pending` by an edit, or rejected. A `__name__ IN` query is authorised
+   *    against the documents it names rather than against its filters, so one
+   *    unreadable name refuses the lot and the status clause cannot prevent
+   *    it — measured against the emulator's rules engine, and it is exactly the
+   *    rot a quiz is expected to suffer, since it holds ids rather than copies.
+   *    On that refusal each id is read on its own, and a refusal or a 404 there
+   *    is simply a question the quiz skips (administrator decision,
+   *    8 October 2026).
+   *
+   * Worst case, then, one refused query and twenty-five gets; the usual case
+   * is the one query. The status clause is for the callers whose query *is*
+   * allowed over an unapproved question — a reviewer, or that question's own
+   * author, may read it in any status — and what the gets return is filtered
+   * on `status` here for the same reason: a quiz plays approved questions to
+   * everybody alike.
+   *
+   * An id that cannot name one document is dropped before anything is sent,
+   * for the reason `getQuestionsByIds` drops one: a `__name__` filter refuses
+   * it, and the throw would take every question in the quiz down with it.
+   */
+  async getApprovedQuestionsByIds(
+    questionIds: readonly string[],
+  ): Promise<(CustomQuestionDoc & { id: string })[]> {
+    const ids = [...new Set(questionIds.filter(isDocumentReference))].slice(0, QUIZ_MAX_QUESTIONS);
+    if (ids.length === 0) {
+      return [];
+    }
+
+    let documents: RestDocument[];
+    try {
+      documents = await this.rest.runQuery(
+        {
+          collectionPath: CUSTOM_QUESTIONS_COLLECTION,
+          where: [
+            { field: 'status', op: 'EQUAL', value: STATUS_APPROVED },
+            { field: DOCUMENT_ID_FIELD, op: 'IN', value: ids },
+          ],
+          limit: ids.length,
+        },
+        { timeoutMs: FIRESTORE_TIMEOUT_MS },
+      );
+    } catch (error) {
+      if (!isFirestorePermissionDenied(error)) {
+        throw error;
+      }
+      const each = await Promise.all(ids.map((id) => this.getReadableQuestion(id)));
+      documents = each.filter((document): document is RestDocument => document !== null);
+    }
+
+    return documents
+      .map((doc) => ({ id: doc.id, ...asDocumentData<CustomQuestionDoc>(doc.data) }))
+      .filter((question) => question.status === STATUS_APPROVED);
+  }
+
+  /**
+   * One bank question by its id, or `null` when there is none this caller may
+   * read. A refusal is `null` rather than an error here because the read rule
+   * errors on a missing document as it does on an unapproved one — both are a
+   * question the quiz skips — while a timeout or a dead network still throws,
+   * so the quiz page can offer a retry rather than play a quiz with holes it
+   * did not have.
+   */
+  private async getReadableQuestion(id: string): Promise<RestDocument | null> {
+    try {
+      return await this.rest.getDocument(`${CUSTOM_QUESTIONS_COLLECTION}/${id}`, {
+        timeoutMs: FIRESTORE_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (isFirestorePermissionDenied(error)) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -996,6 +1104,59 @@ export class FirebaseService {
       bestStreak: asCount(document.data['bestStreak']),
       statsSince: typeof statsSince === 'number' && Number.isFinite(statsSince) ? statsSince : null,
     };
+  }
+
+  /**
+   * The newest published quizzes, for the list on `/` (`FEAT-024`).
+   *
+   * Returned raw — `QuizService` decides what of each document it can use,
+   * because the console can write anything here and the reader has to be right
+   * regardless (`CLAUDE.md` §4.4).
+   *
+   * **`isPublished == true` is what makes the read allowed at all**: the rule
+   * serves a published quiz and nothing else, and rules are not filters, so an
+   * unfiltered query is refused rather than narrowed. Ordered newest first and
+   * bounded at {@link QUIZ_LIST_LIMIT} — see there for the index it needs.
+   */
+  async getPublishedQuizzes(): Promise<RawDocument[]> {
+    const documents = await this.rest.runQuery(
+      {
+        collectionPath: QUIZZES_COLLECTION,
+        where: [{ field: 'isPublished', op: 'EQUAL', value: true }],
+        orderBy: [{ field: 'createdAt', direction: 'DESCENDING' }],
+        limit: QUIZ_LIST_LIMIT,
+      },
+      { timeoutMs: FIRESTORE_TIMEOUT_MS },
+    );
+    return documents.map((doc) => ({ id: doc.id, data: doc.data }));
+  }
+
+  /**
+   * One quiz by its id, or `null` when there is no published quiz under it
+   * (`FEAT-024`).
+   *
+   * **A refusal is `null` here, and that is this collection's rule rather than
+   * a shortcut.** The read rule is `resource.data.isPublished == true`, which
+   * errors on a document that does not exist — so Firestore answers a missing
+   * quiz and an unpublished one with the same `403`, and a `404` never comes
+   * back for this path at all. Both mean "nothing to play under this address",
+   * and telling them apart would tell a stranger which drafts exist. Every
+   * other failure — a timeout, a dead network, a malformed request — still
+   * throws, so the screen can say the quiz could not be loaded rather than that
+   * there is no such quiz (`CLAUDE.md` §4.4).
+   */
+  async getQuiz(quizId: string): Promise<RawDocument | null> {
+    try {
+      const document = await this.rest.getDocument(`${QUIZZES_COLLECTION}/${quizId}`, {
+        timeoutMs: FIRESTORE_TIMEOUT_MS,
+      });
+      return document ? { id: document.id, data: document.data } : null;
+    } catch (error) {
+      if (isFirestorePermissionDenied(error)) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**

@@ -23,6 +23,7 @@ import {
   QuestionReportSeed,
   QuestionVoteRecord,
   QuestionVoteSeed,
+  QuizSeed,
   ReviewerSeed,
   VerifiedUserSeed,
 } from './types';
@@ -48,6 +49,7 @@ export class FirebaseBackend {
   private readonly authUids = new Set<string>();
   private readonly customQuestionIds = new Set<string>();
   private readonly leaderboardUids = new Set<string>();
+  private readonly quizIds = new Set<string>();
 
   constructor(
     private readonly target: FirebaseTarget,
@@ -95,6 +97,30 @@ export class FirebaseBackend {
         return this.firestore.collection('custom_questions').doc(docId).set(seeded);
       }),
     );
+  }
+
+  /**
+   * Writes one curated quiz straight into `quizzes`, bypassing Firestore rules
+   * (`FEAT-024`) — the only way one can be written at all, since no client may.
+   *
+   * Tracked by id for the preview sweep, which is why a spec seeds its quizzes
+   * through here rather than through the collection: a quiz is keyed by
+   * nothing else the sweep knows about.
+   */
+  async seedQuiz(seed: QuizSeed): Promise<void> {
+    const { id, ...fields } = seed;
+    this.quizIds.add(id);
+    await this.firestore
+      .collection('quizzes')
+      .doc(id)
+      .set({
+        title: 'An e2e quiz',
+        description: '',
+        createdBy: 'e2e-curator',
+        createdAt: Date.now(),
+        isPublished: true,
+        ...fields,
+      });
   }
 
   /**
@@ -646,6 +672,7 @@ export class FirebaseBackend {
       authUids: this.authUids,
       customQuestionIds: this.customQuestionIds,
       leaderboardUids: this.leaderboardUids,
+      quizIds: this.quizIds,
     });
   }
 }

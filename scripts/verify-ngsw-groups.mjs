@@ -18,7 +18,7 @@
  *  2. **A chunk reaches exactly one group, and the first one wins.** The
  *     generator assigns each file to the first group whose globs match it and
  *     skips it thereafter (`@angular/service-worker/config`, `seenMap`), which
- *     is what lets `deferred-routes` name seven components ahead of an `app`
+ *     is what lets `deferred-routes` name eight components ahead of an `app`
  *     group that sweeps up `/*.js`. Ordering that load-bearing deserves a test
  *     rather than a comment, not least because the config file is JSON and
  *     cannot carry the comment.

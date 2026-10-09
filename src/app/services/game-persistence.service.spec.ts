@@ -87,6 +87,7 @@ function makeGame(overrides: Partial<Parameters<GamePersistenceService['save']>[
     lifelines: ALL_LIFELINES_AVAILABLE,
     eliminatedAnswerIds: [],
     gameId: 'game-fixture',
+    quiz: null,
     ...overrides,
   };
 }
@@ -712,5 +713,83 @@ describe('GamePersistenceService (B8)', () => {
     expect(await service.load()).toBeNull();
     await expect(service.save(makeGame())).resolves.toBeUndefined();
     await expect(service.clear()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * `FEAT-024`. A curated quiz rides the snapshot as `{ id, title }`, and it is
+ * what `/game-over` keys on to offer no leaderboard entry — so a quiz reloaded
+ * on its last question has to still be a quiz when the results screen renders.
+ *
+ * Additive with no `SCHEMA_VERSION` bump, like every field before it: a save
+ * written before quizzes existed restores as a drawn game, which is exactly
+ * what it was.
+ */
+describe('GamePersistenceService — the quiz a game is playing (FEAT-024)', () => {
+  let service: GamePersistenceService;
+
+  beforeEach(async () => {
+    TestBed.configureTestingModule({});
+    service = TestBed.inject(GamePersistenceService);
+    await service.clear();
+  });
+
+  afterEach(async () => {
+    await service.clear();
+    await TestBed.inject(OfflineDbService).close();
+    TestBed.resetTestingModule();
+  });
+
+  it('round-trips the quiz with the game', async () => {
+    await service.save(makeGame({ quiz: { id: 'world-cup-1998', title: 'The 1998 World Cup' } }));
+
+    const loaded = await service.load();
+
+    expect(loaded?.quiz).toEqual({ id: 'world-cup-1998', title: 'The 1998 World Cup' });
+    expect(loaded?.questions).toHaveLength(2);
+  });
+
+  it('round-trips a drawn game as no quiz', async () => {
+    await service.save(makeGame());
+
+    expect((await service.load())?.quiz).toBeNull();
+  });
+
+  // The record a build from before quizzes wrote: no `quiz` key at all, at the
+  // same schema version. It restores, as the drawn game it was.
+  it('restores a save written before quizzes existed, as a drawn game', async () => {
+    await putRaw(validRecord());
+
+    const loaded = await service.load();
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.quiz).toBeNull();
+  });
+
+  // Dropped rather than refused: the questions and the score are worth more
+  // than knowing the game was a quiz.
+  it('restores the game and drops a quiz value it cannot read', async () => {
+    for (const quiz of [
+      'world-cup-1998',
+      { id: 'a/b', title: 'Bad id' },
+      { id: 'world-cup-1998', title: '   ' },
+      { id: 'world-cup-1998' },
+      { title: 'No id' },
+    ]) {
+      await putRaw(validRecord({ quiz }));
+
+      const loaded = await service.load();
+
+      expect(loaded, JSON.stringify(quiz)).not.toBeNull();
+      expect(loaded?.quiz, JSON.stringify(quiz)).toBeNull();
+    }
+  });
+
+  it('keeps only the id and the title, whatever else the record carried', async () => {
+    await putRaw(
+      validRecord({ quiz: { id: 'world-cup-1998', title: 'The Cup', questionIds: ['x'] } }),
+    );
+
+    expect((await service.load())?.quiz).toEqual({ id: 'world-cup-1998', title: 'The Cup' });
   });
 });

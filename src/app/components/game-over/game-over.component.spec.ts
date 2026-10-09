@@ -24,6 +24,7 @@ import { GameControllerService } from '../../services/game-controller.service';
 import { QuestionVoteService, VoteOutcome } from '../../services/question-vote.service';
 import { RegionService } from '../../services/region.service';
 import { LIKE, VoteValue } from '../../models/question-vote';
+import { QuizContext } from '../../models/quiz.model';
 import { GameOverComponent } from './game-over.component';
 
 /**
@@ -120,6 +121,7 @@ function setup(options: {
           answerHistory: signal<readonly PickedAnswer[]>([]),
           answerDurations: signal<readonly number[]>([]),
           gameId: signal<string | null>('game-fixture'),
+          quiz: signal<QuizContext | null>(null),
           resetGame: () => undefined,
         },
       },
@@ -313,6 +315,7 @@ function configureReporting(options: {
           answerHistory: signal<readonly PickedAnswer[]>([]),
           answerDurations: signal<readonly number[]>([]),
           gameId: signal<string | null>('game-fixture'),
+          quiz: signal<QuizContext | null>(null),
           resetGame: () => undefined,
         },
       },
@@ -844,6 +847,7 @@ describe('GameOverComponent — the leaderboard holds its height', () => {
             answerHistory: signal<readonly PickedAnswer[]>([]),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -1001,6 +1005,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             answerHistory: signal<readonly PickedAnswer[]>([]),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -1092,6 +1097,7 @@ describe('GameOverComponent — per-board leaderboards', () => {
             answerHistory: signal<readonly PickedAnswer[]>([]),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -1153,6 +1159,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
             answerHistory: signal<readonly PickedAnswer[]>([]),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -1300,6 +1307,7 @@ describe('GameOverComponent: which face of the score card shows', () => {
     const faces = [...el(fixture, '[data-cy="score-action"]').children];
 
     expect(faces.map((face) => face.getAttribute('data-cy'))).toEqual([
+      'score-quiz',
       'score-saved',
       'score-save-failed',
       'score-sign-in',
@@ -1380,6 +1388,7 @@ describe('GameOverComponent answer recap (FEAT-001)', () => {
             answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -2016,6 +2025,7 @@ describe('GameOverComponent lifetime stats recording', () => {
             answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>(options.gameId === undefined ? 'game-1' : options.gameId),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -2201,6 +2211,7 @@ describe('GameOverComponent — the end-of-round cue (FEAT-003)', () => {
             answerHistory: signal<readonly PickedAnswer[]>([]),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -2347,6 +2358,7 @@ describe('GameOverComponent — regional leaderboards (FEAT-028)', () => {
             answerHistory: signal<readonly PickedAnswer[]>([]),
             answerDurations: signal<readonly number[]>([]),
             gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -2866,6 +2878,7 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
             answerHistory: signal<readonly PickedAnswer[]>(options.answerHistory),
             answerDurations: signal<readonly number[]>(options.answerDurations),
             gameId: signal<string | null>('gameId' in options ? options.gameId! : 'game-fixture'),
+            quiz: signal<QuizContext | null>(null),
             resetGame: () => undefined,
           },
         },
@@ -2964,5 +2977,168 @@ describe('GameOverComponent — the play history it submits (FEAT-049)', () => {
     });
 
     expect(recordGameResult).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `FEAT-024`. A curated quiz makes **no leaderboard entry** (administrator
+ * decision, 8 October 2026): everybody plays its questions in the same order,
+ * so a replay is a memory test. These pin how the save path is closed — the
+ * card shows the quiz face for every auth state, the board is neither shown
+ * nor read, and `saveScore()` refuses on its own even if something called it —
+ * and that the rest of the game is unchanged: the totals and the play history
+ * are still banked.
+ */
+describe('GameOverComponent — a curated quiz is not ranked (FEAT-024)', () => {
+  const QUIZ: QuizContext = { id: 'world-cup-1998', title: 'The 1998 World Cup' };
+
+  function quizSetup(
+    auth: { user: unknown; isAnonymous: boolean; isFullyAuthenticated: boolean } = {
+      user: { uid: 'player-1', displayName: 'Ada' },
+      isAnonymous: false,
+      isFullyAuthenticated: true,
+    },
+  ) {
+    const saveHighScore = vi.fn(() => Promise.resolve());
+    const saveRegionalHighScore = vi.fn(() => Promise.resolve());
+    const getTopScores = vi.fn(() => of([]));
+    const getRegionalTopScores = vi.fn(() => of([]));
+    const recordGameResult = vi.fn().mockResolvedValue(undefined);
+    const inferredRegion = vi.fn(() => Promise.resolve(null));
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: GameControllerService,
+          useValue: {
+            score: signal(7),
+            correctAnswers: signal(7),
+            maxStreak: signal(4),
+            totalQuestions: signal(10),
+            percentage: signal(70),
+            questions: signal([]),
+            config: signal(makeConfig()),
+            flaggedQuestionIds: signal<ReadonlySet<string>>(new Set()),
+            answerHistory: signal<readonly PickedAnswer[]>([]),
+            answerDurations: signal<readonly number[]>([]),
+            gameId: signal<string | null>('game-fixture'),
+            quiz: signal<QuizContext | null>(QUIZ),
+            resetGame: () => undefined,
+          },
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            user: signal(auth.user),
+            isAnonymous: signal(auth.isAnonymous),
+            isFullyAuthenticated: signal(auth.isFullyAuthenticated),
+            resendVerificationEmail: () => Promise.resolve(),
+          },
+        },
+        { provide: AuthMenuStateService, useValue: { open: () => undefined } },
+        { provide: AccountService, useValue: { recordGameResult } },
+        { provide: EmbedModeService, useValue: { isEmbedded: signal(false) } },
+        {
+          provide: RegionService,
+          useValue: {
+            declaredRegion: () => null,
+            inferredRegion,
+            declareRegion: vi.fn(),
+          },
+        },
+        {
+          provide: FirebaseService,
+          useValue: {
+            saveHighScore,
+            saveRegionalHighScore,
+            getLeaderboardEntry: () => Promise.resolve(null),
+            getTopScores,
+            getRegionalTopScores,
+          },
+        },
+        { provide: Router, useValue: { navigateByUrl: () => Promise.resolve(true) } },
+      ],
+    });
+
+    const fixture = TestBed.createComponent(GameOverComponent);
+    const component = fixture.componentInstance as unknown as {
+      scoreAction: () => string;
+      playerName: string;
+      saveScore: () => Promise<void>;
+      hasSaved: { set: (value: boolean) => void };
+    };
+    fixture.detectChanges();
+    return {
+      fixture,
+      component,
+      host: fixture.nativeElement as HTMLElement,
+      saveHighScore,
+      saveRegionalHighScore,
+      getTopScores,
+      getRegionalTopScores,
+      recordGameResult,
+      inferredRegion,
+    };
+  }
+
+  it('shows the quiz face for a fully authenticated account, not the save form', () => {
+    const { component, host } = quizSetup();
+
+    expect(component.scoreAction()).toBe('quiz');
+    const visible = [...host.querySelectorAll('[data-cy="score-action"] > *')].filter(
+      (face) => !face.classList.contains('invisible'),
+    );
+    expect(visible.map((face) => face.getAttribute('data-cy'))).toEqual(['score-quiz']);
+    expect(host.querySelector('[data-cy="score-save"]')?.classList).toContain('invisible');
+  });
+
+  // Ahead of every auth state, so no account sees a form the quiz must not
+  // have — and a save that somehow landed does not bring the board back.
+  it('shows the quiz face whatever auth says', () => {
+    for (const auth of [
+      { user: null, isAnonymous: false, isFullyAuthenticated: false },
+      { user: { uid: 'anon-1' }, isAnonymous: true, isFullyAuthenticated: false },
+      { user: { uid: 'player-1' }, isAnonymous: false, isFullyAuthenticated: false },
+    ]) {
+      const { component } = quizSetup(auth);
+      expect(component.scoreAction(), JSON.stringify(auth)).toBe('quiz');
+      TestBed.resetTestingModule();
+    }
+
+    const { component, fixture } = quizSetup();
+    component.hasSaved.set(true);
+    fixture.detectChanges();
+    expect(component.scoreAction()).toBe('quiz');
+  });
+
+  // The pin on the write itself: even called directly, with a name and a
+  // fully authenticated account, nothing reaches either board.
+  it('writes nothing to any board when a save is attempted anyway', async () => {
+    const { component, saveHighScore, saveRegionalHighScore } = quizSetup();
+    component.playerName = 'Ada';
+
+    await component.saveScore();
+
+    expect(saveHighScore).not.toHaveBeenCalled();
+    expect(saveRegionalHighScore).not.toHaveBeenCalled();
+  });
+
+  it('neither shows nor reads a leaderboard, nor looks up a country for one', () => {
+    const { host, getTopScores, getRegionalTopScores, inferredRegion } = quizSetup();
+
+    expect(host.querySelector('[data-cy="leaderboard-card"]')).toBeNull();
+    expect(host.querySelector('[data-cy="leaderboard-title"]')).toBeNull();
+    expect(getTopScores).not.toHaveBeenCalled();
+    expect(getRegionalTopScores).not.toHaveBeenCalled();
+    expect(inferredRegion).not.toHaveBeenCalled();
+  });
+
+  // A quiz is a game for everything but the board: the totals and the play
+  // history are banked exactly as a drawn game's are (`FEAT-049`).
+  it('still banks the game into the player’s totals', () => {
+    const { recordGameResult } = quizSetup();
+
+    expect(recordGameResult).toHaveBeenCalledWith(
+      expect.objectContaining({ gameId: 'game-fixture', totalQuestions: 10, correctAnswers: 7 }),
+    );
   });
 });
