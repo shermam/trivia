@@ -22,7 +22,7 @@
  *
  * Pure and free of `firebase-admin` on purpose — the store is injected, so the
  * boundary and the batching are unit-testable without an emulator. The
- * Firestore-backed store lives in `play-history-sweep.ts`.
+ * Firestore-backed store lives in `daily-sweep.ts`.
  */
 
 /** Twelve months, as the Privacy Policy's retention section states it. */

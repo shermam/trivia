@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '../../fixtures/test';
+import { CustomQuestionSeed, QuestionReportSeed } from '../../fixtures/types';
 import { openAuthMenu, signInViaUi } from '../../support/auth';
 import { answerQuestion, startNewGame } from '../../support/game';
 import { waitForGameplayStats } from '../../support/gameplay-stats';
@@ -196,6 +197,127 @@ test.describe('account management: export and deletion', () => {
     // The export has to say what it deliberately does not contain, otherwise a
     // missing card number reads as concealment.
     expect(exported.notHeldHere.join(' ')).toMatch(/stripe/i);
+  });
+
+  /**
+   * The reports an account filed (`FEAT-042`), against the emulator's real
+   * queries: the equality on `reportedBy` both export and deletion find them
+   * by, the batched lookup of their questions, and the batch whose delete
+   * demands the original. Export first and deletion second, the order a person
+   * exercising both rights would take.
+   *
+   * Seeded rather than filed through game-over, which files one report per
+   * five-minute slot and only about a question it served — which is to say an
+   * approved one. This account needs a report about each kind of question at
+   * once: approved and rejected (decided), one since deleted (decided — there
+   * is nothing left to review), and one under review, plus somebody else's
+   * reports on the same questions, which must come through untouched.
+   */
+  test('exports the reports that still name the user, and deletion leaves none that do', async ({
+    page,
+    firebase,
+  }) => {
+    const email = `reporter-${unique()}@example.com`;
+    const { uid } = await firebase.createVerifiedUser({ email, password });
+    const other = `someone-else-${unique()}`;
+    const tag = unique();
+    const ids = {
+      approved: `reported-approved-${tag}`,
+      rejected: `reported-rejected-${tag}`,
+      pending: `reported-pending-${tag}`,
+      // Never seeded: the report outlived its question.
+      gone: `reported-gone-${tag}`,
+    };
+    const question = (id: string, status: CustomQuestionSeed['status']): CustomQuestionSeed => ({
+      id,
+      type: 'multiple',
+      difficulty: 'easy',
+      question: `A reported question (${status})`,
+      correct_answer: 'Yes',
+      incorrect_answers: ['No', 'Maybe', 'Perhaps'],
+      createdBy: `author-${tag}`,
+      createdAt: Date.now(),
+      status,
+    });
+    await firebase.seedCustomQuestions([
+      question(ids.approved, 'approved'),
+      question(ids.rejected, 'rejected'),
+      question(ids.pending, 'pending'),
+    ]);
+
+    // The id the create rule demands, `{window}-{slot}-{uid}`, in the window
+    // the client would have used.
+    const window = Math.floor(Date.now() / 300_000);
+    const createdAt = Date.now();
+    const report = (
+      by: string,
+      slot: number,
+      questionId: string,
+      extra: Partial<QuestionReportSeed> = {},
+    ): QuestionReportSeed => ({
+      id: `${window}-${slot}-${by}`,
+      questionId,
+      reason: 'incorrect',
+      reportedBy: by,
+      createdAt,
+      ...extra,
+    });
+    const mine = [
+      report(uid, 0, ids.approved),
+      report(uid, 1, ids.rejected),
+      report(uid, 2, ids.gone),
+      report(uid, 3, ids.pending, { detail: 'Two of the answers mean the same thing.' }),
+    ];
+    const theirs = [report(other, 0, ids.approved), report(other, 1, ids.pending)];
+    await firebase.seedQuestionReports([...mine, ...theirs]);
+
+    await stubOpenTrivia(page);
+    await page.goto('/');
+    await signInViaUi(page, email, password);
+
+    await openAuthMenu(page);
+    const downloading = page.waitForEvent('download', { timeout: 30_000 });
+    await page.getByTestId('download-my-data').click();
+    const download = await downloading;
+    const exported = JSON.parse(await readFile(await download.path(), 'utf8')) as {
+      questionReports: { id: string; questionId: string; reportedBy: string }[];
+    };
+    // Every report that still names the account, whatever its question's
+    // status — the decided ones keep the uid until the daily run — and nobody
+    // else's.
+    expect(exported.questionReports.map(({ id }) => id).sort()).toEqual(
+      mine.map(({ id }) => id).sort(),
+    );
+    expect(exported.questionReports.every(({ reportedBy }) => reportedBy === uid)).toBe(true);
+
+    await page.getByTestId('delete-account').click();
+    await page.getByTestId('confirm-delete-account').click();
+    await expect(page.getByTestId('auth-menu-trigger')).toContainText('Sign in', {
+      timeout: 30_000,
+    });
+
+    const after = await firebase.getQuestionReports(Object.values(ids));
+    // Non-vacuous: the export above read four reports naming the account.
+    // None does now — not in a field, and not in a document id.
+    expect(after.filter(({ reportedBy }) => reportedBy === uid)).toEqual([]);
+    expect(after.filter(({ id }) => id.includes(uid))).toEqual([]);
+    // Somebody else's are exactly as they were.
+    expect(
+      after
+        .filter(({ reportedBy }) => reportedBy === other)
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual([...theirs].sort((a, b) => a.id.localeCompare(b.id)));
+    // The three about decided questions went with the account; the one under
+    // review stayed, as a complaint naming nobody.
+    const anonymised = after.filter((stored) => !('reportedBy' in stored));
+    expect(anonymised).toHaveLength(1);
+    const { id: _id, ...content } = anonymised[0];
+    expect(content).toEqual({
+      questionId: ids.pending,
+      reason: 'incorrect',
+      detail: 'Two of the answers mean the same thing.',
+      createdAt,
+    });
   });
 
   test('can be backed out of without deleting anything', async ({ page, firebase }) => {

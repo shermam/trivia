@@ -157,15 +157,21 @@ export interface CheckoutSessionRecord {
 
 /**
  * A `question_reports` document as read back by `getQuestionReports`, ID
- * included — the ID carries the `{window}-{slot}-{uid}` volume cap, so specs
- * assert on its shape as well as on the payload (finding H4).
+ * included — the ID of a filed report carries the `{window}-{slot}-{uid}`
+ * volume cap, so specs assert on its shape as well as on the payload
+ * (finding H4).
+ *
+ * `reportedBy` is optional because a stored report need not have one: once
+ * the question it names is decided, the report is copied to an auto-id
+ * without it (`FEAT-042`). Typing the read shape as always attributed would
+ * be a claim about the collection that stopped being true.
  */
 export interface QuestionReportRecord {
   id: string;
   questionId: string;
   reason: 'incorrect' | 'inappropriate' | 'spam' | 'other';
   detail?: string;
-  reportedBy: string;
+  reportedBy?: string;
   createdAt: number;
 }
 

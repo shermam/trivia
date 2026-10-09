@@ -8,6 +8,7 @@ import { ANONYMISED_AUTHOR, isCancellableStatus } from './account-policy';
 import { buildAccountExport, timestampToIso } from './account-export';
 import { LEADERBOARD_BOARDS, allLeaderboardPathsFor, regionalEntryRefsFor } from './leaderboards';
 import { deleteQuestionVotes, questionVotesFor } from './question-votes';
+import { questionReportsFor, sweepLeaverReports } from './report-anonymisation';
 
 /**
  * Deletes the caller's account and everything attached to it.
@@ -17,9 +18,10 @@ import { deleteQuestionVotes, questionVotesFor } from './question-votes';
  * leaderboard, and the question bank — and because the Admin SDK bypasses
  * `firestore.rules`, which is the only way to touch documents the client is
  * deliberately forbidden from writing: no leaderboard has a delete rule at
- * all, and a `custom_questions` document is writable only by its own author
- * — which is exactly the person this function is erasing, and who is
- * therefore about to stop being able to write it.
+ * all, no client may update or delete a `question_reports` document, and a
+ * `custom_questions` document is writable only by its own author — which is
+ * exactly the person this function is erasing, and who is therefore about to
+ * stop being able to write it.
  *
  * Order matters. Stripe is cancelled first, because it is the only step with
  * a cost attached to getting it wrong: if a later step fails after Auth is
@@ -67,6 +69,14 @@ export const deleteAccount = onCall({ secrets: [stripeSecretKey] }, async (reque
     // `question_votes` ids that begin with this uid, which is the reason those
     // ids put the uid first (`question-votes.ts`).
     await deleteQuestionVotes(firestore, uid);
+    // The reports the account filed that still name it (`FEAT-042`). The daily
+    // sweep has already taken the identity off every report whose question was
+    // decided before today, so what is left is recent or still under review:
+    // a report about a decided question goes with its author, one a reviewer
+    // has yet to act on stays without them. Either way none names the uid
+    // afterwards — not in `reportedBy`, and not in a document id, which is
+    // where `{window}-{slot}-{uid}` would otherwise leave it.
+    await sweepLeaverReports(firestore, uid);
     await deleteCustomerRecord(uid);
     await getAuth().deleteUser(uid);
   } catch (error) {
@@ -115,6 +125,7 @@ export const exportAccountData = onCall(async (request) => {
       plays,
       questions,
       votes,
+      reports,
       customer,
       subscriptions,
       checkouts,
@@ -147,6 +158,10 @@ export const exportAccountData = onCall(async (request) => {
       // (`FEAT-027`) — so the two cannot disagree about what a player's votes
       // are.
       questionVotesFor(firestore, uid),
+      // The reports that still name the account (`FEAT-042`), by the same
+      // query deletion sweeps — whatever their question's status, because a
+      // report about a decided question keeps the uid until the next daily run.
+      questionReportsFor(firestore, uid),
       customerRef.get(),
       customerRef.collection('subscriptions').get(),
       customerRef.collection('checkout_sessions').get(),
@@ -185,6 +200,7 @@ export const exportAccountData = onCall(async (request) => {
       playHistory: plays.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       contributedQuestions: questions.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
       questionVotes: votes,
+      questionReports: reports,
       stripeCustomerId: (customer.data()?.['stripeId'] as string | undefined) ?? null,
       // Serialised rather than passed through: `supporterSince` is a Firestore
       // `Timestamp`, and an export is JSON handed straight to the person who

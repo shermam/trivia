@@ -65,6 +65,21 @@ export interface AccountExport {
    * collection here.
    */
   questionVotes: Record<string, unknown>[];
+  /**
+   * Every report the account filed that still names it (`FEAT-042`), each
+   * document whole with its id: `questionId`, `reason`, the optional `detail`,
+   * `reportedBy` and `createdAt`.
+   *
+   * "Still names it" is the whole of the selection. A report keeps its reporter
+   * while the question it is about is under review, and loses it at the first
+   * daily run that finds the question decided — copied without the identity
+   * to a new id, the original deleted — so this holds the reports filed since
+   * the last run and the ones about questions still undecided. A report that has
+   * been anonymised holds nothing tying it to this account and is not here,
+   * for the same reason it is not deleted with it. An empty list for an
+   * account that has no such report.
+   */
+  questionReports: Record<string, unknown>[];
   billing: {
     stripeCustomerId: string | null;
     /** ISO 8601, or `null` for an account that has never donated. */
@@ -112,6 +127,7 @@ export function buildAccountExport(input: {
   leaderboardEntries: Record<string, unknown>[];
   contributedQuestions: Record<string, unknown>[];
   questionVotes?: Record<string, unknown>[];
+  questionReports?: Record<string, unknown>[];
   gameplayStats: Record<string, unknown> | null;
   playHistory?: Record<string, unknown>[];
   stripeCustomerId: string | null;
@@ -138,6 +154,7 @@ export function buildAccountExport(input: {
     playHistory: input.playHistory ?? [],
     contributedQuestions: input.contributedQuestions,
     questionVotes: input.questionVotes ?? [],
+    questionReports: input.questionReports ?? [],
     billing: {
       stripeCustomerId: input.stripeCustomerId,
       supporterSince: input.supporterSince ?? null,
