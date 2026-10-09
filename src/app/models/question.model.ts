@@ -503,6 +503,15 @@ export interface QuestionReport {
    * same way an unattributed question does.
    */
   createdAt: number | null;
+  /**
+   * Whether `createdAt` is a day rather than a moment: true for a report that
+   * no longer names its reporter. An anonymised copy keeps only the start of
+   * the UTC day its report was filed (`FEAT-042`, `startOfUtcDay` in
+   * `functions/src/report-anonymisation.ts`), so the queue shows that day, in
+   * UTC, rather than a time of day nobody filed it at — midnight UTC, which
+   * west of Greenwich is the evening before.
+   */
+  dayOnly: boolean;
 }
 
 /**

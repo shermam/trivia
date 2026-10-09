@@ -477,7 +477,15 @@ export class ReviewQueueComponent implements OnInit {
   }
 
   protected reportedAt(report: QuestionReport): string {
-    return report.createdAt ? new Date(report.createdAt).toLocaleString() : 'Unknown';
+    if (!report.createdAt) {
+      return 'Unknown';
+    }
+    // An anonymised report keeps the UTC day it was filed and not the moment
+    // (`FEAT-042`), so it is shown as that day, in UTC, rather than as the
+    // midnight it is stored at.
+    return report.dayOnly
+      ? `${new Date(report.createdAt).toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+      : new Date(report.createdAt).toLocaleString();
   }
 
   protected reasonLabel(report: QuestionReport): string {

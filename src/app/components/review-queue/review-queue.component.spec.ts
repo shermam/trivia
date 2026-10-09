@@ -130,6 +130,7 @@ function report(id: string, overrides: Partial<QuestionReport> = {}): QuestionRe
     questionId: 'p1',
     reason: 'incorrect',
     createdAt: 1_760_000_000_000,
+    dayOnly: false,
     ...overrides,
   };
 }
@@ -672,6 +673,33 @@ describe('ReviewQueueComponent reports tab, rendered', () => {
     expect(row.textContent).toContain('We live on Earth, not Mars.');
     expect(row.textContent).toContain('Q p1?');
     expect(row.textContent).not.toContain('anonuid2b9');
+  });
+
+  /**
+   * An anonymised report keeps the UTC day it was filed, stored as that day's
+   * midnight (`FEAT-042`). Rendered with a time, it would claim a moment
+   * nobody filed it at — and west of Greenwich, the evening of the day before.
+   * A report still inside its thirty days keeps its moment, and shows it.
+   */
+  it('shows an anonymised report’s filing day in UTC, with no time of day', async () => {
+    const day = Date.UTC(2026, 9, 9);
+    const moment = day + 13 * 60 * 60 * 1000;
+    const host = await renderReports({
+      reports: [
+        report('Xq3vL9aT2bRk8mNc4PdE', { createdAt: day, dayOnly: true }),
+        report('5954006-3-anonuid2b9', { createdAt: moment }),
+      ],
+      questionsById: [question('p1')],
+    });
+
+    const [anonymised, attributed] = [
+      ...host.querySelectorAll<HTMLElement>('[data-cy="report-filed"]'),
+    ].map((line) => line.textContent?.trim());
+    expect(anonymised).toBe(
+      `Reported ${new Date(day).toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`,
+    );
+    expect(anonymised).not.toMatch(/\d:\d\d/);
+    expect(attributed).toBe(`Reported ${new Date(moment).toLocaleString()}`);
   });
 
   it('says the question is gone rather than rendering an empty card', async () => {

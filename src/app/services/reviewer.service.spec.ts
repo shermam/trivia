@@ -379,6 +379,7 @@ describe('ReviewerService.getQuestionReports', () => {
 
     expect(Object.keys(report).sort()).toEqual([
       'createdAt',
+      'dayOnly',
       'detail',
       'id',
       'questionId',
@@ -400,8 +401,31 @@ describe('ReviewerService.getQuestionReports', () => {
         reason: 'incorrect',
         detail: 'We live on Earth.',
         createdAt: 1_760_000_000_000,
+        dayOnly: false,
       },
     ]);
+  });
+
+  /**
+   * An anonymised copy (`FEAT-042`) is the one report without a reporter, and
+   * it keeps only the UTC day its report was filed — so the queue is told to
+   * show a day rather than a moment. Read off the field's absence; the uid
+   * itself still goes no further than here.
+   */
+  it('marks a report that no longer names its reporter as filed on a day, not at a moment', async () => {
+    const { reportedBy: _reportedBy, ...anonymised } = FULL_REPORT;
+    const h = reportsSetup([
+      reportDoc('Xq3vL9aT2bRk8mNc4PdE', { ...anonymised, createdAt: Date.UTC(2026, 9, 9) }),
+      reportDoc('5954006-3-anon-uid', FULL_REPORT),
+    ]);
+
+    const reports = (await h.service.getQuestionReports()).reports;
+
+    expect(reports.map(({ id, dayOnly }) => ({ id, dayOnly }))).toEqual([
+      { id: 'Xq3vL9aT2bRk8mNc4PdE', dayOnly: true },
+      { id: '5954006-3-anon-uid', dayOnly: false },
+    ]);
+    expect(reports[0].createdAt).toBe(Date.UTC(2026, 9, 9));
   });
 
   it('omits an absent detail rather than carrying an undefined one', async () => {
