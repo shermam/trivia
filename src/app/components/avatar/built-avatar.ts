@@ -10,12 +10,15 @@
  * the CSP would drop while leaving it in the markup (`CLAUDE.md` §4.4).
  *
  * **A seed names a variant**: `<set>-<shape digit><colour digit>`, so
- * `core-35` is the `core` set's square on mint. Sets are what `FEAT-041`
- * will lock and unlock by name, with no change to the stored field; which sets
- * a player may use is a later rule, not this table's business. **A shipped set
- * is frozen** — a stored seed is a reference into it, so a new shape or colour
- * is a new set rather than an edit to an old one, or every avatar built from
- * the old one silently changes.
+ * `core-35` is the `core` set's square on mint. Sets are what a level unlocks
+ * (`FEAT-041`), by name and with no change to the stored field — `core` from
+ * the start, `bold` at level 3 — and which sets a player may choose is the
+ * rule in `models/levels.ts`, not this table's business: this table draws
+ * every seed it knows, locked or not, because a seed already stored stays
+ * drawn whatever happens to its set's threshold. **A shipped set is frozen** —
+ * a stored seed is a reference into it, so a new shape or colour is a new set
+ * rather than an edit to an old one, or every avatar built from the old one
+ * silently changes.
  */
 
 export interface BuiltShape {
@@ -62,9 +65,37 @@ export const BUILT_AVATAR_SETS: Readonly<Record<string, BuiltAvatarSet>> = {
       { id: 'mint', background: '#d1fae5', foreground: '#065f46' },
     ],
   },
+  /**
+   * The set level 3 unlocks: emblems rather than plain geometry, on the warm
+   * end of the brand's palette — the error and warning reds and ambers, slate
+   * and jade — so it reads as a different family from `core` at a glance.
+   * Lines and arcs only, like `core`, and every colour a token from
+   * `BRAND_DESIGN_SYSTEM.md`.
+   */
+  bold: {
+    shapes: [
+      {
+        id: 'star',
+        d: 'M16 6.3L18.7 13.1L26 13.5L20.4 18.2L22.2 25.3L16 21.3L9.8 25.3L11.6 18.2L6 13.5L13.3 13.1Z',
+      },
+      { id: 'bolt', d: 'M18.5 5.5L9 17.5H15L13.5 26.5L23 14H17L18.5 5.5Z' },
+      { id: 'heart', d: 'M16 25.5L7.6 17.2A5.3 5.3 0 0 1 16 11A5.3 5.3 0 0 1 24.4 17.2Z' },
+      { id: 'crown', d: 'M8 23V11L12.5 15.5L16 8L19.5 15.5L24 11V23Z' },
+      { id: 'moon', d: 'M15 6.5A9.5 9.5 0 1 0 24.21 18.34A7.5 7.5 0 1 1 15 6.5Z' },
+      { id: 'shield', d: 'M16 6.5L23.5 9.5V15.5A9 9.5 0 0 1 16 25.5A9 9.5 0 0 1 8.5 15.5V9.5Z' },
+    ],
+    palettes: [
+      { id: 'ruby', background: '#b91c1c', foreground: '#fef2f2' },
+      { id: 'amber', background: '#b45309', foreground: '#fffbeb' },
+      { id: 'blush', background: '#fecaca', foreground: '#b91c1c' },
+      { id: 'honey', background: '#fde68a', foreground: '#78350f' },
+      { id: 'slate', background: '#64748b', foreground: '#f7f9f8' },
+      { id: 'jade', background: '#059669', foreground: '#0f172a' },
+    ],
+  },
 };
 
-/** The set the picker builds from today — the only one there is. */
+/** The set a new builder starts on — always unlocked. */
 export const DEFAULT_BUILT_SET = 'core';
 
 /** What the picker starts a player on the first time they build one. */

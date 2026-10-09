@@ -64,6 +64,27 @@ interface RecordGameAnswer {
   recorded?: unknown;
   reason?: unknown;
   provider?: unknown;
+  xp?: unknown;
+  xpGained?: unknown;
+}
+
+/**
+ * The XP a game banked in this tab came to, and what that game added — the
+ * callable's own answer (`FEAT-041`), held for the account it was banked for.
+ * `/profile` reads it to say when the last game crossed a level, which nothing
+ * on the document can say once it is written.
+ */
+export interface BankedXp {
+  /** The account the game was banked for. */
+  uid: string;
+  /** `users/{uid}.xp` once the game was banked. */
+  xp: number;
+  /** What the game added to it. */
+  gained: number;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 /**
@@ -112,6 +133,16 @@ function accountErrorMessage(error: unknown, action: string): string {
   return `Could not ${action}. Please try again.`;
 }
 
+/**
+ * The XP a banked game's answer carries, read field by field: both whole,
+ * non-negative counts and the game's share no larger than the total, or
+ * `null`. The server answering may be older than this bundle, or newer.
+ */
+function bankedXpFrom(uid: string, answer: RecordGameAnswer): BankedXp | null {
+  const { xp, xpGained } = answer;
+  return isCount(xp) && isCount(xpGained) && xpGained <= xp ? { uid, xp, gained: xpGained } : null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AccountService {
   private readonly firebaseAppService = inject(FirebaseAppService);
@@ -123,6 +154,7 @@ export class AccountService {
   }> | null = null;
 
   private readonly unbankedGameSignal = signal<UnbankedGame | null>(null);
+  private readonly bankedXpSignal = signal<BankedXp | null>(null);
 
   /**
    * The last game a signed-in account finished in this tab that the server
@@ -130,6 +162,14 @@ export class AccountService {
    * `/profile` shows it for the account it belongs to and nobody else.
    */
   readonly unbankedGame = this.unbankedGameSignal.asReadonly();
+
+  /**
+   * The XP of the last game a signed-in account banked in this tab, or `null`
+   * — for none, for a refused game, or for an answer from a server too old to
+   * say. Like {@link unbankedGame} it lives as long as the tab, and `/profile`
+   * reads it only for the account it belongs to.
+   */
+  readonly bankedXp = this.bankedXpSignal.asReadonly();
 
   /**
    * The `firebase/functions` bootstrap, memoized — **and cleared on
@@ -292,6 +332,11 @@ export class AccountService {
    * line anywhere saying so. So it is logged with the server's reason, and
    * held in {@link unbankedGame} for `/profile` to tell the player.
    *
+   * **And a banked game's XP is kept for the tab** (`FEAT-041`): the answer
+   * says what the player's XP came to and what this game added, held in
+   * {@link bankedXp} so `/profile` can say when the last game crossed a level
+   * — which nothing on the document can say once the game is written.
+   *
    * The uid is never sent: the callable reads it from the verified token, so a
    * caller can only ever record against themselves. The numbers *are* sent,
    * and are bounded server-side rather than attested — see
@@ -368,6 +413,12 @@ export class AccountService {
       if (this.unbankedGameSignal()?.uid === account.uid) {
         this.unbankedGameSignal.set(null);
       }
+      // A duplicate repeats a game already noted, so only a fresh bank moves
+      // the XP — and one whose XP this build cannot read leaves nothing to
+      // say about the last game rather than something about the one before.
+      if (answer?.recorded === true) {
+        this.bankedXpSignal.set(bankedXpFrom(account.uid, answer));
+      }
       return;
     }
     // An answer this build cannot read says nothing either way, so it is not
@@ -380,5 +431,7 @@ export class AccountService {
       typeof answer.provider === 'string' ? `, sign-in provider ${answer.provider}` : '';
     console.error(`[stats] the server did not add this game to your totals (${reason}${provider})`);
     this.unbankedGameSignal.set({ uid: account.uid, reason });
+    // The last game earned nothing, so no level it crossed is left to report.
+    this.bankedXpSignal.set(null);
   }
 }

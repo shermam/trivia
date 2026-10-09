@@ -100,10 +100,11 @@
     its box — that is what holds the card's height — and `inert` makes the
     hidden controls unreachable by Tab or pointer, the pair the nav drawer uses.
 
-    Three radiogroups of real `<input type="radio">` elements, `sr-only` behind
-    their labels — the setup screen's picker contract (G4): native keys, native
-    checked state, a group name from `aria-labelledby`. The focus ring is on the
-    label, because the radio is a clipped 1px box nobody could see one on.
+    Radiogroups of real `<input type="radio">` elements — the kind, then a
+    shape and a colour for each set — `sr-only` behind their labels: the setup
+    screen's picker contract (G4): native keys, native checked state, a group
+    name from `aria-labelledby`. The focus ring is on the label, because the
+    radio is a clipped 1px box nobody could see one on.
   -->
   <div
     data-cy="avatar-picker"
@@ -177,75 +178,163 @@
       }
     </div>
 
-    <span
-      id="avatar-shape-label"
-      class="block mt-5 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-      >Shape</span
-    >
-    <div
-      role="radiogroup"
-      aria-labelledby="avatar-shape-label"
-      data-cy="avatar-shape"
-      class="flex flex-wrap gap-2"
-    >
-      @for (option of shapeOptions(); track option.id) {
-        <label
-          class="flex rounded-full border-2 p-0.5 cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
-          [class.border-emerald-600]="builtSelection()?.shapeIndex === option.index"
-          [class.border-transparent]="builtSelection()?.shapeIndex !== option.index"
-        >
-          <input
-            type="radio"
-            name="avatar-shape"
-            class="sr-only"
-            [attr.data-cy]="'avatar-shape-' + option.id"
-            [attr.value]="option.id"
-            [checked]="builtSelection()?.shapeIndex === option.index"
-            [attr.aria-disabled]="saving() ? 'true' : null"
-            (click)="holdWhileSaving($event)"
-            (keydown)="holdKeysWhileSaving($event)"
-            (change)="chooseShape(option.index)"
-          />
-          <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
-          <span class="sr-only">{{ option.label }}</span>
-        </label>
-      }
-    </div>
+    <!--
+      One block per set (`FEAT-041`): a heading, and the set's shapes and
+      colours as two radiogroups named by both — "Core Shape", "Bold Colour".
+      A set the player's level has not reached is drawn exactly as an open one
+      is, its tiles `aria-disabled`, dimmed and described by the line beside
+      the heading, so locked or not the block is one height by construction
+      (`CLAUDE.md` §4.4). The line's three sentences share one grid cell for
+      the same reason; `core` is open from the start and has none.
 
-    <span
-      id="avatar-colour-label"
-      class="block mt-5 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
-      >Colour</span
-    >
-    <div
-      role="radiogroup"
-      aria-labelledby="avatar-colour-label"
-      data-cy="avatar-colour"
-      class="flex flex-wrap gap-2"
-    >
-      @for (option of paletteOptions(); track option.id) {
-        <label
-          class="flex rounded-full border-2 p-0.5 cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
-          [class.border-emerald-600]="builtSelection()?.paletteIndex === option.index"
-          [class.border-transparent]="builtSelection()?.paletteIndex !== option.index"
+      A locked tile stays reachable by Tab — that is how a keyboard user finds
+      out the set exists and what opens it — while its click, Space and arrow
+      keys are held (`holdBuiltClick`, `holdBuiltKeys`).
+    -->
+    @for (block of setBlocks(); track block.set) {
+      <div class="mt-5" [attr.data-cy]="'avatar-set-' + block.set">
+        <div class="flex items-baseline justify-between gap-3">
+          <h3
+            [id]="'avatar-set-' + block.set + '-label'"
+            class="text-sm font-bold text-slate-900 dark:text-slate-50"
+          >
+            {{ block.label }}
+          </h3>
+          @if (block.status !== 'open') {
+            <div
+              [id]="'avatar-set-' + block.set + '-status'"
+              [attr.data-cy]="'avatar-set-' + block.set + '-status'"
+              class="grid text-right text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              <p
+                class="col-start-1 row-start-1"
+                [class.invisible]="block.status !== 'checking'"
+                [attr.data-cy]="'avatar-set-' + block.set + '-checking'"
+              >
+                Checking your level&hellip;
+              </p>
+              <p
+                class="col-start-1 row-start-1 inline-flex items-center justify-end gap-1"
+                [class.invisible]="block.status !== 'locked'"
+                [attr.data-cy]="'avatar-set-' + block.set + '-locked'"
+              >
+                <app-icon name="lock" [size]="12" />
+                Unlocks at level {{ block.unlockLevel }}
+              </p>
+              <p
+                class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
+                [class.invisible]="block.status !== 'unlocked'"
+                [attr.data-cy]="'avatar-set-' + block.set + '-unlocked'"
+              >
+                Unlocked at level {{ block.unlockLevel }}
+              </p>
+            </div>
+          }
+        </div>
+
+        <span
+          [id]="'avatar-set-' + block.set + '-shape-label'"
+          class="block mt-2 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+          >Shape</span
         >
-          <input
-            type="radio"
-            name="avatar-colour"
-            class="sr-only"
-            [attr.data-cy]="'avatar-colour-' + option.id"
-            [attr.value]="option.id"
-            [checked]="builtSelection()?.paletteIndex === option.index"
-            [attr.aria-disabled]="saving() ? 'true' : null"
-            (click)="holdWhileSaving($event)"
-            (keydown)="holdKeysWhileSaving($event)"
-            (change)="choosePalette(option.index)"
-          />
-          <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
-          <span class="sr-only">{{ option.label }}</span>
-        </label>
-      }
-    </div>
+        <div
+          role="radiogroup"
+          [attr.aria-labelledby]="
+            'avatar-set-' + block.set + '-label avatar-set-' + block.set + '-shape-label'
+          "
+          [attr.data-cy]="'avatar-set-' + block.set + '-shapes'"
+          class="flex flex-wrap gap-2"
+        >
+          @for (option of block.shapes; track option.id) {
+            <label
+              class="flex rounded-full border-2 p-0.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+              [class.cursor-pointer]="block.choosable"
+              [class.cursor-not-allowed]="!block.choosable"
+              [class.opacity-50]="!block.choosable"
+              [class.border-emerald-600]="
+                builtSelection()?.set === block.set && builtSelection()?.shapeIndex === option.index
+              "
+              [class.border-transparent]="
+                builtSelection()?.set !== block.set || builtSelection()?.shapeIndex !== option.index
+              "
+            >
+              <input
+                type="radio"
+                class="sr-only"
+                [name]="'avatar-shape-' + block.set"
+                [attr.data-cy]="'avatar-shape-' + option.id"
+                [attr.value]="option.id"
+                [checked]="
+                  builtSelection()?.set === block.set &&
+                  builtSelection()?.shapeIndex === option.index
+                "
+                [attr.aria-disabled]="saving() || !block.choosable ? 'true' : null"
+                [attr.aria-describedby]="
+                  block.status === 'open' ? null : 'avatar-set-' + block.set + '-status'
+                "
+                (click)="holdBuiltClick($event, block)"
+                (keydown)="holdBuiltKeys($event, block)"
+                (change)="chooseShape(block.set, option.index)"
+              />
+              <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
+              <span class="sr-only">{{ option.label }}</span>
+            </label>
+          }
+        </div>
+
+        <span
+          [id]="'avatar-set-' + block.set + '-colour-label'"
+          class="block mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+          >Colour</span
+        >
+        <div
+          role="radiogroup"
+          [attr.aria-labelledby]="
+            'avatar-set-' + block.set + '-label avatar-set-' + block.set + '-colour-label'
+          "
+          [attr.data-cy]="'avatar-set-' + block.set + '-colours'"
+          class="flex flex-wrap gap-2"
+        >
+          @for (option of block.palettes; track option.id) {
+            <label
+              class="flex rounded-full border-2 p-0.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-emerald-500"
+              [class.cursor-pointer]="block.choosable"
+              [class.cursor-not-allowed]="!block.choosable"
+              [class.opacity-50]="!block.choosable"
+              [class.border-emerald-600]="
+                builtSelection()?.set === block.set &&
+                builtSelection()?.paletteIndex === option.index
+              "
+              [class.border-transparent]="
+                builtSelection()?.set !== block.set ||
+                builtSelection()?.paletteIndex !== option.index
+              "
+            >
+              <input
+                type="radio"
+                class="sr-only"
+                [name]="'avatar-colour-' + block.set"
+                [attr.data-cy]="'avatar-colour-' + option.id"
+                [attr.value]="option.id"
+                [checked]="
+                  builtSelection()?.set === block.set &&
+                  builtSelection()?.paletteIndex === option.index
+                "
+                [attr.aria-disabled]="saving() || !block.choosable ? 'true' : null"
+                [attr.aria-describedby]="
+                  block.status === 'open' ? null : 'avatar-set-' + block.set + '-status'
+                "
+                (click)="holdBuiltClick($event, block)"
+                (keydown)="holdBuiltKeys($event, block)"
+                (change)="choosePalette(block.set, option.index)"
+              />
+              <app-avatar size="md" [letter]="letter()" [choice]="option.preview" />
+              <span class="sr-only">{{ option.label }}</span>
+            </label>
+          }
+        </div>
+      </div>
+    }
 
     <!--
       The owner's condition on this feature: a player decides whether their

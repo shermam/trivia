@@ -1795,6 +1795,7 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
     correctAnswers: 31,
     bestStreak: 9,
     statsSince: 1_755_000_000_000,
+    xp: 640,
     // Bookkeeping the callable keeps and the profile screen has no use for.
     lastGameId: 'game-7',
     updatedAt: 1_755_000_100_000,
@@ -1820,7 +1821,7 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
     expect(urls[0]).toContain(`${RESOURCE_ROOT}/users/user-1`);
   });
 
-  it('returns the five totals the profile renders, and nothing else', async () => {
+  it('returns the five totals and the XP the profile renders, and nothing else', async () => {
     const { service } = setup([{ id: 'user-1', data: { ...TOTALS } }]);
 
     expect(await service.getGameplayStats('user-1')).toEqual({
@@ -1829,7 +1830,22 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
       correctAnswers: 31,
       bestStreak: 9,
       statsSince: 1_755_000_000_000,
+      xp: 640,
     });
+  });
+
+  /**
+   * `FEAT-041`'s XP is read the way `setAvatar` reads it, so the progress card
+   * and the server's unlock can never disagree about a value a hand edit has
+   * broken: anything but a whole, non-negative count is none.
+   */
+  it('reads an XP that is not a whole, non-negative count as none', async () => {
+    for (const xp of ['640', -5, 12.5, null]) {
+      const { service } = setup([{ id: 'user-1', data: { ...TOTALS, xp } }]);
+      expect((await service.getGameplayStats('user-1'))?.xp, String(xp)).toBe(0);
+      vi.unstubAllGlobals();
+      TestBed.resetTestingModule();
+    }
   });
 
   /**
@@ -1860,6 +1876,7 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
       correctAnswers: 0,
       bestStreak: 0,
       statsSince: null,
+      xp: 0,
     });
   });
 
@@ -1887,6 +1904,7 @@ describe('FirebaseService.getGameplayStats (FEAT-005)', () => {
       correctAnswers: 31,
       bestStreak: 9,
       statsSince: 1_755_000_000_000,
+      xp: 640,
     });
   });
 

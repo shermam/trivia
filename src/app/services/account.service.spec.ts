@@ -281,6 +281,88 @@ describe('AccountService.recordGameResult reading the answer', () => {
   });
 });
 
+/**
+ * `FEAT-041`: a banked game's answer carries the player's XP after it and what
+ * the game added, and `/profile` says when the last game crossed a level from
+ * that and nothing else — so what is kept, for whom, and when it is dropped
+ * are pinned here.
+ */
+describe('AccountService.recordGameResult noting the XP', () => {
+  const result = { gameId: 'g1', totalQuestions: 5, correctAnswers: 4, bestStreak: 3 };
+
+  const silenceConsoleError = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  let consoleError: ReturnType<typeof silenceConsoleError>;
+  beforeEach(() => {
+    consoleError = silenceConsoleError();
+  });
+  afterEach(() => consoleError.mockRestore());
+
+  it('keeps the XP a banked game came to, for the account it was banked for', async () => {
+    const { service } = setup();
+    h.recordAnswer = { recorded: true, xp: 650, xpGained: 60 };
+
+    await service.recordGameResult(result);
+
+    expect(service.bankedXp()).toEqual({ uid: 'player-1', xp: 650, gained: 60 });
+  });
+
+  it('keeps nothing for a guest', async () => {
+    const { service } = setup({ account: { uid: 'guest-1', isAnonymous: true } });
+    h.recordAnswer = { recorded: true, xp: 650, xpGained: 60 };
+
+    await service.recordGameResult(result);
+
+    expect(service.bankedXp()).toBeNull();
+  });
+
+  /**
+   * An answer from a server older than the XP, or one this build cannot read,
+   * says nothing about the game it answers — and the note about the game
+   * before would then be about a game that is no longer the last one.
+   */
+  it('drops the note when a fresh game banks without an XP it can read', async () => {
+    for (const answer of [
+      { recorded: true },
+      { recorded: true, xp: '650', xpGained: 60 },
+      { recorded: true, xp: 650, xpGained: -1 },
+      { recorded: true, xp: 50, xpGained: 60 },
+      { recorded: true, xp: 650.5, xpGained: 60 },
+    ]) {
+      const { service } = setup();
+      h.recordAnswer = { recorded: true, xp: 590, xpGained: 40 };
+      await service.recordGameResult(result);
+
+      h.recordAnswer = answer;
+      await service.recordGameResult({ ...result, gameId: 'g2' });
+
+      expect(service.bankedXp(), JSON.stringify(answer)).toBeNull();
+      TestBed.resetTestingModule();
+    }
+  });
+
+  it('leaves the note alone for a duplicate, which repeats a game already noted', async () => {
+    const { service } = setup();
+    h.recordAnswer = { recorded: true, xp: 650, xpGained: 60 };
+    await service.recordGameResult(result);
+
+    h.recordAnswer = { recorded: false, reason: 'duplicate' };
+    await service.recordGameResult(result);
+
+    expect(service.bankedXp()).toEqual({ uid: 'player-1', xp: 650, gained: 60 });
+  });
+
+  it('drops the note when the next game is refused, which earned nothing', async () => {
+    const { service } = setup();
+    h.recordAnswer = { recorded: true, xp: 650, xpGained: 60 };
+    await service.recordGameResult(result);
+
+    h.recordAnswer = { recorded: false, reason: 'rate-limited' };
+    await service.recordGameResult({ ...result, gameId: 'g2' });
+
+    expect(service.bankedXp()).toBeNull();
+  });
+});
+
 describe('AccountService functions bootstrap', () => {
   const result = { gameId: 'g1', totalQuestions: 5, correctAnswers: 4, bestStreak: 3 };
 

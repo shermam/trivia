@@ -1,0 +1,150 @@
+<section
+  data-cy="progress-card"
+  aria-labelledby="progress-heading"
+  class="mt-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-900/8 dark:border-white/10 shadow-card p-6 sm:p-8"
+>
+  <h2 id="progress-heading" class="text-lg font-bold text-slate-900 dark:text-slate-50 mb-1">
+    Your level
+  </h2>
+
+  <!--
+    Every sentence this card can show, stacked in one grid cell so the space it
+    takes is the tallest of them and no state resizes the card (`CLAUDE.md`
+    §4.4) — the totals card's construction. `invisible` keeps each laid out
+    while dropping it from the accessibility tree and from `innerText`, so only
+    the live one is ever read.
+
+    No live region of its own: the page has one, and a level the last game
+    reached is said there too.
+  -->
+  <div data-cy="progress-status" class="grid mb-5">
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'loading'"
+      data-cy="progress-loading"
+    >
+      Loading your level&hellip;
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'signedOut'"
+      data-cy="progress-signed-out"
+    >
+      Sign in to earn experience points (XP) from the games you finish. Guest games earn none.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-red-700 dark:text-red-300"
+      [class.invisible]="line() !== 'failed'"
+      data-cy="progress-failed"
+    >
+      Could not load your level just now.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm text-slate-500 dark:text-slate-400"
+      [class.invisible]="line() !== 'ready'"
+      data-cy="progress-ready"
+    >
+      Right answers earn experience points (XP) — more for harder questions, and for a run of them
+      in a row. Only you can see them.
+    </p>
+    <p
+      class="col-start-1 row-start-1 text-sm font-semibold text-emerald-700 dark:text-emerald-400"
+      [class.invisible]="line() !== 'levelUp'"
+      data-cy="progress-level-up"
+    >
+      Your last game took you to level {{ levelUp() }}.
+    </p>
+  </div>
+
+  <div class="flex items-baseline justify-between gap-4">
+    <p class="flex items-baseline gap-2">
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"
+        >Level</span
+      >
+      <span
+        data-cy="progress-level"
+        class="text-3xl font-extrabold text-slate-900 dark:text-slate-50 tracking-tight tabular-nums"
+        >{{ levelText() }}</span
+      >
+    </p>
+    <p
+      data-cy="progress-xp"
+      class="text-sm font-semibold text-slate-700 dark:text-slate-300 tabular-nums"
+    >
+      {{ xpText() }}
+    </p>
+  </div>
+
+  <!--
+    The track is there in every state; the fill is a width set through
+    `[style.width.%]`, which goes through the CSSOM rather than a `style`
+    attribute the CSP would drop (`CLAUDE.md` §4.4). No transition: a bar that
+    grows as it arrives is motion nobody asked for, and this one is read, not
+    watched.
+  -->
+  <div
+    data-cy="progress-bar"
+    class="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+    [attr.role]="progress() ? 'progressbar' : null"
+    [attr.aria-label]="progress() ? 'Progress to the next level' : null"
+    [attr.aria-valuemin]="progress() ? 0 : null"
+    [attr.aria-valuemax]="progress()?.span ?? null"
+    [attr.aria-valuenow]="progress()?.into ?? null"
+    [attr.aria-valuetext]="valueText()"
+    [attr.aria-hidden]="progress() ? null : 'true'"
+  >
+    <div
+      class="h-full rounded-full bg-emerald-600 dark:bg-emerald-500"
+      [style.width.%]="percent()"
+    ></div>
+  </div>
+  <p data-cy="progress-next" class="mt-2 text-sm text-slate-500 dark:text-slate-400 tabular-nums">
+    {{ toNextText() }}
+  </p>
+
+  <!--
+    What the next unlock is. The avatar is the reserved box `AvatarComponent`
+    guarantees: the neutral face until somebody is signed in, then the set's
+    first avatar drawn over their initial — the same box either way. The two
+    sentences under the name share one grid cell, and the lock keeps its space
+    when it is not drawn.
+  -->
+  <div
+    data-cy="progress-unlock"
+    class="mt-5 flex items-center gap-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-900/6 dark:border-white/5 px-4 py-3"
+  >
+    <app-avatar
+      size="md"
+      data-cy="progress-unlock-preview"
+      [letter]="letter()"
+      [choice]="featuredPreview()"
+    />
+    <div class="min-w-0 flex-1">
+      <p class="text-sm font-semibold text-slate-900 dark:text-slate-50">
+        {{ featuredLabel() }}
+      </p>
+      <div class="grid text-xs text-slate-500 dark:text-slate-400">
+        <p
+          class="col-start-1 row-start-1"
+          [class.invisible]="featuredUnlocked()"
+          data-cy="progress-unlock-locked"
+        >
+          Unlock at level {{ featuredLevel() }}
+        </p>
+        <p
+          class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
+          [class.invisible]="!featuredUnlocked()"
+          data-cy="progress-unlock-unlocked"
+        >
+          Unlocked — choose one below
+        </p>
+      </div>
+    </div>
+    <app-icon
+      name="lock"
+      [size]="16"
+      class="shrink-0 text-slate-400 dark:text-slate-500"
+      [class.invisible]="featuredUnlocked()"
+    />
+  </div>
+</section>

@@ -14,27 +14,83 @@ import {
  * tables could reach the DOM as anything but a presentation attribute.
  */
 describe('builtAvatar', () => {
-  const core = BUILT_AVATAR_SETS[DEFAULT_BUILT_SET];
-
-  it('draws every variant of the core set, and names each by its own seed', () => {
-    core.shapes.forEach((shape, shapeIndex) => {
-      core.palettes.forEach((palette, paletteIndex) => {
-        const seed = builtSeed(DEFAULT_BUILT_SET, shapeIndex, paletteIndex);
-        // Every seed the picker can produce is one the server will store.
-        expect(AVATAR_SEED_PATTERN.test(seed)).toBe(true);
-        expect(builtAvatar(seed)).toEqual({
-          set: DEFAULT_BUILT_SET,
-          shapeIndex,
-          paletteIndex,
-          shape,
-          palette,
+  it('draws every variant of every set, and names each by its own seed', () => {
+    for (const [name, set] of Object.entries(BUILT_AVATAR_SETS)) {
+      set.shapes.forEach((shape, shapeIndex) => {
+        set.palettes.forEach((palette, paletteIndex) => {
+          const seed = builtSeed(name, shapeIndex, paletteIndex);
+          // Every seed the picker can produce is one the server will store.
+          expect(AVATAR_SEED_PATTERN.test(seed), seed).toBe(true);
+          expect(builtAvatar(seed)).toEqual({
+            set: name,
+            shapeIndex,
+            paletteIndex,
+            shape,
+            palette,
+          });
         });
       });
+    }
+  });
+
+  /**
+   * **A shipped set is frozen**: a stored seed is a reference into it, so
+   * reordering, renaming or recolouring one entry silently changes every avatar
+   * built from it. Pinned by name and colour, so an edit has to be a new set.
+   */
+  it('keeps every shipped set exactly as it shipped', () => {
+    const catalog = Object.fromEntries(
+      Object.entries(BUILT_AVATAR_SETS).map(([name, set]) => [
+        name,
+        {
+          shapes: set.shapes.map((shape) => shape.id),
+          palettes: set.palettes.map(
+            (palette) => `${palette.id} ${palette.background} ${palette.foreground}`,
+          ),
+        },
+      ]),
+    );
+    expect(catalog).toEqual({
+      core: {
+        shapes: ['dot', 'ring', 'diamond', 'square', 'triangle', 'plus'],
+        palettes: [
+          'emerald #047857 #d1fae5',
+          'forest #064e3b #fde68a',
+          'gold #d97706 #fef3c7',
+          'night #0f172a #a7f3d0',
+          'cocoa #78350f #fef3c7',
+          'mint #d1fae5 #065f46',
+        ],
+      },
+      bold: {
+        shapes: ['star', 'bolt', 'heart', 'crown', 'moon', 'shield'],
+        palettes: [
+          'ruby #b91c1c #fef2f2',
+          'amber #b45309 #fffbeb',
+          'blush #fecaca #b91c1c',
+          'honey #fde68a #78350f',
+          'slate #64748b #f7f9f8',
+          'jade #059669 #0f172a',
+        ],
+      },
     });
   });
 
-  it('starts a new builder on a variant it can draw', () => {
-    expect(builtAvatar(DEFAULT_BUILT_SEED)).not.toBeNull();
+  /**
+   * The picker names each option by its id — the radio's label and its
+   * `data-cy` — with every set on the page at once, so an id two sets shared
+   * would be two controls nobody could tell apart.
+   */
+  it('gives no two shapes or colours the same name, across every set', () => {
+    const sets = Object.values(BUILT_AVATAR_SETS);
+    const shapes = sets.flatMap((set) => set.shapes.map((shape) => shape.id));
+    const palettes = sets.flatMap((set) => set.palettes.map((palette) => palette.id));
+    expect(new Set(shapes).size).toBe(shapes.length);
+    expect(new Set(palettes).size).toBe(palettes.length);
+  });
+
+  it('starts a new builder on a variant it can draw, from the default set', () => {
+    expect(builtAvatar(DEFAULT_BUILT_SEED)?.set).toBe(DEFAULT_BUILT_SET);
   });
 
   /**
@@ -46,6 +102,7 @@ describe('builtAvatar', () => {
     for (const seed of [
       'gems-00',
       'core-90',
+      'bold-66',
       'core-09',
       'core-0',
       'core-000',

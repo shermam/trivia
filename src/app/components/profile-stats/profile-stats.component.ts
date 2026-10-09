@@ -11,15 +11,17 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { avatarLetter } from '../../models/avatar.model';
+import { levelFor } from '../../models/levels';
 import { AccountService } from '../../services/account.service';
 import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { AvatarService } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
 import { FirebaseService, GameplayStats } from '../../services/firebase.service';
-import { AvatarPickerComponent } from '../avatar-picker/avatar-picker.component';
+import { AvatarPickerComponent, XpKnowledge } from '../avatar-picker/avatar-picker.component';
 import { AvatarComponent } from '../avatar/avatar.component';
 import { IconComponent, IconName } from '../icon/icon.component';
+import { ProgressCardComponent, ProgressState } from '../progress-card/progress-card.component';
 
 /**
  * Which of the screen's five states is showing.
@@ -39,6 +41,10 @@ type ProfileView = 'loading' | 'signedOut' | 'empty' | 'stats' | 'failed';
  * action row go by the view alone; only the sentence changes.
  */
 type StatsLine = ProfileView | 'notBanked';
+
+/** The picker's two answers for a player whose XP is not a number yet. */
+const CHECKING_XP: XpKnowledge = { state: 'checking' };
+const UNKNOWN_XP: XpKnowledge = { state: 'unknown' };
 
 /** One number on the card. `id` is the `@for` track key, never the label (`CLAUDE.md` §4.4). */
 interface StatTile {
@@ -90,7 +96,13 @@ const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'long' });
 @Component({
   selector: 'app-profile-stats',
   standalone: true,
-  imports: [RouterLink, IconComponent, AvatarComponent, AvatarPickerComponent],
+  imports: [
+    RouterLink,
+    IconComponent,
+    AvatarComponent,
+    AvatarPickerComponent,
+    ProgressCardComponent,
+  ],
   templateUrl: './profile-stats.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -195,6 +207,67 @@ export class ProfileStatsComponent {
   });
 
   /**
+   * The XP of the last game this account banked in this tab, as the callable
+   * answered it (`AccountService.bankedXp`), or `null` — for nobody else.
+   */
+  private readonly bankedXp = computed(() => {
+    const banked = this.accountService.bankedXp();
+    return banked !== null && banked.uid === this.signedInUid() ? banked : null;
+  });
+
+  /**
+   * The XP the progress card draws and the picker's locks are decided on
+   * (`FEAT-041`) — one value, so the two cannot disagree — or `null` while
+   * there is none to show.
+   *
+   * The read's, raised to the callable's answer when a game banked in this tab
+   * landed after the read was made: the answer is what the transaction
+   * committed, so it is never ahead of the document, and XP only grows. A
+   * document with no `xp` — no game banked since XP began, or none at all —
+   * is a real total of zero once somebody is signed in.
+   */
+  protected readonly progressXp = computed<number | null>(() => {
+    const view = this.view();
+    if (view !== 'empty' && view !== 'stats') {
+      return null;
+    }
+    return Math.max(this.statsSignal()?.xp ?? 0, this.bankedXp()?.xp ?? 0);
+  });
+
+  /** The progress card's state: the totals card's view, with no games yet a level of its own. */
+  protected readonly progressState = computed<ProgressState>(() => {
+    const view = this.view();
+    return view === 'empty' || view === 'stats' ? 'ready' : view;
+  });
+
+  /**
+   * The level this account's last game in this tab took it to, when it
+   * crossed one — said on the progress card and through the live region.
+   *
+   * Only over loaded totals: over "nothing banked yet" it would contradict the
+   * line above it, which can only happen when the first game banked in the
+   * moment between the read and the answer, and a refused last game earned
+   * nothing to cross a level with (`AccountService` drops the note then).
+   */
+  protected readonly levelUp = computed<number | null>(() => {
+    const banked = this.bankedXp();
+    if (banked === null || this.line() !== 'stats') {
+      return null;
+    }
+    const reached = levelFor(banked.xp);
+    return reached > levelFor(banked.xp - banked.gained) ? reached : null;
+  });
+
+  /** What the picker knows of the XP: still being read, known, or — signed out or failed — not. */
+  protected readonly xpKnowledge = computed<XpKnowledge>(() => {
+    const xp = this.progressXp();
+    if (xp !== null) {
+      return { state: 'known', xp };
+    }
+    return this.view() === 'loading' ? CHECKING_XP : UNKNOWN_XP;
+  });
+
+  /**
    * The five numbers, formatted, or five placeholders.
    *
    * Built in every state rather than only when there is something to show:
@@ -283,8 +356,12 @@ export class ProfileStatsComponent {
 
   private readonly statsAnnouncement = computed(() => {
     switch (this.line()) {
-      case 'stats':
-        return 'Your stats are ready.';
+      case 'stats': {
+        const level = this.levelUp();
+        return level === null
+          ? 'Your stats are ready.'
+          : `Your stats are ready. Your last game took you to level ${level}.`;
+      }
       case 'empty':
         return 'No finished games yet.';
       case 'notBanked':

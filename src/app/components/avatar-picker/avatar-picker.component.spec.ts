@@ -5,7 +5,7 @@ import { AuthMenuStateService } from '../../services/auth-menu-state.service';
 import { AuthService } from '../../services/auth.service';
 import { AvatarSaveOutcome, AvatarService, AvatarStatus } from '../../services/avatar.service';
 import { EmbedModeService } from '../../services/embed-mode.service';
-import { AvatarPickerComponent } from './avatar-picker.component';
+import { AvatarPickerComponent, XpKnowledge } from './avatar-picker.component';
 
 /**
  * The avatar picker on `/profile` (`FEAT-038`).
@@ -32,6 +32,8 @@ interface Options {
   choice?: AvatarChoice | null;
   photoUrl?: string | null;
   embedded?: boolean;
+  /** What the page knows of the XP (`FEAT-041`); the input's own default when omitted. */
+  xp?: XpKnowledge;
 }
 
 function render(options: Options = {}) {
@@ -87,6 +89,9 @@ function render(options: Options = {}) {
   });
 
   const fixture = TestBed.createComponent(AvatarPickerComponent);
+  if (options.xp !== undefined) {
+    fixture.componentRef.setInput('xp', options.xp);
+  }
   const announced: string[] = [];
   fixture.componentInstance.announce.subscribe((text) => announced.push(text));
   fixture.detectChanges();
@@ -211,7 +216,7 @@ describe('AvatarPickerComponent', () => {
   });
 
   describe('a signed-in account', () => {
-    it('offers the picker, its three groups each named', () => {
+    it('offers the picker, its groups each named — the kind, and two per set', () => {
       const h = render();
 
       expect(h.line()).toEqual(['avatar-idle']);
@@ -221,12 +226,20 @@ describe('AvatarPickerComponent', () => {
       const groups = [...h.host.querySelectorAll('[role="radiogroup"]')];
       expect(groups.map((group) => group.getAttribute('data-cy'))).toEqual([
         'avatar-kind',
-        'avatar-shape',
-        'avatar-colour',
+        'avatar-set-core-shapes',
+        'avatar-set-core-colours',
+        'avatar-set-bold-shapes',
+        'avatar-set-bold-colours',
       ]);
+      const names = groups.map((group) =>
+        group
+          .getAttribute('aria-labelledby')!
+          .split(' ')
+          .map((id) => h.host.querySelector(`#${id}`)?.textContent?.trim())
+          .join(' '),
+      );
+      expect(names).toEqual(['Show as', 'Core Shape', 'Core Colour', 'Bold Shape', 'Bold Colour']);
       for (const group of groups) {
-        const label = h.host.querySelector(`#${group.getAttribute('aria-labelledby')}`);
-        expect(label?.textContent?.trim()).toBeTruthy();
         expect(group.querySelectorAll('input[type="radio"]').length).toBeGreaterThan(0);
       }
     });
@@ -298,8 +311,8 @@ describe('AvatarPickerComponent', () => {
         [...h.host.querySelectorAll<HTMLInputElement>(`[data-cy="${group}"] input`)].filter(
           (input) => input.checked,
         );
-      expect(checked('avatar-shape')).toHaveLength(0);
-      expect(checked('avatar-colour')).toHaveLength(0);
+      expect(checked('avatar-set-core-shapes')).toHaveLength(0);
+      expect(checked('avatar-set-core-colours')).toHaveLength(0);
 
       h.q('avatar-shape-dot')!.click();
       await h.settle();
@@ -469,6 +482,178 @@ describe('AvatarPickerComponent', () => {
       await h.settle();
 
       expect(h.line()).toEqual(['avatar-idle']);
+    });
+  });
+
+  /**
+   * `FEAT-041`: the `bold` set opens at level 3 (600 XP). A locked set is
+   * shown locked, never hidden — every tile on the page, `aria-disabled`,
+   * described by the line that names the level — and cannot be chosen by
+   * pointer or keyboard. jsdom cannot measure, so that the card is one height
+   * locked or not is `xp-and-levels.spec.ts`'s, in Chromium; what is pinned
+   * here is that the two states are the same markup.
+   */
+  describe('a set the player has not unlocked', () => {
+    const LOCKED: XpKnowledge = { state: 'known', xp: 120 };
+    const OPEN: XpKnowledge = { state: 'known', xp: 640 };
+    const boldTiles = (h: ReturnType<typeof render>) => [
+      ...h.host.querySelectorAll<HTMLInputElement>(
+        '[data-cy="avatar-set-bold-shapes"] input, [data-cy="avatar-set-bold-colours"] input',
+      ),
+    ];
+    const statusLine = (h: ReturnType<typeof render>, set: string) =>
+      [...h.host.querySelectorAll(`[data-cy="avatar-set-${set}-status"] > p`)]
+        .filter((p) => !p.classList.contains('invisible'))
+        .map((p) => p.textContent?.trim());
+
+    it('renders every tile of the locked set, aria-disabled and described by its level', () => {
+      const h = render({ xp: LOCKED });
+
+      const tiles = boldTiles(h);
+      expect(tiles).toHaveLength(12);
+      for (const tile of tiles) {
+        expect(tile.getAttribute('aria-disabled')).toBe('true');
+        expect(tile.hasAttribute('disabled')).toBe(false);
+        expect(tile.getAttribute('aria-describedby')).toBe('avatar-set-bold-status');
+        expect(tile.closest('label')!.classList.contains('opacity-50')).toBe(true);
+      }
+      expect(statusLine(h, 'bold')).toEqual(['Unlocks at level 3']);
+      // The set every level has stays open, and says nothing about levels.
+      expect(h.q('avatar-shape-dot')!.hasAttribute('aria-disabled')).toBe(false);
+      expect(h.q('avatar-set-core-status')).toBeNull();
+    });
+
+    it('treats an XP the page could not read as locked', () => {
+      const h = render({ xp: { state: 'unknown' } });
+
+      expect(boldTiles(h).every((tile) => tile.getAttribute('aria-disabled') === 'true')).toBe(
+        true,
+      );
+      expect(statusLine(h, 'bold')).toEqual(['Unlocks at level 3']);
+    });
+
+    /** While the XP is read, neither answer is guessed: the tiles hold still and say so. */
+    it('says it is checking while the XP is still being read', () => {
+      const h = render({ xp: { state: 'checking' } });
+
+      expect(statusLine(h, 'bold')).toEqual(['Checking your level…']);
+      expect(boldTiles(h).every((tile) => tile.getAttribute('aria-disabled') === 'true')).toBe(
+        true,
+      );
+    });
+
+    it('cannot be chosen by a click, and the save sends what it sent before', async () => {
+      const h = render({ xp: LOCKED });
+
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+      h.q('avatar-shape-star')!.dispatchEvent(click);
+      h.q('avatar-shape-star')!.dispatchEvent(new Event('change'));
+      await h.settle();
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(h.q<HTMLInputElement>('avatar-kind-initials')!.checked).toBe(true);
+      h.q('avatar-save')!.click();
+      await h.settle();
+      expect(h.save).toHaveBeenCalledWith({ kind: 'initials', showPublicly: false });
+    });
+
+    it('holds the arrow keys and Space on a locked tile, and nothing else', () => {
+      const h = render({ xp: LOCKED });
+
+      for (const key of ['ArrowRight', 'ArrowDown', 'ArrowLeft', ' ']) {
+        const press = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        h.q('avatar-colour-ruby')!.dispatchEvent(press);
+        expect(press.defaultPrevented, key).toBe(true);
+      }
+      // Tab still moves on, past the set and out of it.
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      h.q('avatar-colour-ruby')!.dispatchEvent(tab);
+      expect(tab.defaultPrevented).toBe(false);
+    });
+
+    it('opens at level 3: the tiles enabled, and a bold avatar built and sent', async () => {
+      const h = render({ xp: OPEN });
+
+      expect(boldTiles(h).some((tile) => tile.hasAttribute('aria-disabled'))).toBe(false);
+      expect(statusLine(h, 'bold')).toEqual(['Unlocked at level 3']);
+
+      h.q('avatar-shape-crown')!.click();
+      await h.settle();
+      expect(h.q<HTMLInputElement>('avatar-kind-built')!.checked).toBe(true);
+      expect(h.q<HTMLInputElement>('avatar-shape-crown')!.checked).toBe(true);
+      // The set's first colour, which is what the crown tile was drawn in.
+      expect(h.q<HTMLInputElement>('avatar-colour-ruby')!.checked).toBe(true);
+
+      h.q('avatar-colour-honey')!.click();
+      await h.settle();
+      h.q('avatar-save')!.click();
+      await h.settle();
+
+      expect(h.save).toHaveBeenCalledWith({ kind: 'built', seed: 'bold-33', showPublicly: false });
+    });
+
+    /**
+     * One variant at a time: moving to the other set checks nothing in the set
+     * left behind, so neither block claims a choice it does not hold.
+     */
+    it('checks tiles in one set at a time', async () => {
+      const h = render({
+        xp: OPEN,
+        choice: { kind: 'built', seed: 'core-35', showPublicly: false },
+      });
+
+      h.q('avatar-shape-heart')!.click();
+      await h.settle();
+
+      const checkedIn = (group: string) =>
+        [...h.host.querySelectorAll<HTMLInputElement>(`[data-cy="${group}"] input`)]
+          .filter((input) => input.checked)
+          .map((input) => input.value);
+      expect(checkedIn('avatar-set-core-shapes')).toEqual([]);
+      expect(checkedIn('avatar-set-core-colours')).toEqual([]);
+      expect(checkedIn('avatar-set-bold-shapes')).toEqual(['heart']);
+      expect(checkedIn('avatar-set-bold-colours')).toEqual(['ruby']);
+    });
+
+    /**
+     * **Never re-lock what was granted.** A bold avatar stored before a
+     * threshold moved stays checked, and saving again sends it — `setAvatar`
+     * accepts the seed already stored — while the rest of the set stays shut.
+     */
+    it('keeps a stored seed from a locked set checked, and saves it again', async () => {
+      const h = render({
+        xp: LOCKED,
+        choice: { kind: 'built', seed: 'bold-21', showPublicly: false },
+      });
+
+      expect(h.q<HTMLInputElement>('avatar-kind-built')!.checked).toBe(true);
+      expect(h.q<HTMLInputElement>('avatar-shape-heart')!.checked).toBe(true);
+      expect(h.q<HTMLInputElement>('avatar-colour-amber')!.checked).toBe(true);
+      expect(h.q('avatar-shape-moon')!.getAttribute('aria-disabled')).toBe('true');
+
+      h.q('avatar-public')!.click();
+      await h.settle();
+      h.q('avatar-save')!.click();
+      await h.settle();
+
+      expect(h.save).toHaveBeenCalledWith({ kind: 'built', seed: 'bold-21', showPublicly: true });
+    });
+
+    /**
+     * The same block either way, so the same height: every sentence of the
+     * status line is in its one grid cell whatever the state, and only which
+     * one is visible changes.
+     */
+    it('draws a locked set with exactly the markup of an open one', () => {
+      const shape = (xp: XpKnowledge) => {
+        const block = render({ xp }).q('avatar-set-bold')!;
+        const outline = [...block.querySelectorAll('*')].map((node) => node.tagName).join(',');
+        TestBed.resetTestingModule();
+        return outline;
+      };
+
+      expect(shape(LOCKED)).toBe(shape(OPEN));
+      expect(shape({ state: 'checking' })).toBe(shape(OPEN));
     });
   });
 });
