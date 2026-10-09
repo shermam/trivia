@@ -42,10 +42,26 @@
         >
           @for (quiz of quizzes(); track quiz.id) {
             <li class="w-64 shrink-0 snap-start">
+              <!--
+                Offline, a disabled link rather than a link to a page that
+                cannot load: a null routerLink removes the href, so a tap goes
+                nowhere and fetches nothing, and role="link" with aria-disabled
+                keeps it announced as the link it is, unavailable. Back online,
+                the same element is a link again — nothing is re-read.
+              -->
               <a
-                [routerLink]="['/quiz', quiz.id]"
+                [routerLink]="offline() ? null : ['/quiz', quiz.id]"
+                [attr.role]="offline() ? 'link' : null"
+                [attr.aria-disabled]="offline() ? 'true' : null"
                 data-cy="quiz-link"
-                class="flex h-44 flex-col rounded-2xl border border-slate-900/7 dark:border-white/10 bg-white dark:bg-slate-900 px-5 py-4 shadow-card transition-colors hover:border-emerald-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                class="flex h-44 flex-col rounded-2xl border border-slate-900/7 dark:border-white/10 px-5 py-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                [class.bg-white]="!offline()"
+                [class.dark:bg-slate-900]="!offline()"
+                [class.shadow-card]="!offline()"
+                [class.hover:border-emerald-500/40]="!offline()"
+                [class.bg-slate-100]="offline()"
+                [class.dark:bg-slate-900/50]="offline()"
+                [class.cursor-not-allowed]="offline()"
               >
                 <span
                   class="line-clamp-2 break-words font-bold text-slate-900 dark:text-slate-50"
@@ -56,10 +72,27 @@
                   class="mt-1 line-clamp-3 break-words text-sm text-slate-600 dark:text-slate-400"
                   >{{ quiz.description }}</span
                 >
-                <span
-                  class="mt-auto text-xs font-semibold text-emerald-700 dark:text-emerald-400"
-                  >{{ countLabel(quiz) }}</span
-                >
+                <!--
+                  The count, or why the card cannot open, stacked in one cell so
+                  the foot is the same height either way (CLAUDE.md §4.4).
+                  amber-800 rather than the offline banner's amber-700: this
+                  sits on slate-100, where amber-700 clears 4.5:1 by a hair.
+                -->
+                <span class="mt-auto grid text-xs font-semibold">
+                  <span
+                    class="col-start-1 row-start-1 text-emerald-700 dark:text-emerald-400"
+                    [class.invisible]="offline()"
+                    >{{ countLabel(quiz) }}</span
+                  >
+                  <span
+                    class="col-start-1 row-start-1 flex items-center gap-1.5 text-amber-800 dark:text-amber-300"
+                    [class.invisible]="!offline()"
+                    data-cy="quiz-link-offline"
+                  >
+                    <app-icon name="wifi-off" [size]="14" class="shrink-0" />
+                    Needs a connection
+                  </span>
+                </span>
               </a>
             </li>
           }

@@ -24,14 +24,16 @@ import { runTag } from '../../support/topics';
  * observer, so `quiz-list.component.spec.ts` drives a fake; this drives the
  * real thing.
  *
- * **The list is collection-wide, and the emulator is shared.** Every worker's
- * quizzes are in it, so the tests assert about the quizzes they seeded — the
- * newest by construction where order matters — and about boxes, which do not
- * depend on what is listed: every state of the strip is one fixed height.
+ * **The list is collection-wide, and the backend is shared.** Every worker's
+ * quizzes are in it — and in the preview slice, another run's and the
+ * owner's too — so the tests assert about the quizzes they seeded, ordered
+ * only against each other and newest by construction so the list's limit
+ * cannot leave them out, and about boxes, which do not depend on what is
+ * listed: every state of the strip is one fixed height.
  *
- * Emulator-only for now, for the reason `curated-quiz.spec.ts` gives: a preview
- * channel runs `main`'s deployed rules, which until this feature merges have no
- * `quizzes` block (`playwright.preview.config.ts`).
+ * **It runs in the preview slice**, where the list's
+ * `(isPublished, createdAt)` query is the only place its composite index meets
+ * a real query engine — the emulator answers it with no index at all (`D3`).
  */
 
 const unique = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -294,9 +296,12 @@ test.describe('the quizzes the list shows (FEAT-024)', () => {
     await page.goto('/');
     await page.getByTestId('quiz-list').scrollIntoViewIfNeeded();
 
+    // This test's quizzes, in the order the list shows them. Ordered only
+    // against each other: anything else seeded an hour ahead — by another
+    // test here, or by another run against the same project — may sit
+    // between or before them, and is not this test's to place.
     const titles = page.getByTestId('quiz-link-title');
-    await expect(titles.nth(0)).toHaveText(newer.title);
-    await expect(titles.nth(1)).toHaveText(older.title);
+    await expect(titles.filter({ hasText: runId })).toHaveText([newer.title, older.title]);
     await expect(titles.filter({ hasText: draft.title })).toHaveCount(0);
     await expect(page.getByTestId('quiz-list-status')).toHaveText(/^\s*(1 quiz|\d+ quizzes)\.\s*$/);
 
